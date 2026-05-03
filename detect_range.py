@@ -67,16 +67,6 @@ TAIL_WORDS   = 80
 SEARCH_RANGE = 20
 LOW_CONF     = 0.40
 
-# Words that commonly appear in ta'awwudh / basmala preambles.
-# NOTE: "بسم" is intentionally NOT included here — it is detected separately
-# in _find_quran_start so that the basmala-skip fires correctly.
-_PREAMBLE_VOCAB: frozenset[str] = frozenset({
-    "اعوذ", "اعود", "بالله", "بالل", "من",          # ta'awwudh start
-    "الرجيم", "الشيطان", "الشيطن", "شيطان", "شيطن",  # ta'awwudh end
-    "الرحمن", "الرحيم",                               # basmala tail (not "الله" — too common)
-})
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # Arabic normalisation
 # ══════════════════════════════════════════════════════════════════════════════
@@ -185,6 +175,7 @@ def parse_ayat(quran_path: str, surah_filter: str | None = None) -> list[dict]:
     surah_name = ""
     buf: list[str] = []   # token accumulator for the ayah being assembled
     in_target_surah = (surah_filter is None)
+    surah_filter_norm = normalize_ar(surah_filter) if surah_filter is not None else None
 
     def _flush(num: int) -> None:
         """Flush the accumulator as ayah `num` of the current surah."""
@@ -218,11 +209,14 @@ def parse_ayat(quran_path: str, surah_filter: str | None = None) -> list[dict]:
             buf.clear()
             surah_num  += 1
             surah_name  = stripped
-            in_target_surah = (
-                surah_filter is None
-                or normalize_ar(surah_filter) in normalize_ar(surah_name)
-                or normalize_ar(surah_name) in normalize_ar(surah_filter)
-            )
+            if surah_filter_norm is None:
+                in_target_surah = True
+            else:
+                surah_name_norm = normalize_ar(surah_name)
+                in_target_surah = (
+                    surah_filter_norm in surah_name_norm
+                    or surah_name_norm in surah_filter_norm
+                )
             continue
 
         # ── preamble lines to skip ────────────────────────────────────────────
@@ -384,6 +378,72 @@ def _global_prefilter(
     )
     return ranked[:n]
 
+
+def _build_candidate_pool(
+    ayat: list[dict],
+    search_range: int,
+    *,
+    global_search: bool,
+    window_str: str,
+    min_index: int | None = None,
+) -> list[dict]:
+    """Return the candidate ayat list for a head/tail window."""
+    if global_search:
+        prefiltered = _global_prefilter(ayat, window_str, search_range * 4)
+        candidates = [
+            a for a in prefiltered
+            if len(a["text_norm"].split()) >= _MIN_WORDS_GLOBAL
+        ]
+        if not candidates:
+            candidates = prefiltered
+        if min_index is not None:
+            filtered = [a for a in candidates if a["_index"] >= min_index]
+            if filtered:
+                candidates = filtered
+        return candidates
+
+    return ayat[:search_range]
+
+
+def _score_candidates(
+    candidates: list[dict],
+    window_str: str,
+    pos_thresh: float,
+) -> list[tuple[int, float, dict]]:
+    """Score each candidate against the given transcript window."""
+    scored: list[tuple[int, float, dict]] = []
+    for ayah in candidates:
+        pos, _ = _find_match_position(ayah["text_norm"], window_str, pos_thresh)
+        sc = score_ayah(ayah["text_norm"], window_str)
+        scored.append((pos, sc, ayah))
+    return scored
+
+
+def _select_best_candidate(
+    scored: list[tuple[int, float, dict]],
+    window_len: int,
+    *,
+    latest: bool,
+    global_search: bool,
+) -> tuple[dict, float]:
+    """Pick the best candidate using the existing position/score rules."""
+    if global_search:
+        positioned = [
+            (pos, sc, ay) for pos, sc, ay in scored
+            if pos < window_len and sc >= _HIGH_CONF_POSITION
+        ]
+    else:
+        positioned = [(pos, sc, ay) for pos, sc, ay in scored if pos < window_len]
+
+    if positioned:
+        positioned.sort(key=lambda t: ((-t[0]) if latest else t[0], -t[1]))
+        _, best_score, best_ayah = positioned[0]
+    else:
+        scored.sort(key=lambda t: -t[1])
+        _, best_score, best_ayah = scored[0]
+
+    return best_ayah, best_score
+
 def _partial_ratio(needle: str, haystack: str) -> float:
     """
     Best ``SequenceMatcher.ratio`` of *needle* against any same-length
@@ -542,51 +602,24 @@ def detect_first_ayah(
     - All ayat are pre-screened by word-recall before position detection,
       keeping the *search_range* × 4 best candidates.
     """
-    if global_search:
-        skip   = _find_quran_start(words)
-        head_words = words[skip: skip + head_n]
-    else:
-        head_words = words[:head_n]
+    skip = _find_quran_start(words) if global_search else 0
+    head_words = words[skip: skip + head_n] if global_search else words[:head_n]
 
     head_str = " ".join(w["word_norm"] for w in head_words)
     pos_thresh = _POSITION_THRESHOLD_GLOBAL if global_search else _POSITION_THRESHOLD
-
-    if global_search:
-        candidates = _global_prefilter(ayat, head_str, search_range * 4)
-        # Drop very short ayat — they produce spurious early positions by
-        # matching preamble words (e.g. الرحمن الرحيم = 2 words).
-        candidates = [a for a in candidates
-                      if len(a["text_norm"].split()) >= _MIN_WORDS_GLOBAL]
-    else:
-        candidates = ayat[:search_range]
-
-    scored: list[tuple[int, float, dict]] = []   # (pos, score, ayah)
-    for ayah in candidates:
-        pos, _ = _find_match_position(ayah["text_norm"], head_str, pos_thresh)
-        sc     = score_ayah(ayah["text_norm"], head_str)
-        scored.append((pos, sc, ayah))
-
-    # In global mode, only let HIGH-confidence candidates compete by position.
-    # Low-confidence candidates fall into the score-only pool to prevent
-    # wrong-surah ayat from winning purely by chance of early/late position.
-    if global_search:
-        positioned = [
-            (pos, sc, ay) for pos, sc, ay in scored
-            if pos < len(head_str) and sc >= _HIGH_CONF_POSITION
-        ]
-    else:
-        positioned = [(pos, sc, ay) for pos, sc, ay in scored if pos < len(head_str)]
-
-    if positioned:
-        # Earliest position wins; break ties by highest score
-        positioned.sort(key=lambda t: (t[0], -t[1]))
-        _, best_score, best_ayah = positioned[0]
-    else:
-        # All candidates fell back to sentinel — use pure score ranking
-        scored.sort(key=lambda t: -t[1])
-        _, best_score, best_ayah = scored[0]
-
-    return best_ayah, best_score
+    candidates = _build_candidate_pool(
+        ayat,
+        search_range,
+        global_search=global_search,
+        window_str=head_str,
+    )
+    scored = _score_candidates(candidates, head_str, pos_thresh)
+    return _select_best_candidate(
+        scored,
+        len(head_str),
+        latest=False,
+        global_search=global_search,
+    )
 
 
 def detect_last_ayah(
@@ -611,50 +644,21 @@ def detect_last_ayah(
     """
     tail_str = " ".join(w["word_norm"] for w in words[-tail_n:])
     pos_thresh = _POSITION_THRESHOLD_GLOBAL if global_search else _POSITION_THRESHOLD
-
-    if global_search:
-        candidates = _global_prefilter(ayat, tail_str, search_range * 4)
-        # Drop very short ayat — they pick up spurious late positions by
-        # matching common word endings (e.g. العزيز الرحيم / الحكيم = 3-4 words).
-        candidates = [a for a in candidates
-                      if len(a["text_norm"].split()) >= _MIN_WORDS_GLOBAL]
-        # Drop any ayah that comes BEFORE the first ayah in the Quran order.
-        # This prevents mirror-text ayat in earlier surahs from winning
-        # (e.g. Al-Hadid #1 ≈ tail of Al-Hashr #24).
-        if first_ayah is not None:
-            min_idx = first_ayah.get("_index", 0)
-            filtered = [a for a in candidates if a["_index"] >= min_idx]
-            if filtered:          # only apply if it doesn't empty the list
-                candidates = filtered
-    else:
-        candidates = ayat[-search_range:]
-
-    scored: list[tuple[int, float, dict]] = []
-    for ayah in candidates:
-        pos, _ = _find_match_position(ayah["text_norm"], tail_str, pos_thresh)
-        sc     = score_ayah(ayah["text_norm"], tail_str)
-        scored.append((pos, sc, ayah))
-
-    # In global mode, only let HIGH-confidence candidates compete by position.
-    # Low-confidence candidates fall into the score-only pool to prevent
-    # wrong-surah ayat from winning purely by chance of late position.
-    if global_search:
-        positioned = [
-            (pos, sc, ay) for pos, sc, ay in scored
-            if pos < len(tail_str) and sc >= _HIGH_CONF_POSITION
-        ]
-    else:
-        positioned = [(pos, sc, ay) for pos, sc, ay in scored if pos < len(tail_str)]
-
-    if positioned:
-        # Latest position wins; break ties by highest score
-        positioned.sort(key=lambda t: (-t[0], -t[1]))
-        _, best_score, best_ayah = positioned[0]
-    else:
-        scored.sort(key=lambda t: -t[1])
-        _, best_score, best_ayah = scored[0]
-
-    return best_ayah, best_score
+    min_index = first_ayah.get("_index", 0) if first_ayah is not None else None
+    candidates = _build_candidate_pool(
+        ayat,
+        search_range,
+        global_search=global_search,
+        window_str=tail_str,
+        min_index=min_index,
+    )
+    scored = _score_candidates(candidates, tail_str, pos_thresh)
+    return _select_best_candidate(
+        scored,
+        len(tail_str),
+        latest=True,
+        global_search=global_search,
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
