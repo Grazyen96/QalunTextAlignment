@@ -1,0 +1,905 @@
+#!/usr/bin/env python3
+"""
+detect_range.py — v1
+
+Detects the FIRST and LAST ayah present in a WhisperX transcription, given a
+Qalun-riwaya Quran text file.
+
+Algorithm
+---------
+1.  Parse the Quran text file into an ordered list of ayat (each with its
+    surah/verse number and normalized text).
+2.  Extract a flat word list from the WhisperX JSON output.
+3.  Detect the FIRST ayah by fuzzy-matching the HEAD of the transcript against
+    the first SEARCH_RANGE candidate ayat.
+4.  Detect the LAST ayah by fuzzy-matching the TAIL of the transcript against
+    the last SEARCH_RANGE candidate ayat.
+5.  Emit a structured JSON result with confidence scores and warnings.
+
+Design constraints respected
+-----------------------------
+• WhisperX may not preserve tashkeel -------→ every comparison uses normalize_ar()
+• WhisperX word boundaries ≠ Quran words -------→ character-level partial-ratio scoring
+• Reciter may not start at ayah 1-------→ configurable search window
+• Reciter may not end at the last ayah -------→ configurable search window
+• Basmala is NOT assumed to be part of ayah 1 → basmala lines are skipped
+• The Quran text is the single source of truth
+
+CLI
+---
+    python detect_range.py \\
+        --quran  "UthmanicQaloon1-Ver05.txt" \\
+        --whisperx whisperx.json \\
+        --output result.json
+
+Optional filters / tuning
+--------------------------
+    --surah "سُورَةُ الفُرقَانِ"   filter to one surah (name as it appears in the file)
+    --head-words   N               words from transcript start used for first-ayah scan (default 80)
+    --tail-words   N               words from transcript end  used for last-ayah  scan (default 80)
+    --search-range N               candidate ayat scanned from each end (default 20)
+    --low-conf     F               warn when confidence < F (default 0.40)
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from difflib import SequenceMatcher
+from pathlib import Path
+
+# ── Unicode / regex constants ──────────────────────────────────────────────────
+
+# Tashkeel: classical diacritics + Quranic reading marks (incl. U+06EC ۬)
+TASHKEEL = re.compile(
+    r"[\u0600-\u0605\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]"
+)
+
+# Arabic-Indic digits (U+0660–U+0669)
+_AR_DIG_TR = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+AR_DIGIT_RE = re.compile(r"^[٠١٢٣٤٥٦٧٨٩]+$")
+
+# ── Default tuning knobs ───────────────────────────────────────────────────────
+HEAD_WORDS   = 80
+TAIL_WORDS   = 80
+SEARCH_RANGE = 20
+LOW_CONF     = 0.40
+
+# Words that commonly appear in ta'awwudh / basmala preambles.
+# NOTE: "بسم" is intentionally NOT included here — it is detected separately
+# in _find_quran_start so that the basmala-skip fires correctly.
+_PREAMBLE_VOCAB: frozenset[str] = frozenset({
+    "اعوذ", "اعود", "بالله", "بالل", "من",          # ta'awwudh start
+    "الرجيم", "الشيطان", "الشيطن", "شيطان", "شيطن",  # ta'awwudh end
+    "الرحمن", "الرحيم",                               # basmala tail (not "الله" — too common)
+})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Arabic normalisation
+# ══════════════════════════════════════════════════════════════════════════════
+
+def normalize_ar(text: str) -> str:
+    """
+    Normalize Arabic text for fuzzy comparison.
+
+    Steps:
+    1. Strip tashkeel (vowel marks, shadda, Quranic reading marks).
+    2. Unify alef variants (أ إ آ ٱ → ا).
+    3. Unify ya/waw variants (ى ؤ ئ ے → ي / و).
+    4. Remove every non-Arabic character (Latin letters, digits, punctuation …).
+    5. Collapse runs of whitespace.
+    """
+    text = TASHKEEL.sub("", text)
+    text = re.sub(r"[إأآٱ]", "ا", text)
+    text = (
+        text.replace("ى", "ي")
+            .replace("ؤ", "و")
+            .replace("ئ", "ي")
+            .replace("ے", "ي")
+    )
+    # Keep only basic Arabic letters (U+0621 - U+064A) and spaces.
+    # Everything else (special Quranic marks not caught above, punctuation, …)
+    # becomes a space, preventing false letter-boundary merges.
+    text = re.sub(r"[^\u0621-\u064A\s]", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _arabic_indic_to_int(s: str) -> int:
+    return int(s.translate(_AR_DIG_TR))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Quran text parser
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _is_surah_header(raw_line: str) -> bool:
+    """True when the line is a sūrah-name header (e.g. 'سُورَةُ البَقَرَةِ')."""
+    tokens = raw_line.strip().split()
+    if not tokens:
+        return False
+    # Compare first token after stripping tashkeel (keeps ة / ه)
+    first = TASHKEEL.sub("", tokens[0])
+    return first in {"سورة", "سوره"}
+
+
+def _is_basmala(raw_line: str) -> bool:
+    """
+    True when the line is a standalone basmala.
+
+    Detection: after tashkeel strip, the line starts with 'بسم'
+    and contains 'الرحمن' or 'لرحمن'.
+    Robust against the Uthmani 'اِ۬للَّهِ' ligature form.
+    """
+    stripped = TASHKEEL.sub("", raw_line.strip())
+    first = stripped.split()[0] if stripped.split() else ""
+    first_norm = re.sub(r"[^\u0621-\u064A]", "", first)
+    tail = re.sub(r"[^\u0621-\u064A\s]", " ", stripped)
+    return first_norm == "بسم" and ("لرحمن" in tail or "الرحمن" in tail)
+
+
+def _is_taawwudh(raw_line: str) -> bool:
+    """
+    True when the line is a ta'awwudh preamble spoken before the recitation
+    (e.g. 'أَعُوذُ بِاللَّهِ مِنَ الشَّيْطَانِ الرَّجِيمِ').
+    Only present in some single-surah text files; never in the full Quran file.
+
+    Detection: normalised line starts with 'اعوذ' (أَعُوذُ after stripping
+    tashkeel), OR contains 'الشيطن' (الشَّيْطَانِ loses the alef-madda
+    encoding under normalize_ar, yielding 'الشيطن').
+    """
+    norm = normalize_ar(raw_line)
+    # Only match the opening word — "اعود"/"اعوذ" at the start of the line.
+    # Do NOT match interior occurrences of الشيطان, which appear in Quran verses.
+    return norm.startswith("اعوذ") or norm.startswith("اعود")
+
+
+def parse_ayat(quran_path: str, surah_filter: str | None = None) -> list[dict]:
+    """
+    Parse a Qalun-riwaya Quran file and return an ordered list of dicts::
+
+        {surah_num, surah_name, ayah_num, text_raw, text_norm, _index}
+
+    Handles
+    -------
+    - UTF-16 LE (BOM-detected) and UTF-8 files.
+    - Verse numbers appearing *before or after* verse text (both conventions
+      used by different editions collapse to the same token-stream logic:
+      a numeral token flushes the preceding buffer as that verse).
+    - Surah headers  (lines starting with سُورَةُ)  → increment surah counter.
+    - Basmala lines                                 → skipped entirely.
+    - Ta'awwudh lines                               → skipped entirely.
+    - Optional surah_filter: if given, only yield ayat for that surah.
+    """
+    path = Path(quran_path)
+    with path.open("rb") as fh:
+        bom = fh.read(2)
+    encoding = "utf-16" if bom in (b"\xff\xfe", b"\xfe\xff") else "utf-8"
+    with path.open(encoding=encoding, errors="replace") as fh:
+        lines = fh.readlines()
+
+    ayat: list[dict] = []
+    surah_num  = 0
+    surah_name = ""
+    buf: list[str] = []   # token accumulator for the ayah being assembled
+    in_target_surah = (surah_filter is None)
+
+    def _flush(num: int) -> None:
+        """Flush the accumulator as ayah `num` of the current surah."""
+        if not buf:
+            return
+        if surah_filter is not None and not in_target_surah:
+            buf.clear()
+            return
+        text_raw  = " ".join(buf)
+        text_norm = normalize_ar(text_raw)
+        if text_norm:
+            ayat.append({
+                "surah_num":  surah_num,
+                "surah_name": surah_name,
+                "ayah_num":   num,
+                "text_raw":   text_raw,
+                "text_norm":  text_norm,
+                "_index":     len(ayat),
+            })
+        buf.clear()
+
+    for raw_line in lines:
+        raw_line = raw_line.rstrip("\r\n")
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+
+        # ── surah header ──────────────────────────────────────────────────────
+        if _is_surah_header(stripped):
+            # Do NOT flush here — no half-ayah should be lingering at this point.
+            buf.clear()
+            surah_num  += 1
+            surah_name  = stripped
+            in_target_surah = (
+                surah_filter is None
+                or normalize_ar(surah_filter) in normalize_ar(surah_name)
+                or normalize_ar(surah_name) in normalize_ar(surah_filter)
+            )
+            continue
+
+        # ── preamble lines to skip ────────────────────────────────────────────
+        if _is_basmala(stripped) or _is_taawwudh(stripped):
+            continue
+
+        # ── tokenise the line and process each token ──────────────────────────
+        for token in stripped.split():
+            if AR_DIGIT_RE.match(token):
+                # Verse number → flush buffer as that verse
+                _flush(_arabic_indic_to_int(token))
+            else:
+                # Only enqueue tokens that contain at least one Arabic letter
+                if re.search(r"[\u0621-\u064A]", token):
+                    buf.append(token)
+
+    # Trailing buffer (e.g. last line of a file without a trailing numeral):
+    # we do NOT flush — incomplete verse text is unreliable for matching.
+
+    return ayat
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# WhisperX extraction
+# ══════════════════════════════════════════════════════════════════════════════
+
+def extract_whisper_words(data: dict | list) -> list[dict]:
+    """
+    Extract a flat list of ``{word_norm, word_raw, start, end, score}`` dicts
+    from a WhisperX JSON output.
+
+    Handles
+    -------
+    - ``dict`` with ``segments[].words[]``  (word-level alignment output).
+    - ``dict`` with ``segments[]`` only     (segment fallback, no word timestamps).
+    - Flat ``list`` of word dicts.
+    """
+    words: list[dict] = []
+
+    def _push(raw: str, start, end, score=None) -> None:
+        norm = normalize_ar(raw)
+        if norm and start is not None and end is not None:
+            words.append({
+                "word_norm": norm,
+                "word_raw":  raw.strip(),
+                "start":     float(start),
+                "end":       float(end),
+                "score":     score,
+            })
+
+    if isinstance(data, dict):
+        for seg in data.get("segments", []):
+            seg_words = seg.get("words") or []
+            if seg_words:
+                for w in seg_words:
+                    _push(
+                        w.get("word") or w.get("text") or "",
+                        w.get("start"), w.get("end"), w.get("score"),
+                    )
+            else:
+                # Segment-level fallback: treat entire segment text as one unit
+                _push(seg.get("text", ""), seg.get("start"), seg.get("end"))
+    elif isinstance(data, list):
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            seg_words = item.get("words") or []
+            if seg_words:
+                # Item is a segment with nested word-level timestamps
+                for w in seg_words:
+                    _push(
+                        w.get("word") or w.get("text") or "",
+                        w.get("start"), w.get("end"), w.get("score"),
+                    )
+            else:
+                # Item is already a word-level entry
+                _push(
+                    item.get("word") or item.get("text") or "",
+                    item.get("start"), item.get("end"), item.get("score"),
+                )
+
+    return words
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Fuzzy scoring
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _find_quran_start(words: list[dict]) -> int:
+    """
+    Return the index of the first WhisperX word that is NOT part of an
+    opening ta'awwudh or basmala preamble.
+
+    The reciter often begins with:
+        أعوذ بالله من الشيطان الرجيم   (≤ 5 words)  ← ta'awwudh
+        بسم  الله  الرحمن  الرحيم      (4 words)    ← basmala
+
+    before the actual surah verses start.  Including these words in the
+    head window biases global matching towards Al-Fatiha ayah 2
+    (الرحمن الرحيم) which appears verbatim in the basmala.
+
+    Key: "بسم" is detected as a *separator* between the two patterns and
+    must NOT be in _PREAMBLE_VOCAB, otherwise the ta'awwudh loop would
+    consume it and the basmala check would never fire.
+    """
+    _TAAWWUDH_VOCAB = frozenset({
+        "اعوذ", "اعود", "بالله", "بالل", "من",
+        "الرجيم", "الشيطان", "الشيطن", "شيطان", "شيطن",
+    })
+    _BASMALA_REST = frozenset({"الله", "الرحمن", "الرحيم"})
+
+    norms = [w["word_norm"] for w in words[:20]]
+    i = 0
+
+    # ── Step 1: skip ta'awwudh ─────────────────────────────────────────────
+    # Only enters if the very first word is أعوذ / أعود.
+    if i < len(norms) and norms[i] in ("اعوذ", "اعود"):
+        end = min(i + 8, len(norms))
+        while i < end and norms[i] in _TAAWWUDH_VOCAB:
+            i += 1
+        # i now points to the first non-ta'awwudh word (typically "بسم")
+
+    # ── Step 2: skip basmala if the next word is بسم ──────────────────────
+    if i < len(norms) and norms[i] == "بسم":
+        i += 1   # skip "بسم" itself
+        # skip the remaining 3 basmala words (الله الرحمن الرحيم), up to 3
+        skipped = 0
+        while skipped < 3 and i < len(norms) and norms[i] in _BASMALA_REST:
+            i += 1
+            skipped += 1
+
+    # Safety cap: never skip more than 15 words
+    return min(i, 15)
+
+
+def _global_prefilter(
+    ayat: list[dict],
+    target_str: str,
+    n: int,
+) -> list[dict]:
+    """
+    Fast word-recall prefilter over ALL ayat in the parsed list.
+
+    Returns the top *n* ayat ranked by the fraction of their normalised words
+    that appear anywhere in *target_str*.  This O(|ayat| × |ayah_words|)
+    first pass dramatically narrows the candidate set before the more
+    expensive position-based scoring is applied.
+
+    Used when no ``--surah`` filter is given and the file spans multiple surahs.
+    """
+    target_words = set(target_str.split())
+    if not target_words:
+        return ayat[:n]
+
+    ranked = sorted(
+        ayat,
+        key=lambda a: _word_recall(a["text_norm"].split(), target_words),
+        reverse=True,
+    )
+    return ranked[:n]
+
+def _partial_ratio(needle: str, haystack: str) -> float:
+    """
+    Best ``SequenceMatcher.ratio`` of *needle* against any same-length
+    sub-window of *haystack*.
+
+    Analogous to fuzzywuzzy's ``partial_ratio``.  When the haystack is longer
+    than the needle (the typical case), this finds the best-aligned fragment
+    rather than penalising the score for surrounding context words.
+
+    Complexity: O(|haystack| / step × |needle|) — fast enough for short Arabic
+    verses (≤ ~200 chars) against an 80-word window (≤ ~500 chars).
+    """
+    n = len(needle)
+    h = len(haystack)
+    if n == 0 or h == 0:
+        return 0.0
+    if n >= h:
+        return SequenceMatcher(None, needle, haystack, autojunk=False).ratio()
+
+    best = 0.0
+    step = max(1, n // 5)
+    for start in range(0, h - n + 1, step):
+        r = SequenceMatcher(
+            None, needle, haystack[start: start + n], autojunk=False,
+        ).ratio()
+        if r > best:
+            best = r
+        if best > 0.97:   # early exit — practically a perfect match
+            break
+    return best
+
+
+def _find_match_position(
+    needle: str,
+    haystack: str,
+    min_score: float = 0.40,
+) -> tuple[int, float]:
+    """
+    Slide a same-length window across *haystack* and return
+    ``(earliest_pos, best_score)`` where *earliest_pos* is the leftmost
+    start-index that achieves a score ≥ *min_score*.
+
+    If no window reaches *min_score*, returns ``(len(haystack), best_score)``
+    so the caller can still rank by score even in the low-confidence case.
+    """
+    n, h = len(needle), len(haystack)
+    if n == 0 or h == 0:
+        return h, 0.0
+    if n >= h:
+        sc = SequenceMatcher(None, needle, haystack, autojunk=False).ratio()
+        return (0 if sc >= min_score else h), sc
+
+    best_score   = 0.0
+    earliest_pos = h          # sentinel: "not found"
+    step = max(1, n // 5)
+
+    for start in range(0, h - n + 1, step):
+        r = SequenceMatcher(
+            None, needle, haystack[start: start + n], autojunk=False,
+        ).ratio()
+        if r > best_score:
+            best_score = r
+        if r >= min_score and start < earliest_pos:
+            earliest_pos = start
+
+    return earliest_pos, best_score
+
+
+def _word_recall(ayah_words: list[str], transcript_words: set[str]) -> float:
+    """
+    Fraction of *ayah_words* that appear anywhere in *transcript_words*.
+    Measures how fully the ayah is covered by the transcript window,
+    independent of window length (unlike Jaccard).
+    """
+    if not ayah_words:
+        return 0.0
+    return sum(1 for w in ayah_words if w in transcript_words) / len(ayah_words)
+
+
+def score_ayah(ayah_norm: str, transcript_str: str) -> float:
+    """
+    Combined confidence score (0–1) for how well *ayah_norm* matches
+    *transcript_str*:
+
+    - **partial_ratio** (char-level): finds the best aligning substring of the
+      transcript for the ayah, handling length mismatches gracefully.
+    - **word recall**: fraction of ayah words found anywhere in the transcript
+      window (robust to WhisperX word-boundary and insertion noise, and unlike
+      Jaccard does not penalise short ayat for the large transcript denominator).
+
+    Final score is the average of the two signals.
+    """
+    pr  = _partial_ratio(ayah_norm, transcript_str)
+    rec = _word_recall(ayah_norm.split(), set(transcript_str.split()))
+    return round((pr + rec) / 2.0, 4)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Core detection
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Minimum score required at a position for that position to be considered
+# "reliably found" rather than a spurious partial alignment.
+_POSITION_THRESHOLD        = 0.55   # used when --surah is given / single-surah file
+_POSITION_THRESHOLD_GLOBAL = 0.65   # stricter threshold for full-Quran global search
+                                    # prevents short ayat (≤3 words) from spuriously
+                                    # matching common character sequences
+
+# In global mode, only use *position* as the tiebreaker for ayat whose
+# score meets this bar.  Ayat below this threshold rank by score alone,
+# which prevents low-confidence matches from other surahs from winning
+# purely by happening to appear late/early in the search window.
+_HIGH_CONF_POSITION = 0.75
+
+# Minimum number of words an ayah must have to be used as a first/last candidate
+# in global-search mode.  Very short ayat (≤4 words) produce spurious late-position
+# hits by matching common endings (e.g. العزيز الرحيم, الرحمن الرحيم).
+_MIN_WORDS_GLOBAL = 5
+
+
+def detect_first_ayah(
+    ayat: list[dict],
+    words: list[dict],
+    head_n: int,
+    search_range: int,
+    *,
+    global_search: bool = False,
+) -> tuple[dict, float]:
+    """
+    Detect the FIRST ayah in the recording.
+
+    Strategy
+    --------
+    For each candidate (first *search_range* ayat, or global prefilter):
+
+    1.  Find the **earliest position** in the transcript head where the ayah
+        achieves a fuzzy score ≥ ``_POSITION_THRESHOLD``.
+    2.  Independently compute ``score_ayah`` (partial-ratio + recall) as a
+        quality measure.
+
+    Decision:
+
+    - **If any candidates produced a reliable position**: pick the one with the
+      smallest (earliest) position.  This correctly identifies which ayah the
+      reciter started on even when multiple ayat fit the head window.
+    - **Fallback** (no candidate met the threshold): rank purely by
+      ``score_ayah`` — avoids returning a completely wrong ayah when the
+      head window is noisy.
+
+    Global search mode
+    ------------------
+    When *global_search* is True (full-Quran file, no ``--surah``):
+
+    - Leading ta'awwudh / basmala words are skipped from the head window so
+      that "الرحمن الرحيم" in the preamble cannot spuriously match Al-Fatiha.
+    - All ayat are pre-screened by word-recall before position detection,
+      keeping the *search_range* × 4 best candidates.
+    """
+    if global_search:
+        skip   = _find_quran_start(words)
+        head_words = words[skip: skip + head_n]
+    else:
+        head_words = words[:head_n]
+
+    head_str = " ".join(w["word_norm"] for w in head_words)
+    pos_thresh = _POSITION_THRESHOLD_GLOBAL if global_search else _POSITION_THRESHOLD
+
+    if global_search:
+        candidates = _global_prefilter(ayat, head_str, search_range * 4)
+        # Drop very short ayat — they produce spurious early positions by
+        # matching preamble words (e.g. الرحمن الرحيم = 2 words).
+        candidates = [a for a in candidates
+                      if len(a["text_norm"].split()) >= _MIN_WORDS_GLOBAL]
+    else:
+        candidates = ayat[:search_range]
+
+    scored: list[tuple[int, float, dict]] = []   # (pos, score, ayah)
+    for ayah in candidates:
+        pos, _ = _find_match_position(ayah["text_norm"], head_str, pos_thresh)
+        sc     = score_ayah(ayah["text_norm"], head_str)
+        scored.append((pos, sc, ayah))
+
+    # In global mode, only let HIGH-confidence candidates compete by position.
+    # Low-confidence candidates fall into the score-only pool to prevent
+    # wrong-surah ayat from winning purely by chance of early/late position.
+    if global_search:
+        positioned = [
+            (pos, sc, ay) for pos, sc, ay in scored
+            if pos < len(head_str) and sc >= _HIGH_CONF_POSITION
+        ]
+    else:
+        positioned = [(pos, sc, ay) for pos, sc, ay in scored if pos < len(head_str)]
+
+    if positioned:
+        # Earliest position wins; break ties by highest score
+        positioned.sort(key=lambda t: (t[0], -t[1]))
+        _, best_score, best_ayah = positioned[0]
+    else:
+        # All candidates fell back to sentinel — use pure score ranking
+        scored.sort(key=lambda t: -t[1])
+        _, best_score, best_ayah = scored[0]
+
+    return best_ayah, best_score
+
+
+def detect_last_ayah(
+    ayat: list[dict],
+    words: list[dict],
+    tail_n: int,
+    search_range: int,
+    *,
+    global_search: bool = False,
+    first_ayah: dict | None = None,
+) -> tuple[dict, float]:
+    """
+    Detect the LAST ayah in the recording.
+
+    Mirror of ``detect_first_ayah``: among the last *search_range* ayat
+    (or a global prefilter when *global_search* is True), the one whose text
+    is found at the **largest (latest)** reliable position in the transcript
+    tail wins.
+
+    No preamble-skip is needed for the tail (recordings end with the last
+    verse, not with a postamble).
+    """
+    tail_str = " ".join(w["word_norm"] for w in words[-tail_n:])
+    pos_thresh = _POSITION_THRESHOLD_GLOBAL if global_search else _POSITION_THRESHOLD
+
+    if global_search:
+        candidates = _global_prefilter(ayat, tail_str, search_range * 4)
+        # Drop very short ayat — they pick up spurious late positions by
+        # matching common word endings (e.g. العزيز الرحيم / الحكيم = 3-4 words).
+        candidates = [a for a in candidates
+                      if len(a["text_norm"].split()) >= _MIN_WORDS_GLOBAL]
+        # Drop any ayah that comes BEFORE the first ayah in the Quran order.
+        # This prevents mirror-text ayat in earlier surahs from winning
+        # (e.g. Al-Hadid #1 ≈ tail of Al-Hashr #24).
+        if first_ayah is not None:
+            min_idx = first_ayah.get("_index", 0)
+            filtered = [a for a in candidates if a["_index"] >= min_idx]
+            if filtered:          # only apply if it doesn't empty the list
+                candidates = filtered
+    else:
+        candidates = ayat[-search_range:]
+
+    scored: list[tuple[int, float, dict]] = []
+    for ayah in candidates:
+        pos, _ = _find_match_position(ayah["text_norm"], tail_str, pos_thresh)
+        sc     = score_ayah(ayah["text_norm"], tail_str)
+        scored.append((pos, sc, ayah))
+
+    # In global mode, only let HIGH-confidence candidates compete by position.
+    # Low-confidence candidates fall into the score-only pool to prevent
+    # wrong-surah ayat from winning purely by chance of late position.
+    if global_search:
+        positioned = [
+            (pos, sc, ay) for pos, sc, ay in scored
+            if pos < len(tail_str) and sc >= _HIGH_CONF_POSITION
+        ]
+    else:
+        positioned = [(pos, sc, ay) for pos, sc, ay in scored if pos < len(tail_str)]
+
+    if positioned:
+        # Latest position wins; break ties by highest score
+        positioned.sort(key=lambda t: (-t[0], -t[1]))
+        _, best_score, best_ayah = positioned[0]
+    else:
+        scored.sort(key=lambda t: -t[1])
+        _, best_score, best_ayah = scored[0]
+
+    return best_ayah, best_score
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Sanity checks / warnings
+# ══════════════════════════════════════════════════════════════════════════════
+
+def build_warnings(
+    first: dict,
+    first_conf: float,
+    last: dict,
+    last_conf: float,
+    words: list[dict],
+    low_conf: float,
+    *,
+    global_search: bool = False,
+) -> list[str]:
+    """Return a list of human-readable warning strings."""
+    w: list[str] = []
+
+    # ── global-search notice ───────────────────────────────────────────────
+    if global_search:
+        w.append(
+            "No --surah specified: ran a global search across all surahs in the file. "
+            "Specify --surah for faster, more accurate results."
+        )
+
+    # ── very sparse transcript ─────────────────────────────────────────────
+    if len(words) < 20:
+        w.append(
+            f"Only {len(words)} word(s) in WhisperX output — "
+            "transcript may be empty, too short, or corrupt."
+        )
+
+    # ── low confidence ─────────────────────────────────────────────────────
+    if first_conf < low_conf:
+        w.append(
+            f"Low confidence for first ayah ({first_conf:.2f} < {low_conf:.2f}). "
+            "Try increasing --head-words or --search-range, "
+            "or verify that --quran matches the riwaya recited."
+        )
+    if last_conf < low_conf:
+        w.append(
+            f"Low confidence for last ayah ({last_conf:.2f} < {low_conf:.2f}). "
+            "Try increasing --tail-words or --search-range."
+        )
+
+    # ── order inversion ────────────────────────────────────────────────────
+    f_idx = first.get("_index", 0)
+    l_idx = last.get("_index", 0)
+    if f_idx > l_idx:
+        w.append(
+            "Detected first ayah falls AFTER the detected last ayah in the "
+            "Quran file — alignment is likely wrong. "
+            "Consider widening --search-range."
+        )
+
+    # ── suspiciously narrow range for a long audio ────────────────────────
+    if l_idx - f_idx < 2 and len(words) >= 40:
+        duration = (words[-1]["end"] - words[0]["start"]) if words else 0.0
+        if duration > 30:
+            w.append(
+                f"Only {l_idx - f_idx + 1} ayah(s) detected over "
+                f"{duration:.0f}s of audio — "
+                "this looks suspiciously narrow. "
+                "Consider increasing --search-range."
+            )
+
+    # ── overall very low average confidence ───────────────────────────────
+    if first_conf > 0.0 and last_conf > 0.0:
+        avg = (first_conf + last_conf) / 2.0
+        if avg < 0.25:
+            w.append(
+                f"Average confidence is very low ({avg:.2f}). "
+                "Ensure the Quran file matches the riwaya actually recited."
+            )
+
+    return w
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CLI entry point
+# ══════════════════════════════════════════════════════════════════════════════
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Detect first & last ayah in a WhisperX transcription (v1).",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--quran", required=True,
+        help="Path to Qalun Quran text file (single-surah or full Quran).",
+    )
+    parser.add_argument(
+        "--whisperx", required=True,
+        help="Path to WhisperX JSON transcription output.",
+    )
+    parser.add_argument(
+        "--output", default="result.json",
+        help="Path for the output JSON.",
+    )
+    parser.add_argument(
+        "--surah", default=None,
+        help=(
+            "Optional: surah name to restrict search to "
+            "(as it appears in the file, e.g. 'سُورَةُ الفُرقَانِ'). "
+            "Not required when --quran is a single-surah file."
+        ),
+    )
+    parser.add_argument(
+        "--head-words", type=int, default=HEAD_WORDS,
+        help="WhisperX words from the start used for first-ayah detection.",
+    )
+    parser.add_argument(
+        "--tail-words", type=int, default=TAIL_WORDS,
+        help="WhisperX words from the end used for last-ayah detection.",
+    )
+    parser.add_argument(
+        "--search-range", type=int, default=SEARCH_RANGE,
+        help="Number of candidate ayat scanned from each end of the surah.",
+    )
+    parser.add_argument(
+        "--low-conf", type=float, default=LOW_CONF,
+        help="Confidence threshold below which a warning is emitted.",
+    )
+    args = parser.parse_args()
+
+    # ── Step 1: parse Quran ────────────────────────────────────────────────────
+    print(f"[1/4] Parsing Quran text: {args.quran}")
+    ayat = parse_ayat(args.quran, surah_filter=args.surah)
+    if not ayat:
+        print(
+            "ERROR: No ayat parsed. "
+            "Check --quran path, encoding, and --surah spelling.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    n_surahs = len({a["surah_num"] for a in ayat})
+    print(f"      {len(ayat)} ayat parsed across {n_surahs} surah(s).")
+
+    # ── Step 2: load WhisperX ──────────────────────────────────────────────────
+    print(f"[2/4] Loading WhisperX JSON: {args.whisperx}")
+    wx_path = Path(args.whisperx)
+    if not wx_path.exists():
+        print(f"ERROR: WhisperX file not found: {args.whisperx}", file=sys.stderr)
+        sys.exit(1)
+    with wx_path.open(encoding="utf-8") as fh:
+        wx_data = json.load(fh)
+    words = extract_whisper_words(wx_data)
+    if not words:
+        print("ERROR: No word tokens extracted from WhisperX output.", file=sys.stderr)
+        sys.exit(1)
+    duration = words[-1]["end"] - words[0]["start"]
+    print(
+        f"      {len(words)} word tokens extracted "
+        f"({duration:.1f}s, "
+        f"{words[0]['start']:.2f}s – {words[-1]['end']:.2f}s)."
+    )
+
+    # Clamp parameters to actual data sizes
+    head_n  = min(args.head_words,   len(words))
+    tail_n  = min(args.tail_words,   len(words))
+    s_range = min(args.search_range, len(ayat))
+
+    # Decide whether to run in global-search mode
+    global_search = (n_surahs > 1 and args.surah is None)
+
+    # ── Step 3: detect first & last ayah ──────────────────────────────────────
+    mode_label = "global" if global_search else f"search_range={s_range}"
+    print(
+        f"[3/4] Detecting range  "
+        f"(head={head_n} words, tail={tail_n} words, {mode_label}) …"
+    )
+    first_ayah, first_conf = detect_first_ayah(
+        ayat, words, head_n, s_range, global_search=global_search,
+    )
+    last_ayah, last_conf = detect_last_ayah(
+        ayat, words, tail_n, s_range, global_search=global_search,
+        first_ayah=first_ayah,
+    )
+
+    warnings = build_warnings(
+        first_ayah, first_conf,
+        last_ayah,  last_conf,
+        words,
+        args.low_conf,
+        global_search=global_search,
+    )
+
+    # ── Step 4: assemble and write result ──────────────────────────────────────
+    def _ayah_entry(ayah: dict, conf: float) -> dict:
+        return {
+            "surah_num":  ayah["surah_num"],
+            "surah_name": ayah["surah_name"],
+            "ayah_num":   ayah["ayah_num"],
+            "text":       ayah["text_raw"],
+            "confidence": conf,
+        }
+
+    result = {
+        "first_ayah": _ayah_entry(first_ayah, first_conf),
+        "last_ayah":  _ayah_entry(last_ayah,  last_conf),
+        "warnings":   warnings,
+        "meta": {
+            "total_ayat_in_file": len(ayat),
+            "whisperx_words":     len(words),
+            "audio_start_s":      words[0]["start"],
+            "audio_end_s":        words[-1]["end"],
+            "audio_duration_s":   round(duration, 2),
+            "head_words_used":    head_n,
+            "tail_words_used":    tail_n,
+            "search_range_used":  s_range,
+            "global_search":      global_search,
+        },
+    }
+
+    out_path = Path(args.output)
+    print(f"[4/4] Writing result → {out_path}")
+    with out_path.open("w", encoding="utf-8") as fh:
+        json.dump(result, fh, ensure_ascii=False, indent=2)
+
+    # ── Console summary ────────────────────────────────────────────────────────
+    SEP = "═" * 64
+    fa  = result["first_ayah"]
+    la  = result["last_ayah"]
+    print(f"\n{SEP}")
+    print(
+        f"  First ayah │ {fa['surah_name']} — #{fa['ayah_num']}"
+        f"  (conf {fa['confidence']:.2f})"
+    )
+    print(f"             │ {fa['text'][:70]}")
+    print()
+    print(
+        f"  Last ayah  │ {la['surah_name']} — #{la['ayah_num']}"
+        f"  (conf {la['confidence']:.2f})"
+    )
+    print(f"             │ {la['text'][:70]}")
+    if warnings:
+        print()
+        print("  ⚠  Warnings:")
+        for msg in warnings:
+            print(f"     • {msg}")
+    print(SEP)
+    print(f"\nSaved to: {out_path.resolve()}\n")
+
+
+if __name__ == "__main__":
+    main()
+
