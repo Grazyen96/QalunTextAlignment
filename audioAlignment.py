@@ -4,6 +4,8 @@ import replicate
 import json
 from difflib import SequenceMatcher
 
+from env_utils import load_project_env
+
 # ── constants ────────────────────────────────────────────────────────────────
 TASHKEEL = re.compile(r"[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]")
 
@@ -139,6 +141,8 @@ def write_srt(result: list[dict], path: str) -> None:
 
 # ── main ─────────────────────────────────────────────────────────────────────
 def main():
+    load_project_env()
+
     if not os.path.exists(TEXT_FILE):
         raise FileNotFoundError(f"Text file not found: {TEXT_FILE}")
     if not os.path.exists(AUDIO_FILE):
