@@ -29,7 +29,12 @@ CLI
 ---
     python detect_range.py \\
         --quran  "UthmanicQaloon1-Ver05.txt" \\
-        --whisperx whisperx.json \\
+        --whisperx whisperx.json \
+        --output result.json
+
+    python detect_range.py \
+        --quran  "UthmanicQaloon1-Ver05.txt" \
+        --audio  recitation.mp3 \
         --output result.json
 
 Optional filters / tuning
@@ -49,6 +54,8 @@ import re
 import sys
 from difflib import SequenceMatcher
 from pathlib import Path
+
+from whisperx_service import WhisperXServiceError, transcribe_audio
 
 # ── Unicode / regex constants ──────────────────────────────────────────────────
 
@@ -299,6 +306,21 @@ def extract_whisper_words(data: dict | list) -> list[dict]:
                 )
 
     return words
+
+
+def _count_whisperx_segments(data: dict | list) -> int:
+    """Count top-level WhisperX segments/items in a loaded JSON response."""
+    if isinstance(data, dict):
+        return len(data.get("segments", []))
+    if isinstance(data, list):
+        return len(data)
+    return 0
+
+
+def _default_whisperx_raw_path(output_path: str | Path) -> Path:
+    """Place raw WhisperX JSON next to the main result file."""
+    output_path = Path(output_path)
+    return output_path.with_name(f"{output_path.stem}_whisperx_raw.json")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -751,9 +773,14 @@ def main() -> None:
         "--quran", required=True,
         help="Path to Qalun Quran text file (single-surah or full Quran).",
     )
-    parser.add_argument(
-        "--whisperx", required=True,
-        help="Path to WhisperX JSON transcription output.",
+    source_group = parser.add_mutually_exclusive_group(required=True)
+    source_group.add_argument(
+        "--whisperx",
+        help="Path to an existing WhisperX JSON transcription output.",
+    )
+    source_group.add_argument(
+        "--audio",
+        help="Path to an audio file to transcribe with WhisperX via Replicate.",
     )
     parser.add_argument(
         "--output", default="result.json",
@@ -798,14 +825,49 @@ def main() -> None:
     n_surahs = len({a["surah_num"] for a in ayat})
     print(f"      {len(ayat)} ayat parsed across {n_surahs} surah(s).")
 
-    # ── Step 2: load WhisperX ──────────────────────────────────────────────────
-    print(f"[2/4] Loading WhisperX JSON: {args.whisperx}")
-    wx_path = Path(args.whisperx)
-    if not wx_path.exists():
-        print(f"ERROR: WhisperX file not found: {args.whisperx}", file=sys.stderr)
-        sys.exit(1)
-    with wx_path.open(encoding="utf-8") as fh:
-        wx_data = json.load(fh)
+    # ── Step 2: load or generate WhisperX ──────────────────────────────────────
+    out_path = Path(args.output)
+    if args.whisperx is not None:
+        print(f"[2/4] Loading WhisperX JSON: {args.whisperx}")
+        wx_path = Path(args.whisperx)
+        if not wx_path.exists():
+            print(f"ERROR: WhisperX file not found: {args.whisperx}", file=sys.stderr)
+            sys.exit(1)
+        try:
+            with wx_path.open(encoding="utf-8") as fh:
+                wx_data = json.load(fh)
+        except json.JSONDecodeError as error:
+            print(
+                f"ERROR: Failed to parse WhisperX JSON '{args.whisperx}': {error}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        transcript_source = "whisperx_json"
+        transcript_input_path = str(wx_path.resolve())
+        whisperx_raw_output_path = str(wx_path.resolve())
+        whisperx_model_ref = None
+        whisperx_segment_count = _count_whisperx_segments(wx_data)
+    else:
+        print(f"[2/4] Transcribing audio with WhisperX: {args.audio}")
+        raw_output_path = _default_whisperx_raw_path(out_path)
+        try:
+            service_result = transcribe_audio(args.audio, save_raw_to=raw_output_path)
+        except (FileNotFoundError, WhisperXServiceError) as error:
+            print(f"ERROR: {error}", file=sys.stderr)
+            sys.exit(1)
+
+        wx_data = service_result.output
+        transcript_source = "audio"
+        transcript_input_path = str(Path(args.audio).resolve())
+        whisperx_raw_output_path = service_result.raw_output_path
+        whisperx_model_ref = service_result.model_ref
+        whisperx_segment_count = service_result.segment_count
+        print(
+            f"      WhisperX raw JSON saved to {service_result.raw_output_path} "
+            f"({service_result.segment_count} segments, {service_result.word_count} words)."
+        )
+
     words = extract_whisper_words(wx_data)
     if not words:
         print("ERROR: No word tokens extracted from WhisperX output.", file=sys.stderr)
@@ -862,6 +924,11 @@ def main() -> None:
         "last_ayah":  _ayah_entry(last_ayah,  last_conf),
         "warnings":   warnings,
         "meta": {
+            "input_type":         transcript_source,
+            "input_path":         transcript_input_path,
+            "whisperx_raw_output_path": whisperx_raw_output_path,
+            "whisperx_model_ref": whisperx_model_ref,
+            "whisperx_segments":  whisperx_segment_count,
             "total_ayat_in_file": len(ayat),
             "whisperx_words":     len(words),
             "audio_start_s":      words[0]["start"],
@@ -874,7 +941,6 @@ def main() -> None:
         },
     }
 
-    out_path = Path(args.output)
     print(f"[4/4] Writing result → {out_path}")
     with out_path.open("w", encoding="utf-8") as fh:
         json.dump(result, fh, ensure_ascii=False, indent=2)
