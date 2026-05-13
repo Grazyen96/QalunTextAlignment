@@ -1,13 +1,16 @@
 # `detect_range.py`
 
-`detect_range.py` finds the **first and last ayah** covered by a WhisperX transcription and writes the result to JSON.
+`detect_range.py` detects Qur'an content inside a WhisperX transcription and writes the result to JSON.
 
 It is designed for Quran recitation workflows where you already have:
 
 - a **Qalun-riwaya Quran text file**
 - either a **WhisperX JSON transcription output** or an **audio file** to transcribe with WhisperX
 
-The script compares the beginning and end of the transcription against the Quran text and returns the most likely verse range.
+The script supports two workflows:
+
+- `range` mode: compare the beginning and end of the transcription against the Quran text and return the most likely verse range
+- `lecture` mode: scan the whole transcription for Qur'an quotations inside lecture / Dars audio
 
 ## What you need
 
@@ -54,9 +57,10 @@ The script normalizes the transcription text before matching it to the Quran tex
 1. Parses the Quran text into ordered ayat
 2. Loads the WhisperX JSON output
 3. Extracts the transcript words
-4. Detects the **first ayah** by matching the start of the transcription
-5. Detects the **last ayah** by matching the end of the transcription
-6. Writes a structured JSON result with confidence scores and warnings
+4. Either:
+   - detects the **first and last ayah** in recitation-oriented `range` mode, or
+   - scans overlapping transcript windows for Qur'an mentions in `lecture` mode
+5. Writes a structured JSON result with confidence scores and metadata
 
 ## Usage
 
@@ -87,11 +91,15 @@ You cannot use both at the same time.
 
 ### Optional arguments
 
+- `--mode` — choose `range` or `lecture`
 - `--surah` — restricts detection to one surah name exactly as it appears in the Quran file
 - `--head-words` — number of words from the beginning of the transcription to scan for the first ayah
 - `--tail-words` — number of words from the end of the transcription to scan for the last ayah
 - `--search-range` — how many candidate ayat to inspect from each end
 - `--low-conf` — confidence threshold used for warnings
+- `--max-span` — maximum number of consecutive ayat to consider in `lecture` mode
+- `--lecture-threshold` — minimum confidence required in `lecture` mode
+- `--min-matched-words` — minimum overlapping Qur'an words required in `lecture` mode
 
 Example with a surah filter:
 
@@ -103,7 +111,25 @@ python detect_range.py \
   --output "result.json"
 ```
 
+Example for lecture mode:
+
+```bash
+python detect_range.py \
+  --quran "UthmanicQaloon1-Ver05.txt" \
+  --whisperx "whisperx.json" \
+  --mode lecture \
+  --max-span 5 \
+  --lecture-threshold 0.78 \
+  --min-matched-words 4 \
+  --output "lecture_result.json"
+```
+
+`lecture` mode always scans the **full Quran**, even if `--surah` is provided.
+The lecture matcher lives in the separate module `lecture_mode.py` to keep the CLI readable.
+
 ## Output format
+
+### `range` mode
 
 The script writes a JSON file containing:
 
@@ -147,6 +173,37 @@ Example structure:
 
 When `--audio` is used, the script automatically saves the raw WhisperX JSON next to your output file using a name like `result_whisperx_raw.json`.
 
+### `lecture` mode
+
+Lecture mode writes a `matches` array. Each match includes both:
+
+- `detected_text` — the transcript fragment detected in the lecture audio
+- `text` / `full_text` — the full matched Quran ayah/span text from the Quran source file
+
+Example structure:
+
+```json
+{
+  "matches": [
+    {
+      "surah_num": 1,
+      "surah_name": "سُورَةُ الفَاتِحَةِ",
+      "from_ayah": 1,
+      "to_ayah": 3,
+      "detected_text": "بسم الله الرحمن الرحيم الحمد لله رب العالمين الرحمن الرحيم",
+      "text": "بِسْمِ اللَّهِ الرَّحْمَـٰنِ الرَّحِيمِ\nٱلْحَمْدُ لِلَّهِ رَبِّ ٱلْعَـٰلَمِينَ\nٱلرَّحْمَـٰنِ ٱلرَّحِيمِ",
+      "full_text": "بِسْمِ اللَّهِ الرَّحْمَـٰنِ الرَّحِيمِ\nٱلْحَمْدُ لِلَّهِ رَبِّ ٱلْعَـٰلَمِينَ\nٱلرَّحْمَـٰنِ الرَّحِيمِ",
+      "confidence": 0.91,
+      "start_time": 183.52,
+      "end_time": 197.21
+    }
+  ],
+  "meta": {
+    "mode": "lecture"
+  }
+}
+```
+
 ## When to use `--surah`
 
 Use `--surah` when:
@@ -154,11 +211,14 @@ Use `--surah` when:
 - you are matching a single surah file
 - you want faster search
 - you want more accurate results in a known surah
+- you are using `range` mode
 
 Leave it out when:
 
 - you are using a full-Quran text file
 - you want the script to search across all surahs automatically
+
+In `lecture` mode, `--surah` is ignored and the script searches the full Quran.
 
 ## Notes and tips
 

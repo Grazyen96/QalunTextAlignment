@@ -2,19 +2,14 @@
 """
 detect_range.py — v1
 
-Detects the FIRST and LAST ayah present in a WhisperX transcription, given a
-Qalun-riwaya Quran text file.
+Detects Quran content inside a WhisperX transcription, given a Qalun-riwaya
+Quran text file.
 
-Algorithm
----------
-1.  Parse the Quran text file into an ordered list of ayat (each with its
-    surah/verse number and normalized text).
-2.  Extract a flat word list from the WhisperX JSON output.
-3.  Detect the FIRST ayah by fuzzy-matching the HEAD of the transcript against
-    the first SEARCH_RANGE candidate ayat.
-4.  Detect the LAST ayah by fuzzy-matching the TAIL of the transcript against
-    the last SEARCH_RANGE candidate ayat.
-5.  Emit a structured JSON result with confidence scores and warnings.
+Modes
+-----
+1.  ``range``   → detect the FIRST and LAST ayah present in the transcript.
+2.  ``lecture`` → scan the whole transcript for Quran mentions inside Dars or
+    explanation-heavy audio.
 
 Design constraints respected
 -----------------------------
@@ -55,6 +50,7 @@ import sys
 from difflib import SequenceMatcher
 from pathlib import Path
 
+from lecture_mode import detect_quran_mentions_in_lecture
 from whisperx_service import WhisperXServiceError, transcribe_audio
 
 # ── Unicode / regex constants ──────────────────────────────────────────────────
@@ -766,7 +762,7 @@ def build_warnings(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Detect first & last ayah in a WhisperX transcription (v1).",
+        description="Detect Quran content in a WhisperX transcription.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
@@ -791,8 +787,14 @@ def main() -> None:
         help=(
             "Optional: surah name to restrict search to "
             "(as it appears in the file, e.g. 'سُورَةُ الفُرقَانِ'). "
-            "Not required when --quran is a single-surah file."
+            "Used only in range mode; lecture mode always scans the full Quran."
         ),
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["range", "lecture"],
+        default="range",
+        help="range = detect first/last ayah; lecture = detect Quran mentions in lecture audio.",
     )
     parser.add_argument(
         "--head-words", type=int, default=HEAD_WORDS,
@@ -810,11 +812,24 @@ def main() -> None:
         "--low-conf", type=float, default=LOW_CONF,
         help="Confidence threshold below which a warning is emitted.",
     )
+    parser.add_argument(
+        "--max-span", type=int, default=5,
+        help="Maximum number of consecutive ayat to match in lecture mode.",
+    )
+    parser.add_argument(
+        "--lecture-threshold", type=float, default=0.78,
+        help="Minimum confidence for accepting Quran matches in lecture mode.",
+    )
+    parser.add_argument(
+        "--min-matched-words", type=int, default=4,
+        help="Minimum overlapping Quran words required in lecture mode.",
+    )
     args = parser.parse_args()
 
     # ── Step 1: parse Quran ────────────────────────────────────────────────────
     print(f"[1/4] Parsing Quran text: {args.quran}")
-    ayat = parse_ayat(args.quran, surah_filter=args.surah)
+    effective_surah = None if args.mode == "lecture" else args.surah
+    ayat = parse_ayat(args.quran, surah_filter=effective_surah)
     if not ayat:
         print(
             "ERROR: No ayat parsed. "
@@ -824,6 +839,8 @@ def main() -> None:
         sys.exit(1)
     n_surahs = len({a["surah_num"] for a in ayat})
     print(f"      {len(ayat)} ayat parsed across {n_surahs} surah(s).")
+    if args.mode == "lecture" and args.surah is not None:
+        print("      Note: ignoring --surah in lecture mode; scanning the full Quran.")
 
     # ── Step 2: load or generate WhisperX ──────────────────────────────────────
     out_path = Path(args.output)
@@ -886,6 +903,67 @@ def main() -> None:
 
     # Decide whether to run in global-search mode
     global_search = (n_surahs > 1 and args.surah is None)
+
+    if args.mode == "lecture":
+        print("[3/4] Detecting Quran mentions inside lecture...")
+
+        mentions = detect_quran_mentions_in_lecture(
+            ayat,
+            words,
+            max_span=args.max_span,
+            min_score=args.lecture_threshold,
+            min_matched_words=args.min_matched_words,
+        )
+
+        result = {
+            "matches": mentions,
+            "meta": {
+                "input_type": transcript_source,
+                "input_path": transcript_input_path,
+                "whisperx_raw_output_path": whisperx_raw_output_path,
+                "whisperx_model_ref": whisperx_model_ref,
+                "whisperx_segments": whisperx_segment_count,
+                "total_ayat_in_file": len(ayat),
+                "whisperx_words": len(words),
+                "audio_start_s": words[0]["start"],
+                "audio_end_s": words[-1]["end"],
+                "audio_duration_s": round(duration, 2),
+                "mode": "lecture",
+                "max_span": args.max_span,
+                "lecture_threshold": args.lecture_threshold,
+                "min_matched_words": args.min_matched_words,
+                "surah_filter_ignored": args.surah is not None,
+            },
+        }
+
+        print(f"[4/4] Writing result → {out_path}")
+        with out_path.open("w", encoding="utf-8") as fh:
+            json.dump(result, fh, ensure_ascii=False, indent=2)
+
+        print()
+        print("=" * 64)
+
+        if not mentions:
+            print("No Qur'an ayat detected.")
+        else:
+            for match in mentions:
+                if match["from_ayah"] == match["to_ayah"]:
+                    ayah_range = f"#{match['from_ayah']}"
+                else:
+                    ayah_range = f"#{match['from_ayah']}–{match['to_ayah']}"
+
+                print(
+                    f"{match['surah_name']} {ayah_range} "
+                    f"({match['start_time']:.2f}s–{match['end_time']:.2f}s, "
+                    f"conf {match['confidence']:.2f})"
+                )
+                print(f"Detected: {match['detected_text']}")
+                print("Quran:")
+                print(match["full_text"])
+                print("-" * 64)
+
+        print(f"\nSaved to: {out_path.resolve()}\n")
+        return
 
     # ── Step 3: detect first & last ayah ──────────────────────────────────────
     mode_label = "global" if global_search else f"search_range={s_range}"
