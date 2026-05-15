@@ -10,6 +10,8 @@ Modes
 1.  ``range``   → detect the FIRST and LAST ayah present in the transcript.
 2.  ``lecture`` → scan the whole transcript for Quran mentions inside Dars or
     explanation-heavy audio.
+3.  ``recitation`` → detect the recited surah/range first, then emit timestamped
+    Quran spans from only that range.
 
 Design constraints respected
 -----------------------------
@@ -62,6 +64,10 @@ TASHKEEL = re.compile(
 
 # Arabic-Indic digits (U+0660–U+0669)
 _AR_DIG_TR = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
+# Reverse map: Latin → Arabic-Indic
+_TO_ARABIC_INDIC = str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩")
+
 AR_DIGIT_RE = re.compile(r"^[٠١٢٣٤٥٦٧٨٩]+$")
 
 # ── Default tuning knobs ───────────────────────────────────────────────────────
@@ -102,6 +108,16 @@ def normalize_ar(text: str) -> str:
 
 def _arabic_indic_to_int(s: str) -> int:
     return int(s.translate(_AR_DIG_TR))
+
+
+def _int_to_arabic_indic(n: int) -> str:
+    """Convert an integer to its Arabic-Indic digit string (e.g. 25 → '٢٥')."""
+    return str(n).translate(_TO_ARABIC_INDIC)
+
+
+def _ayah_text_with_marker(text_raw: str, ayah_num: int) -> str:
+    """Append the ayah number wrapped in ornamental parentheses ﴿٧﴾."""
+    return f"{text_raw} \ufd3e{_int_to_arabic_indic(ayah_num)}\ufd3f"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -404,6 +420,7 @@ def _build_candidate_pool(
     global_search: bool,
     window_str: str,
     min_index: int | None = None,
+    latest: bool = False,
 ) -> list[dict]:
     """Return the candidate ayat list for a head/tail window."""
     if global_search:
@@ -420,7 +437,7 @@ def _build_candidate_pool(
                 candidates = filtered
         return candidates
 
-    return ayat[:search_range]
+    return ayat[-search_range:] if latest else ayat[:search_range]
 
 
 def _score_candidates(
@@ -669,6 +686,7 @@ def detect_last_ayah(
         global_search=global_search,
         window_str=tail_str,
         min_index=min_index,
+        latest=True,
     )
     scored = _score_candidates(candidates, tail_str, pos_thresh)
     return _select_best_candidate(
@@ -756,6 +774,147 @@ def build_warnings(
     return w
 
 
+def _ayah_entry(ayah: dict, conf: float) -> dict:
+    return {
+        "surah_num":  ayah["surah_num"],
+        "surah_name": ayah["surah_name"],
+        "ayah_num":   ayah["ayah_num"],
+        "text":       ayah["text_raw"],
+        "confidence": conf,
+    }
+
+
+def _ayat_in_detected_range(
+    ayat: list[dict],
+    first_ayah: dict,
+    last_ayah: dict,
+) -> list[dict]:
+    """
+    Return ayat from the detected recitation range.
+
+    Recitation audio should stay inside one surah.  The first ayah is used as
+    the surah anchor; if the global tail search picks another surah, fall back
+    to the rest of the anchored surah instead of mixing unrelated surahs.
+    """
+    target_surah = first_ayah["surah_num"]
+    first_index = first_ayah["_index"]
+
+    same_surah_last = last_ayah["surah_num"] == target_surah
+    if same_surah_last and last_ayah["_index"] >= first_index:
+        last_index = last_ayah["_index"]
+    else:
+        same_surah = [a for a in ayat if a["surah_num"] == target_surah]
+        last_index = same_surah[-1]["_index"] if same_surah else first_index
+
+    return [
+        a for a in ayat
+        if a["surah_num"] == target_surah
+        and first_index <= a["_index"] <= last_index
+    ]
+
+
+def _trim_match_to_ayah_range(
+    match: dict,
+    recitation_ayat: list[dict],
+    from_ayah: int,
+    to_ayah: int,
+) -> dict | None:
+    selected_ayat = [
+        a for a in recitation_ayat
+        if from_ayah <= a["ayah_num"] <= to_ayah
+    ]
+    if not selected_ayat:
+        return None
+
+    full_text = "\n".join(
+        _ayah_text_with_marker(a["text_raw"], a["ayah_num"])
+        for a in selected_ayat
+    )
+    trimmed = dict(match)
+    trimmed["from_ayah"] = selected_ayat[0]["ayah_num"]
+    trimmed["to_ayah"] = selected_ayat[-1]["ayah_num"]
+    trimmed["text"] = full_text
+    trimmed["full_text"] = full_text
+    return trimmed
+
+
+def _select_recitation_timeline(
+    matches: list[dict],
+    recitation_ayat: list[dict],
+    *,
+    max_span: int,
+) -> list[dict]:
+    """
+    Keep one forward-moving set of recitation display spans.
+
+    The lecture matcher intentionally reports every strong overlapping window.
+    For continuous recitation that is too noisy, so this pass keeps the earliest
+    high-confidence span that advances the ayah number and trims overlap from
+    the already displayed ayat.
+    """
+    if not matches or not recitation_ayat:
+        return []
+
+    first_ayah_num = recitation_ayat[0]["ayah_num"]
+    last_ayah_num = recitation_ayat[-1]["ayah_num"]
+    selected: list[dict] = []
+    last_to_ayah = first_ayah_num - 1
+    last_end_time = -1.0
+
+    ordered = sorted(
+        matches,
+        key=lambda m: (
+            m["start_time"],
+            -m["confidence"],
+            m["to_ayah"] - m["from_ayah"],
+        ),
+    )
+
+    for match in ordered:
+        if match["to_ayah"] <= last_to_ayah:
+            continue
+        if selected and match["start_time"] < last_end_time - 0.5:
+            continue
+
+        from_ayah = max(match["from_ayah"], last_to_ayah + 1)
+        to_ayah = min(match["to_ayah"], from_ayah + max_span - 1)
+        if from_ayah > to_ayah:
+            continue
+
+        trimmed = _trim_match_to_ayah_range(
+            match,
+            recitation_ayat,
+            from_ayah,
+            to_ayah,
+        )
+        if trimmed is None:
+            continue
+
+        selected.append(trimmed)
+        last_to_ayah = trimmed["to_ayah"]
+        last_end_time = trimmed["end_time"]
+
+        if last_to_ayah >= last_ayah_num:
+            break
+
+    # ── Clamp boundaries so frames switch exactly at detected transitions ──────
+    # Forward pass: ensure start_time >= previous end_time
+    for i in range(1, len(selected)):
+        prev_end = selected[i - 1]["end_time"]
+        if selected[i]["start_time"] < prev_end:
+            selected[i] = dict(selected[i])
+            selected[i]["start_time"] = round(prev_end, 2)
+
+    # Backward pass: ensure end_time <= next start_time
+    for i in range(len(selected) - 1):
+        next_start = selected[i + 1]["start_time"]
+        if selected[i]["end_time"] > next_start:
+            selected[i] = dict(selected[i])
+            selected[i]["end_time"] = round(next_start, 2)
+
+    return selected
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # CLI entry point
 # ══════════════════════════════════════════════════════════════════════════════
@@ -787,14 +946,18 @@ def main() -> None:
         help=(
             "Optional: surah name to restrict search to "
             "(as it appears in the file, e.g. 'سُورَةُ الفُرقَانِ'). "
-            "Used only in range mode; lecture mode always scans the full Quran."
+            "Used in range/recitation modes; lecture mode always scans the full Quran."
         ),
     )
     parser.add_argument(
         "--mode",
-        choices=["range", "lecture"],
+        choices=["range", "lecture", "recitation"],
         default="range",
-        help="range = detect first/last ayah; lecture = detect Quran mentions in lecture audio.",
+        help=(
+            "range = detect first/last ayah; "
+            "lecture = detect Quran mentions in lecture audio; "
+            "recitation = detect range, then emit timestamped ayah spans inside it."
+        ),
     )
     parser.add_argument(
         "--head-words", type=int, default=HEAD_WORDS,
@@ -987,16 +1150,82 @@ def main() -> None:
         global_search=global_search,
     )
 
-    # ── Step 4: assemble and write result ──────────────────────────────────────
-    def _ayah_entry(ayah: dict, conf: float) -> dict:
-        return {
-            "surah_num":  ayah["surah_num"],
-            "surah_name": ayah["surah_name"],
-            "ayah_num":   ayah["ayah_num"],
-            "text":       ayah["text_raw"],
-            "confidence": conf,
+    if args.mode == "recitation":
+        print("[3/4] Refining recitation matches inside detected range...")
+        recitation_ayat = _ayat_in_detected_range(ayat, first_ayah, last_ayah)
+        raw_mentions = detect_quran_mentions_in_lecture(
+            recitation_ayat,
+            words,
+            max_span=args.max_span,
+            min_score=args.lecture_threshold,
+            min_matched_words=args.min_matched_words,
+            max_merged_ayat=args.max_span,
+        )
+        mentions = _select_recitation_timeline(
+            raw_mentions,
+            recitation_ayat,
+            max_span=args.max_span,
+        )
+
+        result = {
+            "first_ayah": _ayah_entry(first_ayah, first_conf),
+            "last_ayah":  _ayah_entry(last_ayah,  last_conf),
+            "matches": mentions,
+            "warnings": warnings,
+            "meta": {
+                "input_type": transcript_source,
+                "input_path": transcript_input_path,
+                "whisperx_raw_output_path": whisperx_raw_output_path,
+                "whisperx_model_ref": whisperx_model_ref,
+                "whisperx_segments": whisperx_segment_count,
+                "total_ayat_in_file": len(ayat),
+                "recitation_ayat_scanned": len(recitation_ayat),
+                "whisperx_words": len(words),
+                "audio_start_s": words[0]["start"],
+                "audio_end_s": words[-1]["end"],
+                "audio_duration_s": round(duration, 2),
+                "mode": "recitation",
+                "max_span": args.max_span,
+                "lecture_threshold": args.lecture_threshold,
+                "min_matched_words": args.min_matched_words,
+                "head_words_used": head_n,
+                "tail_words_used": tail_n,
+                "search_range_used": s_range,
+                "global_search": global_search,
+                "detected_surah_num": first_ayah["surah_num"],
+                "detected_surah_name": first_ayah["surah_name"],
+            },
         }
 
+        print(f"[4/4] Writing result → {out_path}")
+        with out_path.open("w", encoding="utf-8") as fh:
+            json.dump(result, fh, ensure_ascii=False, indent=2)
+
+        print()
+        print("=" * 64)
+        print(
+            f"Detected range: {first_ayah['surah_name']} "
+            f"#{first_ayah['ayah_num']}–#{last_ayah['ayah_num']} "
+            f"(matches: {len(mentions)})"
+        )
+        if warnings:
+            print("Warnings:")
+            for msg in warnings:
+                print(f"- {msg}")
+        for match in mentions:
+            if match["from_ayah"] == match["to_ayah"]:
+                ayah_range = f"#{match['from_ayah']}"
+            else:
+                ayah_range = f"#{match['from_ayah']}–{match['to_ayah']}"
+            print(
+                f"{match['surah_name']} {ayah_range} "
+                f"({match['start_time']:.2f}s–{match['end_time']:.2f}s, "
+                f"conf {match['confidence']:.2f})"
+            )
+        print(f"\nSaved to: {out_path.resolve()}\n")
+        return
+
+    # ── Step 4: assemble and write result ──────────────────────────────────────
     result = {
         "first_ayah": _ayah_entry(first_ayah, first_conf),
         "last_ayah":  _ayah_entry(last_ayah,  last_conf),
@@ -1050,4 +1279,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

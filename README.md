@@ -11,6 +11,7 @@ The script supports two workflows:
 
 - `range` mode: compare the beginning and end of the transcription against the Quran text and return the most likely verse range
 - `lecture` mode: scan the whole transcription for Qur'an quotations inside lecture / Dars audio
+- `recitation` mode: first detect the recited range, then output timestamped spans from only that surah/range
 
 ## What you need
 
@@ -59,7 +60,8 @@ The script normalizes the transcription text before matching it to the Quran tex
 3. Extracts the transcript words
 4. Either:
    - detects the **first and last ayah** in recitation-oriented `range` mode, or
-   - scans overlapping transcript windows for Qur'an mentions in `lecture` mode
+   - scans overlapping transcript windows for Qur'an mentions in `lecture` mode, or
+   - detects the range and emits 1-5 ayah display spans in `recitation` mode
 5. Writes a structured JSON result with confidence scores and metadata
 
 ## Usage
@@ -91,7 +93,7 @@ You cannot use both at the same time.
 
 ### Optional arguments
 
-- `--mode` — choose `range` or `lecture`
+- `--mode` — choose `range`, `lecture`, or `recitation`
 - `--surah` — restricts detection to one surah name exactly as it appears in the Quran file
 - `--head-words` — number of words from the beginning of the transcription to scan for the first ayah
 - `--tail-words` — number of words from the end of the transcription to scan for the last ayah
@@ -126,6 +128,22 @@ python detect_range.py \
 
 `lecture` mode always scans the **full Quran**, even if `--surah` is provided.
 The lecture matcher lives in the separate module `lecture_mode.py` to keep the CLI readable.
+
+Example for full recitation mode:
+
+```bash
+python detect_range.py \
+  --quran "UthmanicQaloon1-Ver05.txt" \
+  --whisperx "result_whisperx_raw.json" \
+  --mode recitation \
+  --max-span 5 \
+  --lecture-threshold 0.78 \
+  --min-matched-words 4 \
+  --output "recitation_result.json"
+```
+
+`recitation` mode uses the same first/last ayah range detection as `range` mode.
+It then restricts matching to the detected surah/range, so repeated wording from other surahs does not appear in the result. Each displayed match is capped by `--max-span`, so the default output shows at most 5 ayat at a time.
 
 ## Output format
 
@@ -180,6 +198,8 @@ Lecture mode writes a `matches` array. Each match includes both:
 - `detected_text` — the transcript fragment detected in the lecture audio
 - `text` / `full_text` — the full matched Quran ayah/span text from the Quran source file
 
+The video renderer described below uses `full_text` for on-screen display.
+
 Example structure:
 
 ```json
@@ -202,6 +222,90 @@ Example structure:
     "mode": "lecture"
   }
 }
+```
+
+### `recitation` mode
+
+Recitation mode writes the same `first_ayah`, `last_ayah`, `warnings`, and `meta`
+fields as `range` mode, plus a `matches` array like `lecture` mode. The matches
+are limited to the detected recitation range and capped to `--max-span` ayat.
+
+## Render an MP4 video from lecture matches
+
+Use `render_ayat_video.py` to turn a lecture JSON result into:
+
+- an `.mp4` video with a black background
+- the original audio track
+- burned-in ASS subtitles showing the matched Qur'an ayat
+- a saved `.ass` subtitle file next to the output video
+
+### ASS renderer (default)
+
+Example:
+
+```bash
+python render_ayat_video.py \
+  --audio "الفرقان7-11-final.wav" \
+  --matches "test1-7-11.json" \
+  --output "test1-7-11.mp4" \
+  --font-name "DejaVu Sans" \
+  --renderer ass \
+  --width 1920 \
+  --height 1080
+```
+
+### Frame renderer
+
+The frame renderer creates a styled silent video in Python using Pillow + OpenCV,
+then muxes the original audio back in with FFmpeg.
+
+```bash
+python render_ayat_video.py \
+  --audio "الفرقان7-11-final.wav" \
+  --matches "test1-7-11.json" \
+  --output "test1-7-11-frame.mp4" \
+  --renderer frame \
+  --font-file "fonts/qaloon.10.ttf" \
+  --width 1920 \
+  --height 1080 \
+  --fps 25
+```
+
+The renderer:
+
+- reads the `matches` list from the lecture JSON
+- uses each match's `start_time` and `end_time`
+- displays the surah label plus the match `full_text`
+- writes the ASS file as UTF-8 with BOM for better Arabic compatibility
+- validates that the requested font exists before rendering
+- prints a clear message if `matches` is empty, then still renders a black video with audio and no subtitle events
+
+Renderer-specific behavior:
+
+- `--renderer ass`
+  - requires `--font-name`
+  - writes an `.ass` file next to the output video
+  - uses FFmpeg `ass=` subtitles on a black background
+- `--renderer frame`
+  - requires `--font-file`
+  - uses Pillow for text drawing and OpenCV for frame writing
+  - supports `--debug-detected-text` to show the transcript fragment in a small footer
+  - creates a temporary silent MP4, then muxes the original audio with FFmpeg
+  - deletes the temp file unless `--keep-temp` is passed
+
+### Video rendering notes
+
+- `--font-name` must be an installed system font family name that FFmpeg/libass can use.
+- `--font-file` must point to a readable TTF/OTF/TTC font file when using `--renderer frame`.
+- Arabic shaping depends on your local FFmpeg build. For best results, FFmpeg should include `libass`, `fribidi`, `harfbuzz`, and `fontconfig` support.
+- The frame renderer requires Pillow, numpy, opencv-python, and Pillow built with `libraqm` support. If `libraqm` is unavailable, frame rendering stops with an explicit error instead of producing incorrect Arabic shaping.
+- If a match has invalid or missing timestamps, or `end_time <= start_time`, it is skipped with a warning.
+- If `full_text` is missing, the renderer falls back to `full_ayah_text`, then `text`.
+
+### Install Python dependencies for the frame renderer
+
+```bash
+pip install -r requirements.txt
 ```
 
 ## When to use `--surah`
@@ -267,5 +371,3 @@ Try:
 ---
 
 If you want, you can also add a sample WhisperX JSON file and a sample output file in this repository for easier testing.
-
-
