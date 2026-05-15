@@ -22,9 +22,12 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# Generated audio/subtitle artifacts
+# Generated audio/video/subtitle artifacts
 *.mp3
+*.mp4
+*.wav
 *.srt
+.*ass
 
 # Generated JSON outputs
 *.json
