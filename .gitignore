@@ -27,7 +27,7 @@ Thumbs.db
 *.mp4
 *.wav
 *.srt
-.*ass
+*.ass
 
 # Generated JSON outputs
 *.json
