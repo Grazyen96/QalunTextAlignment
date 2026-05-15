@@ -3,6 +3,19 @@ from __future__ import annotations
 from collections import defaultdict
 from difflib import SequenceMatcher
 
+# Arabic-Indic digit map (U+0660–U+0669)
+_TO_ARABIC_INDIC = str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩")
+
+
+def _int_to_arabic_indic(n: int) -> str:
+    """Convert an integer to its Arabic-Indic digit string (e.g. 25 → '٢٥')."""
+    return str(n).translate(_TO_ARABIC_INDIC)
+
+
+def _ayah_text_with_marker(text_raw: str, ayah_num: int) -> str:
+    """Append the ayah number wrapped in ornamental parentheses ﴿٧﴾."""
+    return f"{text_raw} \ufd3e{_int_to_arabic_indic(ayah_num)}\ufd3f"
+
 
 def build_ayah_spans(
     ayat: list[dict],
@@ -194,6 +207,7 @@ def merge_quran_matches(
     matches: list[dict],
     *,
     max_time_gap: float = 4.0,
+    max_merged_ayat: int | None = None,
 ) -> list[dict]:
     """Merge duplicate and overlapping ayah detections."""
     if not matches:
@@ -226,6 +240,15 @@ def merge_quran_matches(
         nearby_time = (match["start_time"] - last["end_time"]) <= max_time_gap
 
         if same_surah and overlapping_ayat and nearby_time:
+            merged_from = min(last["from_index"], match["from_index"])
+            merged_to = max(last["to_index"], match["to_index"])
+            if (
+                max_merged_ayat is not None
+                and merged_to - merged_from + 1 > max_merged_ayat
+            ):
+                merged.append(dict(match))
+                continue
+
             if match["from_index"] < last["from_index"]:
                 last["from_index"] = match["from_index"]
                 last["from_ayah"] = match["from_ayah"]
@@ -256,15 +279,23 @@ def hydrate_merged_matches(
 ) -> list[dict]:
     """Rebuild final Quran text and transcript fragment after merging."""
     final: list[dict] = []
+    ayat_by_index = {a["_index"]: a for a in ayat}
 
     for match in merged:
-        selected_ayat = ayat[match["from_index"]:match["to_index"] + 1]
+        selected_ayat = [
+            ayat_by_index[i]
+            for i in range(match["from_index"], match["to_index"] + 1)
+            if i in ayat_by_index
+        ]
         if not selected_ayat:
             continue
 
         detected_words = words[match["start_word"]:match["end_word"] + 1]
         detected_text = " ".join(w["word_raw"] for w in detected_words).strip()
-        full_text = "\n".join(a["text_raw"] for a in selected_ayat)
+        full_text = "\n".join(
+            _ayah_text_with_marker(a["text_raw"], a["ayah_num"])
+            for a in selected_ayat
+        )
 
         final.append({
             "surah_num": match["surah_num"],
@@ -293,6 +324,7 @@ def detect_quran_mentions_in_lecture(
     min_score: float = 0.78,
     min_matched_words: int = 4,
     candidate_limit: int = 25,
+    max_merged_ayat: int | None = None,
 ) -> list[dict]:
     """Detect Qur'an ayat mentioned inside lecture-style audio."""
     if not ayat or not words:
@@ -348,6 +380,5 @@ def detect_quran_mentions_in_lecture(
                 "end_word": window["end_word"],
             })
 
-    merged = merge_quran_matches(matches)
+    merged = merge_quran_matches(matches, max_merged_ayat=max_merged_ayat)
     return hydrate_merged_matches(merged, ayat, words)
-
