@@ -161,7 +161,8 @@ def wrap_text_to_width(draw: Any, text: str, font: Any, max_width: int) -> list[
 
         for word in words[1:]:
             candidate = f"{current} {word}"
-            if draw.textlength(candidate, font=font, direction="rtl") <= max_width:
+            w, _ = measure_text_bbox(draw, candidate, font)
+            if w <= max_width:
                 current = candidate
                 continue
 
@@ -214,6 +215,35 @@ def fit_font_size(
         best_lines = lines
 
     return best_font, best_lines
+
+
+def paginate_lines(
+    lines: list[str],
+    draw: Any,
+    font: Any,
+    line_spacing: int,
+    max_height: int,
+) -> list[list[str]]:
+    """Split a list of wrapped lines into pages that each fit within max_height."""
+    if not lines:
+        return [[]]
+
+    pages: list[list[str]] = []
+    current: list[str] = []
+
+    for line in lines:
+        candidate = current + [line]
+        _, h = _multiline_metrics(draw, candidate, font, line_spacing)
+        if h <= max_height or not current:
+            current = candidate
+        else:
+            pages.append(current)
+            current = [line]
+
+    if current:
+        pages.append(current)
+
+    return pages or [[]]
 
 
 def draw_rounded_rectangle(
@@ -334,6 +364,19 @@ def render_frame_pillow(
             min_size=max(16, int(height * BODY_FONT_MIN_RATIO)),
         )
 
+        body_spacing = max(4, int(body_font.size * LINE_SPACING_RATIO))
+        body_max_height = max(40, body_box[3] - body_box[1])
+        body_pages = paginate_lines(body_lines, draw, body_font, body_spacing, body_max_height)
+        if len(body_pages) > 1:
+            _start = float(match.get("_start_time", t))
+            _end = float(match.get("_end_time", _start + 1.0))
+            _dur = max(_end - _start, 0.001)
+            _progress = max(0.0, min(1.0, (t - _start) / _dur))
+            _page_idx = min(int(_progress * len(body_pages)), len(body_pages) - 1)
+            display_lines = body_pages[_page_idx]
+        else:
+            display_lines = body_lines if body_pages else body_lines
+
         header_box = (
             card_x0 + pad_x,
             card_y0 + pad_y,
@@ -346,7 +389,7 @@ def render_frame_pillow(
 
         body_spacing = max(4, int(body_font.size * LINE_SPACING_RATIO))
         draw_centered_multiline_text(
-            draw, body_lines, body_font, body_box, COLOUR_BODY_TEXT, body_spacing
+            draw, display_lines, body_font, body_box, COLOUR_BODY_TEXT, body_spacing
         )
 
         if debug_detected_text and debug_lines and debug_font is not None:
@@ -378,6 +421,47 @@ def render_frame_pillow(
     return frame[:, :, ::-1].copy()
 
 
+def _count_body_pages(
+    match: dict[str, Any],
+    width: int,
+    height: int,
+    font_file: Path,
+    debug_detected_text: bool,
+) -> int:
+    """Count how many body pages a match would fill, without rendering the full frame."""
+    _, _, image_module, image_draw, _, _ = _frame_dependencies()
+    probe = image_module.new("RGBA", (width, height))
+    draw = image_draw.Draw(probe)
+
+    card_width = int(width * CARD_WIDTH_RATIO)
+    card_height = int(height * (CARD_HEIGHT_RATIO_DEBUG if debug_detected_text else CARD_HEIGHT_RATIO))
+    card_y0 = (height - card_height) // 2
+    card_y1 = card_y0 + card_height
+    pad_x = int(card_width * CARD_PADDING_X_RATIO)
+    pad_y = int(card_height * CARD_PADDING_Y_RATIO)
+    gap = max(12, int(height * SECTION_GAP_RATIO))
+
+    header_font = load_font(font_file, max(18, int(height * HEADER_FONT_RATIO)))
+    header_height = measure_text_bbox(draw, ayah_label(match), header_font)[1]
+
+    body_top = card_y0 + pad_y + header_height + gap
+    body_max_height = max(40, card_y1 - pad_y - body_top)
+    body_max_width = card_width - 2 * pad_x
+
+    body_font, body_lines = fit_font_size(
+        draw,
+        str(match.get("_display_text") or ""),
+        font_file,
+        max_width=body_max_width,
+        max_height=body_max_height,
+        start_size=max(24, int(height * BODY_FONT_START_RATIO)),
+        min_size=max(16, int(height * BODY_FONT_MIN_RATIO)),
+    )
+    body_spacing = max(4, int(body_font.size * LINE_SPACING_RATIO))
+    pages = paginate_lines(body_lines, draw, body_font, body_spacing, body_max_height)
+    return max(1, len(pages))
+
+
 def write_silent_frame_video(
     matches: list[dict[str, Any]],
     duration: float,
@@ -388,7 +472,11 @@ def write_silent_frame_video(
     font_file: Path,
     debug_detected_text: bool = False,
 ) -> None:
-    """Write a silent temporary MP4 using OpenCV."""
+    """Write a silent temporary MP4 using OpenCV.
+
+    Frames with identical content are rendered once and written multiple times,
+    reducing per-frame PIL overhead for long videos with static ayah cards.
+    """
     _, cv2, _, _, _, _ = _frame_dependencies()
     total_frames = max(1, int(math.ceil(duration * fps)))
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -398,33 +486,69 @@ def write_silent_frame_video(
             f"OpenCV failed to open the temporary video writer for '{temp_video_path}'."
         )
 
-    report_every = max(1, fps * 10)
+    sorted_matches = sorted(matches, key=lambda m: float(m.get("_start_time", math.inf)))
+
+    # Pre-compute page counts for every unique active match.
+    page_counts: dict[int, int] = {}
+
+    def _get_n_pages(match: dict[str, Any] | None) -> int:
+        if match is None:
+            return 1
+        mid = id(match)
+        if mid not in page_counts:
+            page_counts[mid] = _count_body_pages(match, width, height, font_file, debug_detected_text)
+        return page_counts[mid]
+
+    # First pass: scan all frame timestamps and record render-event boundaries.
+    # An event boundary occurs when either the active match changes or the
+    # displayed page within a match changes.
+    tracker = ActiveMatchTracker(sorted_matches)
+    events: list[tuple[int, dict[str, Any] | None, int]] = []  # (frame_index, match, page_idx)
+    last_key: tuple[int, int] = (-1, -1)
+
+    for fi in range(total_frames):
+        t = fi / fps
+        match = tracker.at(t)
+        n_pages = _get_n_pages(match)
+        if match is not None and n_pages > 1:
+            _start = float(match.get("_start_time", t))
+            _end = float(match.get("_end_time", t + 1.0))
+            _dur = max(_end - _start, 0.001)
+            _progress = max(0.0, min(1.0, (t - _start) / _dur))
+            page_idx = min(int(_progress * n_pages), n_pages - 1)
+        else:
+            page_idx = 0
+        key = (id(match), page_idx)
+        if key != last_key:
+            events.append((fi, match, page_idx))
+            last_key = key
+
+    # Second pass: render once per event and write all frames for that segment.
     t0 = time.monotonic()
-    active_tracker = ActiveMatchTracker(
-        sorted(matches, key=lambda match: float(match.get("_start_time", math.inf)))
-    )
+    n_events = len(events)
+    report_every = max(1, n_events // 10)
 
     try:
-        for frame_index in range(total_frames):
-            t = frame_index / fps
-            match = active_tracker.at(t)
+        for ev_idx, (ev_start, ev_match, _ev_page) in enumerate(events):
+            ev_end = events[ev_idx + 1][0] if ev_idx + 1 < n_events else total_frames
             frame = render_frame_pillow(
-                t,
-                match,
+                ev_start / fps,
+                ev_match,
                 width,
                 height,
                 font_file,
                 debug_detected_text=debug_detected_text,
             )
-            writer.write(frame)
+            for _ in range(ev_end - ev_start):
+                writer.write(frame)
 
-            if frame_index % report_every == 0 or frame_index == total_frames - 1:
+            if ev_idx % report_every == 0 or ev_idx == n_events - 1:
                 elapsed = time.monotonic() - t0
-                pct = (frame_index + 1) / total_frames
+                pct = (ev_idx + 1) / n_events
                 eta = (elapsed / pct - elapsed) if pct > 0 else 0
                 print(
-                    f"\r  Frames {frame_index + 1:>6}/{total_frames}"
-                    f"  ({pct * 100:.1f}%)"
+                    f"\r  Segments {ev_idx + 1:>5}/{n_events}"
+                    f"  ({ev_end:>6}/{total_frames} frames)"
                     f"  elapsed {elapsed:.0f}s"
                     f"  ETA {eta:.0f}s      ",
                     end="",

@@ -1,3 +1,5 @@
+import pytest
+
 from qurantext.core.lecture_matching import detect_quran_mentions_in_lecture
 from qurantext.core.range_matching import build_warnings, detect_first_ayah, detect_last_ayah
 
@@ -68,3 +70,22 @@ def test_detect_quran_mentions_in_lecture_returns_merged_match() -> None:
     assert matches
     assert matches[0]["from_ayah"] == 1
     assert matches[0]["to_ayah"] == 2
+
+
+def test_detect_first_ayah_raises_on_empty_words() -> None:
+    with pytest.raises(ValueError, match="Head word window is empty"):
+        detect_first_ayah(_sample_ayat(), [], head_n=80, search_range=2)
+
+
+def test_detect_quran_mentions_short_phrase_filtered_at_high_threshold() -> None:
+    # A 1-word match should be rejected when short_phrase_threshold is 1.0.
+    matches = detect_quran_mentions_in_lecture(
+        _sample_ayat(),
+        _sample_words()[:2],
+        max_span=1,
+        min_score=0.4,
+        min_matched_words=1,
+        short_phrase_threshold=1.0,
+        short_phrase_word_limit=10,  # everything is "short"
+    )
+    assert matches == []

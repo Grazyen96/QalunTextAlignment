@@ -58,5 +58,20 @@ def test_cli_parsers_use_centralized_settings_defaults(monkeypatch) -> None:
     assert detection_args.max_span == 8
     assert cli_args.fps == 30
 
+
+def test_default_video_settings_are_frame_renderer_720p(monkeypatch) -> None:
+    get_settings.cache_clear()
+    # Clear any overrides so the compiled-in defaults apply.
+    for key in ("QURANTEXT_VIDEO_RENDERER", "QURANTEXT_VIDEO_WIDTH", "QURANTEXT_VIDEO_HEIGHT"):
+        monkeypatch.delenv(key, raising=False)
+
+    settings = get_settings()
+
+    assert settings.video.renderer == "frame"
+    assert settings.video.width == 1280
+    assert settings.video.height == 720
+
+    get_settings.cache_clear()
+
     get_settings.cache_clear()
 

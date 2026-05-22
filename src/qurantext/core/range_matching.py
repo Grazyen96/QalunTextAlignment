@@ -58,7 +58,7 @@ def _find_quran_start(words: list[dict]) -> int:
             index += 1
             skipped += 1
 
-    return min(index, 15)
+    return min(index, 30)
 
 
 def _find_match_position(
@@ -77,7 +77,7 @@ def _find_match_position(
 
     best_score = 0.0
     earliest_pos = haystack_len
-    step = max(1, needle_len // 5)
+    step = 1 if needle_len < 30 else max(1, needle_len // 10)
 
     for start in range(0, haystack_len - needle_len + 1, step):
         score = SequenceMatcher(
@@ -198,6 +198,12 @@ def detect_first_ayah(
     """Detect the first ayah in the recording."""
     skip = _find_quran_start(words) if global_search else 0
     head_words = words[skip : skip + head_n] if global_search else words[:head_n]
+    if not head_words:
+        raise ValueError(
+            "Head word window is empty — the transcript may be too short or the "
+            "ta\u02bcawwudh/basmala skip consumed all available words. "
+            "Try using a longer recording or verify the audio contains Quran recitation."
+        )
     head_str = " ".join(word["word_norm"] for word in head_words)
     pos_thresh = position_threshold_global if global_search else position_threshold
     candidates = _build_candidate_pool(

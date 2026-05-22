@@ -13,7 +13,10 @@ ARABIC_INDIC_DIGIT_RE = re.compile(r"^[٠١٢٣٤٥٦٧٨٩]+$")
 
 def _normalize_with_pattern(text: str, pattern: re.Pattern[str], *, map_bari_yeh: bool) -> str:
     text = pattern.sub("", text)
+    text = text.replace("\u0640", "")  # Remove Tatweel/Kashida (U+0640) — not covered by tashkeel patterns
     text = re.sub(r"[إأآٱ]", "ا", text)
+    # Intentional: ة (teh marbuta) and ه (heh) are kept distinct — normalising them
+    # causes false merges between grammatically different word forms.
     text = text.replace("ى", "ي").replace("ؤ", "و").replace("ئ", "ي")
     if map_bari_yeh:
         text = text.replace("ے", "ي")
@@ -53,7 +56,9 @@ def partial_ratio(needle: str, haystack: str) -> float:
         return SequenceMatcher(None, needle, haystack, autojunk=False).ratio()
 
     best = 0.0
-    step = max(1, n // 5)
+    # Use step=1 for short needles (< 30 chars) to avoid skipping the best window;
+    # use n//10 for longer needles to keep runtime reasonable.
+    step = 1 if n < 30 else max(1, n // 10)
     for start in range(0, h - n + 1, step):
         ratio = SequenceMatcher(
             None,

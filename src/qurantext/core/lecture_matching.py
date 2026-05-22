@@ -8,6 +8,8 @@ from qurantext.config.settings import (
     DEFAULT_LECTURE_MAX_WINDOW_WORDS,
     DEFAULT_LECTURE_MIN_MATCHED_WORDS,
     DEFAULT_LECTURE_MIN_WINDOW_WORDS,
+    DEFAULT_LECTURE_SHORT_PHRASE_THRESHOLD,
+    DEFAULT_LECTURE_SHORT_PHRASE_WORD_LIMIT,
     DEFAULT_LECTURE_THRESHOLD,
     DEFAULT_LECTURE_WINDOW_STEP,
 )
@@ -163,6 +165,7 @@ def merge_quran_matches(
     *,
     max_time_gap: float = 4.0,
     max_merged_ayat: int | None = None,
+    min_score: float = DEFAULT_LECTURE_THRESHOLD,
 ) -> list[dict]:
     """Merge duplicate and overlapping ayah detections."""
     if not matches:
@@ -209,7 +212,10 @@ def merge_quran_matches(
                 last["to_ayah"] = match["to_ayah"]
 
             last["start_time"] = min(last["start_time"], match["start_time"])
-            last["end_time"] = max(last["end_time"], match["end_time"])
+            # Only extend end_time for merging matches that meet the confidence bar;
+            # low-confidence detections should not silently stretch the displayed span.
+            if match["confidence"] >= min_score:
+                last["end_time"] = max(last["end_time"], match["end_time"])
             last["start_word"] = min(last["start_word"], match["start_word"])
             last["end_word"] = max(last["end_word"], match["end_word"])
             last["confidence"] = max(last["confidence"], match["confidence"])
@@ -277,6 +283,8 @@ def detect_quran_mentions_in_lecture(
     min_matched_words: int = DEFAULT_LECTURE_MIN_MATCHED_WORDS,
     candidate_limit: int = DEFAULT_LECTURE_CANDIDATE_LIMIT,
     max_merged_ayat: int | None = None,
+    short_phrase_threshold: float = DEFAULT_LECTURE_SHORT_PHRASE_THRESHOLD,
+    short_phrase_word_limit: int = DEFAULT_LECTURE_SHORT_PHRASE_WORD_LIMIT,
 ) -> list[dict]:
     """Detect Qur'an ayat mentioned inside lecture-style audio."""
     if not ayat or not words:
@@ -312,6 +320,11 @@ def detect_quran_mentions_in_lecture(
             if score < min_score:
                 continue
 
+            # Short-phrase guard: require higher confidence for spans with few words
+            # to avoid false positives from common short phrases.
+            if span["num_words"] < short_phrase_word_limit and score < short_phrase_threshold:
+                continue
+
             span_words = span["_word_set"]
             matched_words = sum(1 for word in window_words if word in span_words)
             if matched_words < min_matched_words:
@@ -334,5 +347,5 @@ def detect_quran_mentions_in_lecture(
                 }
             )
 
-    merged = merge_quran_matches(matches, max_merged_ayat=max_merged_ayat)
+    merged = merge_quran_matches(matches, max_merged_ayat=max_merged_ayat, min_score=min_score)
     return hydrate_merged_matches(merged, ayat, words)

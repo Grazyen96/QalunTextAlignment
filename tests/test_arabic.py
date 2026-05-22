@@ -38,3 +38,23 @@ def test_arabic_indic_helpers() -> None:
 
 def test_seconds_to_srt_time() -> None:
     assert seconds_to_srt_time(3723.456) == "01:02:03,456"
+
+
+def test_normalization_removes_tatweel() -> None:
+    # Tatweel (U+0640) is a presentational kashida, not a letter — must be stripped.
+    text_with_tatweel = "كتـاب"  # كتاب with a tatweel between ت and ا
+    assert normalize_alignment_ar(text_with_tatweel) == normalize_alignment_ar("كتاب")
+    assert normalize_detection_ar(text_with_tatweel) == normalize_detection_ar("كتاب")
+
+
+def test_teh_marbuta_and_heh_kept_distinct() -> None:
+    # ة (teh marbuta) and ه (heh) must NOT be normalised together.
+    assert normalize_alignment_ar("رحمة") != normalize_alignment_ar("رحمه")
+    assert normalize_detection_ar("رحمة") != normalize_detection_ar("رحمه")
+
+
+def test_partial_ratio_short_needle_uses_fine_step() -> None:
+    # For needles shorter than 30 chars step=1, so the best window is never skipped.
+    needle = "الحمد لله"  # 9 chars — well under the 30-char threshold
+    haystack = "xxx " + needle + " xxx"
+    assert partial_ratio(needle, haystack) > 0.95

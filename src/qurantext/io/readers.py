@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable, Iterator
 from os import PathLike
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from qurantext.core.arabic import (
     normalize_alignment_ar,
@@ -51,6 +54,7 @@ def extract_alignment_words(
     """Return audioAlignment-style word entries from WhisperX output."""
     words: list[dict] = []
 
+    skipped = 0
     for segment in _iter_whisperx_segments(output):
         segment_words = list(_iter_segment_words(segment))
         if not segment_words:
@@ -69,6 +73,13 @@ def extract_alignment_words(
                         "end": end,
                     }
                 )
+            else:
+                skipped += 1
+    if skipped:
+        logger.warning(
+            "extract_alignment_words: skipped %d word(s) with missing timestamps or empty norm",
+            skipped,
+        )
     return words
 
 
@@ -79,8 +90,10 @@ def extract_matching_words(
 ) -> list[dict]:
     """Return detect_range-style word entries from WhisperX output."""
     words: list[dict] = []
+    skipped = 0
 
     def push(raw: str, start: Any, end: Any, score: Any = None) -> None:
+        nonlocal skipped
         norm = normalizer(raw)
         if norm and start is not None and end is not None:
             words.append(
@@ -92,6 +105,8 @@ def extract_matching_words(
                     "score": score,
                 }
             )
+        else:
+            skipped += 1
 
     for segment in _iter_whisperx_segments(data):
         segment_words = list(_iter_segment_words(segment))
@@ -111,6 +126,11 @@ def extract_matching_words(
                 segment.get("score"),
             )
 
+    if skipped:
+        logger.warning(
+            "extract_matching_words: skipped %d word(s) with missing timestamps or empty norm",
+            skipped,
+        )
     return words
 
 
