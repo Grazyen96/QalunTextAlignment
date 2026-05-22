@@ -1,0 +1,4 @@
+WARNING: Ignoring --font-file because --renderer ass uses installed --font-name fonts.
+WARNING: Skipping match #2: end_time (1.0) must be greater than start_time (1.5).
+ASS subtitle saved to: /home/khalil/PycharmProjects/QuranText/tmp_render_tests/ass_warn.ass
+MP4 video saved to: /home/khalil/PycharmProjects/QuranText/tmp_render_tests/ass_warn.mp4
