@@ -46,6 +46,7 @@ def test_io_helpers_extract_words_segments_and_write_outputs(tmp_path: Path) -> 
     assert "بسم الله" in text_srt.read_text(encoding="utf-8")
     assert json.loads(json_path.read_text(encoding="utf-8"))["segments"][0]["text"] == "بِسْمِ اللَّهِ"
 
+
 def test_extract_words_warns_on_missing_timestamps(caplog) -> None:
     import logging
 
@@ -67,3 +68,22 @@ def test_extract_words_warns_on_missing_timestamps(caplog) -> None:
     assert len(alignment) == 1
     assert len(matching) == 1
     assert any("skipped 1 word" in r.message for r in caplog.records)
+
+
+def test_extract_matching_words_tolerates_malformed_entries() -> None:
+    # A non-string word or a non-numeric timestamp must skip that entry, not
+    # crash the whole transcript load.
+    data = {
+        "segments": [
+            {
+                "words": [
+                    {"word": "بِسْمِ", "start": 0.0, "end": 0.4},
+                    {"word": 123, "start": 0.4, "end": 0.5},  # non-string word
+                    {"word": "اللَّهِ", "start": "oops", "end": 1.0},  # bad timestamp
+                ]
+            }
+        ]
+    }
+
+    matching = extract_matching_words(data)
+    assert [w["word_norm"] for w in matching] == ["بسم"]

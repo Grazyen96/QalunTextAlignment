@@ -74,33 +74,50 @@ def iter_word_windows(
     min_words: int = DEFAULT_LECTURE_MIN_WINDOW_WORDS,
     max_words: int = DEFAULT_LECTURE_MAX_WINDOW_WORDS,
     step: int = DEFAULT_LECTURE_WINDOW_STEP,
+    short_max_words: int = 7,
 ):
-    """Yield overlapping transcript windows from the WhisperX word list."""
+    """Yield overlapping transcript windows from the WhisperX word list.
+
+    Windows up to *short_max_words* in size always use step=1 so that short
+    Quranic phrases starting at any word position are found.  Larger windows
+    use the configured *step* for speed.  The two size ranges are
+    non-overlapping, so no window is yielded twice.
+    """
     if not words:
         return
 
-    for start in range(0, len(words), step):
-        for size in range(min_words, max_words + 1):
-            end = start + size
-            if end > len(words):
-                break
+    # Build (start_step, size_min, size_max) for each non-overlapping pass.
+    passes: list[tuple[int, int, int]] = []
+    short_cap = min(max_words, short_max_words)
+    long_min = max(min_words, short_max_words + 1)
+    if min_words <= short_cap:
+        passes.append((1, min_words, short_cap))
+    if long_min <= max_words:
+        passes.append((step, long_min, max_words))
 
-            window_words = words[start:end]
-            text_norm = " ".join(word["word_norm"] for word in window_words).strip()
-            if not text_norm:
-                continue
+    for pass_step, size_min, size_max in passes:
+        for start in range(0, len(words), pass_step):
+            for size in range(size_min, size_max + 1):
+                end = start + size
+                if end > len(words):
+                    break
 
-            text_raw = " ".join(word["word_raw"] for word in window_words).strip()
+                window_words = words[start:end]
+                text_norm = " ".join(word["word_norm"] for word in window_words).strip()
+                if not text_norm:
+                    continue
 
-            yield {
-                "start_word": start,
-                "end_word": end - 1,
-                "start_time": window_words[0]["start"],
-                "end_time": window_words[-1]["end"],
-                "text_norm": text_norm,
-                "text_raw": text_raw,
-                "word_count": size,
-            }
+                text_raw = " ".join(word["word_raw"] for word in window_words).strip()
+
+                yield {
+                    "start_word": start,
+                    "end_word": end - 1,
+                    "start_time": window_words[0]["start"],
+                    "end_time": window_words[-1]["end"],
+                    "text_norm": text_norm,
+                    "text_raw": text_raw,
+                    "word_count": size,
+                }
 
 
 def score_span_for_lecture(span_norm: str, window_norm: str) -> float:
@@ -207,17 +224,20 @@ def merge_quran_matches(
                 last["from_index"] = match["from_index"]
                 last["from_ayah"] = match["from_ayah"]
 
-            if match["to_index"] > last["to_index"]:
-                last["to_index"] = match["to_index"]
-                last["to_ayah"] = match["to_ayah"]
+            # Only let confident detections extend the span FORWARD (more ayat, a
+            # later end). A low-confidence overlap still merges for de-duplication
+            # but must not stretch the displayed range — guard to_index/to_ayah,
+            # end_word and end_time together, since hydrate_merged_matches re-derives
+            # the final end_time from end_word (so guarding end_time alone is moot).
+            if match["confidence"] >= min_score:
+                if match["to_index"] > last["to_index"]:
+                    last["to_index"] = match["to_index"]
+                    last["to_ayah"] = match["to_ayah"]
+                last["end_time"] = max(last["end_time"], match["end_time"])
+                last["end_word"] = max(last["end_word"], match["end_word"])
 
             last["start_time"] = min(last["start_time"], match["start_time"])
-            # Only extend end_time for merging matches that meet the confidence bar;
-            # low-confidence detections should not silently stretch the displayed span.
-            if match["confidence"] >= min_score:
-                last["end_time"] = max(last["end_time"], match["end_time"])
             last["start_word"] = min(last["start_word"], match["start_word"])
-            last["end_word"] = max(last["end_word"], match["end_word"])
             last["confidence"] = max(last["confidence"], match["confidence"])
 
             if len(match["detected_text"]) > len(last["detected_text"]):
@@ -253,6 +273,15 @@ def hydrate_merged_matches(
             ayah_text_with_marker(ayah["text_raw"], ayah["ayah_num"]) for ayah in selected_ayat
         )
 
+        # Anchor timing to actual word-level timestamps instead of the window
+        # boundaries, which may span multiple ayat inside one WhisperX segment.
+        if detected_words:
+            start_time = round(detected_words[0]["start"], 2)
+            end_time = round(detected_words[-1]["end"], 2)
+        else:
+            start_time = round(match["start_time"], 2)
+            end_time = round(match["end_time"], 2)
+
         final.append(
             {
                 "surah_num": match["surah_num"],
@@ -263,8 +292,8 @@ def hydrate_merged_matches(
                 "text": full_text,
                 "full_text": full_text,
                 "confidence": round(match["confidence"], 4),
-                "start_time": round(match["start_time"], 2),
-                "end_time": round(match["end_time"], 2),
+                "start_time": start_time,
+                "end_time": end_time,
             }
         )
 

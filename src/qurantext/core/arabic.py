@@ -13,7 +13,9 @@ ARABIC_INDIC_DIGIT_RE = re.compile(r"^[٠١٢٣٤٥٦٧٨٩]+$")
 
 def _normalize_with_pattern(text: str, pattern: re.Pattern[str], *, map_bari_yeh: bool) -> str:
     text = pattern.sub("", text)
-    text = text.replace("\u0640", "")  # Remove Tatweel/Kashida (U+0640) — not covered by tashkeel patterns
+    text = text.replace(
+        "\u0640", ""
+    )  # Remove Tatweel/Kashida (U+0640) — not covered by tashkeel patterns
     text = re.sub(r"[إأآٱ]", "ا", text)
     # Intentional: ة (teh marbuta) and ه (heh) are kept distinct — normalising them
     # causes false merges between grammatically different word forms.
@@ -91,5 +93,5 @@ def int_to_arabic_indic(value: int) -> str:
 
 
 def ayah_text_with_marker(text_raw: str, ayah_num: int) -> str:
-    """Append the ayah number wrapped in ornamental parentheses ﴿٧﴾."""
-    return f"{text_raw} \ufd3e{int_to_arabic_indic(ayah_num)}\ufd3f"
+    """Append the ayah number as a bare Arabic-Indic digit (e.g. ``… ٧``)."""
+    return f"{text_raw} {int_to_arabic_indic(ayah_num)}"

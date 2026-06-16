@@ -9,16 +9,18 @@ description = "Quran alignment, matching, transcription, and rendering workflows
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "numpy",
-  "opencv-python",
-  "Pillow",
-  "replicate",
+  "numpy>=1.24,<3",
+  "opencv-python>=4.8,<5",
+  # The frame renderer requires a Pillow build compiled with libraqm for
+  # correct Arabic shaping/RTL (checked at runtime via features.check("raqm")).
+  "Pillow>=10.0,<13",
+  "replicate>=1.0,<2",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "pytest",
-  "ruff",
+  "pytest>=8,<10",
+  "ruff>=0.6,<1",
 ]
 
 [project.scripts]
@@ -41,6 +43,16 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["B", "E", "F", "I", "UP"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Legacy root/`scripts/` compatibility shims intentionally adjust sys.path
+# before importing the package, which trips E402 (import not at top of file).
+"detect_range.py" = ["E402"]
+"render_ayat_video.py" = ["E402"]
+"lecture_mode.py" = ["E402"]
+"whisperx_service.py" = ["E402"]
+"env_utils.py" = ["E402"]
+"scripts/*.py" = ["E402"]
 
 [tool.ruff.format]
 quote-style = "double"

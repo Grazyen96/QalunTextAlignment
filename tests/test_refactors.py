@@ -1,8 +1,75 @@
 from pathlib import Path
 
-from qurantext.core.alignment import align_segments, align_words
+from qurantext.core.alignment import (
+    align_canonical_word_timings,
+    align_segments,
+    align_words,
+)
 from qurantext.core.quran_parser import parse_ayat
 from qurantext.io.readers import extract_alignment_words, extract_matching_words
+
+
+def test_canonical_timings_one_per_canonical_word_on_clean_recitation() -> None:
+    transcript = [
+        {"word_norm": "الحمد", "start": 0.0, "end": 0.5},
+        {"word_norm": "لله", "start": 0.5, "end": 1.0},
+        {"word_norm": "رب", "start": 1.0, "end": 1.5},
+    ]
+    timings = align_canonical_word_timings(transcript, ["الحمد", "لله", "رب"])
+    assert [(t["start"], t["end"]) for t in timings] == [
+        (0.0, 0.5),
+        (0.5, 1.0),
+        (1.0, 1.5),
+    ]
+
+
+def test_canonical_timings_absorb_repeated_transcript_word() -> None:
+    # Reciter repeats "لله"; the second utterance must not shift "رب" by one.
+    transcript = [
+        {"word_norm": "الحمد", "start": 0.0, "end": 0.5},
+        {"word_norm": "لله", "start": 0.5, "end": 1.0},
+        {"word_norm": "لله", "start": 1.0, "end": 1.4},
+        {"word_norm": "رب", "start": 1.4, "end": 2.0},
+    ]
+    timings = align_canonical_word_timings(transcript, ["الحمد", "لله", "رب"])
+    assert len(timings) == 3
+    assert timings[0]["start"] == 0.0
+    # "لله" spans both utterances; "رب" still lands on the genuine word.
+    assert timings[1] == {"start": 0.5, "end": 1.4}
+    assert timings[2] == {"start": 1.4, "end": 2.0}
+
+
+def test_canonical_timings_skip_leading_preamble_words() -> None:
+    # Transcript opens with basmala words absent from the canonical ayah text;
+    # they must be treated as insertions, not consume canonical slots.
+    transcript = [
+        {"word_norm": "بسم", "start": 0.0, "end": 0.3},
+        {"word_norm": "الله", "start": 0.3, "end": 0.6},
+        {"word_norm": "الحمد", "start": 0.6, "end": 1.0},
+        {"word_norm": "لله", "start": 1.0, "end": 1.5},
+    ]
+    timings = align_canonical_word_timings(transcript, ["الحمد", "لله"])
+    assert timings[0]["start"] == 0.6
+    assert timings[1] == {"start": 1.0, "end": 1.5}
+
+
+def test_canonical_timings_interpolate_dropped_word() -> None:
+    # Reciter's middle word missing from transcript -> interpolate, no stall.
+    transcript = [
+        {"word_norm": "الحمد", "start": 0.0, "end": 0.5},
+        {"word_norm": "العالمين", "start": 1.5, "end": 2.0},
+    ]
+    timings = align_canonical_word_timings(transcript, ["الحمد", "لله", "العالمين"])
+    assert len(timings) == 3
+    assert timings[0]["start"] == 0.0
+    assert timings[2]["end"] == 2.0
+    # The dropped middle word gets a span between its neighbours.
+    assert 0.5 <= timings[1]["start"] <= timings[1]["end"] <= 1.5
+
+
+def test_canonical_timings_empty_transcript_yields_none() -> None:
+    timings = align_canonical_word_timings([], ["الحمد", "لله"])
+    assert timings == [{"start": None, "end": None}, {"start": None, "end": None}]
 
 
 def test_align_words_and_segments_keep_unmatched_entries_for_manual_review() -> None:
@@ -76,4 +143,3 @@ def test_parse_ayat_cache_returns_fresh_copies_per_call(tmp_path: Path) -> None:
 
     assert len(second) == 2
     assert second[0]["text_raw"] == "الْحَمْدُ لِلَّهِ رَبِّ الْعَالَمِينَ"
-

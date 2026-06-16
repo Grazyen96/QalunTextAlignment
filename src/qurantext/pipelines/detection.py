@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import cast
 
 from qurantext.config.settings import get_settings
+from qurantext.core.alignment import align_canonical_word_timings
+from qurantext.core.arabic import normalize_alignment_ar
 from qurantext.core.lecture_matching import detect_quran_mentions_in_lecture
+from qurantext.core.preamble import extract_preamble, trim_leading_preamble
 from qurantext.core.quran_parser import parse_ayat
 from qurantext.core.range_matching import (
     ayah_entry,
@@ -20,6 +23,16 @@ from qurantext.core.range_matching import (
 from qurantext.io.readers import extract_matching_words, load_json
 from qurantext.io.writers import write_json
 from qurantext.services.transcription import WhisperXServiceError, transcribe_audio
+
+
+def _is_ayah_marker(token: str) -> bool:
+    """Return True if *token* is an ayah-number marker (Arabic-Indic digits only).
+
+    Mirrors ``frame_renderer._is_ayah_marker`` so canonical word timings are
+    indexed over the same non-marker words the renderer highlights.
+    """
+    stripped = token.strip()
+    return bool(stripped) and all("٠" <= c <= "٩" for c in stripped)
 
 
 def count_whisperx_segments(data: dict | list) -> int:
@@ -79,14 +92,11 @@ def run_detection(
     )
     resolved_max_span = cast(int, max_span if max_span is not None else lecture_settings.max_span)
     resolved_lecture_threshold = cast(
-        float,
-        lecture_threshold if lecture_threshold is not None else lecture_settings.min_score
+        float, lecture_threshold if lecture_threshold is not None else lecture_settings.min_score
     )
     resolved_min_matched_words = cast(
         int,
-        min_matched_words
-        if min_matched_words is not None
-        else lecture_settings.min_matched_words
+        min_matched_words if min_matched_words is not None else lecture_settings.min_matched_words,
     )
 
     def emit(message: str = "") -> None:
@@ -153,6 +163,7 @@ def run_detection(
             ayat,
             words,
             max_span=resolved_max_span,
+            max_merged_ayat=resolved_max_span,
             min_window_words=lecture_settings.min_window_words,
             max_window_words=lecture_settings.max_window_words,
             window_step=lecture_settings.window_step,
@@ -261,6 +272,44 @@ def run_detection(
             recitation_ayat,
             max_span=resolved_max_span,
         )
+
+        # Attach per-word timestamps to each match for video word highlighting.
+        # The video highlights the Nth *canonical* word, so transcript words are
+        # aligned onto the canonical text first — a positional (Nth transcript ≈
+        # Nth canonical) mapping drifts ahead/behind whenever the counts differ
+        # (repeats, split/merged tokens, a leading preamble). The result is one
+        # timing per canonical (non-marker) word, in display order.
+        # A small tolerance keeps boundary words from being excluded.
+        _eps = 0.1
+        for _match in mentions:
+            _win_words = [
+                w
+                for w in words
+                if w["start"] >= _match["start_time"] - _eps
+                and w["end"] <= _match["end_time"] + _eps
+            ]
+            _canon_tokens = [
+                tok
+                for tok in str(_match.get("full_text") or "").replace("\n", " ").split()
+                if not _is_ayah_marker(tok)
+            ]
+            _canon_norms = [normalize_alignment_ar(tok) for tok in _canon_tokens]
+            _timings = align_canonical_word_timings(_win_words, _canon_norms)
+            _match["word_timings"] = [
+                {"word": tok, "start": tm["start"], "end": tm["end"]}
+                for tok, tm in zip(_canon_tokens, _timings, strict=True)
+            ]
+
+        # A leading istiʿādha/basmala is stripped from the canonical text, so the
+        # matcher folds that audio into the first ayah — pulling its start time to
+        # the top of the recording and shifting its word highlights. Emit the
+        # preamble as its own timed card(s) and trim the first ayah back to where
+        # it actually begins.
+        preamble_matches, boundary_time = extract_preamble(words)
+        if preamble_matches and boundary_time is not None:
+            trim_leading_preamble(mentions, boundary_time)
+            mentions = preamble_matches + mentions
+
         result = {
             "first_ayah": ayah_entry(first_ayah, first_conf),
             "last_ayah": ayah_entry(last_ayah, last_conf),
@@ -288,6 +337,7 @@ def run_detection(
                 "global_search": global_search,
                 "detected_surah_num": first_ayah["surah_num"],
                 "detected_surah_name": first_ayah["surah_name"],
+                "preamble_segments": [m["preamble_kind"] for m in preamble_matches],
             },
         }
         emit(f"[4/4] Writing result → {out_path}")
@@ -444,7 +494,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     """Run the standalone detect-range compatibility CLI."""
-    parser = build_parser()
+    try:
+        parser = build_parser()
+    except ValueError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 1
     args = parser.parse_args(argv)
     try:
         run_detection(

@@ -21,7 +21,7 @@ def test_full_aya_normalization_preserves_current_bari_yeh_behavior() -> None:
 
 
 def test_detection_normalization_removes_quranic_marks() -> None:
-    assert normalize_detection_ar("۞ إِنَّا أَعْطَيْنَاكَ") == "انا اعطيناك"
+    assert normalize_detection_ar("۞ إِنَّا أَعْطَيْنَاكَ") == "انا اعطيناك"
 
 
 def test_similarity_helpers() -> None:
@@ -33,11 +33,18 @@ def test_similarity_helpers() -> None:
 def test_arabic_indic_helpers() -> None:
     assert int_to_arabic_indic(25) == "٢٥"
     assert arabic_indic_to_int("٢٥") == 25
-    assert ayah_text_with_marker("الحمد لله", 7) == "الحمد لله \ufd3e٧\ufd3f"
+    # Ayah number is appended as a bare Arabic-Indic digit (no ornate parentheses).
+    assert ayah_text_with_marker("الحمد لله", 7) == "الحمد لله ٧"
 
 
 def test_seconds_to_srt_time() -> None:
     assert seconds_to_srt_time(3723.456) == "01:02:03,456"
+
+
+def test_seconds_to_srt_time_rounds_without_millisecond_overflow() -> None:
+    # 0.9996s must not produce ",1000"; it rolls over into the next whole second.
+    assert seconds_to_srt_time(3.9996) == "00:00:04,000"
+    assert seconds_to_srt_time(59.9996) == "00:01:00,000"
 
 
 def test_normalization_removes_tatweel() -> None:

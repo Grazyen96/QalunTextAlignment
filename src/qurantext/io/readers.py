@@ -7,13 +7,13 @@ from os import PathLike
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 from qurantext.core.arabic import (
     normalize_alignment_ar,
     normalize_detection_ar,
     normalize_full_aya_ar,
 )
+
+logger = logging.getLogger(__name__)
 
 TextNormalizer = Callable[[str], str]
 
@@ -60,7 +60,7 @@ def extract_alignment_words(
         if not segment_words:
             segment_words = [segment]
         for word_data in segment_words:
-            raw_word = word_data.get("word") or word_data.get("text") or ""
+            raw_word = str(word_data.get("word") or word_data.get("text") or "")
             start = word_data.get("start")
             end = word_data.get("end")
             norm = normalizer(raw_word)
@@ -92,21 +92,29 @@ def extract_matching_words(
     words: list[dict] = []
     skipped = 0
 
-    def push(raw: str, start: Any, end: Any, score: Any = None) -> None:
+    def push(raw: Any, start: Any, end: Any, score: Any = None) -> None:
         nonlocal skipped
+        raw = str(raw) if raw is not None else ""
         norm = normalizer(raw)
-        if norm and start is not None and end is not None:
-            words.append(
-                {
-                    "word_norm": norm,
-                    "word_raw": raw.strip(),
-                    "start": float(start),
-                    "end": float(end),
-                    "score": score,
-                }
-            )
-        else:
+        if not norm or start is None or end is None:
             skipped += 1
+            return
+        # Tolerate messy WhisperX/hand-edited JSON: a single non-numeric
+        # timestamp skips that word instead of crashing the whole load.
+        try:
+            start_f, end_f = float(start), float(end)
+        except (TypeError, ValueError):
+            skipped += 1
+            return
+        words.append(
+            {
+                "word_norm": norm,
+                "word_raw": raw.strip(),
+                "start": start_f,
+                "end": end_f,
+                "score": score,
+            }
+        )
 
     for segment in _iter_whisperx_segments(data):
         segment_words = list(_iter_segment_words(segment))

@@ -12,6 +12,7 @@ def run_video_generation(
     font_name: str | None = None,
     font_file: str | None = None,
     renderer: str | None = None,
+    preset: str | None = None,
     width: int | None = None,
     height: int | None = None,
     fps: int | None = None,
@@ -31,6 +32,8 @@ def run_video_generation(
         "--renderer",
         resolved_renderer,
     ]
+    if preset is not None:
+        argv.extend(["--preset", preset])
     if font_name:
         argv.extend(["--font-name", font_name])
     if font_file:

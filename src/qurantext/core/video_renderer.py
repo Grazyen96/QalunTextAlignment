@@ -4,7 +4,14 @@ import argparse
 import sys
 from pathlib import Path
 
-from qurantext.config.settings import DEFAULT_VIDEO_FPS, DEFAULT_VIDEO_HEIGHT, DEFAULT_VIDEO_WIDTH, get_settings
+from qurantext.config.settings import (
+    DEFAULT_VIDEO_FONT_FILE,
+    DEFAULT_VIDEO_FPS,
+    DEFAULT_VIDEO_HEIGHT,
+    DEFAULT_VIDEO_WIDTH,
+    VIDEO_PRESETS,
+    get_settings,
+)
 from qurantext.core.ass_renderer import build_ass, render_ass_video, validate_font_name
 from qurantext.core.frame_renderer import (
     ActiveMatchTracker,
@@ -50,8 +57,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=settings.video.renderer,
         help="Choose the renderer implementation.",
     )
-    parser.add_argument("--width", type=int, default=settings.video.width, help="Output video width.")
-    parser.add_argument("--height", type=int, default=settings.video.height, help="Output video height.")
+    parser.add_argument(
+        "--preset",
+        choices=sorted(VIDEO_PRESETS),
+        default=None,
+        help="Named quality preset (fast/standard/high/social). Overrides --width, --height, --fps.",
+    )
+    parser.add_argument(
+        "--width", type=int, default=settings.video.width, help="Output video width."
+    )
+    parser.add_argument(
+        "--height", type=int, default=settings.video.height, help="Output video height."
+    )
     parser.add_argument(
         "--fps", type=int, default=settings.video.fps, help="Output video frame rate."
     )
@@ -73,7 +90,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     """Run the packaged video-rendering CLI."""
-    args = parse_args(argv)
+    try:
+        args = parse_args(argv)
+    except ValueError as error:
+        # Malformed QURANTEXT_* env override surfaced while building defaults.
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 1
+
+    # Apply preset overrides before any validation.
+    if args.preset is not None:
+        w, h, f = VIDEO_PRESETS[args.preset]
+        args.width, args.height, args.fps = w, h, f
 
     try:
         audio_path = Path(args.audio).expanduser().resolve()
@@ -98,7 +125,9 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.renderer == "ass":
             if font_file_path is not None:
-                warn("Ignoring --font-file because --renderer ass uses installed --font-name fonts.")
+                warn(
+                    "Ignoring --font-file because --renderer ass uses installed --font-name fonts."
+                )
             if args.debug_detected_text:
                 warn("Ignoring --debug-detected-text because it only applies to --renderer frame.")
             if not args.font_name:
@@ -107,13 +136,22 @@ def main(argv: list[str] | None = None) -> int:
 
             ass_document = build_ass(matches, args.font_name.strip(), args.width, args.height)
             ass_path.write_text(ass_document, encoding="utf-8-sig")
-            render_ass_video(audio_path, ass_path, output_path, args.width, args.height, fps=args.fps)
+            render_ass_video(
+                audio_path, ass_path, output_path, args.width, args.height, fps=args.fps
+            )
             print(f"ASS subtitle saved to: {ass_path}")
         else:
             if args.font_name:
                 warn("Ignoring --font-name because --renderer frame uses --font-file instead.")
             if font_file_path is None:
-                raise ValueError("--font-file is required when --renderer frame is selected")
+                default_font = Path(DEFAULT_VIDEO_FONT_FILE)
+                if not default_font.exists():
+                    raise ValueError(
+                        "--font-file is required when --renderer frame is selected "
+                        "(the bundled default font was not found)."
+                    )
+                print(f"No --font-file given; using bundled default font: {default_font}")
+                font_file_path = default_font
             validate_font_file(font_file_path)
             render_frame_video(
                 audio_path,

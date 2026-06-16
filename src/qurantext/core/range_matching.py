@@ -13,6 +13,7 @@ from qurantext.config.settings import (
     DEFAULT_RANGE_TAIL_WORDS,
 )
 from qurantext.core.arabic import ayah_text_with_marker, partial_ratio, word_recall
+from qurantext.core.preamble import detect_leading_preamble
 
 HEAD_WORDS = DEFAULT_RANGE_HEAD_WORDS
 TAIL_WORDS = DEFAULT_RANGE_TAIL_WORDS
@@ -27,38 +28,8 @@ MIN_WORDS_GLOBAL = DEFAULT_RANGE_MIN_WORDS_GLOBAL
 
 def _find_quran_start(words: list[dict]) -> int:
     """Return the index of the first WhisperX word after ta'awwudh/basmala."""
-    taawwudh_vocab = frozenset(
-        {
-            "اعوذ",
-            "اعود",
-            "بالله",
-            "بالل",
-            "من",
-            "الرجيم",
-            "الشيطان",
-            "الشيطن",
-            "شيطان",
-            "شيطن",
-        }
-    )
-    basmala_rest = frozenset({"الله", "الرحمن", "الرحيم"})
-
-    norms = [word["word_norm"] for word in words[:20]]
-    index = 0
-
-    if index < len(norms) and norms[index] in ("اعوذ", "اعود"):
-        end = min(index + 8, len(norms))
-        while index < end and norms[index] in taawwudh_vocab:
-            index += 1
-
-    if index < len(norms) and norms[index] == "بسم":
-        index += 1
-        skipped = 0
-        while skipped < 3 and index < len(norms) and norms[index] in basmala_rest:
-            index += 1
-            skipped += 1
-
-    return min(index, 30)
+    _, first_index = detect_leading_preamble(words)
+    return min(first_index, 30)
 
 
 def _find_match_position(
@@ -357,7 +328,13 @@ def trim_match_to_ayah_range(
     to_ayah: int,
 ) -> dict | None:
     """Trim one lecture-style match to the selected recitation ayah range."""
-    selected_ayat = [ayah for ayah in recitation_ayat if from_ayah <= ayah["ayah_num"] <= to_ayah]
+    match_surah = match.get("surah_num")
+    selected_ayat = [
+        ayah
+        for ayah in recitation_ayat
+        if from_ayah <= ayah["ayah_num"] <= to_ayah
+        and (match_surah is None or ayah["surah_num"] == match_surah)
+    ]
     if not selected_ayat:
         return None
 
@@ -382,14 +359,16 @@ def select_recitation_timeline(
     if not matches or not recitation_ayat:
         return []
 
+    target_surah = recitation_ayat[0]["surah_num"]
     first_ayah_num = recitation_ayat[0]["ayah_num"]
     last_ayah_num = recitation_ayat[-1]["ayah_num"]
     selected: list[dict] = []
     last_to_ayah = first_ayah_num - 1
     last_end_time = -1.0
 
+    # Defensive guard: discard matches that belong to a different surah.
     ordered = sorted(
-        matches,
+        [m for m in matches if m.get("surah_num") == target_surah],
         key=lambda match: (
             match["start_time"],
             -match["confidence"],
@@ -431,4 +410,8 @@ def select_recitation_timeline(
             selected[index] = dict(selected[index])
             selected[index]["end_time"] = round(next_start, 2)
 
-    return selected
+    # The overlap trims above can push a span's start past its own end (a short
+    # span fully covered in time by its neighbour). Such a span cannot be
+    # displayed and would otherwise be silently dropped by the renderer's
+    # validated_matches with a confusing warning — drop it here instead.
+    return [span for span in selected if span["end_time"] > span["start_time"]]

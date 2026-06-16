@@ -5,7 +5,14 @@ import subprocess
 from pathlib import Path
 from typing import Any, cast
 
-from qurantext.core.video_common import ass_time, ayah_label, escape_ass, require_binary, validated_matches, warn
+from qurantext.core.video_common import (
+    ass_time,
+    ayah_label,
+    escape_ass,
+    require_binary,
+    validated_matches,
+    warn,
+)
 
 
 def _style_font_size(height: int) -> int:
@@ -18,6 +25,31 @@ def _style_margin_lr(width: int) -> int:
 
 def _style_margin_v(height: int) -> int:
     return max(48, round(80 * (height / 1080)))
+
+
+def _wrap_ass_body_text(text: str, max_chars: int = 55) -> str:
+    """Wrap Ayah body text at word boundaries for ASS display.
+
+    Inserts newlines (which ``escape_ass`` converts to ``\\N``) so that each
+    line stays within *max_chars* characters.  This prevents very long Qur'anic
+    phrases from overflowing the video frame when WrapStyle 2 is active.
+    """
+    words = text.split()
+    lines: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for word in words:
+        word_len = len(word)
+        if current and current_len + 1 + word_len > max_chars:
+            lines.append(" ".join(current))
+            current = [word]
+            current_len = word_len
+        else:
+            current.append(word)
+            current_len += (1 if current_len else 0) + word_len
+    if current:
+        lines.append(" ".join(current))
+    return "\n".join(lines)
 
 
 def build_ass(matches: list[dict[str, Any]], font_name: str, width: int, height: int) -> str:
@@ -54,7 +86,8 @@ def build_ass(matches: list[dict[str, Any]], font_name: str, width: int, height:
     valid_events = 0
     for match in validated_matches(matches):
         label = ayah_label(match)
-        dialogue_text = f"{{\\an5}}{escape_ass(label)}\\N\\N{escape_ass(match['_display_text'])}"
+        body = _wrap_ass_body_text(match["_display_text"])
+        dialogue_text = f"{{\\an5}}{escape_ass(label)}\\N\\N{escape_ass(body)}"
         lines.append(
             f"Dialogue: 0,{ass_time(match['_start_time'])},{ass_time(match['_end_time'])},Ayah,,0,0,0,,{dialogue_text}"
         )
@@ -64,6 +97,44 @@ def build_ass(matches: list[dict[str, Any]], font_name: str, width: int, height:
         warn("No valid subtitle events were generated from the provided matches.")
 
     return "\n".join(lines) + "\n"
+
+
+def _probe_audio_codec(audio_path: Path) -> tuple[str, int]:
+    """Return ``(codec_name, bitrate_kbps)`` for the first audio stream.
+
+    Uses ``ffprobe`` with ``-show_entries stream=codec_name,bit_rate`` and
+    ``-of default=noprint_wrappers=1:nokey=1``.  Returns empty strings / 0 if
+    the probe fails or the file has no audio stream.
+    """
+    ffprobe_path = require_binary("ffprobe", "Install FFprobe (part of the FFmpeg suite).")
+    try:
+        result = subprocess.run(
+            [
+                ffprobe_path,
+                "-v",
+                "quiet",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "stream=codec_name,bit_rate",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(audio_path),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return "", 0
+
+    lines = result.stdout.strip().splitlines()
+    codec = lines[0].strip() if lines else ""
+    try:
+        bitrate_kbps = int(lines[1].strip()) // 1000 if len(lines) > 1 else 0
+    except (ValueError, IndexError):
+        bitrate_kbps = 0
+    return codec, bitrate_kbps
 
 
 def _escape_ffmpeg_filter_path(path: Path) -> str:
@@ -79,6 +150,18 @@ def _escape_ffmpeg_filter_path(path: Path) -> str:
         .replace(";", r"\;")
     )
     return f"filename='{escaped}'"
+
+
+def _audio_encode_args(audio_path: Path) -> list[str]:
+    """Return FFmpeg audio encoding arguments.
+
+    If the source is already AAC at ≥ 128 kbps the audio stream is copied
+    without re-encoding.  Otherwise it is transcoded to AAC 192 kbps.
+    """
+    codec, bitrate_kbps = _probe_audio_codec(audio_path)
+    if codec.lower() in {"aac", "aac_latm"} and bitrate_kbps >= 128:
+        return ["-c:a", "copy"]
+    return ["-c:a", "aac", "-b:a", "192k"]
 
 
 def render_ass_video(
@@ -114,10 +197,7 @@ def render_ass_video(
         "18",
         "-pix_fmt",
         "yuv420p",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
+        *_audio_encode_args(audio_path),
         "-movflags",
         "+faststart",
         "-shortest",
@@ -198,4 +278,3 @@ def validate_font_name(font_name: str) -> None:
         f"Could not validate font '{cleaned}' because fontconfig is unavailable and no matching font file "
         "was found in standard font directories. Install fontconfig or use a system-installed font name."
     )
-

@@ -17,4 +17,3 @@ def export_public_names(module_name: str) -> dict[str, Any]:
 
 
 __all__ = ["export_public_names", "run_module_main"]
-

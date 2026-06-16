@@ -59,13 +59,27 @@ DEFAULT_VIDEO_RENDERER = "frame"
 DEFAULT_VIDEO_WIDTH = 1280
 DEFAULT_VIDEO_HEIGHT = 720
 DEFAULT_VIDEO_FPS = 25
+# Gaps between consecutive ayah groups are bridged so no black screen shows.
+# Gaps up to this many seconds pull the next group back to the previous group's
+# end; longer gaps (a genuine pause) split the difference at the midpoint so the
+# next card does not sit idle for the whole pause.
+DEFAULT_VIDEO_GAP_MIDPOINT_THRESHOLD = 3.0
 DEFAULT_VIDEO_FONT_FILE = str(PROJECT_ROOT / "fonts" / "qaloon.10.ttf")
+
+# (width, height, fps) tuples for named quality presets.
+VIDEO_PRESETS: dict[str, tuple[int, int, int]] = {
+    "fast": (960, 540, 24),
+    "standard": (1280, 720, 25),
+    "high": (1920, 1080, 30),
+    "social": (1080, 1920, 30),
+}
 
 DEFAULT_VIDEO = {
     "renderer": DEFAULT_VIDEO_RENDERER,
     "width": DEFAULT_VIDEO_WIDTH,
     "height": DEFAULT_VIDEO_HEIGHT,
     "fps": DEFAULT_VIDEO_FPS,
+    "gap_midpoint_threshold": DEFAULT_VIDEO_GAP_MIDPOINT_THRESHOLD,
 }
 
 DEFAULT_WHISPERX_INPUT = {
@@ -138,18 +152,25 @@ def _env_str(name: str, default: str) -> str:
     return value
 
 
+def _coerce_env(name: str, value: str, caster: Any, kind: str) -> Any:
+    try:
+        return caster(value)
+    except ValueError:
+        raise ValueError(f"Environment variable {name}={value!r} is not a valid {kind}.") from None
+
+
 def _env_int(name: str, default: int) -> int:
     value = os.getenv(name)
     if value is None or value == "":
         return default
-    return int(value)
+    return _coerce_env(name, value, int, "integer")
 
 
 def _env_float(name: str, default: float) -> float:
     value = os.getenv(name)
     if value is None or value == "":
         return default
-    return float(value)
+    return _coerce_env(name, value, float, "number")
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -226,6 +247,7 @@ class VideoSettings:
     width: int
     height: int
     fps: int
+    gap_midpoint_threshold: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -250,9 +272,15 @@ def get_settings() -> AppSettings:
         model_ref=_env_str("QURANTEXT_WHISPERX_MODEL", DEFAULT_MODEL_REF),
         debug=_env_bool("QURANTEXT_WHISPERX_DEBUG", bool(DEFAULT_WHISPERX_INPUT["debug"])),
         language=_env_str("QURANTEXT_WHISPERX_LANGUAGE", str(DEFAULT_WHISPERX_INPUT["language"])),
-        vad_onset=_env_float("QURANTEXT_WHISPERX_VAD_ONSET", float(DEFAULT_WHISPERX_INPUT["vad_onset"])),
-        batch_size=_env_int("QURANTEXT_WHISPERX_BATCH_SIZE", int(DEFAULT_WHISPERX_INPUT["batch_size"])),
-        vad_offset=_env_float("QURANTEXT_WHISPERX_VAD_OFFSET", float(DEFAULT_WHISPERX_INPUT["vad_offset"])),
+        vad_onset=_env_float(
+            "QURANTEXT_WHISPERX_VAD_ONSET", float(DEFAULT_WHISPERX_INPUT["vad_onset"])
+        ),
+        batch_size=_env_int(
+            "QURANTEXT_WHISPERX_BATCH_SIZE", int(DEFAULT_WHISPERX_INPUT["batch_size"])
+        ),
+        vad_offset=_env_float(
+            "QURANTEXT_WHISPERX_VAD_OFFSET", float(DEFAULT_WHISPERX_INPUT["vad_offset"])
+        ),
         diarization=_env_bool(
             "QURANTEXT_WHISPERX_DIARIZATION",
             bool(DEFAULT_WHISPERX_INPUT["diarization"]),
@@ -308,9 +336,7 @@ def get_settings() -> AppSettings:
             "QURANTEXT_LECTURE_MAX_WINDOW_WORDS",
             DEFAULT_LECTURE_MAX_WINDOW_WORDS,
         ),
-        window_step=_env_int(
-            "QURANTEXT_LECTURE_WINDOW_STEP", DEFAULT_LECTURE_WINDOW_STEP
-        ),
+        window_step=_env_int("QURANTEXT_LECTURE_WINDOW_STEP", DEFAULT_LECTURE_WINDOW_STEP),
         min_score=_env_float("QURANTEXT_LECTURE_THRESHOLD", DEFAULT_LECTURE_THRESHOLD),
         min_matched_words=_env_int(
             "QURANTEXT_LECTURE_MIN_MATCHED_WORDS",
@@ -327,6 +353,9 @@ def get_settings() -> AppSettings:
         width=_env_int("QURANTEXT_VIDEO_WIDTH", DEFAULT_VIDEO_WIDTH),
         height=_env_int("QURANTEXT_VIDEO_HEIGHT", DEFAULT_VIDEO_HEIGHT),
         fps=_env_int("QURANTEXT_VIDEO_FPS", DEFAULT_VIDEO_FPS),
+        gap_midpoint_threshold=_env_float(
+            "QURANTEXT_VIDEO_GAP_MIDPOINT_THRESHOLD", DEFAULT_VIDEO_GAP_MIDPOINT_THRESHOLD
+        ),
     )
 
     return AppSettings(

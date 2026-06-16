@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
+from qurantext.config.settings import get_settings
+
 
 def ass_time(seconds: float) -> str:
     """Convert seconds to ASS timestamp format ``H:MM:SS.cs``."""
@@ -78,6 +80,45 @@ def _match_display_text(match: dict[str, Any], match_index: int) -> str:
     )
 
 
+def _bridge_match_gaps(
+    matches: list[dict[str, Any]], midpoint_threshold: float
+) -> None:
+    """Close black-screen gaps between consecutive groups, mutating in place.
+
+    Each match only displays during ``[_start_time, _end_time]``, so any gap
+    before the next group's first detected word renders as a black screen while
+    the reciter is already moving on. Two regimes, by gap size:
+
+    * Gap ``<= midpoint_threshold`` — pull the next group's start back to the
+      previous group's end, so the next part appears the instant the previous one
+      finishes (small gaps are usually just words the matcher missed).
+    * Gap ``> midpoint_threshold`` — a genuine pause; meet in the middle so the
+      previous card holds for the first half and the next card appears for the
+      second half, instead of sitting idle for the whole pause.
+
+    Overlapping/nested matches are left untouched (no gap to bridge).
+    """
+    prev_match: dict[str, Any] | None = None
+    for match in sorted(matches, key=lambda m: float(m["_start_time"])):
+        start = float(match["_start_time"])
+        end = float(match["_end_time"])
+        if prev_match is not None:
+            prev_end = float(prev_match["_end_time"])
+            gap = start - prev_end
+            if gap > 0:
+                if gap <= midpoint_threshold:
+                    match["_start_time"] = prev_end
+                    match["_duration"] = end - prev_end
+                else:
+                    midpoint = prev_end + gap / 2.0
+                    prev_match["_end_time"] = midpoint
+                    prev_match["_duration"] = midpoint - float(prev_match["_start_time"])
+                    match["_start_time"] = midpoint
+                    match["_duration"] = end - midpoint
+        if prev_match is None or end >= float(prev_match["_end_time"]):
+            prev_match = match
+
+
 def validated_matches(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Validate and enrich timed match dictionaries for rendering."""
     valid_matches: list[dict[str, Any]] = []
@@ -96,9 +137,12 @@ def validated_matches(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
             enriched["_end_time"] = end_time
             enriched["_duration"] = end_time - start_time
             enriched["_confidence"] = _match_confidence(match)
+            enriched["_word_timings"] = list(match.get("word_timings") or [])
             valid_matches.append(enriched)
         except ValueError as error:
             warn(f"Skipping {error}.")
+
+    _bridge_match_gaps(valid_matches, get_settings().video.gap_midpoint_threshold)
     return valid_matches
 
 
@@ -195,4 +239,3 @@ def load_matches(matches_path: Path) -> list[dict[str, Any]]:
             continue
         normalized_matches.append(item)
     return normalized_matches
-

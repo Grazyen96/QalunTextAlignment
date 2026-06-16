@@ -1,4 +1,19 @@
-from qurantext.core.frame_renderer import ActiveMatchTracker, active_match_at
+from unittest.mock import patch
+
+import pytest
+
+from qurantext.config.paths import PROJECT_ROOT
+from qurantext.core.ass_renderer import _audio_encode_args, _probe_audio_codec, _wrap_ass_body_text
+from qurantext.core.frame_renderer import (
+    ActiveMatchTracker,
+    _count_non_marker_words,
+    active_match_at,
+    active_word_timing_index,
+    render_frame_pillow,
+)
+from qurantext.core.video_common import validated_matches
+
+_BUNDLED_FONT = PROJECT_ROOT / "fonts" / "qaloon.10.ttf"
 
 
 def _timed_matches() -> list[dict]:
@@ -57,3 +72,149 @@ def test_active_match_at_prefers_higher_confidence_then_longer_duration() -> Non
 
     assert active_match_at(matches, 1.0)["id"] == "longer"
 
+
+# ---------------------------------------------------------------------------
+# _probe_audio_codec
+# ---------------------------------------------------------------------------
+
+
+def test_probe_audio_codec_parses_ffprobe_aac_output() -> None:
+    fake_stdout = "aac\n192000\n"
+    with (
+        patch("qurantext.core.ass_renderer.require_binary", return_value="ffprobe"),
+        patch("subprocess.run") as mock_run,
+    ):
+        mock_run.return_value.stdout = fake_stdout
+        codec, bitrate_kbps = _probe_audio_codec(__import__("pathlib").Path("audio.m4a"))
+
+    assert codec == "aac"
+    assert bitrate_kbps == 192
+
+
+def test_probe_audio_codec_returns_empty_on_oserror() -> None:
+    with (
+        patch("qurantext.core.ass_renderer.require_binary", return_value="ffprobe"),
+        patch("subprocess.run", side_effect=OSError("not found")),
+    ):
+        codec, bitrate_kbps = _probe_audio_codec(__import__("pathlib").Path("audio.m4a"))
+
+    assert codec == ""
+    assert bitrate_kbps == 0
+
+
+# ---------------------------------------------------------------------------
+# _audio_encode_args
+# ---------------------------------------------------------------------------
+
+
+def test_audio_encode_args_copies_aac_stream_when_bitrate_sufficient() -> None:
+    with patch("qurantext.core.ass_renderer._probe_audio_codec", return_value=("aac", 192)):
+        args = _audio_encode_args(__import__("pathlib").Path("audio.m4a"))
+    assert args == ["-c:a", "copy"]
+
+
+def test_audio_encode_args_reencodes_when_codec_is_not_aac() -> None:
+    with patch("qurantext.core.ass_renderer._probe_audio_codec", return_value=("mp3", 320)):
+        args = _audio_encode_args(__import__("pathlib").Path("audio.mp3"))
+    assert args == ["-c:a", "aac", "-b:a", "192k"]
+
+
+def test_audio_encode_args_reencodes_when_aac_bitrate_is_low() -> None:
+    with patch("qurantext.core.ass_renderer._probe_audio_codec", return_value=("aac", 64)):
+        args = _audio_encode_args(__import__("pathlib").Path("audio.m4a"))
+    assert args == ["-c:a", "aac", "-b:a", "192k"]
+
+
+# ---------------------------------------------------------------------------
+# _wrap_ass_body_text
+# ---------------------------------------------------------------------------
+
+
+def test_wrap_ass_body_text_inserts_newlines_at_word_boundaries() -> None:
+    long_text = "كلمة " * 20  # 20 words; each "كلمة " is 6 chars
+    wrapped = _wrap_ass_body_text(long_text.strip(), max_chars=30)
+    for line in wrapped.split("\n"):
+        assert len(line) <= 30
+
+
+def test_wrap_ass_body_text_short_text_unchanged() -> None:
+    short_text = "بسم الله"
+    assert _wrap_ass_body_text(short_text) == short_text
+
+
+# ---------------------------------------------------------------------------
+# word-highlight building blocks
+# ---------------------------------------------------------------------------
+
+
+def test_count_non_marker_words_skips_ayah_markers() -> None:
+    assert _count_non_marker_words("الحمد لله ٧ رب العالمين ١") == 4
+    assert _count_non_marker_words("") == 0
+
+
+def test_validated_matches_bridges_gaps_between_groups() -> None:
+    matches = [
+        {"start_time": 0.0, "end_time": 2.0, "full_text": "ا"},
+        # Gap from 2.0 -> 5.0 would render as black; should be bridged.
+        {"start_time": 5.0, "end_time": 7.0, "full_text": "ب"},
+    ]
+    enriched = validated_matches(matches)
+    assert enriched[0]["_end_time"] == 2.0
+    assert enriched[1]["_start_time"] == 2.0  # pulled back to previous end
+    assert enriched[1]["_end_time"] == 7.0
+    assert enriched[1]["_duration"] == 5.0
+
+
+def test_validated_matches_leaves_overlapping_groups_untouched() -> None:
+    matches = [
+        {"start_time": 0.0, "end_time": 3.0, "full_text": "ا"},
+        {"start_time": 1.0, "end_time": 4.0, "full_text": "ب"},  # overlaps, no gap
+    ]
+    enriched = validated_matches(matches)
+    assert enriched[1]["_start_time"] == 1.0
+
+
+def test_validated_matches_splits_long_pause_at_midpoint() -> None:
+    # A long pause (gap 10.0s > 3.0s threshold) meets in the middle: previous
+    # card holds to the midpoint, next card appears there.
+    matches = [
+        {"start_time": 0.0, "end_time": 2.0, "full_text": "ا"},
+        {"start_time": 12.0, "end_time": 14.0, "full_text": "ب"},
+    ]
+    enriched = validated_matches(matches)
+    assert enriched[0]["_end_time"] == 7.0  # 2.0 + 10.0/2
+    assert enriched[1]["_start_time"] == 7.0
+    assert enriched[1]["_end_time"] == 14.0
+
+
+def test_active_word_timing_index_holds_last_started_during_silence() -> None:
+    word_timings = [{"start": 0.0, "end": 1.0}, {"start": 2.0, "end": 3.0}]
+    assert active_word_timing_index(word_timings, 0.5) == 0
+    assert active_word_timing_index(word_timings, 1.5) == 0  # gap -> last started word
+    assert active_word_timing_index(word_timings, 2.5) == 1
+    assert active_word_timing_index(word_timings, -1.0) is None
+    assert active_word_timing_index([], 0.0) is None
+
+
+@pytest.mark.skipif(not _BUNDLED_FONT.exists(), reason="bundled font missing")
+def test_render_frame_pillow_produces_valid_highlighted_frame() -> None:
+    from PIL import features
+
+    if not features.check("raqm"):
+        pytest.skip("Pillow built without libraqm")
+
+    match = {
+        "surah_name": "سُورَةُ الفَاتِحَةِ",
+        "from_ayah": 1,
+        "to_ayah": 1,
+        "_display_text": "الحمد لله رب العالمين",
+        "_start_time": 0.0,
+        "_end_time": 2.0,
+        "_word_timings": [
+            {"word": "الحمد", "start": 0.0, "end": 0.5},
+            {"word": "لله", "start": 0.5, "end": 1.0},
+        ],
+    }
+    # t=0.7 falls on the second word; should render without raising.
+    frame = render_frame_pillow(0.7, match, 480, 320, _BUNDLED_FONT)
+    assert frame.shape == (320, 480, 3)

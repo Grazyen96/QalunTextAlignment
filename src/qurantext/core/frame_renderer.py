@@ -9,13 +9,21 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from qurantext.core.video_common import ayah_label, get_audio_duration, require_binary, validated_matches, validate_input_file, warn
+from qurantext.core.video_common import (
+    ayah_label,
+    get_audio_duration,
+    require_binary,
+    validate_input_file,
+    validated_matches,
+    warn,
+)
 
 COLOUR_BG = (10, 10, 12, 255)
 COLOUR_CARD = (36, 36, 42, 230)
 COLOUR_CARD_BORDER = (255, 255, 255, 28)
 COLOUR_HEADER_TEXT = (230, 230, 235, 255)
 COLOUR_BODY_TEXT = (255, 255, 255, 255)
+COLOUR_HIGHLIGHT_WORD = (255, 215, 0, 255)  # Gold — active recited word
 COLOUR_DEBUG_TEXT = (188, 188, 198, 255)
 COLOUR_SUBTLE = (150, 150, 162, 255)
 
@@ -128,8 +136,15 @@ class ActiveMatchTracker:
         )
 
 
+@lru_cache(maxsize=256)
 def load_font(font_file: Path, size: int) -> Any:
-    """Load a TrueType/OpenType font file for frame rendering."""
+    """Load a TrueType/OpenType font file for frame rendering.
+
+    Cached by ``(font_file, size)``: ``fit_font_size`` probes many sizes per
+    match and the same sizes recur across thousands of frames, so re-reading and
+    re-parsing the TTF every call dominated render time. PIL font objects are
+    safe to reuse for measuring and drawing.
+    """
     _, _, _, _, image_font, _ = _frame_dependencies()
     try:
         return image_font.truetype(str(font_file), size=size)
@@ -295,6 +310,180 @@ def draw_centered_multiline_text(
         current_y += line_height + line_spacing
 
 
+def _is_ayah_marker(token: str) -> bool:
+    """Return True if *token* is an ayah number marker (Arabic-Indic digits only)."""
+    stripped = token.strip()
+    return bool(stripped) and all("\u0660" <= c <= "\u0669" for c in stripped)
+
+
+def _count_non_marker_words(line: str) -> int:
+    """Count word tokens on *line*, excluding ayah-number markers.
+
+    Mirrors the word counting in ``draw_centered_multiline_text_with_highlight``
+    so a highlight index can be made page-local.
+    """
+    return sum(1 for token in line.split() if not _is_ayah_marker(token))
+
+
+def _page_index_for_word(pages: list[list[str]], word_idx: int) -> int:
+    """Return the page holding the *word_idx*-th non-marker word.
+
+    Page turns are driven by which word is being recited (via word timings)
+    rather than elapsed clock time, so the displayed page tracks the highlight
+    instead of running ahead or lagging behind the reciter's pace.
+    """
+    cumulative = 0
+    for page_idx, page in enumerate(pages):
+        page_words = sum(_count_non_marker_words(line) for line in page)
+        if word_idx < cumulative + page_words:
+            return page_idx
+        cumulative += page_words
+    return max(0, len(pages) - 1)
+
+
+def active_word_timing_index(word_timings: list[dict[str, Any]], t: float) -> int | None:
+    """Return the index of the word in *word_timings* being recited at time *t*.
+
+    If *t* falls between two words the most recently started word is returned so
+    the highlight never disappears mid-silence.  Returns ``None`` when
+    *word_timings* is empty or *t* is before the first word.
+    """
+    last_started: int | None = None
+    for i, wt in enumerate(word_timings):
+        start = wt.get("start")
+        end = wt.get("end")
+        if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
+            continue
+        if start <= t:
+            last_started = i
+        if start <= t <= end:
+            return i
+    return last_started
+
+
+def draw_rtl_line_with_highlight(
+    draw: Any,
+    line_words: list[str],
+    font: Any,
+    box_x0: int,
+    box_x1: int,
+    line_y: int,
+    default_fill: tuple[int, int, int, int],
+    highlight_fill: tuple[int, int, int, int],
+    highlight_local_idx: int | None,
+    space_w: float,
+) -> None:
+    """Render a single RTL Arabic line word-by-word, highlighting one word.
+
+    Each word is rendered independently with Pillow so that one word can use a
+    different fill colour.  The total line width is measured as a whole string
+    first (for accurate centering); individual words are then placed from right
+    to left within that measured extent.
+    """
+    if not line_words:
+        return
+
+    joined = " ".join(line_words)
+    total_w, _ = measure_text_bbox(draw, joined, font)
+    word_widths = [measure_text_bbox(draw, w, font)[0] for w in line_words]
+
+    sum_widths = sum(word_widths)
+    n_gaps = max(1, len(line_words) - 1)
+    computed_space = max(1.0, (total_w - sum_widths) / n_gaps) if len(line_words) > 1 else 0.0
+
+    # Centre the total line inside the box.
+    line_left = box_x0 + max(0, ((box_x1 - box_x0) - total_w) / 2)
+    # Start placing from the right edge of the line (RTL visual order).
+    current_right = line_left + total_w
+
+    for i, (word, ww) in enumerate(zip(line_words, word_widths, strict=True)):
+        left = current_right - ww
+        fill = highlight_fill if i == highlight_local_idx else default_fill
+        draw.text((left, line_y), word, font=font, fill=fill, direction="rtl")
+        current_right -= ww + computed_space
+
+
+def draw_centered_multiline_text_with_highlight(
+    draw: Any,
+    lines: list[str],
+    font: Any,
+    box: tuple[int, int, int, int],
+    fill: tuple[int, int, int, int],
+    line_spacing: int,
+    highlight_word_idx: int | None = None,
+    highlight_fill: tuple[int, int, int, int] = COLOUR_HIGHLIGHT_WORD,
+) -> None:
+    """Draw multiline RTL text centered inside *box*, highlighting one word.
+
+    When *highlight_word_idx* is ``None`` this behaves identically to
+    :func:`draw_centered_multiline_text`.  Otherwise the word at that position
+    in the flat word list (ayah-marker tokens are skipped) is rendered in
+    *highlight_fill*; every other word uses *fill*.
+
+    Lines that do not contain the highlighted word are rendered as a single
+    :py:meth:`~PIL.ImageDraw.ImageDraw.draw.text` call (better Arabic shaping);
+    only the line that contains the highlighted word is split word-by-word.
+    """
+    x0, y0, x1, y1 = box
+    _, total_height = _multiline_metrics(draw, lines, font, line_spacing)
+    current_y = y0 + max(0, ((y1 - y0) - total_height) / 2)
+
+    space_w = max(2.0, measure_text_bbox(draw, " ", font)[0])
+
+    global_word_idx = 0  # counts only non-marker words
+
+    for line in lines:
+        probe = line if line.strip() else " "
+        line_height = measure_text_bbox(draw, probe, font)[1]
+
+        line_words = line.split() if line.strip() else []
+
+        # Determine whether the highlighted word falls inside this line.
+        highlight_local_idx: int | None = None
+        if highlight_word_idx is not None:
+            temp_global = global_word_idx
+            for local_i, token in enumerate(line_words):
+                if _is_ayah_marker(token):
+                    continue
+                if temp_global == highlight_word_idx:
+                    highlight_local_idx = local_i
+                    break
+                temp_global += 1
+
+        if highlight_local_idx is not None:
+            draw_rtl_line_with_highlight(
+                draw,
+                line_words,
+                font,
+                x0,
+                x1,
+                int(current_y),
+                fill,
+                highlight_fill,
+                highlight_local_idx,
+                space_w,
+            )
+        else:
+            # No highlight on this line — render as one string (better shaping).
+            lw, _ = measure_text_bbox(draw, line, font)
+            cx = x0 + max(0, ((x1 - x0) - lw) / 2)
+            draw.text(
+                (cx, current_y),
+                line,
+                font=font,
+                fill=fill,
+                direction="rtl",
+                align="center",
+            )
+
+        # Advance the global non-marker word counter.
+        for token in line_words:
+            if not _is_ayah_marker(token):
+                global_word_idx += 1
+
+        current_y += line_height + line_spacing
+
+
 def render_frame_pillow(
     t: float,
     match: dict[str, Any] | None,
@@ -367,15 +556,27 @@ def render_frame_pillow(
         body_spacing = max(4, int(body_font.size * LINE_SPACING_RATIO))
         body_max_height = max(40, body_box[3] - body_box[1])
         body_pages = paginate_lines(body_lines, draw, body_font, body_spacing, body_max_height)
+
+        # Resolve the active word first: page turns follow the recited word so the
+        # displayed page tracks the highlight instead of a fixed time fraction.
+        _word_timings = match.get("_word_timings") or []
+        _highlight_idx = active_word_timing_index(_word_timings, t) if _word_timings else None
+
         if len(body_pages) > 1:
-            _start = float(match.get("_start_time", t))
-            _end = float(match.get("_end_time", _start + 1.0))
-            _dur = max(_end - _start, 0.001)
-            _progress = max(0.0, min(1.0, (t - _start) / _dur))
-            _page_idx = min(int(_progress * len(body_pages)), len(body_pages) - 1)
+            if _highlight_idx is not None:
+                _page_idx = _page_index_for_word(body_pages, _highlight_idx)
+            else:
+                # No active word (silence or missing timings) — fall back to
+                # clock-proportional paging so multi-page cards still advance.
+                _start = float(match.get("_start_time", t))
+                _end = float(match.get("_end_time", _start + 1.0))
+                _dur = max(_end - _start, 0.001)
+                _progress = max(0.0, min(1.0, (t - _start) / _dur))
+                _page_idx = min(int(_progress * len(body_pages)), len(body_pages) - 1)
             display_lines = body_pages[_page_idx]
         else:
-            display_lines = body_lines if body_pages else body_lines
+            _page_idx = 0
+            display_lines = body_pages[0] if body_pages else body_lines
 
         header_box = (
             card_x0 + pad_x,
@@ -387,9 +588,26 @@ def render_frame_pillow(
             draw, [header_text], header_font, header_box, COLOUR_HEADER_TEXT, 0
         )
 
-        body_spacing = max(4, int(body_font.size * LINE_SPACING_RATIO))
-        draw_centered_multiline_text(
-            draw, display_lines, body_font, body_box, COLOUR_BODY_TEXT, body_spacing
+        # _word_timings carries one entry per canonical (non-marker) word, aligned
+        # to the display text upstream (see detection.py), so this index maps
+        # directly onto the word the highlight helper colours.
+        if _highlight_idx is not None and _page_idx > 0:
+            # active_word_timing_index returns an index over the whole ayah's word
+            # list, but only one page is drawn. Make it page-local by subtracting
+            # the non-marker words on earlier pages; the draw helper leaves the
+            # highlight off when the index is not on this page.
+            words_before_page = sum(
+                _count_non_marker_words(line) for page in body_pages[:_page_idx] for line in page
+            )
+            _highlight_idx -= words_before_page
+        draw_centered_multiline_text_with_highlight(
+            draw,
+            display_lines,
+            body_font,
+            body_box,
+            COLOUR_BODY_TEXT,
+            body_spacing,
+            highlight_word_idx=_highlight_idx,
         )
 
         if debug_detected_text and debug_lines and debug_font is not None:
@@ -421,20 +639,26 @@ def render_frame_pillow(
     return frame[:, :, ::-1].copy()
 
 
-def _count_body_pages(
+def _body_pages(
     match: dict[str, Any],
     width: int,
     height: int,
     font_file: Path,
     debug_detected_text: bool,
-) -> int:
-    """Count how many body pages a match would fill, without rendering the full frame."""
+) -> list[list[str]]:
+    """Return the paginated body lines a match would fill, without rendering it.
+
+    Mirrors the pagination ``render_frame_pillow`` performs so page counts and
+    per-page word counts stay consistent with what is actually drawn.
+    """
     _, _, image_module, image_draw, _, _ = _frame_dependencies()
     probe = image_module.new("RGBA", (width, height))
     draw = image_draw.Draw(probe)
 
     card_width = int(width * CARD_WIDTH_RATIO)
-    card_height = int(height * (CARD_HEIGHT_RATIO_DEBUG if debug_detected_text else CARD_HEIGHT_RATIO))
+    card_height = int(
+        height * (CARD_HEIGHT_RATIO_DEBUG if debug_detected_text else CARD_HEIGHT_RATIO)
+    )
     card_y0 = (height - card_height) // 2
     card_y1 = card_y0 + card_height
     pad_x = int(card_width * CARD_PADDING_X_RATIO)
@@ -459,7 +683,7 @@ def _count_body_pages(
     )
     body_spacing = max(4, int(body_font.size * LINE_SPACING_RATIO))
     pages = paginate_lines(body_lines, draw, body_font, body_spacing, body_max_height)
-    return max(1, len(pages))
+    return pages or [body_lines]
 
 
 def write_silent_frame_video(
@@ -488,37 +712,48 @@ def write_silent_frame_video(
 
     sorted_matches = sorted(matches, key=lambda m: float(m.get("_start_time", math.inf)))
 
-    # Pre-compute page counts for every unique active match.
-    page_counts: dict[int, int] = {}
+    # Pre-compute paginated body lines for every unique active match. Caching the
+    # pages (not just the count) lets page boundaries be derived from the active
+    # word, matching how render_frame_pillow chooses the displayed page.
+    page_cache: dict[int, list[list[str]]] = {}
 
-    def _get_n_pages(match: dict[str, Any] | None) -> int:
+    def _get_pages(match: dict[str, Any] | None) -> list[list[str]]:
         if match is None:
-            return 1
+            return [[]]
         mid = id(match)
-        if mid not in page_counts:
-            page_counts[mid] = _count_body_pages(match, width, height, font_file, debug_detected_text)
-        return page_counts[mid]
+        if mid not in page_cache:
+            page_cache[mid] = _body_pages(
+                match, width, height, font_file, debug_detected_text
+            )
+        return page_cache[mid]
 
     # First pass: scan all frame timestamps and record render-event boundaries.
-    # An event boundary occurs when either the active match changes or the
-    # displayed page within a match changes.
+    # An event boundary occurs when the active match, the displayed page, or the
+    # actively highlighted word changes.
     tracker = ActiveMatchTracker(sorted_matches)
     events: list[tuple[int, dict[str, Any] | None, int]] = []  # (frame_index, match, page_idx)
-    last_key: tuple[int, int] = (-1, -1)
+    last_key: tuple[int, int, int | None] = (-1, -1, None)
 
     for fi in range(total_frames):
         t = fi / fps
         match = tracker.at(t)
-        n_pages = _get_n_pages(match)
+        pages = _get_pages(match)
+        n_pages = max(1, len(pages))
+        # Include the active word index so a re-render fires on each word change.
+        _wt = list(match.get("_word_timings") or []) if match is not None else []
+        active_word = active_word_timing_index(_wt, t) if _wt else None
         if match is not None and n_pages > 1:
-            _start = float(match.get("_start_time", t))
-            _end = float(match.get("_end_time", t + 1.0))
-            _dur = max(_end - _start, 0.001)
-            _progress = max(0.0, min(1.0, (t - _start) / _dur))
-            page_idx = min(int(_progress * n_pages), n_pages - 1)
+            if active_word is not None:
+                page_idx = _page_index_for_word(pages, active_word)
+            else:
+                _start = float(match.get("_start_time", t))
+                _end = float(match.get("_end_time", t + 1.0))
+                _dur = max(_end - _start, 0.001)
+                _progress = max(0.0, min(1.0, (t - _start) / _dur))
+                page_idx = min(int(_progress * n_pages), n_pages - 1)
         else:
             page_idx = 0
-        key = (id(match), page_idx)
+        key = (id(match), page_idx, active_word)
         if key != last_key:
             events.append((fi, match, page_idx))
             last_key = key
@@ -670,4 +905,3 @@ def validate_font_file(font_file: Path) -> None:
         warn(
             f"Font file '{font_file.name}' does not use a typical TTF/OTF/TTC extension; attempting to load it anyway."
         )
-

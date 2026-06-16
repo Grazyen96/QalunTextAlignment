@@ -2,7 +2,7 @@ from pathlib import Path
 
 from qurantext.cli.main import build_parser as build_cli_parser
 from qurantext.config.paths import ensure_required_directories
-from qurantext.config.settings import get_settings
+from qurantext.config.settings import VIDEO_PRESETS, get_settings
 from qurantext.pipelines.detection import build_parser as build_detection_parser
 
 
@@ -73,5 +73,27 @@ def test_default_video_settings_are_frame_renderer_720p(monkeypatch) -> None:
 
     get_settings.cache_clear()
 
+
+def test_video_presets_contains_expected_keys() -> None:
+    assert set(VIDEO_PRESETS) >= {"fast", "standard", "high", "social"}
+    for name, (w, h, fps) in VIDEO_PRESETS.items():
+        assert w > 0 and h > 0 and fps > 0, f"preset '{name}' has invalid values"
+
+
+def test_preset_flag_overrides_width_height_fps_in_cli() -> None:
+    get_settings.cache_clear()
+    args = build_cli_parser().parse_args(
+        ["generate-video", "--audio", "a.mp3", "--matches", "m.json", "--preset", "high"]
+    )
+    from qurantext.cli.main import _resolve_preset
+
+    _resolve_preset(args)
+
+    w, h, f = VIDEO_PRESETS["high"]
+    assert args.width == w
+    assert args.height == h
+    assert args.fps == f
+
     get_settings.cache_clear()
 
+    get_settings.cache_clear()
