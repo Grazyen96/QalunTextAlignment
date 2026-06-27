@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import sys
 from pathlib import Path
 from typing import cast
 
+from qurantext.config.paths import QURAN_DB_PATH
 from qurantext.config.settings import get_settings
 from qurantext.core.alignment import align_canonical_word_timings
 from qurantext.core.arabic import normalize_alignment_ar
-from qurantext.core.lecture_matching import detect_quran_mentions_in_lecture
+from qurantext.core.lecture_matching import (
+    detect_quran_mentions_in_lecture,
+    select_lecture_timeline,
+)
 from qurantext.core.preamble import extract_preamble, trim_leading_preamble
 from qurantext.core.quran_parser import parse_ayat
 from qurantext.core.range_matching import (
@@ -20,6 +25,7 @@ from qurantext.core.range_matching import (
     detect_last_ayah,
     select_recitation_timeline,
 )
+from qurantext.data.quran_db import QuranDataError, ensure_quran_db
 from qurantext.io.readers import extract_matching_words, load_json
 from qurantext.io.writers import write_json
 from qurantext.services.transcription import WhisperXServiceError, transcribe_audio
@@ -159,18 +165,45 @@ def run_detection(
 
     if mode == "lecture":
         emit("[3/4] Detecting Quran mentions inside lecture...")
-        mentions = detect_quran_mentions_in_lecture(
-            ayat,
-            words,
-            max_span=resolved_max_span,
-            max_merged_ayat=resolved_max_span,
-            min_window_words=lecture_settings.min_window_words,
-            max_window_words=lecture_settings.max_window_words,
-            window_step=lecture_settings.window_step,
-            min_score=resolved_lecture_threshold,
-            min_matched_words=resolved_min_matched_words,
-            candidate_limit=lecture_settings.candidate_limit,
-        )
+        # Back candidate selection with the persisted citation n-gram index: on
+        # lecture audio most windows are speech, not quotes, so the index skips
+        # them before any fuzzy scoring (~10× faster, same final boundaries). If
+        # the store can't be prepared, fall back to the in-memory path so
+        # detection never hard-fails on a missing/unwritable DB.
+        conn = None
+        try:
+            conn = ensure_quran_db(quran, QURAN_DB_PATH)
+        except (OSError, sqlite3.DatabaseError, QuranDataError) as error:
+            emit(f"      Note: citation index unavailable ({error}); using in-memory matcher.")
+        try:
+            # Lecture cards show exactly the single ayah being mentioned: a
+            # teacher quotes one ayah, explains, then quotes the next. Force
+            # single-ayah spans (max_span=1) and block range-merging
+            # (max_merged_ayat=1) so each card is one ayah — a continuously
+            # recited passage still surfaces as its individual ayat in sequence,
+            # which the renderer latches one at a time. (Multi-ayah spans remain
+            # the default for recitation mode, which has its own call below.)
+            mentions = detect_quran_mentions_in_lecture(
+                ayat,
+                words,
+                max_span=1,
+                max_merged_ayat=1,
+                min_window_words=lecture_settings.min_window_words,
+                max_window_words=lecture_settings.max_window_words,
+                window_step=lecture_settings.window_step,
+                min_score=resolved_lecture_threshold,
+                min_matched_words=resolved_min_matched_words,
+                candidate_limit=lecture_settings.candidate_limit,
+                conn=conn,
+                db_strategy="ngram" if conn is not None else "word_overlap",
+            )
+        finally:
+            if conn is not None:
+                conn.close()
+        # Resolve overlapping/competing single-ayah detections into a clean
+        # one-ayah-at-a-time timeline so each card shows exactly the ayah being
+        # mentioned (see select_lecture_timeline).
+        mentions = select_lecture_timeline(mentions)
         result = {
             "matches": mentions,
             "meta": {

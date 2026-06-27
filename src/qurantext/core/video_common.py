@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from qurantext.config.settings import get_settings
+from qurantext.io.readers import extract_segments, load_json
 
 
 def ass_time(seconds: float) -> str:
@@ -119,8 +120,17 @@ def _bridge_match_gaps(
             prev_match = match
 
 
-def validated_matches(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Validate and enrich timed match dictionaries for rendering."""
+def validated_matches(
+    matches: list[dict[str, Any]], *, bridge_gaps: bool = True
+) -> list[dict[str, Any]]:
+    """Validate and enrich timed match dictionaries for rendering.
+
+    When *bridge_gaps* is true (the ASS renderer and the default), gaps between
+    consecutive matches are closed so the previous card never collapses to black.
+    The frame renderer passes ``bridge_gaps=False`` because it *latches* the
+    centred ayah instead: the last detected ayah holds until the next one is
+    detected, so bridging would only fight that behaviour.
+    """
     valid_matches: list[dict[str, Any]] = []
     for match_index, match in enumerate(matches, start=1):
         try:
@@ -142,8 +152,65 @@ def validated_matches(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
         except ValueError as error:
             warn(f"Skipping {error}.")
 
-    _bridge_match_gaps(valid_matches, get_settings().video.gap_midpoint_threshold)
+    if bridge_gaps:
+        _bridge_match_gaps(valid_matches, get_settings().video.gap_midpoint_threshold)
     return valid_matches
+
+
+def load_caption_segments(matches_path: Path) -> list[dict[str, Any]]:
+    """Load live-transcript caption segments referenced by a matches JSON file.
+
+    The detection step records the raw WhisperX transcript path in
+    ``meta.whisperx_raw_output_path``. This reads that transcript and returns one
+    ``{"text", "start", "end"}`` entry per WhisperX segment, in time order, for
+    the bottom caption band. Captions are best-effort: any problem (missing meta,
+    moved/unreadable transcript) logs a warning and returns ``[]`` so the video
+    still renders, just without live captions.
+    """
+    try:
+        payload = json.loads(Path(matches_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        warn(f"Could not read matches file for captions ({error}); rendering without captions.")
+        return []
+    if not isinstance(payload, dict):
+        return []
+
+    meta = payload.get("meta")
+    raw_path = meta.get("whisperx_raw_output_path") if isinstance(meta, dict) else None
+    if not raw_path:
+        warn("Matches file has no transcript path in meta; rendering without live captions.")
+        return []
+
+    # The stored path is absolute, but fall back to the transcript sitting next
+    # to the matches file in case the project was moved between machines.
+    candidates = [Path(raw_path), Path(matches_path).parent / Path(raw_path).name]
+    transcript_path = next((p for p in candidates if p.exists()), None)
+    if transcript_path is None:
+        warn(f"Transcript '{raw_path}' not found; rendering without live captions.")
+        return []
+
+    try:
+        data = load_json(transcript_path)
+    except (OSError, json.JSONDecodeError) as error:
+        warn(f"Could not parse transcript '{transcript_path}' ({error}); rendering without captions.")
+        return []
+
+    segments: list[dict[str, Any]] = []
+    # Keep the raw spoken text verbatim (strip-only normalizer) so non-Arabic or
+    # punctuation-only segments are not dropped from the captions.
+    for segment in extract_segments(data, normalizer=lambda text: (text or "").strip()):
+        text = str(segment.get("text_raw") or "").strip()
+        try:
+            start = float(segment["start"])
+            end = float(segment["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not text or not math.isfinite(start) or not math.isfinite(end) or end < start:
+            continue
+        segments.append({"text": text, "start": start, "end": end})
+
+    segments.sort(key=lambda seg: seg["start"])
+    return segments
 
 
 def require_binary(binary_name: str, install_hint: str | None = None) -> str:

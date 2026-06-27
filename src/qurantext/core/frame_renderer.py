@@ -26,20 +26,34 @@ COLOUR_BODY_TEXT = (255, 255, 255, 255)
 COLOUR_HIGHLIGHT_WORD = (255, 215, 0, 255)  # Gold — active recited word
 COLOUR_DEBUG_TEXT = (188, 188, 198, 255)
 COLOUR_SUBTLE = (150, 150, 162, 255)
+COLOUR_CAPTION_BG = (0, 0, 0, 165)  # translucent strip behind the live captions
+COLOUR_CAPTION_TEXT = (240, 240, 245, 255)
+COLOUR_PLACEHOLDER_TEXT = (205, 205, 215, 255)
 
 CARD_WIDTH_RATIO = 0.86
-CARD_HEIGHT_RATIO = 0.78
-CARD_HEIGHT_RATIO_DEBUG = 0.84
+# Ayah card height as a fraction of the region *above* the caption band.
+CARD_REGION_HEIGHT_RATIO = 0.90
 CARD_RADIUS_RATIO = 0.024
 CARD_PADDING_X_RATIO = 0.055
 CARD_PADDING_Y_RATIO = 0.06
 HEADER_FONT_RATIO = 0.036
-BODY_FONT_START_RATIO = 0.064
-BODY_FONT_MIN_RATIO = 0.026
+BODY_FONT_START_RATIO = 0.060
+BODY_FONT_MIN_RATIO = 0.024
 DEBUG_FONT_START_RATIO = 0.025
 DEBUG_FONT_MIN_RATIO = 0.015
 LINE_SPACING_RATIO = 0.30
 SECTION_GAP_RATIO = 0.02
+
+# Live-transcript caption band pinned to the bottom of the frame.
+CAPTION_BAND_RATIO = 0.20
+CAPTION_PADDING_X_RATIO = 0.06
+CAPTION_FONT_START_RATIO = 0.040
+CAPTION_FONT_MIN_RATIO = 0.022
+
+# Centre placeholder shown before the first ayah is detected.
+DEFAULT_PLACEHOLDER_TITLE = "القرآن الكريم"
+PLACEHOLDER_FONT_START_RATIO = 0.060
+PLACEHOLDER_FONT_MIN_RATIO = 0.030
 
 
 @lru_cache(maxsize=1)
@@ -484,155 +498,301 @@ def draw_centered_multiline_text_with_highlight(
         current_y += line_height + line_spacing
 
 
+@dataclass(slots=True)
+class _FrameLayout:
+    """Geometry shared by the ayah card (centre) and the caption band (bottom)."""
+
+    card: tuple[int, int, int, int]
+    pad_x: int
+    pad_y: int
+    gap: int
+    caption_band: tuple[int, int, int, int]
+
+
+def _frame_layout(width: int, height: int) -> _FrameLayout:
+    """Split the frame into a centred card region and a bottom caption band."""
+    caption_band_h = max(1, int(height * CAPTION_BAND_RATIO))
+    caption_band_top = height - caption_band_h
+    region_h = caption_band_top  # space available above the caption band
+
+    card_width = int(width * CARD_WIDTH_RATIO)
+    card_height = int(region_h * CARD_REGION_HEIGHT_RATIO)
+    card_x0 = (width - card_width) // 2
+    card_y0 = max(0, (region_h - card_height) // 2)
+    card_x1 = card_x0 + card_width
+    card_y1 = card_y0 + card_height
+
+    return _FrameLayout(
+        card=(card_x0, card_y0, card_x1, card_y1),
+        pad_x=int(card_width * CARD_PADDING_X_RATIO),
+        pad_y=int(card_height * CARD_PADDING_Y_RATIO),
+        gap=max(12, int(height * SECTION_GAP_RATIO)),
+        caption_band=(0, caption_band_top, width, height),
+    )
+
+
+@dataclass(slots=True)
+class _CardContent:
+    """Resolved header/body/debug text and pagination for one ayah card."""
+
+    header_text: str
+    header_font: Any
+    header_box: tuple[int, int, int, int]
+    body_box: tuple[int, int, int, int]
+    body_font: Any
+    body_spacing: int
+    body_pages: list[list[str]]
+    debug_font: Any | None
+    debug_lines: list[str]
+    debug_height: int
+
+
+def _card_content(
+    draw: Any,
+    match: dict[str, Any],
+    layout: _FrameLayout,
+    height: int,
+    font_file: Path,
+    debug_detected_text: bool,
+) -> _CardContent:
+    """Fit the header, body and optional debug text for *match* into the card.
+
+    Shared by :func:`render_frame_pillow` and :func:`_body_pages` so the page
+    boundaries used to pick the displayed page match the ones actually drawn.
+    """
+    card_x0, card_y0, card_x1, card_y1 = layout.card
+    card_width = card_x1 - card_x0
+    card_height = card_y1 - card_y0
+    pad_x, pad_y, gap = layout.pad_x, layout.pad_y, layout.gap
+
+    header_text = ayah_label(match)
+    header_font = load_font(font_file, max(18, int(height * HEADER_FONT_RATIO)))
+    header_height = measure_text_bbox(draw, header_text, header_font)[1]
+
+    debug_lines: list[str] = []
+    debug_font = None
+    debug_height = 0
+    if debug_detected_text:
+        detected_text = str(match.get("detected_text") or "").strip()
+        if detected_text:
+            debug_font, debug_lines = fit_font_size(
+                draw,
+                detected_text,
+                font_file,
+                max_width=card_width - (2 * pad_x),
+                max_height=max(32, int(card_height * 0.16)),
+                start_size=max(16, int(height * DEBUG_FONT_START_RATIO)),
+                min_size=max(12, int(height * DEBUG_FONT_MIN_RATIO)),
+            )
+            debug_spacing = max(4, int(debug_font.size * LINE_SPACING_RATIO))
+            _, debug_height = _multiline_metrics(draw, debug_lines, debug_font, debug_spacing)
+
+    header_box = (
+        card_x0 + pad_x,
+        card_y0 + pad_y,
+        card_x1 - pad_x,
+        card_y0 + pad_y + header_height,
+    )
+    body_top = card_y0 + pad_y + header_height + gap
+    body_bottom = card_y1 - pad_y - (debug_height + gap if debug_lines else 0)
+    body_box = (card_x0 + pad_x, body_top, card_x1 - pad_x, max(body_top, body_bottom))
+    body_font, body_lines = fit_font_size(
+        draw,
+        str(match.get("_display_text") or ""),
+        font_file,
+        max_width=body_box[2] - body_box[0],
+        max_height=max(40, body_box[3] - body_box[1]),
+        start_size=max(24, int(height * BODY_FONT_START_RATIO)),
+        min_size=max(16, int(height * BODY_FONT_MIN_RATIO)),
+    )
+    body_spacing = max(4, int(body_font.size * LINE_SPACING_RATIO))
+    body_max_height = max(40, body_box[3] - body_box[1])
+    body_pages = paginate_lines(body_lines, draw, body_font, body_spacing, body_max_height)
+
+    return _CardContent(
+        header_text=header_text,
+        header_font=header_font,
+        header_box=header_box,
+        body_box=body_box,
+        body_font=body_font,
+        body_spacing=body_spacing,
+        body_pages=body_pages,
+        debug_font=debug_font,
+        debug_lines=debug_lines,
+        debug_height=debug_height,
+    )
+
+
+def _draw_ayah_card(
+    draw: Any,
+    t: float,
+    match: dict[str, Any],
+    layout: _FrameLayout,
+    height: int,
+    font_file: Path,
+    debug_detected_text: bool,
+) -> None:
+    """Draw the surah/ayah header plus the (paged, highlighted) ayah body."""
+    content = _card_content(draw, match, layout, height, font_file, debug_detected_text)
+    body_pages = content.body_pages
+
+    # Resolve the active word first: page turns follow the recited word so the
+    # displayed page tracks the highlight instead of a fixed time fraction.
+    _word_timings = match.get("_word_timings") or []
+    _highlight_idx = active_word_timing_index(_word_timings, t) if _word_timings else None
+
+    if len(body_pages) > 1:
+        if _highlight_idx is not None:
+            _page_idx = _page_index_for_word(body_pages, _highlight_idx)
+        else:
+            # No active word (silence or missing timings) — fall back to
+            # clock-proportional paging so multi-page cards still advance.
+            _start = float(match.get("_start_time", t))
+            _end = float(match.get("_end_time", _start + 1.0))
+            _dur = max(_end - _start, 0.001)
+            _progress = max(0.0, min(1.0, (t - _start) / _dur))
+            _page_idx = min(int(_progress * len(body_pages)), len(body_pages) - 1)
+        display_lines = body_pages[_page_idx]
+    else:
+        _page_idx = 0
+        display_lines = body_pages[0] if body_pages else []
+
+    draw_centered_multiline_text(
+        draw, [content.header_text], content.header_font, content.header_box, COLOUR_HEADER_TEXT, 0
+    )
+
+    # _word_timings carries one entry per canonical (non-marker) word, aligned
+    # to the display text upstream (see detection.py), so this index maps
+    # directly onto the word the highlight helper colours.
+    if _highlight_idx is not None and _page_idx > 0:
+        # active_word_timing_index returns an index over the whole ayah's word
+        # list, but only one page is drawn. Make it page-local by subtracting
+        # the non-marker words on earlier pages; the draw helper leaves the
+        # highlight off when the index is not on this page.
+        words_before_page = sum(
+            _count_non_marker_words(line) for page in body_pages[:_page_idx] for line in page
+        )
+        _highlight_idx -= words_before_page
+    draw_centered_multiline_text_with_highlight(
+        draw,
+        display_lines,
+        content.body_font,
+        content.body_box,
+        COLOUR_BODY_TEXT,
+        content.body_spacing,
+        highlight_word_idx=_highlight_idx,
+    )
+
+    if debug_detected_text and content.debug_lines and content.debug_font is not None:
+        card_x0, card_y0, card_x1, card_y1 = layout.card
+        card_width = card_x1 - card_x0
+        pad_x, pad_y, gap = layout.pad_x, layout.pad_y, layout.gap
+        debug_spacing = max(4, int(content.debug_font.size * LINE_SPACING_RATIO))
+        debug_label = "النص المكتشف"
+        label_font = load_font(font_file, max(14, content.debug_font.size))
+        label_width, label_height = measure_text_bbox(draw, debug_label, label_font)
+        label_y = card_y1 - pad_y - content.debug_height - gap - label_height
+        draw.text(
+            (card_x0 + ((card_width - label_width) / 2), label_y),
+            debug_label,
+            font=label_font,
+            fill=COLOUR_SUBTLE,
+            direction="rtl",
+            align="center",
+        )
+        debug_box = (
+            card_x0 + pad_x,
+            label_y + label_height + 6,
+            card_x1 - pad_x,
+            card_y1 - pad_y,
+        )
+        draw_centered_multiline_text(
+            draw, content.debug_lines, content.debug_font, debug_box, COLOUR_DEBUG_TEXT, debug_spacing
+        )
+
+
+def _draw_placeholder(
+    draw: Any, title: str, layout: _FrameLayout, height: int, font_file: Path
+) -> None:
+    """Draw the centre placeholder shown before the first ayah is detected."""
+    card_x0, card_y0, card_x1, card_y1 = layout.card
+    pad_x, pad_y = layout.pad_x, layout.pad_y
+    box = (card_x0 + pad_x, card_y0 + pad_y, card_x1 - pad_x, card_y1 - pad_y)
+    font, lines = fit_font_size(
+        draw,
+        title,
+        font_file,
+        max_width=box[2] - box[0],
+        max_height=max(40, box[3] - box[1]),
+        start_size=max(24, int(height * PLACEHOLDER_FONT_START_RATIO)),
+        min_size=max(18, int(height * PLACEHOLDER_FONT_MIN_RATIO)),
+    )
+    spacing = max(4, int(font.size * LINE_SPACING_RATIO))
+    draw_centered_multiline_text(draw, lines, font, box, COLOUR_PLACEHOLDER_TEXT, spacing)
+
+
+def _draw_caption(
+    image: Any, draw: Any, caption_text: str, layout: _FrameLayout, width: int, height: int,
+    font_file: Path,
+) -> None:
+    """Draw the live-transcript caption inside the bottom band."""
+    _, _, image_module, image_draw, _, _ = _frame_dependencies()
+    bx0, by0, bx1, by1 = layout.caption_band
+
+    overlay = image_module.new("RGBA", image.size, (0, 0, 0, 0))
+    overlay_draw = image_draw.Draw(overlay, "RGBA")
+    overlay_draw.rectangle((bx0, by0, bx1, by1), fill=COLOUR_CAPTION_BG)
+    image.alpha_composite(overlay)
+
+    pad_x = int(width * CAPTION_PADDING_X_RATIO)
+    pad_y = max(8, int((by1 - by0) * 0.16))
+    text_box = (bx0 + pad_x, by0 + pad_y, bx1 - pad_x, by1 - pad_y)
+    font, lines = fit_font_size(
+        draw,
+        caption_text,
+        font_file,
+        max_width=text_box[2] - text_box[0],
+        max_height=max(20, text_box[3] - text_box[1]),
+        start_size=max(16, int(height * CAPTION_FONT_START_RATIO)),
+        min_size=max(12, int(height * CAPTION_FONT_MIN_RATIO)),
+    )
+    spacing = max(4, int(font.size * LINE_SPACING_RATIO))
+    draw_centered_multiline_text(draw, lines, font, text_box, COLOUR_CAPTION_TEXT, spacing)
+
+
 def render_frame_pillow(
     t: float,
     match: dict[str, Any] | None,
     width: int,
     height: int,
     font_file: Path,
+    *,
+    caption_text: str = "",
+    title: str = DEFAULT_PLACEHOLDER_TITLE,
     debug_detected_text: bool = False,
 ) -> Any:
-    """Render one styled frame as a BGR numpy array for OpenCV."""
+    """Render one styled frame as a BGR numpy array for OpenCV.
+
+    The frame has two zones: a centred card showing the active ayah (surah name,
+    ayah number and the Qur'an text) — or *title* as a placeholder when no ayah
+    has been detected yet — and a bottom band showing the live transcript
+    *caption_text* for the current moment.
+    """
     np, _, image_module, image_draw, _, _ = _frame_dependencies()
     image = image_module.new("RGBA", (width, height), COLOUR_BG)
+    layout = _frame_layout(width, height)
+
+    radius = max(18, int(min(width, height) * CARD_RADIUS_RATIO))
+    draw_rounded_rectangle(image, layout.card, radius, COLOUR_CARD)
+    draw = image_draw.Draw(image)
 
     if match is not None:
-        draw = image_draw.Draw(image)
-        card_width = int(width * CARD_WIDTH_RATIO)
-        card_height = int(
-            height * (CARD_HEIGHT_RATIO_DEBUG if debug_detected_text else CARD_HEIGHT_RATIO)
-        )
-        card_x0 = (width - card_width) // 2
-        card_y0 = (height - card_height) // 2
-        card_x1 = card_x0 + card_width
-        card_y1 = card_y0 + card_height
-        radius = max(18, int(min(width, height) * CARD_RADIUS_RATIO))
-        draw_rounded_rectangle(image, (card_x0, card_y0, card_x1, card_y1), radius, COLOUR_CARD)
+        _draw_ayah_card(draw, t, match, layout, height, font_file, debug_detected_text)
+    else:
+        _draw_placeholder(draw, title or DEFAULT_PLACEHOLDER_TITLE, layout, height, font_file)
 
-        draw = image_draw.Draw(image)
-        pad_x = int(card_width * CARD_PADDING_X_RATIO)
-        pad_y = int(card_height * CARD_PADDING_Y_RATIO)
-        gap = max(12, int(height * SECTION_GAP_RATIO))
-
-        header_text = ayah_label(match)
-        header_font = load_font(font_file, max(18, int(height * HEADER_FONT_RATIO)))
-        header_height = measure_text_bbox(draw, header_text, header_font)[1]
-
-        debug_lines: list[str] = []
-        debug_font = None
-        debug_height = 0
-        if debug_detected_text:
-            detected_text = str(match.get("detected_text") or "").strip()
-            if detected_text:
-                debug_font, debug_lines = fit_font_size(
-                    draw,
-                    detected_text,
-                    font_file,
-                    max_width=card_width - (2 * pad_x),
-                    max_height=max(32, int(card_height * 0.16)),
-                    start_size=max(16, int(height * DEBUG_FONT_START_RATIO)),
-                    min_size=max(12, int(height * DEBUG_FONT_MIN_RATIO)),
-                )
-                debug_spacing = max(4, int(debug_font.size * LINE_SPACING_RATIO))
-                _, debug_height = _multiline_metrics(draw, debug_lines, debug_font, debug_spacing)
-            else:
-                debug_detected_text = False
-
-        body_top = card_y0 + pad_y + header_height + gap
-        body_bottom = (
-            card_y1 - pad_y - (debug_height + gap if debug_detected_text and debug_lines else 0)
-        )
-        body_box = (card_x0 + pad_x, body_top, card_x1 - pad_x, max(body_top, body_bottom))
-        body_font, body_lines = fit_font_size(
-            draw,
-            str(match.get("_display_text") or ""),
-            font_file,
-            max_width=body_box[2] - body_box[0],
-            max_height=max(40, body_box[3] - body_box[1]),
-            start_size=max(24, int(height * BODY_FONT_START_RATIO)),
-            min_size=max(16, int(height * BODY_FONT_MIN_RATIO)),
-        )
-
-        body_spacing = max(4, int(body_font.size * LINE_SPACING_RATIO))
-        body_max_height = max(40, body_box[3] - body_box[1])
-        body_pages = paginate_lines(body_lines, draw, body_font, body_spacing, body_max_height)
-
-        # Resolve the active word first: page turns follow the recited word so the
-        # displayed page tracks the highlight instead of a fixed time fraction.
-        _word_timings = match.get("_word_timings") or []
-        _highlight_idx = active_word_timing_index(_word_timings, t) if _word_timings else None
-
-        if len(body_pages) > 1:
-            if _highlight_idx is not None:
-                _page_idx = _page_index_for_word(body_pages, _highlight_idx)
-            else:
-                # No active word (silence or missing timings) — fall back to
-                # clock-proportional paging so multi-page cards still advance.
-                _start = float(match.get("_start_time", t))
-                _end = float(match.get("_end_time", _start + 1.0))
-                _dur = max(_end - _start, 0.001)
-                _progress = max(0.0, min(1.0, (t - _start) / _dur))
-                _page_idx = min(int(_progress * len(body_pages)), len(body_pages) - 1)
-            display_lines = body_pages[_page_idx]
-        else:
-            _page_idx = 0
-            display_lines = body_pages[0] if body_pages else body_lines
-
-        header_box = (
-            card_x0 + pad_x,
-            card_y0 + pad_y,
-            card_x1 - pad_x,
-            card_y0 + pad_y + header_height,
-        )
-        draw_centered_multiline_text(
-            draw, [header_text], header_font, header_box, COLOUR_HEADER_TEXT, 0
-        )
-
-        # _word_timings carries one entry per canonical (non-marker) word, aligned
-        # to the display text upstream (see detection.py), so this index maps
-        # directly onto the word the highlight helper colours.
-        if _highlight_idx is not None and _page_idx > 0:
-            # active_word_timing_index returns an index over the whole ayah's word
-            # list, but only one page is drawn. Make it page-local by subtracting
-            # the non-marker words on earlier pages; the draw helper leaves the
-            # highlight off when the index is not on this page.
-            words_before_page = sum(
-                _count_non_marker_words(line) for page in body_pages[:_page_idx] for line in page
-            )
-            _highlight_idx -= words_before_page
-        draw_centered_multiline_text_with_highlight(
-            draw,
-            display_lines,
-            body_font,
-            body_box,
-            COLOUR_BODY_TEXT,
-            body_spacing,
-            highlight_word_idx=_highlight_idx,
-        )
-
-        if debug_detected_text and debug_lines and debug_font is not None:
-            debug_spacing = max(4, int(debug_font.size * LINE_SPACING_RATIO))
-            debug_label = "النص المكتشف"
-            label_font = load_font(font_file, max(14, debug_font.size))
-            label_width, label_height = measure_text_bbox(draw, debug_label, label_font)
-            label_y = card_y1 - pad_y - debug_height - gap - label_height
-            draw.text(
-                (card_x0 + ((card_width - label_width) / 2), label_y),
-                debug_label,
-                font=label_font,
-                fill=COLOUR_SUBTLE,
-                direction="rtl",
-                align="center",
-            )
-            debug_box = (
-                card_x0 + pad_x,
-                label_y + label_height + 6,
-                card_x1 - pad_x,
-                card_y1 - pad_y,
-            )
-            draw_centered_multiline_text(
-                draw, debug_lines, debug_font, debug_box, COLOUR_DEBUG_TEXT, debug_spacing
-            )
+    if caption_text:
+        _draw_caption(image, draw, caption_text, layout, width, height, font_file)
 
     rgb = image.convert("RGB")
     frame = np.array(rgb)
@@ -655,35 +815,9 @@ def _body_pages(
     probe = image_module.new("RGBA", (width, height))
     draw = image_draw.Draw(probe)
 
-    card_width = int(width * CARD_WIDTH_RATIO)
-    card_height = int(
-        height * (CARD_HEIGHT_RATIO_DEBUG if debug_detected_text else CARD_HEIGHT_RATIO)
-    )
-    card_y0 = (height - card_height) // 2
-    card_y1 = card_y0 + card_height
-    pad_x = int(card_width * CARD_PADDING_X_RATIO)
-    pad_y = int(card_height * CARD_PADDING_Y_RATIO)
-    gap = max(12, int(height * SECTION_GAP_RATIO))
-
-    header_font = load_font(font_file, max(18, int(height * HEADER_FONT_RATIO)))
-    header_height = measure_text_bbox(draw, ayah_label(match), header_font)[1]
-
-    body_top = card_y0 + pad_y + header_height + gap
-    body_max_height = max(40, card_y1 - pad_y - body_top)
-    body_max_width = card_width - 2 * pad_x
-
-    body_font, body_lines = fit_font_size(
-        draw,
-        str(match.get("_display_text") or ""),
-        font_file,
-        max_width=body_max_width,
-        max_height=body_max_height,
-        start_size=max(24, int(height * BODY_FONT_START_RATIO)),
-        min_size=max(16, int(height * BODY_FONT_MIN_RATIO)),
-    )
-    body_spacing = max(4, int(body_font.size * LINE_SPACING_RATIO))
-    pages = paginate_lines(body_lines, draw, body_font, body_spacing, body_max_height)
-    return pages or [body_lines]
+    layout = _frame_layout(width, height)
+    content = _card_content(draw, match, layout, height, font_file, debug_detected_text)
+    return content.body_pages or [[]]
 
 
 def write_silent_frame_video(
@@ -694,9 +828,17 @@ def write_silent_frame_video(
     height: int,
     fps: int,
     font_file: Path,
+    *,
+    captions: list[dict[str, Any]] | None = None,
+    title: str = DEFAULT_PLACEHOLDER_TITLE,
     debug_detected_text: bool = False,
 ) -> None:
     """Write a silent temporary MP4 using OpenCV.
+
+    The centre ayah card is *latched*: the most recently started match is shown
+    and held until the next match starts, so it only changes when a new ayah is
+    detected (a placeholder *title* shows before the first one). The bottom band
+    shows the live-transcript *captions* segment for the current moment.
 
     Frames with identical content are rendered once and written multiple times,
     reducing per-frame PIL overhead for long videos with static ayah cards.
@@ -711,6 +853,7 @@ def write_silent_frame_video(
         )
 
     sorted_matches = sorted(matches, key=lambda m: float(m.get("_start_time", math.inf)))
+    caption_list = sorted(captions or [], key=lambda c: float(c.get("start", math.inf)))
 
     # Pre-compute paginated body lines for every unique active match. Caching the
     # pages (not just the count) lets page boundaries be derived from the active
@@ -728,15 +871,33 @@ def write_silent_frame_video(
         return page_cache[mid]
 
     # First pass: scan all frame timestamps and record render-event boundaries.
-    # An event boundary occurs when the active match, the displayed page, or the
-    # actively highlighted word changes.
-    tracker = ActiveMatchTracker(sorted_matches)
-    events: list[tuple[int, dict[str, Any] | None, int]] = []  # (frame_index, match, page_idx)
-    last_key: tuple[int, int, int | None] = (-1, -1, None)
+    # An event boundary occurs when the latched match, the displayed page, the
+    # actively highlighted word, or the active caption changes.
+    n_matches = len(sorted_matches)
+    events: list[tuple[int, dict[str, Any] | None, str]] = []  # (frame, match, caption_text)
+    last_key: tuple[int | None, int, int | None, int] = (-2, -1, None, -2)
+    card_ptr = -1  # index of the latched match, -1 while showing the placeholder
+    cap_scan = 0  # monotonically advancing cursor into caption_list
+    n_caps = len(caption_list)
 
     for fi in range(total_frames):
         t = fi / fps
-        match = tracker.at(t)
+        # Latch: advance to the most recently started match (holds across gaps).
+        while card_ptr + 1 < n_matches and float(sorted_matches[card_ptr + 1]["_start_time"]) <= t:
+            card_ptr += 1
+        match = sorted_matches[card_ptr] if card_ptr >= 0 else None
+
+        # Captions are not latched — they roll with the speech and clear in gaps.
+        while cap_scan + 1 < n_caps and float(caption_list[cap_scan + 1]["start"]) <= t:
+            cap_scan += 1
+        cap_active = (
+            cap_scan
+            if n_caps
+            and float(caption_list[cap_scan]["start"]) <= t <= float(caption_list[cap_scan]["end"])
+            else -1
+        )
+        caption_text = str(caption_list[cap_active]["text"]) if cap_active >= 0 else ""
+
         pages = _get_pages(match)
         n_pages = max(1, len(pages))
         # Include the active word index so a re-render fires on each word change.
@@ -753,9 +914,9 @@ def write_silent_frame_video(
                 page_idx = min(int(_progress * n_pages), n_pages - 1)
         else:
             page_idx = 0
-        key = (id(match), page_idx, active_word)
+        key = (id(match) if match is not None else None, page_idx, active_word, cap_active)
         if key != last_key:
-            events.append((fi, match, page_idx))
+            events.append((fi, match, caption_text))
             last_key = key
 
     # Second pass: render once per event and write all frames for that segment.
@@ -764,7 +925,7 @@ def write_silent_frame_video(
     report_every = max(1, n_events // 10)
 
     try:
-        for ev_idx, (ev_start, ev_match, _ev_page) in enumerate(events):
+        for ev_idx, (ev_start, ev_match, ev_caption) in enumerate(events):
             ev_end = events[ev_idx + 1][0] if ev_idx + 1 < n_events else total_frames
             frame = render_frame_pillow(
                 ev_start / fps,
@@ -772,6 +933,8 @@ def write_silent_frame_video(
                 width,
                 height,
                 font_file,
+                caption_text=ev_caption,
+                title=title,
                 debug_detected_text=debug_detected_text,
             )
             for _ in range(ev_end - ev_start):
@@ -832,6 +995,8 @@ def render_frame_video(
     font_file: Path,
     keep_temp: bool = False,
     debug_detected_text: bool = False,
+    captions: list[dict[str, Any]] | None = None,
+    title: str = DEFAULT_PLACEHOLDER_TITLE,
 ) -> Path | None:
     """Render a styled frame-by-frame video and mux the original audio."""
     _frame_dependencies()
@@ -840,7 +1005,9 @@ def render_frame_video(
     require_binary("ffprobe", "Install FFmpeg/ffprobe and try again.")
 
     duration = get_audio_duration(audio_path)
-    valid_matches = validated_matches(matches)
+    # The centre card is latched (holds until the next detection), so gap
+    # bridging is unnecessary and would only move the detection boundaries.
+    valid_matches = validated_matches(matches, bridge_gaps=False)
     if not valid_matches and matches:
         warn(
             "No valid timed matches remained for the frame renderer; rendering a dark video with audio only."
@@ -873,6 +1040,8 @@ def render_frame_video(
             height,
             fps,
             font_file,
+            captions=captions,
+            title=title,
             debug_detected_text=debug_detected_text,
         )
         frame_elapsed = time.monotonic() - t0

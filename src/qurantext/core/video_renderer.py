@@ -14,6 +14,7 @@ from qurantext.config.settings import (
 )
 from qurantext.core.ass_renderer import build_ass, render_ass_video, validate_font_name
 from qurantext.core.frame_renderer import (
+    DEFAULT_PLACEHOLDER_TITLE,
     ActiveMatchTracker,
     active_match_at,
     render_frame_pillow,
@@ -25,6 +26,7 @@ from qurantext.core.video_common import (
     ass_time,
     ayah_label,
     escape_ass,
+    load_caption_segments,
     load_matches,
     validate_dimensions,
     validate_fps,
@@ -51,6 +53,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--font-name", default=None, help="Installed font family name for ASS rendering."
     )
     parser.add_argument("--font-file", default=None, help="Font file path for frame rendering.")
+    parser.add_argument(
+        "--title",
+        default=None,
+        help=(
+            "Placeholder text shown in the centre (frame renderer) before the first ayah "
+            f"is detected. Defaults to '{DEFAULT_PLACEHOLDER_TITLE}'."
+        ),
+    )
     parser.add_argument(
         "--renderer",
         choices=["ass", "frame"],
@@ -130,6 +140,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
             if args.debug_detected_text:
                 warn("Ignoring --debug-detected-text because it only applies to --renderer frame.")
+            if args.title:
+                warn("Ignoring --title because it only applies to --renderer frame.")
             if not args.font_name:
                 raise ValueError("--font-name is required when --renderer ass is selected")
             validate_font_name(args.font_name)
@@ -153,6 +165,9 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"No --font-file given; using bundled default font: {default_font}")
                 font_file_path = default_font
             validate_font_file(font_file_path)
+            captions = load_caption_segments(matches_path)
+            if captions:
+                print(f"Loaded {len(captions)} caption segment(s) for the bottom band.")
             render_frame_video(
                 audio_path,
                 matches,
@@ -163,6 +178,8 @@ def main(argv: list[str] | None = None) -> int:
                 font_file_path,
                 keep_temp=args.keep_temp,
                 debug_detected_text=args.debug_detected_text,
+                captions=captions,
+                title=args.title or DEFAULT_PLACEHOLDER_TITLE,
             )
 
     except (FileNotFoundError, ValueError, RuntimeError) as error:

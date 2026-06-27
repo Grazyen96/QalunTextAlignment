@@ -1,3 +1,4 @@
+import json
 from unittest.mock import patch
 
 import pytest
@@ -11,7 +12,7 @@ from qurantext.core.frame_renderer import (
     active_word_timing_index,
     render_frame_pillow,
 )
-from qurantext.core.video_common import validated_matches
+from qurantext.core.video_common import load_caption_segments, validated_matches
 
 _BUNDLED_FONT = PROJECT_ROOT / "fonts" / "qaloon.10.ttf"
 
@@ -174,6 +175,19 @@ def test_validated_matches_leaves_overlapping_groups_untouched() -> None:
     assert enriched[1]["_start_time"] == 1.0
 
 
+def test_validated_matches_no_bridge_preserves_original_times() -> None:
+    # The frame renderer latches the centre card, so it disables bridging: each
+    # match must keep its own detected start/end and the gap is left intact.
+    matches = [
+        {"start_time": 0.0, "end_time": 2.0, "full_text": "ا"},
+        {"start_time": 5.0, "end_time": 7.0, "full_text": "ب"},
+    ]
+    enriched = validated_matches(matches, bridge_gaps=False)
+    assert enriched[0]["_end_time"] == 2.0
+    assert enriched[1]["_start_time"] == 5.0  # NOT pulled back to the previous end
+    assert enriched[1]["_end_time"] == 7.0
+
+
 def test_validated_matches_splits_long_pause_at_midpoint() -> None:
     # A long pause (gap 10.0s > 3.0s threshold) meets in the middle: previous
     # card holds to the midpoint, next card appears there.
@@ -194,6 +208,51 @@ def test_active_word_timing_index_holds_last_started_during_silence() -> None:
     assert active_word_timing_index(word_timings, 2.5) == 1
     assert active_word_timing_index(word_timings, -1.0) is None
     assert active_word_timing_index([], 0.0) is None
+
+
+def test_load_caption_segments_reads_transcript(tmp_path) -> None:
+    transcript = tmp_path / "lecture_whisperx_raw.json"
+    transcript.write_text(
+        json.dumps(
+            {
+                "segments": [
+                    {"start": 1.0, "end": 3.0, "text": " يقول المحاضر "},
+                    {"start": 5.0, "end": 6.5, "text": "ثم تلا الآية"},
+                    {"start": 7.0, "end": 6.0, "text": "زمن غير صالح"},  # end < start → dropped
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    matches_file = tmp_path / "lecture_lecture.json"
+    matches_file.write_text(
+        json.dumps({"matches": [], "meta": {"whisperx_raw_output_path": str(transcript)}}),
+        encoding="utf-8",
+    )
+
+    segments = load_caption_segments(matches_file)
+    assert [s["text"] for s in segments] == ["يقول المحاضر", "ثم تلا الآية"]
+    assert segments[0]["start"] == 1.0 and segments[0]["end"] == 3.0
+
+
+def test_load_caption_segments_missing_meta_returns_empty(tmp_path) -> None:
+    matches_file = tmp_path / "lecture_lecture.json"
+    matches_file.write_text(json.dumps({"matches": []}), encoding="utf-8")
+    assert load_caption_segments(matches_file) == []
+
+
+@pytest.mark.skipif(not _BUNDLED_FONT.exists(), reason="bundled font missing")
+def test_render_frame_pillow_placeholder_and_caption_render() -> None:
+    from PIL import features
+
+    if not features.check("raqm"):
+        pytest.skip("Pillow built without libraqm")
+
+    # match=None → placeholder title in the centre; caption_text → bottom band.
+    frame = render_frame_pillow(
+        0.0, None, 480, 320, _BUNDLED_FONT, caption_text="يقول المحاضر", title="القرآن الكريم"
+    )
+    assert frame.shape == (320, 480, 3)
 
 
 @pytest.mark.skipif(not _BUNDLED_FONT.exists(), reason="bundled font missing")

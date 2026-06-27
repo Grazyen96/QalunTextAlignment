@@ -42,13 +42,36 @@ def _is_surah_header(raw_line: str) -> bool:
     return True
 
 
+def is_ayah_marker(token: str) -> bool:
+    """True when *token* is a standalone ayah-number marker.
+
+    Ayah numbers are Arabic-Indic digits with no leading zero — no ayah is
+    numbered 0, and the mushaf never zero-pads a verse number. Rejecting
+    leading-zero tokens stops the file's trailing version string
+    «النسخة رقم ٠٥» from being misread as a marker, which otherwise flushes the
+    copyright footer as a phantom An-Nās ayah 5.
+    """
+    return bool(ARABIC_INDIC_DIGIT_RE.match(token)) and not token.startswith("٠")
+
+
+_BASMALA_NORM = "بسم الله الرحمن الرحيم"
+
+
 def _is_basmala(raw_line: str) -> bool:
-    """True when the line is a standalone basmala."""
-    stripped = DETECTION_TASHKEEL.sub("", raw_line.strip())
-    first = stripped.split()[0] if stripped.split() else ""
-    first_norm = re.sub(r"[^\u0621-\u064A]", "", first)
-    tail = re.sub(r"[^\u0621-\u064A\s]", " ", stripped)
-    return first_norm == "بسم" and ("لرحمن" in tail or "الرحمن" in tail)
+    """True only for a standalone opening basmala line — the whole line and
+    nothing else.
+
+    The old "first word is بسم" heuristic also matched An-Naml 27:30's *in-verse*
+    basmala, where mushaf line-wrapping puts «بسم الله الرحمن الرحيم ٣٠ أَلَّا
+    تَعْلُواْ…» on one physical line. Skipping that whole line dropped markers
+    ٣٠/٣١, all of 27:31, and the tail of 27:30, then fused the remainder into
+    27:32. Every one of the 113 genuine opening basmalas in the file normalizes
+    exactly to «بسم الله الرحمن الرحيم» and is never combined with following ayah
+    text, so an exact match skips them all and rejects the in-verse case.
+    """
+    return normalize_detection_ar(raw_line) == _BASMALA_NORM
+
+
 
 
 def _is_taawwudh(raw_line: str) -> bool:
@@ -155,7 +178,7 @@ def _parse_ayat_cached(quran_path: str, surah_filter: str | None = None) -> tupl
             continue
 
         for token in stripped.split():
-            if ARABIC_INDIC_DIGIT_RE.match(token):
+            if is_ayah_marker(token):
                 flush(arabic_indic_to_int(token))
             elif re.search(r"[\u0621-\u064A]", token):
                 buf.append(token)

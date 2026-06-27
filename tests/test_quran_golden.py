@@ -68,7 +68,26 @@ def test_golden_parse_of_shipped_qalun_file() -> None:
     assert find(23, "اعوذ بك من همزت"), "Al-Muʾminūn ayah starting with أعوذ was dropped"
 
     # Lock the recovered ayah count so a regression that re-drops them is caught.
-    assert len(ayat) == 6213
+    # 6214 reflects two correctness fixes over the old 6213:
+    #   -1  the trailing version string «النسخة رقم ٠٥» is no longer misread as a
+    #       marker, so the copyright footer is no longer a phantom An-Nās ayah 5.
+    #   +2  An-Naml 27:30 and 27:31 are no longer lost to the in-verse basmala
+    #       false-skip (see is_ayah_marker / _is_basmala).
+    assert len(ayat) == 6214
+
+    # The footer must NOT appear as a verse, and An-Nās ends at ayah 6.
+    annas = sorted(a["ayah_num"] for a in ayat if a["surah_num"] == 114)
+    assert annas == [1, 2, 3, 4, 5, 6], "An-Nās must have exactly 6 ayat, no footer phantom"
+
+    # An-Naml's in-verse basmala (27:30) must not eat its own line: 30 keeps the
+    # basmala, 31 is recovered, and every surah numbers 1..N with no gap.
+    naml = sorted(a["ayah_num"] for a in ayat if a["surah_num"] == 27)
+    assert naml == list(range(1, 96)), "An-Naml must be 95 contiguous ayat"
+    assert find(27, "وانه بسم الله الرحمن الرحيم"), "27:30 in-verse basmala dropped"
+    assert find(27, "الا تعلوا علي واتوني مسلمين"), "27:31 was dropped"
+    for surah in surah_nums:
+        nums = sorted(a["ayah_num"] for a in ayat if a["surah_num"] == surah)
+        assert nums == list(range(1, len(nums) + 1)), f"surah {surah} has an ayah-number gap"
 
 
 @pytest.mark.skipif(not QURAN_FILE.exists(), reason="shipped Quran file not present")

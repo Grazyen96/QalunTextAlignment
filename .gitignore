@@ -36,6 +36,10 @@ Thumbs.db
 # If you want to ignore all generated output folders
 output_word/
 
+# Built data store (regenerate with `qurantext build-db`)
+/data/*.sqlite
+/data/*.sqlite.tmp
+
 # Optional: test/cache/build artifacts
 .pytest_cache/
 .mypy_cache/

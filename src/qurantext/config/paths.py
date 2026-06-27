@@ -11,6 +11,10 @@ RECITATIONS_INPUT_DIR = INPUT_DIR / "recitations"
 
 OUTPUT_DIR = PROJECT_ROOT / "output"
 VIDEOS_OUTPUT_DIR = OUTPUT_DIR / "videos"
+
+# On-device data store (versioned SQLite build of the certified Qalun text).
+DATA_DIR = PROJECT_ROOT / "data"
+QURAN_DB_PATH = DATA_DIR / "quran.sqlite"
 RECITATION_MATCHING_OUTPUT_DIR = OUTPUT_DIR / "recitation_matching"
 LECTURE_MATCHING_OUTPUT_DIR = OUTPUT_DIR / "lecture_matching"
 WHISPERX_TRANSCRIPTS_OUTPUT_DIR = OUTPUT_DIR / "whisperx_transcripts"

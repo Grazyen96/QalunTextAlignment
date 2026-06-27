@@ -8,12 +8,15 @@ from pathlib import Path
 from qurantext import __version__
 from qurantext.config.paths import (
     LECTURE_MATCHING_OUTPUT_DIR,
+    QURAN_DB_PATH,
     RANGE_MATCHING_OUTPUT_DIR,
     RECITATION_MATCHING_OUTPUT_DIR,
     VIDEOS_OUTPUT_DIR,
     WHISPERX_TRANSCRIPTS_OUTPUT_DIR,
 )
 from qurantext.config.settings import VIDEO_PRESETS, get_settings
+from qurantext.data.citation_index import DEFAULT_NGRAM_N
+from qurantext.data.quran_db import build_quran_db
 from qurantext.io.readers import load_json
 from qurantext.pipelines.detection import run_detection
 from qurantext.pipelines.recitation import build_recitation_output_paths, run_word_alignment
@@ -90,6 +93,18 @@ def _run_transcribe(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_build_db(args: argparse.Namespace) -> int:
+    summary = build_quran_db(
+        args.quran, args.output, verify=not args.no_verify, ngram_n=args.ngram_n
+    )
+    print(f"Built Quran store at {summary['db_path']}")
+    print(
+        f"  surahs={summary['surahs']} ayat={summary['ayat']} words={summary['words']}"
+        f" ngrams={summary['ngrams']} data_version={summary['data_version']}"
+    )
+    return 0
+
+
 def _resolve_preset(args: argparse.Namespace) -> argparse.Namespace:
     """Apply --preset overrides to width/height/fps on *args* (mutates in place)."""
     preset = getattr(args, "preset", None)
@@ -121,6 +136,7 @@ def _run_generate_video(args: argparse.Namespace) -> int:
         fps=args.fps,
         keep_temp=args.keep_temp,
         debug_detected_text=args.debug_detected_text,
+        title=getattr(args, "title", None),
     )
 
 
@@ -181,6 +197,7 @@ def _run_all(args: argparse.Namespace) -> int:
         fps=args.fps,
         keep_temp=args.keep_temp,
         debug_detected_text=args.debug_detected_text,
+        title=getattr(args, "title", None),
     )
 
 
@@ -198,6 +215,31 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     subparsers = parser.add_subparsers(dest="command")
+
+    build_db_parser = subparsers.add_parser(
+        "build-db",
+        help="Build the versioned SQLite store from the certified Qalun text.",
+    )
+    build_db_parser.add_argument(
+        "--quran", required=True, help="Path to the certified Qalun text file."
+    )
+    build_db_parser.add_argument(
+        "--output",
+        default=str(QURAN_DB_PATH),
+        help="Path for the output SQLite store.",
+    )
+    build_db_parser.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="Skip the consistency check against the ayah-level parser.",
+    )
+    build_db_parser.add_argument(
+        "--ngram-n",
+        type=int,
+        default=DEFAULT_NGRAM_N,
+        help="Phrase length for the citation n-gram index.",
+    )
+    build_db_parser.set_defaults(handler=_run_build_db)
 
     word_align_parser = subparsers.add_parser(
         "word-align",
@@ -316,6 +358,11 @@ def build_parser() -> argparse.ArgumentParser:
     video_parser.add_argument("--font-name", default=None)
     video_parser.add_argument("--font-file", default=None)
     video_parser.add_argument(
+        "--title",
+        default=None,
+        help="Centre placeholder text shown before the first ayah (frame renderer).",
+    )
+    video_parser.add_argument(
         "--renderer", choices=["ass", "frame"], default=settings.video.renderer
     )
     video_parser.add_argument(
@@ -387,6 +434,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_all_parser.add_argument("--font-name", default=None)
     run_all_parser.add_argument("--font-file", default=None)
+    run_all_parser.add_argument(
+        "--title",
+        default=None,
+        help="Centre placeholder text shown before the first ayah (frame renderer).",
+    )
     run_all_parser.add_argument(
         "--renderer", choices=["ass", "frame"], default=settings.video.renderer
     )

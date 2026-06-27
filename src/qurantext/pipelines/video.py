@@ -18,6 +18,7 @@ def run_video_generation(
     fps: int | None = None,
     keep_temp: bool = False,
     debug_detected_text: bool = False,
+    title: str | None = None,
 ) -> int:
     """Run the video renderer using explicit function arguments."""
     settings = get_settings()
@@ -38,6 +39,8 @@ def run_video_generation(
         argv.extend(["--font-name", font_name])
     if font_file:
         argv.extend(["--font-file", font_file])
+    if title:
+        argv.extend(["--title", title])
     if width is not None:
         argv.extend(["--width", str(width)])
     elif settings.video.width:
