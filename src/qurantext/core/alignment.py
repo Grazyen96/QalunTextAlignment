@@ -258,3 +258,71 @@ def align_canonical_word_timings(
 
     _interpolate_missing_timings(timings, transcript_words)
     return timings
+
+
+def refine_word_timings(
+    timings: list[dict],
+    *,
+    offset: float = 0.0,
+    bridge_max: float = 0.6,
+) -> list[dict]:
+    """Post-process canonical word timings for steadier, better-synced highlighting.
+
+    Operates on the output of :func:`align_canonical_word_timings` — one
+    ``{"start", "end"}`` per canonical word — applying three order-preserving
+    corrections that target the two ways raw WhisperX/CTC timings read wrong on
+    screen. The frame renderer switches the highlight on each word's *start*
+    (``active_word_timing_index`` holds the last-started word through any gap),
+    so steadier starts are what the viewer feels; the end corrections keep the
+    spans continuous and keyframe-ready for the editable-project export.
+
+    1. **Monotonic starts** — clamp each start up to the previous one so a word
+       whose onset estimate landed *before* its predecessor can't make the
+       highlight jump backwards (the backward half of per-word jitter).
+    2. **Onset-anchored ends** — when the gap to the next word is small
+       (``<= bridge_max``) or negative (overlap), pull this word's end to the
+       next word's start, so spans are gap-free and continuous. Larger gaps (a
+       genuine pause between ayat) are left intact.
+    3. **Global offset** — add ``offset`` seconds to every start and end
+       (floored at 0) to cancel a consistent highlight lag (use a negative
+       offset) or lead (positive). This is the single knob for the uniform
+       early/late bias CTC alignment leaves on every word.
+
+    ``None`` entries (empty transcript) and non-numeric values pass through
+    untouched. Returns a new list; the input is not mutated.
+    """
+    refined = [dict(t) for t in timings]
+    n = len(refined)
+
+    # 1. Monotonic starts (and keep each end at or after its own start).
+    prev_start: float | None = None
+    for entry in refined:
+        start = entry.get("start")
+        if not isinstance(start, (int, float)):
+            continue
+        if prev_start is not None and start < prev_start:
+            start = prev_start
+            entry["start"] = start
+        end = entry.get("end")
+        if isinstance(end, (int, float)) and end < start:
+            entry["end"] = start
+        prev_start = start
+
+    # 2. Onset-anchored ends: bridge small gaps / overlaps to the next start.
+    for i in range(n - 1):
+        cur_end = refined[i].get("end")
+        next_start = refined[i + 1].get("start")
+        if not isinstance(cur_end, (int, float)) or not isinstance(next_start, (int, float)):
+            continue
+        if next_start - cur_end <= bridge_max:
+            refined[i]["end"] = next_start
+
+    # 3. Global offset (floored at 0 so nothing goes negative near t=0).
+    if offset:
+        for entry in refined:
+            for key in ("start", "end"):
+                value = entry.get(key)
+                if isinstance(value, (int, float)):
+                    entry[key] = max(0.0, value + offset)
+
+    return refined

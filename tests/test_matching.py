@@ -8,6 +8,44 @@ from qurantext.core.range_matching import (
     select_recitation_timeline,
     trim_match_to_ayah_range,
 )
+from qurantext.pipelines.detection import assign_recitation_word_timings
+
+
+def test_assign_recitation_word_timings_derives_window_from_word_onsets() -> None:
+    """Card start/end come from aligned word onsets, not the fuzzy match window.
+
+    Reproduces the chunk-boundary lag: a continuous recital of two ayat where the
+    matcher handed the second chunk a start_time far later than the ayah's real
+    onset. After assignment the cards must tile (chunk2 starts exactly where the
+    reciter starts ayah 2), with no dropped words in the gap.
+    """
+    recitation_ayat = [
+        {"surah_num": 1, "ayah_num": 1, "text_raw": "الحمد لله", "_index": 0},
+        {"surah_num": 1, "ayah_num": 2, "text_raw": "رب العالمين", "_index": 1},
+    ]
+    words = [
+        {"word_norm": "الحمد", "start": 0.0, "end": 0.5},
+        {"word_norm": "لله", "start": 0.5, "end": 1.0},
+        {"word_norm": "رب", "start": 1.0, "end": 1.5},  # ayah 2 begins here
+        {"word_norm": "العالمين", "start": 1.5, "end": 2.0},
+    ]
+    mentions = [
+        {"from_ayah": 1, "to_ayah": 1, "start_time": 0.0, "end_time": 5.0},
+        # Buggy coarse window: claims ayah 2 starts at 3.0s, long after 1.0s.
+        {"from_ayah": 2, "to_ayah": 2, "start_time": 3.0, "end_time": 8.0},
+    ]
+
+    assign_recitation_word_timings(mentions, recitation_ayat, words)
+
+    # Each card carries exactly its ayah's words.
+    assert [w["word"] for w in mentions[0]["word_timings"]] == ["الحمد", "لله"]
+    assert [w["word"] for w in mentions[1]["word_timings"]] == ["رب", "العالمين"]
+    # The second card now starts at the true onset of ayah 2, not 3.0.
+    assert mentions[1]["start_time"] == 1.0
+    # Cards tile with no hole: chunk 1 ends exactly where chunk 2 begins.
+    assert mentions[0]["end_time"] == mentions[1]["start_time"]
+    assert mentions[0]["start_time"] == 0.0
+    assert mentions[1]["end_time"] == 2.0
 
 
 def _sample_ayat() -> list[dict]:

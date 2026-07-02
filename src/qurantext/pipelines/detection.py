@@ -9,7 +9,7 @@ from typing import cast
 
 from qurantext.config.paths import QURAN_DB_PATH
 from qurantext.config.settings import get_settings
-from qurantext.core.alignment import align_canonical_word_timings
+from qurantext.core.alignment import align_canonical_word_timings, refine_word_timings
 from qurantext.core.arabic import normalize_alignment_ar
 from qurantext.core.lecture_matching import (
     detect_quran_mentions_in_lecture,
@@ -39,6 +39,57 @@ def _is_ayah_marker(token: str) -> bool:
     """
     stripped = token.strip()
     return bool(stripped) and all("٠" <= c <= "٩" for c in stripped)
+
+
+def assign_recitation_word_timings(
+    mentions: list[dict],
+    recitation_ayat: list[dict],
+    words: list[dict],
+    *,
+    offset: float = 0.0,
+    bridge_max: float = 0.6,
+) -> None:
+    """Attach word timings and re-derive each card's display window, in place.
+
+    Recitation is a forced-alignment problem over KNOWN text, so the whole
+    transcript is aligned against the whole detected range ONCE — every
+    canonical (non-marker) word gets its real onset. Each mention then takes the
+    slice of that global alignment covering its ``from_ayah..to_ayah`` and its
+    ``start_time``/``end_time`` are set from those words' true onsets.
+
+    The previous per-chunk approach windowed the transcript by each match's
+    *fuzzy* start/end (coarse 5–35-word windows, step 3); at a chunk boundary
+    that could drop a whole ayah and make the card switch lag the reciter by
+    seconds. Deriving the window from the aligned words instead makes cards tile
+    the recitation with no gap and switch exactly on the next chunk's first word.
+    """
+    range_tokens: list[tuple[int, str]] = []  # (ayah_num, token) in recital order
+    for ayah in recitation_ayat:
+        for token in str(ayah["text_raw"]).split():
+            if not _is_ayah_marker(token):
+                range_tokens.append((ayah["ayah_num"], token))
+
+    range_norms = [normalize_alignment_ar(token) for _, token in range_tokens]
+    global_timings = align_canonical_word_timings(words, range_norms)
+    # Steady the raw CTC timings: monotonic starts (kill backward jitter),
+    # gap-free onset-anchored ends (keyframe-ready spans, and cards that abut
+    # cleanly), and a global offset to cancel any consistent highlight lag/lead.
+    global_timings = refine_word_timings(global_timings, offset=offset, bridge_max=bridge_max)
+
+    for match in mentions:
+        from_ayah, to_ayah = match["from_ayah"], match["to_ayah"]
+        word_timings = [
+            {"word": token, "start": global_timings[i]["start"], "end": global_timings[i]["end"]}
+            for i, (ayah_num, token) in enumerate(range_tokens)
+            if from_ayah <= ayah_num <= to_ayah
+        ]
+        match["word_timings"] = word_timings
+        starts = [w["start"] for w in word_timings if isinstance(w["start"], (int, float))]
+        ends = [w["end"] for w in word_timings if isinstance(w["end"], (int, float))]
+        if starts:
+            match["start_time"] = round(min(starts), 2)
+        if ends:
+            match["end_time"] = round(max(ends), 2)
 
 
 def count_whisperx_segments(data: dict | list) -> int:
@@ -306,32 +357,15 @@ def run_detection(
             max_span=resolved_max_span,
         )
 
-        # Attach per-word timestamps to each match for video word highlighting.
-        # The video highlights the Nth *canonical* word, so transcript words are
-        # aligned onto the canonical text first — a positional (Nth transcript ≈
-        # Nth canonical) mapping drifts ahead/behind whenever the counts differ
-        # (repeats, split/merged tokens, a leading preamble). The result is one
-        # timing per canonical (non-marker) word, in display order.
-        # A small tolerance keeps boundary words from being excluded.
-        _eps = 0.1
-        for _match in mentions:
-            _win_words = [
-                w
-                for w in words
-                if w["start"] >= _match["start_time"] - _eps
-                and w["end"] <= _match["end_time"] + _eps
-            ]
-            _canon_tokens = [
-                tok
-                for tok in str(_match.get("full_text") or "").replace("\n", " ").split()
-                if not _is_ayah_marker(tok)
-            ]
-            _canon_norms = [normalize_alignment_ar(tok) for tok in _canon_tokens]
-            _timings = align_canonical_word_timings(_win_words, _canon_norms)
-            _match["word_timings"] = [
-                {"word": tok, "start": tm["start"], "end": tm["end"]}
-                for tok, tm in zip(_canon_tokens, _timings, strict=True)
-            ]
+        # Attach per-word timestamps for the video highlight and re-derive each
+        # card's display window from those aligned onsets (see the helper).
+        assign_recitation_word_timings(
+            mentions,
+            recitation_ayat,
+            words,
+            offset=settings.alignment.highlight_offset_s,
+            bridge_max=settings.alignment.bridge_max_s,
+        )
 
         # A leading istiʿādha/basmala is stripped from the canonical text, so the
         # matcher folds that audio into the first ayah — pulling its start time to

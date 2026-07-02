@@ -4,6 +4,7 @@ from qurantext.core.alignment import (
     align_canonical_word_timings,
     align_segments,
     align_words,
+    refine_word_timings,
 )
 from qurantext.core.quran_parser import parse_ayat
 from qurantext.io.readers import extract_alignment_words, extract_matching_words
@@ -70,6 +71,57 @@ def test_canonical_timings_interpolate_dropped_word() -> None:
 def test_canonical_timings_empty_transcript_yields_none() -> None:
     timings = align_canonical_word_timings([], ["الحمد", "لله"])
     assert timings == [{"start": None, "end": None}, {"start": None, "end": None}]
+
+
+def test_refine_word_timings_default_bridges_small_gaps() -> None:
+    # Ragged CTC ends with small silences between words -> continuous spans.
+    timings = [
+        {"start": 0.0, "end": 0.40},
+        {"start": 0.50, "end": 0.90},
+        {"start": 1.00, "end": 1.40},
+    ]
+    refined = refine_word_timings(timings)
+    assert [(t["start"], t["end"]) for t in refined] == [
+        (0.0, 0.50),
+        (0.50, 1.00),
+        (1.00, 1.40),
+    ]
+
+
+def test_refine_word_timings_preserves_long_pause() -> None:
+    # A genuine pause (> bridge_max) between ayat is left intact.
+    timings = [
+        {"start": 0.0, "end": 0.40},
+        {"start": 2.50, "end": 3.00},
+    ]
+    refined = refine_word_timings(timings, bridge_max=0.6)
+    assert refined[0]["end"] == 0.40  # not stretched across the pause
+    assert refined[1]["start"] == 2.50
+
+
+def test_refine_word_timings_clamps_backward_start() -> None:
+    # A word whose onset landed before its predecessor must not jump backwards.
+    timings = [
+        {"start": 1.00, "end": 1.40},
+        {"start": 0.80, "end": 1.30},
+    ]
+    refined = refine_word_timings(timings, bridge_max=0.0)
+    assert refined[1]["start"] == 1.00
+    assert refined[1]["end"] >= refined[1]["start"]
+
+
+def test_refine_word_timings_applies_global_offset() -> None:
+    timings = [{"start": 0.50, "end": 0.90}, {"start": 1.00, "end": 1.40}]
+    refined = refine_word_timings(timings, offset=-0.1, bridge_max=0.0)
+    assert refined[0]["start"] == 0.40
+    assert refined[1]["start"] == 0.90
+    # Offset is floored at 0 near the start of the recording.
+    assert refine_word_timings([{"start": 0.05, "end": 0.2}], offset=-0.1)[0]["start"] == 0.0
+
+
+def test_refine_word_timings_passes_through_none_entries() -> None:
+    timings = [{"start": None, "end": None}, {"start": None, "end": None}]
+    assert refine_word_timings(timings, offset=-0.1) == timings
 
 
 def test_align_words_and_segments_keep_unmatched_entries_for_manual_review() -> None:

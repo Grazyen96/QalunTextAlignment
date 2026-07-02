@@ -55,6 +55,14 @@ DEFAULT_LECTURE_MATCHING = {
     "candidate_limit": DEFAULT_LECTURE_CANDIDATE_LIMIT,
 }
 
+# Recitation word-highlight timing corrections (applied by refine_word_timings).
+# Offset shifts every highlight start/end to cancel a consistent lag (negative)
+# or lead (positive); 0.0 = neutral, dial empirically per reciter. Bridge_max is
+# the largest inter-word silence (seconds) that gets closed so spans stay
+# continuous — gaps beyond it are treated as genuine pauses and left intact.
+DEFAULT_HIGHLIGHT_OFFSET_S = 0.0
+DEFAULT_TIMING_BRIDGE_MAX_S = 0.6
+
 DEFAULT_VIDEO_RENDERER = "frame"
 DEFAULT_VIDEO_WIDTH = 1280
 DEFAULT_VIDEO_HEIGHT = 720
@@ -240,6 +248,14 @@ class LectureMatchingSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class AlignmentSettings:
+    """Runtime corrections applied to recitation word-highlight timings."""
+
+    highlight_offset_s: float
+    bridge_max_s: float
+
+
+@dataclass(frozen=True, slots=True)
 class VideoSettings:
     """Runtime defaults for video rendering."""
 
@@ -258,6 +274,7 @@ class AppSettings:
     whisperx: WhisperXSettings
     range_matching: RangeMatchingSettings
     lecture_matching: LectureMatchingSettings
+    alignment: AlignmentSettings
     video: VideoSettings
     word_match_threshold: float
     aya_match_threshold: float
@@ -348,6 +365,15 @@ def get_settings() -> AppSettings:
         ),
     )
 
+    alignment = AlignmentSettings(
+        highlight_offset_s=_env_float(
+            "QURANTEXT_HIGHLIGHT_OFFSET_S", DEFAULT_HIGHLIGHT_OFFSET_S
+        ),
+        bridge_max_s=_env_float(
+            "QURANTEXT_TIMING_BRIDGE_MAX_S", DEFAULT_TIMING_BRIDGE_MAX_S
+        ),
+    )
+
     video = VideoSettings(
         renderer=_env_str("QURANTEXT_VIDEO_RENDERER", DEFAULT_VIDEO_RENDERER),
         width=_env_int("QURANTEXT_VIDEO_WIDTH", DEFAULT_VIDEO_WIDTH),
@@ -363,6 +389,7 @@ def get_settings() -> AppSettings:
         whisperx=whisperx,
         range_matching=range_matching,
         lecture_matching=lecture_matching,
+        alignment=alignment,
         video=video,
         word_match_threshold=_env_float(
             "QURANTEXT_WORD_MATCH_THRESHOLD",
