@@ -1,6 +1,8 @@
 """Configuration helpers for QuranText."""
 
 from .paths import (
+    BASMALA_AUDIO_PATH,
+    BASMALA_INPUT_DIR,
     INPUT_DIR,
     LECTURE_MATCHING_OUTPUT_DIR,
     LECTURES_INPUT_DIR,
@@ -17,6 +19,8 @@ from .settings import AppSettings, WhisperXSettings, get_settings, load_project_
 
 __all__ = [
     "AppSettings",
+    "BASMALA_AUDIO_PATH",
+    "BASMALA_INPUT_DIR",
     "INPUT_DIR",
     "LECTURE_MATCHING_OUTPUT_DIR",
     "LECTURES_INPUT_DIR",

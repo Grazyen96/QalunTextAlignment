@@ -73,6 +73,9 @@ DEFAULT_VIDEO_FPS = 25
 # next card does not sit idle for the whole pause.
 DEFAULT_VIDEO_GAP_MIDPOINT_THRESHOLD = 3.0
 DEFAULT_VIDEO_FONT_FILE = str(PROJECT_ROOT / "fonts" / "qaloon.10.ttf")
+# Splice the shipped input/basmala/basmala.mp3 before each recitation video when
+# the recitation does not already open with one (see core.basmala).
+DEFAULT_VIDEO_PREPEND_BASMALA = True
 
 # (width, height, fps) tuples for named quality presets.
 VIDEO_PRESETS: dict[str, tuple[int, int, int]] = {
@@ -88,6 +91,7 @@ DEFAULT_VIDEO = {
     "height": DEFAULT_VIDEO_HEIGHT,
     "fps": DEFAULT_VIDEO_FPS,
     "gap_midpoint_threshold": DEFAULT_VIDEO_GAP_MIDPOINT_THRESHOLD,
+    "prepend_basmala": DEFAULT_VIDEO_PREPEND_BASMALA,
 }
 
 DEFAULT_WHISPERX_INPUT = {
@@ -264,6 +268,7 @@ class VideoSettings:
     height: int
     fps: int
     gap_midpoint_threshold: float
+    prepend_basmala: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -381,6 +386,9 @@ def get_settings() -> AppSettings:
         fps=_env_int("QURANTEXT_VIDEO_FPS", DEFAULT_VIDEO_FPS),
         gap_midpoint_threshold=_env_float(
             "QURANTEXT_VIDEO_GAP_MIDPOINT_THRESHOLD", DEFAULT_VIDEO_GAP_MIDPOINT_THRESHOLD
+        ),
+        prepend_basmala=_env_bool(
+            "QURANTEXT_VIDEO_PREPEND_BASMALA", DEFAULT_VIDEO_PREPEND_BASMALA
         ),
     )
 

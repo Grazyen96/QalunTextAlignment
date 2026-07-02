@@ -13,6 +13,7 @@ from qurantext.config.settings import (
     get_settings,
 )
 from qurantext.core.ass_renderer import build_ass, render_ass_video, validate_font_name
+from qurantext.core.basmala import maybe_prepend_basmala
 from qurantext.core.frame_renderer import (
     DEFAULT_PLACEHOLDER_TITLE,
     ActiveMatchTracker,
@@ -112,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
         w, h, f = VIDEO_PRESETS[args.preset]
         args.width, args.height, args.fps = w, h, f
 
+    basmala_temp_audio: Path | None = None
     try:
         audio_path = Path(args.audio).expanduser().resolve()
         matches_path = Path(args.matches).expanduser().resolve()
@@ -132,6 +134,21 @@ def main(argv: list[str] | None = None) -> int:
             )
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Splice the shipped basmala before recitations that do not already open
+        # with one, shifting every timing back by its duration (see core.basmala).
+        if get_settings().video.prepend_basmala:
+            prepend = maybe_prepend_basmala(
+                matches_path, matches, audio_path, work_dir=output_path.parent
+            )
+            if prepend is not None:
+                print(
+                    f"Prepending shipped basmala; shifting recitation timings by "
+                    f"{prepend.offset:.2f}s."
+                )
+                matches = prepend.matches
+                audio_path = prepend.audio_path
+                basmala_temp_audio = prepend.audio_path
 
         if args.renderer == "ass":
             if font_file_path is not None:
@@ -185,6 +202,10 @@ def main(argv: list[str] | None = None) -> int:
     except (FileNotFoundError, ValueError, RuntimeError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
+    finally:
+        # The concatenated basmala+recitation audio is a throwaway render input.
+        if basmala_temp_audio is not None and not args.keep_temp:
+            basmala_temp_audio.unlink(missing_ok=True)
 
     print(f"MP4 video saved to: {output_path}")
     return 0
