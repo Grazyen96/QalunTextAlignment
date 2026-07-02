@@ -255,6 +255,52 @@ def test_render_frame_pillow_placeholder_and_caption_render() -> None:
     assert frame.shape == (320, 480, 3)
 
 
+def test_render_frame_pillow_placeholder_with_lecture_subtitle_renders() -> None:
+    from PIL import features
+
+    if not features.check("raqm"):
+        pytest.skip("Pillow built without libraqm")
+
+    frame = render_frame_pillow(
+        0.0,
+        None,
+        480,
+        320,
+        _BUNDLED_FONT,
+        caption_text="يقول المحاضر",
+        title="سورة الأنفال",
+        placeholder_subtitle="تدبر الآيات من الآية 7 إلى الآية 11",
+    )
+    assert frame.shape == (320, 480, 3)
+
+
+def test_lecture_intro_lines_spans_ayah_range_within_surah() -> None:
+    from qurantext.core.video_common import lecture_intro_lines
+
+    matches = [
+        {"surah_name": "سورة الأنفال", "from_ayah": 9, "to_ayah": 11, "_start_time": 10.0},
+        {"surah_name": "سورة الأنفال", "from_ayah": 7, "to_ayah": 8, "_start_time": 2.0},
+    ]
+    assert lecture_intro_lines(matches) == (
+        "سورة الأنفال",
+        "تدبر الآيات من الآية 7 إلى الآية 11",
+    )
+
+
+def test_lecture_intro_lines_single_ayah() -> None:
+    from qurantext.core.video_common import lecture_intro_lines
+
+    matches = [{"surah_name": "سورة الفاتحة", "from_ayah": 5, "to_ayah": 5, "_start_time": 1.0}]
+    assert lecture_intro_lines(matches) == ("سورة الفاتحة", "تدبر الآية 5")
+
+
+def test_lecture_intro_lines_returns_none_without_ayah_numbers() -> None:
+    from qurantext.core.video_common import lecture_intro_lines
+
+    assert lecture_intro_lines([{"surah_name": "سورة الفاتحة", "_start_time": 1.0}]) is None
+    assert lecture_intro_lines([]) is None
+
+
 @pytest.mark.skipif(not _BUNDLED_FONT.exists(), reason="bundled font missing")
 def test_render_frame_pillow_produces_valid_highlighted_frame() -> None:
     from PIL import features

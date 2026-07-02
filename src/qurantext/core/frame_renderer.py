@@ -12,6 +12,7 @@ from typing import Any
 from qurantext.core.video_common import (
     ayah_label,
     get_audio_duration,
+    lecture_intro_lines,
     require_binary,
     validate_input_file,
     validated_matches,
@@ -44,11 +45,16 @@ DEBUG_FONT_MIN_RATIO = 0.015
 LINE_SPACING_RATIO = 0.30
 SECTION_GAP_RATIO = 0.02
 
-# Live-transcript caption band pinned to the bottom of the frame.
-CAPTION_BAND_RATIO = 0.20
-CAPTION_PADDING_X_RATIO = 0.06
-CAPTION_FONT_START_RATIO = 0.040
-CAPTION_FONT_MIN_RATIO = 0.022
+# Live-transcript caption band pinned to the bottom of the frame. The text is
+# kept inside a safe area (insets from the edges) so players that crop-to-fill —
+# phone fullscreen, TV overscan — don't clip it, and sized generously so it stays
+# legible on a phone held at arm's length.
+CAPTION_BAND_RATIO = 0.28
+CAPTION_PADDING_X_RATIO = 0.08
+# Keep caption text this far above the very bottom edge (fraction of frame height).
+CAPTION_SAFE_BOTTOM_RATIO = 0.07
+CAPTION_FONT_START_RATIO = 0.055
+CAPTION_FONT_MIN_RATIO = 0.034
 
 # Centre placeholder shown before the first ayah is detected.
 DEFAULT_PLACEHOLDER_TITLE = "القرآن الكريم"
@@ -509,9 +515,16 @@ class _FrameLayout:
     caption_band: tuple[int, int, int, int]
 
 
-def _frame_layout(width: int, height: int) -> _FrameLayout:
-    """Split the frame into a centred card region and a bottom caption band."""
-    caption_band_h = max(1, int(height * CAPTION_BAND_RATIO))
+def _frame_layout(
+    width: int, height: int, *, reserve_caption_band: bool = True
+) -> _FrameLayout:
+    """Split the frame into a centred card region and a bottom caption band.
+
+    When *reserve_caption_band* is False (recitation mode, or any render without
+    live captions) the band collapses to nothing and the card centres in the
+    full frame, so there is no dead black strip at the bottom.
+    """
+    caption_band_h = max(1, int(height * CAPTION_BAND_RATIO)) if reserve_caption_band else 0
     caption_band_top = height - caption_band_h
     region_h = caption_band_top  # space available above the caption band
 
@@ -712,23 +725,76 @@ def _draw_ayah_card(
 
 
 def _draw_placeholder(
-    draw: Any, title: str, layout: _FrameLayout, height: int, font_file: Path
+    draw: Any,
+    title: str,
+    layout: _FrameLayout,
+    height: int,
+    font_file: Path,
+    subtitle: str = "",
 ) -> None:
-    """Draw the centre placeholder shown before the first ayah is detected."""
+    """Draw the centre placeholder shown before the first ayah is detected.
+
+    When *subtitle* is given (lecture intro), *title* is the surah name drawn as
+    a headline with the ayah-range line below it; otherwise *title* is centred on
+    its own.
+    """
     card_x0, card_y0, card_x1, card_y1 = layout.card
     pad_x, pad_y = layout.pad_x, layout.pad_y
     box = (card_x0 + pad_x, card_y0 + pad_y, card_x1 - pad_x, card_y1 - pad_y)
-    font, lines = fit_font_size(
+
+    if not subtitle:
+        font, lines = fit_font_size(
+            draw,
+            title,
+            font_file,
+            max_width=box[2] - box[0],
+            max_height=max(40, box[3] - box[1]),
+            start_size=max(24, int(height * PLACEHOLDER_FONT_START_RATIO)),
+            min_size=max(18, int(height * PLACEHOLDER_FONT_MIN_RATIO)),
+        )
+        spacing = max(4, int(font.size * LINE_SPACING_RATIO))
+        draw_centered_multiline_text(draw, lines, font, box, COLOUR_PLACEHOLDER_TEXT, spacing)
+        return
+
+    inner_w = box[2] - box[0]
+    inner_h = box[3] - box[1]
+    gap = layout.gap
+
+    title_font, title_lines = fit_font_size(
         draw,
         title,
         font_file,
-        max_width=box[2] - box[0],
-        max_height=max(40, box[3] - box[1]),
+        max_width=inner_w,
+        max_height=max(40, int(inner_h * 0.5)),
         start_size=max(24, int(height * PLACEHOLDER_FONT_START_RATIO)),
         min_size=max(18, int(height * PLACEHOLDER_FONT_MIN_RATIO)),
     )
-    spacing = max(4, int(font.size * LINE_SPACING_RATIO))
-    draw_centered_multiline_text(draw, lines, font, box, COLOUR_PLACEHOLDER_TEXT, spacing)
+    title_spacing = max(4, int(title_font.size * LINE_SPACING_RATIO))
+    _, title_h = _multiline_metrics(draw, title_lines, title_font, title_spacing)
+
+    sub_font, sub_lines = fit_font_size(
+        draw,
+        subtitle,
+        font_file,
+        max_width=inner_w,
+        max_height=max(32, int(inner_h * 0.4)),
+        start_size=max(18, int(height * BODY_FONT_START_RATIO)),
+        min_size=max(14, int(height * BODY_FONT_MIN_RATIO)),
+    )
+    sub_spacing = max(4, int(sub_font.size * LINE_SPACING_RATIO))
+    _, sub_h = _multiline_metrics(draw, sub_lines, sub_font, sub_spacing)
+
+    block_h = title_h + gap + sub_h
+    top = box[1] + max(0, (inner_h - block_h) // 2)
+    title_box = (box[0], top, box[2], top + title_h)
+    sub_box = (box[0], top + title_h + gap, box[2], top + title_h + gap + sub_h)
+
+    draw_centered_multiline_text(
+        draw, title_lines, title_font, title_box, COLOUR_HEADER_TEXT, title_spacing
+    )
+    draw_centered_multiline_text(
+        draw, sub_lines, sub_font, sub_box, COLOUR_PLACEHOLDER_TEXT, sub_spacing
+    )
 
 
 def _draw_caption(
@@ -745,8 +811,11 @@ def _draw_caption(
     image.alpha_composite(overlay)
 
     pad_x = int(width * CAPTION_PADDING_X_RATIO)
-    pad_y = max(8, int((by1 - by0) * 0.16))
-    text_box = (bx0 + pad_x, by0 + pad_y, bx1 - pad_x, by1 - pad_y)
+    pad_top = max(8, int((by1 - by0) * 0.12))
+    # Raise the text off the bottom edge so a crop-to-fill player can't clip it,
+    # while the translucent strip itself may safely run to the frame edge.
+    safe_bottom = max(pad_top, int(height * CAPTION_SAFE_BOTTOM_RATIO))
+    text_box = (bx0 + pad_x, by0 + pad_top, bx1 - pad_x, by1 - safe_bottom)
     font, lines = fit_font_size(
         draw,
         caption_text,
@@ -769,18 +838,21 @@ def render_frame_pillow(
     *,
     caption_text: str = "",
     title: str = DEFAULT_PLACEHOLDER_TITLE,
+    placeholder_subtitle: str = "",
     debug_detected_text: bool = False,
+    reserve_caption_band: bool = True,
 ) -> Any:
     """Render one styled frame as a BGR numpy array for OpenCV.
 
     The frame has two zones: a centred card showing the active ayah (surah name,
     ayah number and the Qur'an text) — or *title* as a placeholder when no ayah
     has been detected yet — and a bottom band showing the live transcript
-    *caption_text* for the current moment.
+    *caption_text* for the current moment. When *reserve_caption_band* is False
+    the band is dropped and the card centres in the full frame.
     """
     np, _, image_module, image_draw, _, _ = _frame_dependencies()
     image = image_module.new("RGBA", (width, height), COLOUR_BG)
-    layout = _frame_layout(width, height)
+    layout = _frame_layout(width, height, reserve_caption_band=reserve_caption_band)
 
     radius = max(18, int(min(width, height) * CARD_RADIUS_RATIO))
     draw_rounded_rectangle(image, layout.card, radius, COLOUR_CARD)
@@ -789,7 +861,14 @@ def render_frame_pillow(
     if match is not None:
         _draw_ayah_card(draw, t, match, layout, height, font_file, debug_detected_text)
     else:
-        _draw_placeholder(draw, title or DEFAULT_PLACEHOLDER_TITLE, layout, height, font_file)
+        _draw_placeholder(
+            draw,
+            title or DEFAULT_PLACEHOLDER_TITLE,
+            layout,
+            height,
+            font_file,
+            subtitle=placeholder_subtitle,
+        )
 
     if caption_text:
         _draw_caption(image, draw, caption_text, layout, width, height, font_file)
@@ -805,6 +884,8 @@ def _body_pages(
     height: int,
     font_file: Path,
     debug_detected_text: bool,
+    *,
+    reserve_caption_band: bool = True,
 ) -> list[list[str]]:
     """Return the paginated body lines a match would fill, without rendering it.
 
@@ -815,7 +896,7 @@ def _body_pages(
     probe = image_module.new("RGBA", (width, height))
     draw = image_draw.Draw(probe)
 
-    layout = _frame_layout(width, height)
+    layout = _frame_layout(width, height, reserve_caption_band=reserve_caption_band)
     content = _card_content(draw, match, layout, height, font_file, debug_detected_text)
     return content.body_pages or [[]]
 
@@ -854,6 +935,20 @@ def write_silent_frame_video(
 
     sorted_matches = sorted(matches, key=lambda m: float(m.get("_start_time", math.inf)))
     caption_list = sorted(captions or [], key=lambda c: float(c.get("start", math.inf)))
+    # Reserve the bottom caption band only when there are captions to show.
+    # Recitation renders have none, so the ayah card centres in the full frame
+    # instead of leaving a black strip where the transcript would be.
+    reserve_caption_band = bool(caption_list)
+
+    # Lecture intro: when live captions are present the opening placeholder
+    # announces the surah and the range of ayat the lecture ponders instead of
+    # the generic title. Recitation renders (no captions) keep the plain title.
+    placeholder_title = title
+    placeholder_subtitle = ""
+    if reserve_caption_band:
+        intro = lecture_intro_lines(sorted_matches)
+        if intro is not None:
+            placeholder_title, placeholder_subtitle = intro
 
     # Pre-compute paginated body lines for every unique active match. Caching the
     # pages (not just the count) lets page boundaries be derived from the active
@@ -866,7 +961,12 @@ def write_silent_frame_video(
         mid = id(match)
         if mid not in page_cache:
             page_cache[mid] = _body_pages(
-                match, width, height, font_file, debug_detected_text
+                match,
+                width,
+                height,
+                font_file,
+                debug_detected_text,
+                reserve_caption_band=reserve_caption_band,
             )
         return page_cache[mid]
 
@@ -934,8 +1034,10 @@ def write_silent_frame_video(
                 height,
                 font_file,
                 caption_text=ev_caption,
-                title=title,
+                title=placeholder_title,
+                placeholder_subtitle=placeholder_subtitle,
                 debug_detected_text=debug_detected_text,
+                reserve_caption_band=reserve_caption_band,
             )
             for _ in range(ev_end - ev_start):
                 writer.write(frame)

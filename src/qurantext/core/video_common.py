@@ -45,6 +45,48 @@ def ayah_label(match: dict[str, Any]) -> str:
     return surah_name
 
 
+def lecture_intro_lines(matches: list[dict[str, Any]]) -> tuple[str, str] | None:
+    """Return ``(surah_name, tadabbur_line)`` for a lecture's opening card.
+
+    The intro announces which ayat the lecture ponders: the surah of the first
+    detected ayah, plus the span from the lowest to the highest ayah number
+    found within that surah (e.g. ``"تدبر الآيات من الآية 7 إلى الآية 11"``).
+    Returns ``None`` when no ayah numbering is available to announce.
+    """
+    ordered = sorted(matches, key=lambda m: float(m.get("_start_time", math.inf)))
+
+    surah_name = ""
+    for match in ordered:
+        name = str(match.get("surah_name") or "").strip()
+        if name and isinstance(match.get("from_ayah"), int):
+            surah_name = name
+            break
+    if not surah_name:
+        return None
+
+    lows: list[int] = []
+    highs: list[int] = []
+    for match in ordered:
+        if str(match.get("surah_name") or "").strip() != surah_name:
+            continue
+        from_ayah = match.get("from_ayah")
+        to_ayah = match.get("to_ayah")
+        if isinstance(from_ayah, int):
+            lows.append(from_ayah)
+            highs.append(to_ayah if isinstance(to_ayah, int) else from_ayah)
+
+    if not lows:
+        return None
+    from_ayah = min(lows)
+    to_ayah = max(highs)
+
+    if from_ayah == to_ayah:
+        line = f"تدبر الآية {from_ayah}"
+    else:
+        line = f"تدبر الآيات من الآية {from_ayah} إلى الآية {to_ayah}"
+    return surah_name, line
+
+
 def warn(message: str) -> None:
     print(f"WARNING: {message}", file=sys.stderr)
 
@@ -176,6 +218,10 @@ def load_caption_segments(matches_path: Path) -> list[dict[str, Any]]:
         return []
 
     meta = payload.get("meta")
+    # Live captions are a lecture-only feature: a recitation video shows the
+    # certified ayah text alone, no spoken-transcript band. Skip silently.
+    if isinstance(meta, dict) and str(meta.get("mode") or "").lower() == "recitation":
+        return []
     raw_path = meta.get("whisperx_raw_output_path") if isinstance(meta, dict) else None
     if not raw_path:
         warn("Matches file has no transcript path in meta; rendering without live captions.")
