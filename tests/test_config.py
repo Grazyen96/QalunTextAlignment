@@ -53,6 +53,12 @@ def test_cli_parsers_use_centralized_settings_defaults(monkeypatch) -> None:
     cli_args = build_cli_parser().parse_args(
         ["generate-video", "--audio", "a.mp3", "--matches", "m.json"]
     )
+    # width/height/fps resolve in _resolve_preset (parse-time default is None so
+    # explicit flags can be told apart from defaults), but the env override must
+    # still flow through the centralized settings.
+    from qurantext.cli.main import _resolve_preset
+
+    _resolve_preset(cli_args)
 
     assert detection_args.tail_words == 14
     assert detection_args.max_span == 8
@@ -95,5 +101,54 @@ def test_preset_flag_overrides_width_height_fps_in_cli() -> None:
     assert args.fps == f
 
     get_settings.cache_clear()
+
+    get_settings.cache_clear()
+
+
+def test_lecture_render_defaults_to_portrait_social_preset() -> None:
+    get_settings.cache_clear()
+    from qurantext.cli.main import _resolve_preset
+
+    args = build_cli_parser().parse_args(
+        ["run-all", "--quran", "q.txt", "--audio", "a.wav", "--mode", "lecture", "--render-video"]
+    )
+    _resolve_preset(args)
+
+    sw, sh, sf = VIDEO_PRESETS["social"]
+    assert (args.width, args.height, args.fps) == (sw, sh, sf)
+    # Not consumed as an explicit preset (nothing to override downstream).
+    assert args.preset is None
+
+    get_settings.cache_clear()
+
+
+def test_lecture_render_respects_explicit_preset_and_dimensions() -> None:
+    get_settings.cache_clear()
+    from qurantext.cli.main import _resolve_preset
+
+    base = ["run-all", "--quran", "q.txt", "--audio", "a.wav", "--mode", "lecture", "--render-video"]
+
+    with_preset = build_cli_parser().parse_args(base + ["--preset", "high"])
+    _resolve_preset(with_preset)
+    assert (with_preset.width, with_preset.height) == VIDEO_PRESETS["high"][:2]
+
+    with_dims = build_cli_parser().parse_args(base + ["--width", "1280", "--height", "720"])
+    _resolve_preset(with_dims)
+    assert (with_dims.width, with_dims.height) == (1280, 720)
+
+    get_settings.cache_clear()
+
+
+def test_recitation_render_defaults_to_portrait_social_preset() -> None:
+    get_settings.cache_clear()
+    from qurantext.cli.main import _resolve_preset
+
+    args = build_cli_parser().parse_args(
+        ["run-all", "--quran", "q.txt", "--audio", "a.wav", "--mode", "recitation", "--render-video"]
+    )
+    _resolve_preset(args)
+
+    sw, sh, sf = VIDEO_PRESETS["social"]
+    assert (args.width, args.height, args.fps) == (sw, sh, sf)
 
     get_settings.cache_clear()

@@ -106,13 +106,39 @@ def _run_build_db(args: argparse.Namespace) -> int:
 
 
 def _resolve_preset(args: argparse.Namespace) -> argparse.Namespace:
-    """Apply --preset overrides to width/height/fps on *args* (mutates in place)."""
+    """Resolve width/height/fps on *args* (mutates in place).
+
+    Precedence, applied per dimension:
+      1. an explicit ``--preset`` (sets width/height/fps together);
+      2. explicit ``--width`` / ``--height`` / ``--fps``;
+      3. for a lecture or recitation video render, the portrait ``social``
+         preset — such videos are watched on phones, where a portrait frame
+         fills the screen without letterboxing;
+      4. the configured ``settings.video`` defaults.
+    """
     preset = getattr(args, "preset", None)
     if preset is not None:
-        w, h, f = VIDEO_PRESETS[preset]
-        args.width = w
-        args.height = h
-        args.fps = f
+        args.width, args.height, args.fps = VIDEO_PRESETS[preset]
+        return args
+
+    phone_video = getattr(args, "render_video", False) and getattr(args, "mode", None) in (
+        "lecture",
+        "recitation",
+    )
+    settings = get_settings()
+    if phone_video:
+        default_width, default_height, default_fps = VIDEO_PRESETS["social"]
+    else:
+        default_width = settings.video.width
+        default_height = settings.video.height
+        default_fps = settings.video.fps
+
+    if args.width is None:
+        args.width = default_width
+    if args.height is None:
+        args.height = default_height
+    if args.fps is None:
+        args.fps = default_fps
     return args
 
 
@@ -376,9 +402,9 @@ def build_parser() -> argparse.ArgumentParser:
             + ", ".join(f"{k} ({v[0]}x{v[1]}@{v[2]}fps)" for k, v in sorted(VIDEO_PRESETS.items()))
         ),
     )
-    video_parser.add_argument("--width", type=int, default=settings.video.width)
-    video_parser.add_argument("--height", type=int, default=settings.video.height)
-    video_parser.add_argument("--fps", type=int, default=settings.video.fps)
+    video_parser.add_argument("--width", type=int, default=None)
+    video_parser.add_argument("--height", type=int, default=None)
+    video_parser.add_argument("--fps", type=int, default=None)
     video_parser.add_argument("--keep-temp", action="store_true")
     video_parser.add_argument("--debug-detected-text", action="store_true")
     video_parser.set_defaults(handler=_run_generate_video)
@@ -451,9 +477,9 @@ def build_parser() -> argparse.ArgumentParser:
             "Overrides --width / --height / --fps when specified."
         ),
     )
-    run_all_parser.add_argument("--width", type=int, default=settings.video.width)
-    run_all_parser.add_argument("--height", type=int, default=settings.video.height)
-    run_all_parser.add_argument("--fps", type=int, default=settings.video.fps)
+    run_all_parser.add_argument("--width", type=int, default=None)
+    run_all_parser.add_argument("--height", type=int, default=None)
+    run_all_parser.add_argument("--fps", type=int, default=None)
     run_all_parser.add_argument("--keep-temp", action="store_true")
     run_all_parser.add_argument("--debug-detected-text", action="store_true")
     run_all_parser.set_defaults(handler=_run_all)
