@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
@@ -7,6 +8,12 @@ from typing import Any
 
 from qurantext.config.settings import DEFAULT_MODEL_REF, get_settings
 from qurantext.io.writers import write_json
+
+# Gateway/rate-limit statuses that reflect a transient edge failure rather than a
+# real problem with the prediction — safe to retry against the same prediction.
+_TRANSIENT_STATUS_CODES = frozenset({429, 502, 503, 504})
+_POLL_INTERVAL_SECONDS = 3.0
+_MAX_TRANSIENT_RETRIES = 8
 
 
 class WhisperXServiceError(RuntimeError):
@@ -59,6 +66,76 @@ def save_raw_output(output: Any, destination: str | PathLike[str]) -> str:
     return write_json(normalized_output, destination)
 
 
+def _transient_status(error: Exception) -> int | None:
+    """Return the HTTP status if *error* is a retryable gateway/rate-limit blip."""
+    status = getattr(error, "status", None)
+    if isinstance(status, int) and status in _TRANSIENT_STATUS_CODES:
+        return status
+    return None
+
+
+def _create_prediction(client: Any, resolved_model_ref: str, prediction_input: dict[str, Any]):
+    """Start a WhisperX prediction non-blocking, retrying transient create failures.
+
+    A transient 5xx on the (quick, non-blocking) create request means the request
+    almost certainly never produced a prediction, so retrying does not orphan a
+    running job.
+    """
+    version_id = resolved_model_ref.split(":", 1)[1] if ":" in resolved_model_ref else None
+    owner_name = resolved_model_ref.split(":", 1)[0]
+
+    last_error: Exception | None = None
+    for attempt in range(_MAX_TRANSIENT_RETRIES):
+        try:
+            if version_id is not None:
+                return client.predictions.create(version=version_id, input=prediction_input)
+            owner, _, name = owner_name.partition("/")
+            return client.models.predictions.create(model=(owner, name), input=prediction_input)
+        except Exception as error:  # noqa: BLE001 — re-raised below when not transient
+            if _transient_status(error) is None:
+                raise
+            last_error = error
+            time.sleep(min(_POLL_INTERVAL_SECONDS * (attempt + 1), 30.0))
+
+    raise WhisperXServiceError(
+        f"WhisperX transcription failed: Replicate kept returning gateway errors while "
+        f"starting the prediction ({last_error})."
+    )
+
+
+def _await_prediction_output(prediction: Any) -> Any:
+    """Poll *prediction* to completion, treating transient gateway errors as retries.
+
+    ``replicate.run`` holds one long blocking request open, so a transient 502 from
+    Replicate's gateway aborts the whole call even though the prediction itself
+    succeeds on the backend. Polling with ``reload`` recovers that already-finished
+    result: each poll is a fresh, retryable GET against the same prediction id.
+    """
+    terminal = {"succeeded", "failed", "canceled"}
+    transient_streak = 0
+    while prediction.status not in terminal:
+        time.sleep(_POLL_INTERVAL_SECONDS)
+        try:
+            prediction.reload()
+            transient_streak = 0
+        except Exception as error:  # noqa: BLE001 — re-raised below when not transient
+            if _transient_status(error) is None:
+                raise
+            transient_streak += 1
+            if transient_streak > _MAX_TRANSIENT_RETRIES:
+                raise WhisperXServiceError(
+                    "WhisperX transcription failed: Replicate's gateway kept returning errors "
+                    f"while polling prediction {prediction.id}. The prediction may still "
+                    "complete — check the Replicate dashboard."
+                ) from error
+
+    if prediction.status != "succeeded":
+        detail = prediction.error or f"prediction {prediction.status}"
+        raise WhisperXServiceError(f"WhisperX transcription failed: {detail}")
+
+    return prediction.output
+
+
 def transcribe_audio(
     audio_path: str | PathLike[str],
     *,
@@ -81,17 +158,20 @@ def transcribe_audio(
     try:
         import replicate
 
+        client = replicate.Client(api_token=settings.replicate_api_token)
         with audio_file_path.open("rb") as audio_file:
-            output = replicate.run(
+            prediction = _create_prediction(
+                client,
                 resolved_model_ref,
-                input={
-                    **settings.whisperx.input_kwargs(),
-                    "audio_file": audio_file,
-                },
+                {**settings.whisperx.input_kwargs(), "audio_file": audio_file},
             )
+        # Poll after the file handle is closed — the audio is already uploaded.
+        output = _await_prediction_output(prediction)
+    except WhisperXServiceError:
+        raise
     except Exception as error:
         error_text = str(error)
-        if "status: 404" in error_text:
+        if "status: 404" in error_text or getattr(error, "status", None) == 404:
             raise WhisperXServiceError(
                 f"Replicate could not find the model: {resolved_model_ref}\n"
                 "Check that the model exists and that your account has access to it."
