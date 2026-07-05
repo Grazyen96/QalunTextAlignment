@@ -5,11 +5,14 @@ import pytest
 
 from qurantext.config.paths import PROJECT_ROOT
 from qurantext.core.ass_renderer import _audio_encode_args, _probe_audio_codec, _wrap_ass_body_text
+import qurantext.core.frame_renderer as frame_renderer
 from qurantext.core.frame_renderer import (
     ActiveMatchTracker,
+    _caption_window,
     _count_non_marker_words,
     active_match_at,
     active_word_timing_index,
+    draw_caption_progressive,
     render_frame_pillow,
 )
 from qurantext.core.video_common import load_caption_segments, validated_matches
@@ -239,6 +242,116 @@ def test_load_caption_segments_missing_meta_returns_empty(tmp_path) -> None:
     matches_file = tmp_path / "lecture_lecture.json"
     matches_file.write_text(json.dumps({"matches": []}), encoding="utf-8")
     assert load_caption_segments(matches_file) == []
+
+
+def test_load_caption_segments_attaches_word_timings(tmp_path) -> None:
+    transcript = tmp_path / "lecture_whisperx_raw.json"
+    transcript.write_text(
+        json.dumps(
+            {
+                "segments": [
+                    {
+                        "start": 1.0,
+                        "end": 3.0,
+                        "text": "يقول المحاضر",
+                        "words": [
+                            {"word": "يقول", "start": 1.0, "end": 1.8},
+                            {"word": "المحاضر", "start": 1.8, "end": 3.0},
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    matches_file = tmp_path / "lecture_lecture.json"
+    matches_file.write_text(
+        json.dumps({"matches": [], "meta": {"whisperx_raw_output_path": str(transcript)}}),
+        encoding="utf-8",
+    )
+
+    seg = load_caption_segments(matches_file)[0]
+    # Text is rebuilt from the word tokens so token N lines up with timing N.
+    assert seg["text"] == "يقول المحاضر"
+    assert [w["word"] for w in seg["word_timings"]] == ["يقول", "المحاضر"]
+    assert (seg["word_timings"][0]["start"], seg["word_timings"][0]["end"]) == (1.0, 1.8)
+
+
+def test_caption_window_shows_all_words_when_within_cap() -> None:
+    wt = [{"word": f"w{i}"} for i in range(5)]
+    words, local = _caption_window(wt, active_idx=2, max_words=28)
+    assert words == ["w0", "w1", "w2", "w3", "w4"]
+    assert local == 2  # index unchanged when nothing is dropped
+
+
+def test_caption_window_pages_long_caption_around_active_word() -> None:
+    wt = [{"word": f"w{i}"} for i in range(33)]
+
+    # Active word in the first chunk: show words 0..27, index unchanged.
+    words, local = _caption_window(wt, active_idx=5, max_words=28)
+    assert len(words) == 28 and words[0] == "w0" and words[-1] == "w27"
+    assert local == 5
+
+    # Active word in the second chunk: show the remainder, index made local.
+    words, local = _caption_window(wt, active_idx=30, max_words=28)
+    assert words == [f"w{i}" for i in range(28, 33)]
+    assert local == 2  # 30 - 28
+
+    # No active word yet -> first chunk, no local highlight.
+    words, local = _caption_window(wt, active_idx=None, max_words=28)
+    assert len(words) == 28 and local is None
+
+
+def test_draw_caption_progressive_colours_words_by_spoken_state(monkeypatch) -> None:
+    # Isolate the colour logic from Pillow measurement/drawing.
+    monkeypatch.setattr(frame_renderer, "_multiline_metrics", lambda *a, **k: (0, 0))
+    monkeypatch.setattr(frame_renderer, "measure_text_bbox", lambda *a, **k: (0, 10))
+    captured: list[tuple[list[str], list[tuple]]] = []
+    monkeypatch.setattr(
+        frame_renderer,
+        "draw_rtl_line_colored",
+        lambda draw, words, fills, font, x0, x1, y: captured.append((words, fills)),
+    )
+
+    lines = ["قال المفسرون في", "هذه الآية"]  # 5 words: indices 0..4
+    draw_caption_progressive(None, lines, None, (0, 0, 100, 100), 4, active_word_idx=2)
+    fills = [f for _, line_fills in captured for f in line_fills]
+    assert fills == [
+        frame_renderer.COLOUR_CAPTION_TEXT,  # 0 spoken
+        frame_renderer.COLOUR_CAPTION_TEXT,  # 1 spoken
+        frame_renderer.COLOUR_CAPTION_ACTIVE,  # 2 active (soft cyan)
+        frame_renderer.COLOUR_CAPTION_UPCOMING,  # 3 upcoming
+        frame_renderer.COLOUR_CAPTION_UPCOMING,  # 4 upcoming
+    ]
+
+    # Before the first spoken word every token is upcoming.
+    captured.clear()
+    draw_caption_progressive(None, lines, None, (0, 0, 100, 100), 4, active_word_idx=None)
+    fills = [f for _, line_fills in captured for f in line_fills]
+    assert all(f == frame_renderer.COLOUR_CAPTION_UPCOMING for f in fills)
+
+
+@pytest.mark.skipif(not _BUNDLED_FONT.exists(), reason="bundled font missing")
+def test_render_frame_pillow_karaoke_caption_renders() -> None:
+    from PIL import features
+
+    if not features.check("raqm"):
+        pytest.skip("Pillow built without libraqm")
+
+    wt = [
+        {"word": "يقول", "start": 0.0, "end": 0.5},
+        {"word": "المحاضر", "start": 0.5, "end": 1.0},
+    ]
+    frame = render_frame_pillow(
+        0.7,  # second word active
+        None,
+        480,
+        320,
+        _BUNDLED_FONT,
+        caption_text="يقول المحاضر",
+        caption_word_timings=wt,
+    )
+    assert frame.shape == (320, 480, 3)
 
 
 @pytest.mark.skipif(not _BUNDLED_FONT.exists(), reason="bundled font missing")

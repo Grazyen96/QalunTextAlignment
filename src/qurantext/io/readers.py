@@ -156,12 +156,20 @@ def extract_segments(
         end = segment.get("end")
         norm = normalizer(raw_text)
         if norm and start is not None and end is not None:
+            words = [
+                {"word": w_text, "start": w["start"], "end": w["end"]}
+                for w in _iter_segment_words(segment)
+                if (w_text := str(w.get("word") or w.get("text") or "").strip())
+                and isinstance(w.get("start"), (int, float))
+                and isinstance(w.get("end"), (int, float))
+            ]
             segments.append(
                 {
                     "text_raw": raw_text.strip(),
                     "text_norm": norm,
                     "start": start,
                     "end": end,
+                    "words": words,
                 }
             )
 

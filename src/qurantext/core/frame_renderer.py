@@ -28,7 +28,9 @@ COLOUR_HIGHLIGHT_WORD = (255, 215, 0, 255)  # Gold — active recited word
 COLOUR_DEBUG_TEXT = (188, 188, 198, 255)
 COLOUR_SUBTLE = (150, 150, 162, 255)
 COLOUR_CAPTION_BG = (0, 0, 0, 165)  # translucent strip behind the live captions
-COLOUR_CAPTION_TEXT = (240, 240, 245, 255)
+COLOUR_CAPTION_TEXT = (240, 240, 245, 255)  # already-spoken caption words
+COLOUR_CAPTION_ACTIVE = (128, 226, 234, 255)  # soft cyan — word being spoken now
+COLOUR_CAPTION_UPCOMING = (150, 150, 162, 255)  # dimmed — not yet spoken
 COLOUR_PLACEHOLDER_TEXT = (205, 205, 215, 255)
 
 CARD_WIDTH_RATIO = 0.86
@@ -48,13 +50,19 @@ SECTION_GAP_RATIO = 0.02
 # Live-transcript caption band pinned to the bottom of the frame. The text is
 # kept inside a safe area (insets from the edges) so players that crop-to-fill —
 # phone fullscreen, TV overscan — don't clip it, and sized generously so it stays
-# legible on a phone held at arm's length.
-CAPTION_BAND_RATIO = 0.28
+# legible on a phone held at arm's length. A taller band both gives long captions
+# more room and pulls the caption text up closer to the ayah card.
+CAPTION_BAND_RATIO = 0.34
 CAPTION_PADDING_X_RATIO = 0.08
 # Keep caption text this far above the very bottom edge (fraction of frame height).
 CAPTION_SAFE_BOTTOM_RATIO = 0.07
 CAPTION_FONT_START_RATIO = 0.055
 CAPTION_FONT_MIN_RATIO = 0.034
+# A single WhisperX segment can run long enough to overflow the band even at the
+# minimum font size. Cap how many words are shown at once: the caption is paged
+# in fixed chunks of this size and only the chunk holding the spoken word is
+# drawn, so the text stays inside the band and shifts only at chunk boundaries.
+MAX_CAPTION_WORDS = 28
 
 # Centre placeholder shown before the first ayah is detected.
 DEFAULT_PLACEHOLDER_TITLE = "القرآن الكريم"
@@ -421,6 +429,86 @@ def draw_rtl_line_with_highlight(
         fill = highlight_fill if i == highlight_local_idx else default_fill
         draw.text((left, line_y), word, font=font, fill=fill, direction="rtl")
         current_right -= ww + computed_space
+
+
+def draw_rtl_line_colored(
+    draw: Any,
+    line_words: list[str],
+    fills: list[tuple[int, int, int, int]],
+    font: Any,
+    box_x0: int,
+    box_x1: int,
+    line_y: int,
+) -> None:
+    """Render one RTL Arabic line word-by-word, each word in its own colour.
+
+    Geometry mirrors :func:`draw_rtl_line_with_highlight` (measure the whole line
+    for centring, then place words right-to-left within that extent); the only
+    difference is that every word takes an independent colour from *fills*.
+    """
+    if not line_words:
+        return
+
+    joined = " ".join(line_words)
+    total_w, _ = measure_text_bbox(draw, joined, font)
+    word_widths = [measure_text_bbox(draw, w, font)[0] for w in line_words]
+
+    sum_widths = sum(word_widths)
+    n_gaps = max(1, len(line_words) - 1)
+    computed_space = max(1.0, (total_w - sum_widths) / n_gaps) if len(line_words) > 1 else 0.0
+
+    line_left = box_x0 + max(0, ((box_x1 - box_x0) - total_w) / 2)
+    current_right = line_left + total_w
+
+    for word, ww, fill in zip(line_words, word_widths, fills, strict=True):
+        left = current_right - ww
+        draw.text((left, line_y), word, font=font, fill=fill, direction="rtl")
+        current_right -= ww + computed_space
+
+
+def draw_caption_progressive(
+    draw: Any,
+    lines: list[str],
+    font: Any,
+    box: tuple[int, int, int, int],
+    line_spacing: int,
+    active_word_idx: int | None,
+    *,
+    spoken_fill: tuple[int, int, int, int] = COLOUR_CAPTION_TEXT,
+    active_fill: tuple[int, int, int, int] = COLOUR_CAPTION_ACTIVE,
+    upcoming_fill: tuple[int, int, int, int] = COLOUR_CAPTION_UPCOMING,
+) -> None:
+    """Draw wrapped caption text with karaoke-style progressive colouring.
+
+    Words before *active_word_idx* use *spoken_fill*, the word at that index uses
+    *active_fill*, and later (not-yet-spoken) words use *upcoming_fill*. The index
+    counts every whitespace token across *lines* in order — captions carry no
+    ayah markers — so it maps directly onto the caption's word-timing list. When
+    *active_word_idx* is ``None`` (before the first word) every word is upcoming.
+    """
+    x0, y0, x1, y1 = box
+    _, total_height = _multiline_metrics(draw, lines, font, line_spacing)
+    current_y = y0 + max(0, ((y1 - y0) - total_height) / 2)
+
+    global_idx = 0
+    for line in lines:
+        probe = line if line.strip() else " "
+        line_height = measure_text_bbox(draw, probe, font)[1]
+        line_words = line.split() if line.strip() else []
+
+        fills: list[tuple[int, int, int, int]] = []
+        for _ in line_words:
+            if active_word_idx is None or global_idx > active_word_idx:
+                fills.append(upcoming_fill)
+            elif global_idx == active_word_idx:
+                fills.append(active_fill)
+            else:
+                fills.append(spoken_fill)
+            global_idx += 1
+
+        if line_words:
+            draw_rtl_line_colored(draw, line_words, fills, font, x0, x1, int(current_y))
+        current_y += line_height + line_spacing
 
 
 def draw_centered_multiline_text_with_highlight(
@@ -797,11 +885,44 @@ def _draw_placeholder(
     )
 
 
+def _caption_window(
+    word_timings: list[dict[str, Any]], active_idx: int | None, max_words: int
+) -> tuple[list[str], int | None]:
+    """Return ``(display_words, local_active_idx)`` for a bounded caption view.
+
+    Short captions (``<= max_words``) show whole. Longer ones are paged in fixed
+    chunks of *max_words*; the chunk holding the spoken word is shown, so the
+    caption stays inside the band and the text shifts only when the highlight
+    crosses a chunk boundary — not on every word. *local_active_idx* is the
+    active word's index within the returned slice (``None`` before the first
+    word, or when the active word falls outside the shown chunk).
+    """
+    words = [str(w.get("word") or "") for w in word_timings]
+    if len(words) <= max_words:
+        return words, active_idx
+
+    anchor = active_idx if active_idx is not None else 0
+    page = anchor // max_words
+    lo = page * max_words
+    hi = min(lo + max_words, len(words))
+    local = None if active_idx is None or not (lo <= active_idx < hi) else active_idx - lo
+    return words[lo:hi], local
+
+
 def _draw_caption(
     image: Any, draw: Any, caption_text: str, layout: _FrameLayout, width: int, height: int,
     font_file: Path,
+    *,
+    word_timings: list[dict[str, Any]] | None = None,
+    t: float = 0.0,
 ) -> None:
-    """Draw the live-transcript caption inside the bottom band."""
+    """Draw the live-transcript caption inside the bottom band.
+
+    When *word_timings* is given, the caption is drawn karaoke-style: the word
+    being spoken at time *t* is accented and the rest fade between spoken and
+    upcoming (see :func:`draw_caption_progressive`). The caption text is built
+    from the same word tokens upstream, so token N is timing N.
+    """
     _, _, image_module, image_draw, _, _ = _frame_dependencies()
     bx0, by0, bx1, by1 = layout.caption_band
 
@@ -816,9 +937,20 @@ def _draw_caption(
     # while the translucent strip itself may safely run to the frame edge.
     safe_bottom = max(pad_top, int(height * CAPTION_SAFE_BOTTOM_RATIO))
     text_box = (bx0 + pad_x, by0 + pad_top, bx1 - pad_x, by1 - safe_bottom)
+
+    # Page long captions to a bounded chunk around the spoken word so the text
+    # never overflows the band; plain (untimed) captions render whole.
+    if word_timings:
+        active_idx = active_word_timing_index(word_timings, t)
+        display_words, local_active = _caption_window(word_timings, active_idx, MAX_CAPTION_WORDS)
+        text = " ".join(display_words)
+    else:
+        text = caption_text
+        local_active = None
+
     font, lines = fit_font_size(
         draw,
-        caption_text,
+        text,
         font_file,
         max_width=text_box[2] - text_box[0],
         max_height=max(20, text_box[3] - text_box[1]),
@@ -826,7 +958,10 @@ def _draw_caption(
         min_size=max(12, int(height * CAPTION_FONT_MIN_RATIO)),
     )
     spacing = max(4, int(font.size * LINE_SPACING_RATIO))
-    draw_centered_multiline_text(draw, lines, font, text_box, COLOUR_CAPTION_TEXT, spacing)
+    if word_timings:
+        draw_caption_progressive(draw, lines, font, text_box, spacing, local_active)
+    else:
+        draw_centered_multiline_text(draw, lines, font, text_box, COLOUR_CAPTION_TEXT, spacing)
 
 
 def render_frame_pillow(
@@ -837,6 +972,7 @@ def render_frame_pillow(
     font_file: Path,
     *,
     caption_text: str = "",
+    caption_word_timings: list[dict[str, Any]] | None = None,
     title: str = DEFAULT_PLACEHOLDER_TITLE,
     placeholder_subtitle: str = "",
     debug_detected_text: bool = False,
@@ -871,7 +1007,17 @@ def render_frame_pillow(
         )
 
     if caption_text:
-        _draw_caption(image, draw, caption_text, layout, width, height, font_file)
+        _draw_caption(
+            image,
+            draw,
+            caption_text,
+            layout,
+            width,
+            height,
+            font_file,
+            word_timings=caption_word_timings,
+            t=t,
+        )
 
     rgb = image.convert("RGB")
     frame = np.array(rgb)
@@ -972,10 +1118,12 @@ def write_silent_frame_video(
 
     # First pass: scan all frame timestamps and record render-event boundaries.
     # An event boundary occurs when the latched match, the displayed page, the
-    # actively highlighted word, or the active caption changes.
+    # actively highlighted card word, the active caption, or the spoken caption
+    # word changes.
     n_matches = len(sorted_matches)
-    events: list[tuple[int, dict[str, Any] | None, str]] = []  # (frame, match, caption_text)
-    last_key: tuple[int | None, int, int | None, int] = (-2, -1, None, -2)
+    # (frame, match, caption_segment)
+    events: list[tuple[int, dict[str, Any] | None, dict[str, Any] | None]] = []
+    last_key: tuple[int | None, int, int | None, int, int | None] = (-2, -1, None, -2, None)
     card_ptr = -1  # index of the latched match, -1 while showing the placeholder
     cap_scan = 0  # monotonically advancing cursor into caption_list
     n_caps = len(caption_list)
@@ -996,7 +1144,10 @@ def write_silent_frame_video(
             and float(caption_list[cap_scan]["start"]) <= t <= float(caption_list[cap_scan]["end"])
             else -1
         )
-        caption_text = str(caption_list[cap_active]["text"]) if cap_active >= 0 else ""
+        caption_seg = caption_list[cap_active] if cap_active >= 0 else None
+        # Re-render on each spoken caption word so the karaoke highlight advances.
+        _cap_wt = caption_seg.get("word_timings") if caption_seg else None
+        cap_word = active_word_timing_index(_cap_wt, t) if _cap_wt else None
 
         pages = _get_pages(match)
         n_pages = max(1, len(pages))
@@ -1014,9 +1165,15 @@ def write_silent_frame_video(
                 page_idx = min(int(_progress * n_pages), n_pages - 1)
         else:
             page_idx = 0
-        key = (id(match) if match is not None else None, page_idx, active_word, cap_active)
+        key = (
+            id(match) if match is not None else None,
+            page_idx,
+            active_word,
+            cap_active,
+            cap_word,
+        )
         if key != last_key:
-            events.append((fi, match, caption_text))
+            events.append((fi, match, caption_seg))
             last_key = key
 
     # Second pass: render once per event and write all frames for that segment.
@@ -1027,13 +1184,16 @@ def write_silent_frame_video(
     try:
         for ev_idx, (ev_start, ev_match, ev_caption) in enumerate(events):
             ev_end = events[ev_idx + 1][0] if ev_idx + 1 < n_events else total_frames
+            ev_caption_text = str(ev_caption["text"]) if ev_caption else ""
+            ev_caption_wt = ev_caption.get("word_timings") if ev_caption else None
             frame = render_frame_pillow(
                 ev_start / fps,
                 ev_match,
                 width,
                 height,
                 font_file,
-                caption_text=ev_caption,
+                caption_text=ev_caption_text,
+                caption_word_timings=ev_caption_wt,
                 title=placeholder_title,
                 placeholder_subtitle=placeholder_subtitle,
                 debug_detected_text=debug_detected_text,

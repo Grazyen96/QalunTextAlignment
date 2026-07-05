@@ -245,15 +245,30 @@ def load_caption_segments(matches_path: Path) -> list[dict[str, Any]]:
     # Keep the raw spoken text verbatim (strip-only normalizer) so non-Arabic or
     # punctuation-only segments are not dropped from the captions.
     for segment in extract_segments(data, normalizer=lambda text: (text or "").strip()):
-        text = str(segment.get("text_raw") or "").strip()
         try:
             start = float(segment["start"])
             end = float(segment["end"])
         except (KeyError, TypeError, ValueError):
             continue
+
+        # Prefer the per-word tokens: building the caption text from them keeps
+        # the displayed words in lock-step with their timings, so the renderer
+        # can highlight the spoken word (the Nth token IS the Nth timing). Fall
+        # back to the verbatim segment text when a segment carries no word data.
+        word_timings = [
+            {"word": w["word"], "start": float(w["start"]), "end": float(w["end"])}
+            for w in (segment.get("words") or [])
+        ]
+        if word_timings:
+            text = " ".join(w["word"] for w in word_timings)
+        else:
+            text = str(segment.get("text_raw") or "").strip()
+
         if not text or not math.isfinite(start) or not math.isfinite(end) or end < start:
             continue
-        segments.append({"text": text, "start": start, "end": end})
+        segments.append(
+            {"text": text, "start": start, "end": end, "word_timings": word_timings}
+        )
 
     segments.sort(key=lambda seg: seg["start"])
     return segments
