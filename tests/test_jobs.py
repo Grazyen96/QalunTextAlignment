@@ -13,7 +13,7 @@ import threading
 
 import pytest
 
-from qurantext.config.paths import PROJECT_ROOT
+from qurantext.config.paths import BASMALA_AUDIO_PATH, PROJECT_ROOT
 from qurantext.jobs import (
     CancelToken,
     ConsoleProgress,
@@ -28,6 +28,23 @@ _BUNDLED_FONT = PROJECT_ROOT / "fonts" / "qaloon.10.ttf"
 _FFMPEG = shutil.which("ffmpeg")
 _FFPROBE = shutil.which("ffprobe")
 
+
+@pytest.fixture()
+def no_basmala(monkeypatch):
+    """Render without the basmala splice.
+
+    input/basmala/basmala.mp3 is the user's own media and is not in the
+    repository, so a test that depends on it passes locally and fails on a
+    fresh clone. Pinning the setting makes these deterministic either way.
+    """
+    from qurantext.config.settings import get_settings
+
+    monkeypatch.setenv("QURANTEXT_VIDEO_PREPEND_BASMALA", "false")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 _SAMPLE_MATCH = {
     "surah_num": 25,
     "surah_name": "سُورَةُ الفُرقَانِ",
@@ -37,6 +54,17 @@ _SAMPLE_MATCH = {
     "confidence": 0.9,
     "start_time": 0.0,
     "end_time": 2.0,
+}
+
+# A card with per-word timings re-renders on every word, so the frame loop has
+# many events and reports progress as it goes.
+_HIGHLIGHTED_MATCH = {
+    **_SAMPLE_MATCH,
+    "end_time": 6.0,
+    "word_timings": [
+        {"word": word, "start": i * 0.6, "end": (i + 1) * 0.6}
+        for i, word in enumerate(str(_SAMPLE_MATCH["full_text"]).split())
+    ],
 }
 
 
@@ -63,13 +91,14 @@ def _silent_audio(tmp_path, seconds: float = 2.0):
     return audio
 
 
-def _matches_file(tmp_path):
+def _matches_file(tmp_path, match=None, name="matches.json"):
     import json
 
-    path = tmp_path / "matches.json"
+    path = tmp_path / name
     path.write_text(
         json.dumps(
-            {"matches": [_SAMPLE_MATCH], "meta": {"mode": "recitation"}}, ensure_ascii=False
+            {"matches": [match or _SAMPLE_MATCH], "meta": {"mode": "recitation"}},
+            ensure_ascii=False,
         ),
         encoding="utf-8",
     )
@@ -149,7 +178,7 @@ def test_cancel_token_is_settable_from_another_thread() -> None:
     not (_FFMPEG and _FFPROBE and _BUNDLED_FONT.exists()),
     reason="needs ffmpeg, ffprobe and the bundled font",
 )
-def test_render_stops_when_cancelled_before_it_starts(tmp_path) -> None:
+def test_render_stops_when_cancelled_before_it_starts(tmp_path, no_basmala) -> None:
     request = RenderRequest(
         audio=_silent_audio(tmp_path),
         matches=_matches_file(tmp_path),
@@ -171,11 +200,11 @@ def test_render_stops_when_cancelled_before_it_starts(tmp_path) -> None:
     not (_FFMPEG and _FFPROBE and _BUNDLED_FONT.exists()),
     reason="needs ffmpeg, ffprobe and the bundled font",
 )
-def test_render_stops_partway_when_cancelled_mid_flight(tmp_path) -> None:
+def test_render_stops_partway_when_cancelled_mid_flight(tmp_path, no_basmala) -> None:
     """Cancelling during the frame loop must abort, not run to completion."""
     request = RenderRequest(
         audio=_silent_audio(tmp_path, seconds=6.0),
-        matches=_matches_file(tmp_path),
+        matches=_matches_file(tmp_path, _HIGHLIGHTED_MATCH),
         output=tmp_path / "out.mp4",
         width=320,
         height=240,
@@ -203,7 +232,7 @@ def test_render_stops_partway_when_cancelled_mid_flight(tmp_path) -> None:
     not (_FFMPEG and _FFPROBE and _BUNDLED_FONT.exists()),
     reason="needs ffmpeg, ffprobe and the bundled font",
 )
-def test_render_returns_what_it_wrote(tmp_path) -> None:
+def test_render_returns_what_it_wrote(tmp_path, no_basmala) -> None:
     """The caller gets a described result, not an exit code."""
     request = RenderRequest(
         audio=_silent_audio(tmp_path),
@@ -220,12 +249,8 @@ def test_render_returns_what_it_wrote(tmp_path) -> None:
     assert result.output == (tmp_path / "out.mp4").resolve()
     assert result.output.exists()
     assert (result.width, result.height, result.fps) == (320, 240, 10)
-    # The match file is recitation mode and carries no basmala of its own, so
-    # the renderer splices the shipped one in front. The result says so, which
-    # is the whole point of returning an object instead of an exit code: the
-    # timeline moved and the caller can see by how much.
-    assert result.basmala_offset_seconds == pytest.approx(4.0, abs=0.2)
-    assert result.duration_seconds == pytest.approx(2.0 + result.basmala_offset_seconds, abs=0.3)
+    assert result.basmala_offset_seconds == 0.0
+    assert result.duration_seconds == pytest.approx(2.0, abs=0.3)
     assert {e.stage for e in events} == {"render"}
     assert events[-1].done is True
 
@@ -255,15 +280,18 @@ def test_request_falls_back_to_configured_defaults() -> None:
     not (_FFMPEG and _FFPROBE and _BUNDLED_FONT.exists()),
     reason="needs ffmpeg, ffprobe and the bundled font",
 )
-def test_render_cancels_inside_one_long_static_event(tmp_path) -> None:
+def test_render_cancels_inside_one_long_static_event(tmp_path, no_basmala) -> None:
     """A latched card with no highlight is a single event covering every frame.
 
     Polling cancellation once per rendered event is not enough there: the frame
     write loop has to be interruptible too, or a long static card runs to
     completion no matter how often the outer loop checks.
+
+    The token cancels itself on a later poll rather than on a timer, so the test
+    proves the in-loop check exists instead of racing the encoder.
     """
     request = RenderRequest(
-        audio=_silent_audio(tmp_path, seconds=60.0),
+        audio=_silent_audio(tmp_path, seconds=20.0),
         matches=_matches_file(tmp_path),
         output=tmp_path / "out.mp4",
         width=160,
@@ -271,14 +299,54 @@ def test_render_cancels_inside_one_long_static_event(tmp_path) -> None:
         fps=25,
         font_file=_BUNDLED_FONT,
     )
-    token = CancelToken()
-    timer = threading.Timer(0.4, token.cancel)
-    timer.start()
-    try:
-        with pytest.raises(JobCancelled):
-            render_video(request, cancel=token)
-    finally:
-        timer.cancel()
+
+    class _CancelsOnLaterPoll(CancelToken):
+        """Fires only after the write loop has polled a few times."""
+
+        def __init__(self, after: int) -> None:
+            super().__init__()
+            self.polls = 0
+            self._after = after
+
+        def raise_if_cancelled(self, stage: str = "job") -> None:
+            self.polls += 1
+            if self.polls > self._after:
+                self.cancel()
+            super().raise_if_cancelled(stage)
+
+    # Poll 1 is render_video's own pre-flight check and poll 2 is the one after
+    # the basmala step, so anything beyond those has to come from inside the
+    # single event's frame-write loop.
+    token = _CancelsOnLaterPoll(after=3)
+    with pytest.raises(JobCancelled):
+        render_video(request, cancel=token)
+
+    assert token.polls > 3, "the frame write loop never polled for cancellation"
 
     # Aborted, so the encoder never finalised a playable file.
     assert not (tmp_path / "out.mp4").exists() or (tmp_path / "out.mp4").stat().st_size == 0
+
+
+@pytest.mark.skipif(
+    not (_FFMPEG and _FFPROBE and _BUNDLED_FONT.exists() and BASMALA_AUDIO_PATH.exists()),
+    reason="needs ffmpeg, ffprobe, the bundled font and the user's basmala audio",
+)
+def test_render_reports_the_basmala_offset_when_it_splices_one(tmp_path) -> None:
+    """A recitation with no basmala of its own gets the shipped one in front.
+
+    The result says by how much the timeline moved, which is the point of
+    returning an object rather than an exit code.
+    """
+    request = RenderRequest(
+        audio=_silent_audio(tmp_path),
+        matches=_matches_file(tmp_path),
+        output=tmp_path / "out.mp4",
+        width=160,
+        height=120,
+        fps=10,
+        font_file=_BUNDLED_FONT,
+    )
+    result = render_video(request)
+
+    assert result.basmala_offset_seconds > 0
+    assert result.duration_seconds == pytest.approx(2.0 + result.basmala_offset_seconds, abs=0.3)
