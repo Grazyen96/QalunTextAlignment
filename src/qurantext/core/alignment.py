@@ -266,6 +266,17 @@ def refine_word_timings(
 ) -> list[dict]:
     """Post-process canonical word timings for steadier, better-synced highlighting.
 
+    NOTE — what this does NOT fix. These timings are only as good as the word
+    timestamps they come from, and the recogniser can drop recited audio outright.
+    On Al-Furqān 7-11 it reports a 7.5 s gap between two words whose waveform
+    sits at -21.2 dBFS, two tenths of a decibel off the level of known recitation
+    either side: seven seconds of recitation that no word covers. A local CTC
+    forced aligner was tried as a replacement and agrees to a 9 ms median on
+    ordinary pacing, then disagrees by ~5 s across that same passage; which one
+    is right could not be settled without listening. ``bridge_max`` below decides
+    which gaps count as genuine pauses, but at its 0.6 s default it is nowhere
+    near this. See docs/findings/forced-alignment-prototype.md.
+
     Operates on the output of :func:`align_canonical_word_timings` — one
     ``{"start", "end"}`` per canonical word — applying three order-preserving
     corrections that target the two ways raw WhisperX/CTC timings read wrong on

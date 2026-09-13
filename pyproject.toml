@@ -40,6 +40,10 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+# Throwaway experiments kept for their written result, not their code. They need
+# dependencies the package does not have (torch, transformers), so CI neither
+# installs nor runs them. See prototypes/README.md.
+exclude = ["prototypes"]
 
 [tool.ruff.lint]
 select = ["B", "E", "F", "I", "UP"]
