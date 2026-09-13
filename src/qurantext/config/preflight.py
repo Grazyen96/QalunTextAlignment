@@ -28,6 +28,7 @@ from dataclasses import dataclass
 
 from qurantext.config.paths import (
     DEFAULT_FONT_PATH,
+    DEFAULT_QURAN_PATH,
     OUTPUT_DIR,
     QURAN_DB_PATH,
     checkout_root,
@@ -129,6 +130,19 @@ def _bundled_font() -> CheckResult:
     )
 
 
+def _bundled_quran() -> CheckResult:
+    if DEFAULT_QURAN_PATH.is_file():
+        size_kb = DEFAULT_QURAN_PATH.stat().st_size // 1024
+        return CheckResult("Quran text", Status.OK, f"{DEFAULT_QURAN_PATH.name} ({size_kb} KB)")
+    return CheckResult(
+        "Quran text",
+        Status.FAIL,
+        f"missing at {DEFAULT_QURAN_PATH}",
+        "The certified Qalun text ships inside the package. A build missing it "
+        "was packaged without its data files; check that assets/ is included.",
+    )
+
+
 def _quran_store() -> CheckResult:
     if QURAN_DB_PATH.is_file():
         size_mb = QURAN_DB_PATH.stat().st_size / 1e6
@@ -137,8 +151,8 @@ def _quran_store() -> CheckResult:
         "Quran store",
         Status.WARN,
         f"not built yet at {QURAN_DB_PATH}",
-        "Built automatically the first time it is needed. To build it now: "
-        "`qurantext build-db --quran <the Qalun text file>`.",
+        "Built automatically the first time it is needed, from the bundled text. "
+        "To build it now: `qurantext build-db`.",
     )
 
 
@@ -179,6 +193,7 @@ def run_checks() -> list[CheckResult]:
         _ffmpeg_binary("ffmpeg"),
         _ffmpeg_binary("ffprobe"),
         _bundled_font(),
+        _bundled_quran(),
         _quran_store(),
         _writable_output(),
         _window(),

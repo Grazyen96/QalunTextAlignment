@@ -20,12 +20,12 @@ pytest.importorskip("PySide6", reason="the window needs Qt: pip install 'qurante
 from PySide6.QtCore import QCoreApplication  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from qurantext.config.paths import DEFAULT_FONT_PATH, QURAN_INPUT_DIR  # noqa: E402
+from qurantext.config.paths import DEFAULT_FONT_PATH, DEFAULT_QURAN_PATH  # noqa: E402
 from qurantext.gui.jobs import JobSpec, run_job  # noqa: E402
 from qurantext.gui.worker import JobWorker, run_in_thread  # noqa: E402
 from qurantext.utils.progress import CancelToken, JobCancelled, ProgressEvent  # noqa: E402
 
-QURAN_FILE = QURAN_INPUT_DIR / "UthmanicQaloon1-Ver05.txt"
+QURAN_FILE = DEFAULT_QURAN_PATH
 _FFMPEG = shutil.which("ffmpeg")
 
 

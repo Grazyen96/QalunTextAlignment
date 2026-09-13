@@ -35,6 +35,7 @@ __all__ = [
     "BASMALA_INPUT_DIR",
     "DATA_DIR",
     "DEFAULT_FONT_PATH",
+    "DEFAULT_QURAN_PATH",
     "INPUT_DIR",
     "LECTURES_INPUT_DIR",
     "LECTURE_MATCHING_OUTPUT_DIR",
@@ -113,6 +114,22 @@ def bundled_asset(relative: str) -> Path:
     return Path(__file__).resolve().parent.parent / "assets" / relative
 
 
+def resolve_quran_path(explicit: str | Path | None = None) -> Path:
+    """The Quran text to use: the one given, else the one that ships with the app.
+
+    Having a default matters for more than convenience. The parser expects one
+    file's exact conventions, and the ayah numbering has to be the Madani
+    counting the rest of the data assumes, so "bring your own text" is a way to
+    get subtly wrong output rather than an obvious failure.
+    """
+    if explicit is not None:
+        path = Path(explicit).expanduser()
+        if not path.is_file():
+            raise FileNotFoundError(f"Quran text file not found: {path}")
+        return path.resolve()
+    return DEFAULT_QURAN_PATH
+
+
 def _output_root() -> Path:
     override = os.getenv("QURANTEXT_OUTPUT_DIR")
     if override:
@@ -159,6 +176,11 @@ RANGE_MATCHING_OUTPUT_DIR = OUTPUT_DIR / "range_matching"
 
 #: The Qalun font that ships with the package.
 DEFAULT_FONT_PATH = bundled_asset("fonts/qaloon.10.ttf")
+#: The certified Qalun text that ships with the package. Everything is built
+#: from this — the store, the citation index, the ayah text on screen — so the
+#: app carries it rather than asking each user to find a copy and hoping the
+#: riwaya and the ayah numbering match.
+DEFAULT_QURAN_PATH = bundled_asset("quran/UthmanicQaloon1-Ver05.txt")
 
 REQUIRED_DIRECTORIES = (
     INPUT_DIR,

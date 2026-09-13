@@ -12,10 +12,10 @@ import json
 
 import pytest
 
-from qurantext.config.paths import QURAN_INPUT_DIR
+from qurantext.config.paths import DEFAULT_QURAN_PATH
 from qurantext.pipelines.detection import cards_for_range, run_recitation_range
 
-QURAN_FILE = QURAN_INPUT_DIR / "UthmanicQaloon1-Ver05.txt"
+QURAN_FILE = DEFAULT_QURAN_PATH
 pytestmark = pytest.mark.skipif(not QURAN_FILE.exists(), reason="shipped Quran file not present")
 
 

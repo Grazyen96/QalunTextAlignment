@@ -169,9 +169,11 @@ input/
   recitations/
 ```
 
-Typical source files:
+The Quran text is not one of them: the certified Qalun text ships with the app,
+so `--quran` is optional everywhere and defaults to it. Pass one only to
+override.
 
-- Quran text: Qalun-format text files such as `UthmanicQaloon1-Ver05.txt`
+Typical source files:
 - Lecture audio: `input/lectures/*.mp3`, `*.wav`
 - Recitation audio: `input/recitations/*.mp3`, `*.wav`
 - Existing WhisperX transcripts: JSON files from a prior transcription run

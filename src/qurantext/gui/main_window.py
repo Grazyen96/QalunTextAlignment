@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from qurantext.config.paths import QURAN_DB_PATH, QURAN_INPUT_DIR
+from qurantext.config.paths import DEFAULT_QURAN_PATH, QURAN_DB_PATH, QURAN_INPUT_DIR
 from qurantext.config.settings import VIDEO_PRESETS
 from qurantext.data.quran_db import ensure_quran_db, list_surahs
 from qurantext.gui.editor import SubtitleEditor
@@ -237,9 +237,12 @@ class MainWindow(QMainWindow):
         self._refresh_enabled()
 
     def _update_quran_label(self) -> None:
-        self.quran_label.setText(
-            f"Quran text: {self._quran}" if self._quran else "Quran text: not chosen yet"
-        )
+        if self._quran is None:
+            self.quran_label.setText("Quran text: not chosen yet")
+        elif self._quran == DEFAULT_QURAN_PATH:
+            self.quran_label.setText("Quran text: the certified Qalun text that ships with Qalun")
+        else:
+            self.quran_label.setText(f"Quran text: {self._quran}")
 
     def _mode_changed(self) -> None:
         recitation = self.mode_box.currentData() == "recitation"
@@ -446,10 +449,16 @@ def _first_audio(urls) -> Path | None:
 
 
 def _default_quran_file() -> Path | None:
-    if not QURAN_INPUT_DIR.is_dir():
-        return None
-    candidates = sorted(QURAN_INPUT_DIR.glob("*.txt"))
-    return candidates[0] if candidates else None
+    """The bundled certified text, unless the user has dropped one in themselves.
+
+    Shipping it means the app works on first launch with nothing to find, and
+    that the ayah numbering matches what the rest of the data assumes.
+    """
+    if QURAN_INPUT_DIR.is_dir():
+        candidates = sorted(QURAN_INPUT_DIR.glob("*.txt"))
+        if candidates:
+            return candidates[0]
+    return DEFAULT_QURAN_PATH if DEFAULT_QURAN_PATH.is_file() else None
 
 
 def _show_in_folder(path: Path) -> None:

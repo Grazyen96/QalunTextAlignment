@@ -13,6 +13,7 @@ from qurantext.config.paths import (
     RECITATION_MATCHING_OUTPUT_DIR,
     VIDEOS_OUTPUT_DIR,
     WHISPERX_TRANSCRIPTS_OUTPUT_DIR,
+    resolve_quran_path,
 )
 from qurantext.config.preflight import Status, format_report, run_checks
 from qurantext.config.settings import VIDEO_PRESETS, get_settings
@@ -48,7 +49,7 @@ def _run_word_align(args: argparse.Namespace) -> int:
         base_name=args.base_name,
     )
     result = run_word_alignment(
-        args.quran,
+        resolve_quran_path(args.quran),
         args.audio,
         output_paths=output_paths,
         whisperx_output=whisperx_output,
@@ -79,7 +80,7 @@ def _run_detection_mode(args: argparse.Namespace) -> int:
                 "Give all three of --surah-num, --from-ayah and --to-ayah, or none of them."
             )
         run_recitation_range(
-            quran=args.quran,
+            quran=resolve_quran_path(args.quran),
             output=output_path,
             surah_num=stated[0],
             from_ayah=stated[1],
@@ -91,7 +92,7 @@ def _run_detection_mode(args: argparse.Namespace) -> int:
         )
         return 0
     run_detection(
-        quran=args.quran,
+        quran=resolve_quran_path(args.quran),
         output=output_path,
         mode=args.mode,
         whisperx=args.whisperx_json,
@@ -129,7 +130,7 @@ def _run_transcribe(args: argparse.Namespace) -> int:
 
 def _run_build_db(args: argparse.Namespace) -> int:
     summary = build_quran_db(
-        args.quran, args.output, verify=not args.no_verify, ngram_n=args.ngram_n
+        resolve_quran_path(args.quran), args.output, verify=not args.no_verify, ngram_n=args.ngram_n
     )
     print(f"Built Quran store at {summary['db_path']}")
     print(
@@ -178,7 +179,7 @@ def _resolve_preset(args: argparse.Namespace) -> argparse.Namespace:
 
 def _run_surahs(args: argparse.Namespace) -> int:
     """List the surahs, which is what a range picker populates from."""
-    conn = ensure_quran_db(args.quran, args.db)
+    conn = ensure_quran_db(resolve_quran_path(args.quran), args.db)
     try:
         rows = list_surahs(conn)
     finally:
@@ -340,7 +341,7 @@ def _run_all(args: argparse.Namespace) -> int:
         default_suffix,
     )
     run_detection(
-        quran=args.quran,
+        quran=resolve_quran_path(args.quran),
         output=output_path,
         mode=args.mode,
         audio=args.audio,
@@ -402,7 +403,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Build the versioned SQLite store from the certified Qalun text.",
     )
     build_db_parser.add_argument(
-        "--quran", required=True, help="Path to the certified Qalun text file."
+        "--quran",
+        default=None,
+        help="Quran text file. Defaults to the certified Qalun text that ships with the app.",
     )
     build_db_parser.add_argument(
         "--output",
@@ -426,7 +429,11 @@ def build_parser() -> argparse.ArgumentParser:
         "word-align",
         help="Run the legacy word-level recitation alignment workflow.",
     )
-    word_align_parser.add_argument("--quran", required=True, help="Path to the Quran text file.")
+    word_align_parser.add_argument(
+        "--quran",
+        default=None,
+        help="Quran text file. Defaults to the one that ships with the app.",
+    )
     word_align_parser.add_argument("--audio", required=True, help="Path to the audio file.")
     word_align_parser.add_argument(
         "--whisperx-json",
@@ -467,7 +474,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     ):
         subparser = subparsers.add_parser(command_name, help=help_text)
-        subparser.add_argument("--quran", required=True, help="Path to the Quran text file.")
+        subparser.add_argument(
+            "--quran",
+            default=None,
+            help="Quran text file. Defaults to the one that ships with the app.",
+        )
         source_group = subparser.add_mutually_exclusive_group(required=True)
         source_group.add_argument(
             "--whisperx-json",
@@ -638,7 +649,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="List surahs and their ayah counts (the range picker's data).",
     )
     surahs_parser.add_argument(
-        "--quran", required=True, help="Path to the certified Qalun text file."
+        "--quran",
+        default=None,
+        help="Quran text file. Defaults to the one that ships with the app.",
     )
     surahs_parser.add_argument(
         "--db", default=str(QURAN_DB_PATH), help="Path to the SQLite Quran store."
@@ -701,7 +714,11 @@ def build_parser() -> argparse.ArgumentParser:
         "run-all",
         help="Run audio transcription plus Quran matching, with optional video rendering.",
     )
-    run_all_parser.add_argument("--quran", required=True, help="Path to the Quran text file.")
+    run_all_parser.add_argument(
+        "--quran",
+        default=None,
+        help="Quran text file. Defaults to the one that ships with the app.",
+    )
     run_all_parser.add_argument("--audio", required=True, help="Path to the audio file.")
     run_all_parser.add_argument(
         "--mode",

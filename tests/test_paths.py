@@ -83,3 +83,36 @@ def test_the_data_dir_override_wins_on_every_platform(monkeypatch, tmp_path) -> 
     for platform in ("win32", "darwin", "linux"):
         monkeypatch.setattr(sys, "platform", platform)
         assert paths.user_data_dir() == tmp_path / "chosen"
+
+
+def test_the_quran_text_ships_with_the_package() -> None:
+    """The app carries its own certified text.
+
+    Not only for convenience: the parser expects one file's exact conventions,
+    and the ayah numbering has to be the Madani counting the rest of the data
+    assumes. "Bring your own text" is a way to get subtly wrong output rather
+    than an obvious failure.
+    """
+    assert paths.DEFAULT_QURAN_PATH.exists(), paths.DEFAULT_QURAN_PATH
+    assert paths.DEFAULT_QURAN_PATH.is_relative_to(paths.bundled_asset(""))
+    assert paths.DEFAULT_QURAN_PATH.stat().st_size > 1_000_000
+
+
+def test_the_bundled_text_parses_to_the_expected_shape() -> None:
+    from qurantext.core.quran_parser import parse_ayat
+
+    ayat = parse_ayat(paths.DEFAULT_QURAN_PATH)
+    assert len({a["surah_num"] for a in ayat}) == 114
+    assert len(ayat) == 6214, "Madani counting, which the store and index assume"
+
+
+def test_resolve_quran_path_prefers_what_it_is_given(tmp_path) -> None:
+    mine = tmp_path / "mine.txt"
+    mine.write_text("سُورَةُ الفَاتِحَةِ\n", encoding="utf-8")
+    assert paths.resolve_quran_path(mine) == mine.resolve()
+    assert paths.resolve_quran_path(None) == paths.DEFAULT_QURAN_PATH
+
+
+def test_a_path_that_does_not_exist_fails_clearly(tmp_path) -> None:
+    with pytest.raises(FileNotFoundError, match="Quran text file not found"):
+        paths.resolve_quran_path(tmp_path / "absent.txt")

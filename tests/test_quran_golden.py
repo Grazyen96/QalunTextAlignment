@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import pytest
 
-from qurantext.config.paths import QURAN_INPUT_DIR
+from qurantext.config.paths import DEFAULT_QURAN_PATH
 from qurantext.core.arabic import normalize_detection_ar
 from qurantext.core.quran_parser import _is_surah_header, _is_taawwudh, parse_ayat
 
-QURAN_FILE = QURAN_INPUT_DIR / "UthmanicQaloon1-Ver05.txt"
+QURAN_FILE = DEFAULT_QURAN_PATH
 
 
 # --- file-independent heuristic unit tests ---------------------------------

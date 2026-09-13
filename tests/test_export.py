@@ -12,11 +12,11 @@ import subprocess
 
 import pytest
 
-from qurantext.config.paths import DEFAULT_FONT_PATH, QURAN_INPUT_DIR
+from qurantext.config.paths import DEFAULT_FONT_PATH, DEFAULT_QURAN_PATH
 from qurantext.data.quran_db import build_quran_db
 from qurantext.jobs.export import SUBTITLE_MODES, ExportRequest, build_cues, export_job
 
-QURAN_FILE = QURAN_INPUT_DIR / "UthmanicQaloon1-Ver05.txt"
+QURAN_FILE = DEFAULT_QURAN_PATH
 _FFMPEG = shutil.which("ffmpeg")
 _FFPROBE = shutil.which("ffprobe")
 
@@ -292,12 +292,45 @@ def test_cues_tile_with_no_gaps(tmp_path, store) -> None:
     assert [c.ref for c in cues] == ["25:7", "25:8"]
 
 
-def test_a_missing_store_costs_the_subtitles_not_the_video(tmp_path, no_basmala) -> None:
-    """The video is already rendered when the subtitles are built.
+def test_a_missing_store_is_built_from_the_bundled_text(tmp_path, no_basmala) -> None:
+    """The app ships the certified text, so a new machine needs nothing from the user.
 
     Found by running the packaged app on a machine that had never built a store:
-    it produced the video and then failed, leaving an error beside a good file.
+    it produced the video and then gave up on the subtitles.
     """
+    audio, matches = _job(tmp_path)
+    store = tmp_path / "fresh.sqlite"
+    assert not store.exists()
+
+    result = export_job(
+        ExportRequest(
+            audio=audio,
+            matches=matches,
+            output=tmp_path / "out.mp4",
+            subtitles="both",
+            width=160,
+            height=120,
+            fps=8,
+            font_file=DEFAULT_FONT_PATH,
+            db_path=store,
+        )
+    )
+    assert store.exists(), "the store should have been built from the bundled text"
+    assert result.video is not None and result.video.exists()
+    assert result.subtitles, "subtitles must be written once the store exists"
+    assert result.cues == 2
+
+
+def test_a_store_that_cannot_be_built_costs_the_subtitles_not_the_video(
+    tmp_path, no_basmala, monkeypatch
+) -> None:
+    """The video is already rendered by the time the subtitles are built."""
+    from qurantext.data import quran_db
+
+    def refuse(*_args, **_kwargs):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(quran_db, "ensure_quran_db", refuse)
     audio, matches = _job(tmp_path)
     result = export_job(
         ExportRequest(
@@ -309,9 +342,8 @@ def test_a_missing_store_costs_the_subtitles_not_the_video(tmp_path, no_basmala)
             height=120,
             fps=8,
             font_file=DEFAULT_FONT_PATH,
-            db_path=tmp_path / "absent.sqlite",
+            db_path=tmp_path / "nope.sqlite",
         )
     )
     assert result.video is not None and result.video.exists()
     assert result.subtitles == []
-    assert result.cues == 0

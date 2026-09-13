@@ -125,18 +125,21 @@ def build_cues(
     )
     conn: sqlite3.Connection | None = None
     if needs_store:
-        from qurantext.data.quran_db import connect
+        from qurantext.config.paths import DEFAULT_QURAN_PATH
+        from qurantext.data.quran_db import QuranDataError, ensure_quran_db
 
         try:
-            conn = connect(db_path)
-        except FileNotFoundError:
-            # The video is already rendered by the time this runs, so a missing
-            # store must cost the subtitles, not the job. Found by running the
-            # packaged app on a machine that had never built one.
+            # The certified text ships with the app, so a missing store is
+            # something to build rather than to fail on. First export on a new
+            # machine pays for it once.
+            conn = ensure_quran_db(DEFAULT_QURAN_PATH, db_path)
+        except (OSError, sqlite3.DatabaseError, QuranDataError, FileNotFoundError) as error:
+            # The video is already rendered by the time this runs, so a store
+            # that cannot be built costs the subtitles, not the job.
             warn(
-                f"No Quran store at {db_path}, so the canonical ayah text for the "
-                "subtitles cannot be read. The video is unaffected. Build the store "
-                "with `build-db --quran <the Qalun text file>` and export again."
+                f"Could not prepare the Quran store at {db_path} ({error}), so the "
+                "canonical ayah text for the subtitles cannot be read. The video is "
+                "unaffected."
             )
             return []
 

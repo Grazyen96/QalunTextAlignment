@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from qurantext.config.paths import QURAN_INPUT_DIR
+from qurantext.config.paths import DEFAULT_QURAN_PATH
 from qurantext.core.quran_parser import parse_ayat
 from qurantext.core.quran_structure import parse_words
 
-QURAN_FILE = QURAN_INPUT_DIR / "UthmanicQaloon1-Ver05.txt"
+QURAN_FILE = DEFAULT_QURAN_PATH
 
 pytestmark = pytest.mark.skipif(not QURAN_FILE.exists(), reason="shipped Quran file not present")
 
