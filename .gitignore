@@ -66,3 +66,7 @@ build/
 /input/recitations/
 /input/basmala/
 vendor/
+ffmpeg-src/
+ffmpeg.tar.xz
+doctor-out.txt
+doctor-err.txt

@@ -25,6 +25,17 @@ USAGE = """Qalun — turn Arabic audio into a subtitled video.
 """
 
 
+def _usable(stream: object) -> bool:
+    """Does this stream go anywhere? A windowed process starts with none."""
+    if stream is None:
+        return False
+    try:
+        stream.fileno()  # type: ignore[attr-defined]
+    except Exception:
+        return False
+    return True
+
+
 def _attach_console() -> None:
     """On Windows, print into the console that launched us.
 
@@ -37,6 +48,11 @@ def _attach_console() -> None:
     """
     if sys.platform != "win32" or not getattr(sys, "frozen", False):
         return
+    if _usable(sys.stdout) and _usable(sys.stderr):
+        # Someone redirected us to a file or a pipe, which a windowed process
+        # does inherit. Writing to the console instead would send the output
+        # somewhere they are not looking.
+        return
     try:
         import ctypes
 
@@ -44,6 +60,8 @@ def _attach_console() -> None:
         if not ctypes.windll.kernel32.AttachConsole(ATTACH_PARENT_PROCESS):
             return
         for stream, target in (("stdout", "w"), ("stderr", "w")):
+            if _usable(getattr(sys, stream, None)):
+                continue
             try:
                 setattr(sys, stream, open("CONOUT$", target, encoding="utf-8", errors="replace"))
             except OSError:
