@@ -207,12 +207,63 @@ def _window() -> CheckResult:
     return CheckResult("Window", Status.OK, f"Qt {QtCore.qVersion()}")
 
 
+def _transcription() -> CheckResult:
+    """Can we reach the recogniser at all?
+
+    Added because a build passed every check here, rendered video correctly, and
+    then died partway through a real job with "No package metadata was found for
+    replicate" — the client reads its own version out of its installed metadata
+    when imported, and a frozen build ships none unless the spec says so. A gate
+    that proves rendering and never touches transcription will keep letting that
+    class of fault through, so this imports the thing for real.
+    """
+    try:
+        from importlib.metadata import version
+
+        import replicate  # noqa: F401 - importing it is the point
+
+        # The exact call that failed in the packaged build. replicate/client.py
+        # runs it at import time, so asking directly keeps this check pinned to
+        # the real failure rather than to a symptom of it.
+        client_version = version("replicate")
+    except Exception as error:  # noqa: BLE001 - any import failure is the same news
+        detail = f"the Replicate client will not import: {error}"
+        if getattr(sys, "frozen", False):
+            remedy = (
+                "Transcription cannot run. This is a packaging fault rather than "
+                "anything to fix on this machine. Please report it."
+            )
+        else:
+            remedy = "Reinstall the app's dependencies: pip install -e '.[gui]'"
+        return CheckResult("Transcription", Status.FAIL, detail, remedy)
+
+    from qurantext.config.settings import get_settings
+
+    token = get_settings().replicate_api_token
+    if not token:
+        return CheckResult(
+            "Transcription",
+            Status.WARN,
+            f"Replicate client {client_version}, but no API token is set",
+            "Transcribing audio needs a Replicate API token. Put a file named "
+            f".env in {user_data_dir()} containing a single line: "
+            "REPLICATE_API_TOKEN=your-token. Then restart the app — settings are "
+            "read once at startup. Everything else works without it.",
+        )
+    return CheckResult(
+        "Transcription",
+        Status.OK,
+        f"Replicate client {client_version}, API token set (\u2026{token[-4:]})",
+    )
+
+
 def run_checks() -> list[CheckResult]:
     """Every check, in the order a person would want to read them."""
     return [
         _arabic_shaping(),
         _ffmpeg_binary("ffmpeg"),
         _ffmpeg_binary("ffprobe"),
+        _transcription(),
         _bundled_font(),
         _bundled_quran(),
         _quran_store(),

@@ -19,6 +19,11 @@ What this has to get right, beyond the obvious:
   failure. The build copies one in beside the executable, and the app loads it
   itself at startup rather than trusting three different loaders to find it;
   see qurantext.config.fribidi. `--doctor` reports whether it resolved.
+* **Package metadata.** The Replicate client reads its own version out of its
+  installed metadata the moment it is imported, and a frozen build ships no
+  .dist-info unless told to. Without this the app renders perfectly and then
+  fails at transcription with "No package metadata was found for replicate" —
+  a failure that only appears once a job is already running.
 * **FFmpeg.** Not bundled here, because the binary is large and its licensing
   depends on the build you choose. Ship one beside the executable and put that
   directory on PATH, or accept the system install. `doctor` reports which.
@@ -26,12 +31,20 @@ What this has to get right, beyond the obvious:
 
 from pathlib import Path
 
+from PyInstaller.utils.hooks import copy_metadata
+
 ROOT = Path(SPECPATH).parent
 
 datas = [
     # The bundled font, kept at the path qurantext.config.paths expects.
     (str(ROOT / "src" / "qurantext" / "assets"), "qurantext/assets"),
 ]
+
+# replicate/__about__.py runs `version("replicate")` at import time, so the
+# package's metadata has to travel with it or the import raises. recursive=True
+# because its dependencies do the same thing, and finding out which ones one
+# traceback at a time is not a use of anyone's afternoon.
+datas += copy_metadata("replicate", recursive=True)
 
 # Pillow's own shared libraries are collected by PyInstaller's Pillow hook into
 # pillow.libs/ with the right search path. Do NOT add collect_dynamic_libs("PIL")

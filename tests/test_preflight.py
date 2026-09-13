@@ -141,3 +141,91 @@ class TestBundledFriBiDi:
         assert result.status == preflight.Status.FAIL
         assert "reinstall" not in (result.remedy or "").lower()
         assert "report it" in (result.remedy or "").lower()
+
+
+class TestTranscriptionCheck:
+    """A build passed every check here, rendered video, then died mid-job.
+
+    The Replicate client reads its own version out of its installed metadata
+    when imported, and a frozen build ships none unless the spec says so. A gate
+    that proves rendering and never touches transcription lets that through, so
+    this check imports the client for real.
+    """
+
+    def test_reports_the_client_version_and_that_a_token_exists(self, monkeypatch) -> None:
+        from qurantext.config import preflight
+        from qurantext.config.settings import get_settings
+
+        get_settings.cache_clear()
+        monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_secret_value_1234")
+        result = preflight._transcription()
+        get_settings.cache_clear()
+
+        assert result.status == preflight.Status.OK
+        assert "Replicate client" in result.detail
+
+    def test_never_prints_the_whole_token(self, monkeypatch) -> None:
+        """It goes in a report people are asked to send to someone else."""
+        from qurantext.config import preflight
+        from qurantext.config.settings import get_settings
+
+        secret = "r8_secret_value_1234"
+        get_settings.cache_clear()
+        monkeypatch.setenv("REPLICATE_API_TOKEN", secret)
+        result = preflight._transcription()
+        get_settings.cache_clear()
+
+        assert secret not in result.detail
+        assert secret[-4:] in result.detail
+
+    def test_a_missing_token_warns_and_names_the_file_to_create(self, monkeypatch) -> None:
+        from qurantext.config import preflight
+        from qurantext.config.settings import get_settings
+
+        get_settings.cache_clear()
+        # Empty rather than absent: the process environment is restored over
+        # anything a .env file supplies, so this is what "no token" looks like
+        # even in a checkout that has one.
+        monkeypatch.setenv("REPLICATE_API_TOKEN", "")
+        monkeypatch.setattr(preflight, "user_data_dir", lambda: Path("/somewhere/qalun"))
+        result = preflight._transcription()
+        get_settings.cache_clear()
+
+        assert result.status == preflight.Status.WARN
+        assert not result.blocking, "rendering still works without a token"
+        assert ".env" in (result.remedy or "")
+        assert "REPLICATE_API_TOKEN" in (result.remedy or "")
+
+    def test_missing_metadata_is_caught_here_rather_than_mid_job(self, monkeypatch) -> None:
+        """The exact fault: no .dist-info in the bundle, so the import raises."""
+        import importlib.metadata as metadata
+
+        from qurantext.config import preflight
+
+        real = metadata.version
+
+        def hidden(name: str) -> str:
+            if name == "replicate":
+                raise metadata.PackageNotFoundError(name)
+            return real(name)
+
+        monkeypatch.setattr(metadata, "version", hidden)
+        monkeypatch.delitem(sys.modules, "replicate", raising=False)
+        result = preflight._transcription()
+
+        assert result.status == preflight.Status.FAIL
+        assert "No package metadata" in result.detail
+
+    def test_a_packaged_user_is_told_it_is_not_their_fault(self, monkeypatch) -> None:
+        import importlib.metadata as metadata
+
+        from qurantext.config import preflight
+
+        monkeypatch.setattr(
+            metadata, "version", lambda n: (_ for _ in ()).throw(metadata.PackageNotFoundError(n))
+        )
+        monkeypatch.delitem(sys.modules, "replicate", raising=False)
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        result = preflight._transcription()
+
+        assert "report it" in (result.remedy or "").lower()
