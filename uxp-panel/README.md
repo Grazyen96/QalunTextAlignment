@@ -6,7 +6,23 @@ builds the *editable* Premiere project that matches the rendered MP4
 (architecture §8/§9). Targets **UXP, not ExtendScript** — ExtendScript is
 supported only through Sept 2026.
 
-## Status
+## Status: deprecated
+
+Superseded by the in-app subtitle editor and `generate-video --subtitles
+sidecar`, which write SRT, WebVTT or ASS beside the video. The editable artifact
+this panel was built to produce is a subtitle file, and every tool reads one
+without a paid application.
+
+Three things here never worked and were never going to without more authoring:
+the Export button returns early because no package contains the `.epr` preset it
+requires, the word-highlight keyframes cannot be applied because `highlight_v1`
+was never authored, and the plugin host has no caption-writing API in any
+shipped version. It has never been run against a live Premiere install.
+
+Kept so nothing is lost. Safe to delete once the replacement has been used in
+anger.
+
+## Original status
 
 The pipeline shape is complete (load spec → import media → sequence →
 audio/overlays/captions/markers → save → AME export). All API signatures now

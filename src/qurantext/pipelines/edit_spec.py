@@ -49,6 +49,30 @@ built against (both exclude the inline ayah-number markers). Preamble cards
 (istiʿādha/basmala) have no canonical Quran identity; their refs use the
 additive ``preamble:<kind>`` scheme and their highlight keyframes are keyed
 ``preamble:<kind>:<n>``.
+
+
+DEPRECATED. The in-app subtitle editor and the sidecar export replace this path.
+
+What this was for: hand an editable project to Premiere Pro. What it actually
+does today, verified against the shipped code:
+
+* The panel's Export button returns early on every package this produces. It
+  requires ``export/qalun_h264.epr`` and nothing here writes one.
+* ``word_highlight`` is the largest structure in the spec — 67 keyframes in the
+  real package — and no shipped component can apply it. The ``highlight_v1``
+  motion-graphics template it needs has never been authored.
+* The panel builds its "editable" project on top of the already-burned-in MP4.
+* The plugin host has no caption-writing API in any shipped version, so the
+  captions still have to be dragged onto the timeline by hand.
+* It has never been run against a live Premiere install.
+
+The editable artifact this was chasing is a subtitle file. ``generate-video
+--subtitles sidecar`` writes one in SRT, WebVTT or ASS, and the editor corrects
+it first. Neither needs a paid application.
+
+Kept for now so nothing is lost while the replacement is used in anger. The cue
+builders it shares have already moved to ``core.subtitles``, so removing this is
+a deletion rather than a salvage.
 """
 
 from __future__ import annotations

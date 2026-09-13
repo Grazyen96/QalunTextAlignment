@@ -272,7 +272,14 @@ python3 -m qurantext check-timing \
 Builds the versioned SQLite store from the certified Qalun text. Lecture
 matching builds it on demand; `export-editspec` requires it up front.
 
-### `export-editspec`
+### `export-editspec` (deprecated)
+
+Superseded by `--subtitles sidecar` above and the in-app editor. The Premiere
+panel it feeds cannot export (no preset is ever written), cannot apply the word
+highlight (its template was never authored), and has never been run against a
+live Premiere. Kept so nothing is lost.
+
+### `export-editspec`, in detail
 Writes the format-neutral edit-spec package for a match result.
 
 ### `run-all`

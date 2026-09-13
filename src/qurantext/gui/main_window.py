@@ -33,8 +33,10 @@ from PySide6.QtWidgets import (
 from qurantext.config.paths import QURAN_DB_PATH, QURAN_INPUT_DIR
 from qurantext.config.settings import VIDEO_PRESETS
 from qurantext.data.quran_db import ensure_quran_db, list_surahs
+from qurantext.gui.editor import SubtitleEditor
 from qurantext.gui.jobs import JobOutcome, JobSpec, run_job
 from qurantext.gui.worker import run_in_thread
+from qurantext.jobs.project import Project, load_project, save_project
 from qurantext.utils.progress import CancelToken, ProgressEvent
 
 __all__ = ["MainWindow"]
@@ -57,6 +59,7 @@ class MainWindow(QMainWindow):
         self._thread = None
         self._worker = None
         self._outcome: JobOutcome | None = None
+        self._editor = None
 
         self._build()
         self._refresh_enabled()
@@ -145,12 +148,16 @@ class MainWindow(QMainWindow):
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.setEnabled(False)
         self.cancel_button.clicked.connect(self._request_cancel)
+        self.check_button = QPushButton("Check the subtitles")
+        self.check_button.setEnabled(False)
+        self.check_button.clicked.connect(self._open_editor)
         self.reveal_button = QPushButton("Show the video")
         self.reveal_button.setEnabled(False)
         self.reveal_button.clicked.connect(self._reveal)
         buttons.addWidget(self.start_button)
         buttons.addWidget(self.cancel_button)
         buttons.addStretch(1)
+        buttons.addWidget(self.check_button)
         buttons.addWidget(self.reveal_button)
         layout.addLayout(buttons)
 
@@ -334,6 +341,7 @@ class MainWindow(QMainWindow):
         where = outcome.video or outcome.matches
         self.status.setText(f"{outcome.cards} card(s). Saved to {where}")
         self.reveal_button.setEnabled(outcome.video is not None)
+        self.check_button.setEnabled(True)
 
     def _on_failed(self, message: str) -> None:
         self.progress.setFormat("Stopped")
@@ -348,6 +356,37 @@ class MainWindow(QMainWindow):
     def _on_done(self) -> None:
         self._cancel = None
         self._refresh_enabled()
+
+    def _open_editor(self) -> None:
+        """Open the finished job's subtitles for correction.
+
+        The project is derived from the match result once, here, and written
+        beside it. After that the project owns the cues: a correction made in
+        the editor survives the next render, which is the whole reason the
+        project file exists.
+        """
+        if self._outcome is None:
+            return
+        project_path = self._outcome.matches.with_suffix(".qalun.json")
+        try:
+            if project_path.exists():
+                project = load_project(project_path)
+            else:
+                project = Project.from_match_file(
+                    self._outcome.matches, self._audio or Path(), mode=self._outcome.mode
+                )
+                save_project(project, project_path)
+        except (OSError, ValueError) as error:
+            QMessageBox.warning(self, "Could not open the subtitles", str(error))
+            return
+
+        editor = SubtitleEditor(project)
+        editor.setWindowFlag(Qt.WindowType.Window, True)
+        editor.resize(760, 520)
+        editor.saved.connect(lambda _p: self.status.setText(f"Corrections saved to {project_path}"))
+        editor.show()
+        # Keep a reference: a window without one is collected and vanishes.
+        self._editor = editor
 
     def _reveal(self) -> None:
         if self._outcome is None or self._outcome.video is None:
