@@ -19,7 +19,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8,<10",
-  "ruff>=0.6,<1",
+  # Pinned exactly: CI runs `ruff format --check`, and the formatter's output
+  # changes between releases, so an open range turns the build red on its own.
+  "ruff==0.15.13",
 ]
 
 [project.scripts]
