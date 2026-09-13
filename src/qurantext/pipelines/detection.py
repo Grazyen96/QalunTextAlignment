@@ -339,6 +339,24 @@ def run_detection(
     if mode == "recitation":
         emit("[3/4] Refining recitation matches inside detected range...")
         recitation_ayat = ayat_in_detected_range(ayat, first_ayah, last_ayah)
+        # This call dominates recitation mode — roughly 99% of its runtime, and
+        # it prints nothing while it works. Backing it with the citation n-gram
+        # index (conn + db_strategy="ngram"), the lever that makes lecture mode
+        # fast, was tried and REJECTED. Measured on the 914-word Al-Furqan
+        # recitation, full surah detected:
+        #
+        #     in-memory   583 s   22 cards, 74 of 77 ayat, no gap over 1.6 s
+        #     ngram       369 s   16 cards, 66 of 77 ayat, gaps up to 39 s
+        #
+        # Only 1.6x faster, because the index earns its speed by skipping windows
+        # with no exact phrase hit — common in a tafseer where most speech is not
+        # quotation, rare in continuous recitation where nearly every window hits
+        # (see the docstring on detect_quran_mentions_in_lecture). Paying eight
+        # dropped ayat and half-minute holes on screen for that is a bad trade.
+        #
+        # The real fix is not a faster matcher: with the surah and ayah range
+        # known, recitation is forced alignment over known text and this whole
+        # detection stage goes away.
         raw_mentions = detect_quran_mentions_in_lecture(
             recitation_ayat,
             words,

@@ -21,6 +21,11 @@ from qurantext.core.arabic import ayah_text_with_marker, partial_ratio, word_rec
 # 48) toward the surah the lecture is actually on.
 SURAH_CONTINUITY_MARGIN = 0.1
 
+# Ayah count of the shipped Qalun text. A caller handing over at least this many
+# ayat is working on the whole Quran, so the candidate queries have nothing to
+# narrow (see _scope_clause).
+_FULL_QURAN_AYAT = 6214
+
 
 def spans_starting_at(ayat: list[dict], index: int, max_span: int) -> list[dict]:
     """Build the same-surah spans that start at ``ayat[index]``.
@@ -251,6 +256,35 @@ def db_ngram_n(conn) -> int:
     return int(row[0]) if row else 3
 
 
+def _scope_clause(ayat_index: dict[tuple[int, int], int]) -> tuple[str, tuple]:
+    """Push the in-play ayah range down into the candidate SQL.
+
+    The store always holds the whole Quran, but callers may be working on a
+    subset — recitation mode scans only the detected range. Both candidate
+    queries apply ``LIMIT`` before the Python-side ``ayat_index`` filter, so
+    without this the top-*N* rows can all be ayat outside the subset and the
+    window ends up with no candidates at all. Restricting the query first keeps
+    the limit meaningful.
+
+    Lecture mode passes the full Quran, where there is nothing to restrict, so
+    it gets an empty clause and the query is unchanged.
+    """
+    if not ayat_index or len(ayat_index) >= _FULL_QURAN_AYAT:
+        return "", ()
+
+    surahs = sorted({surah for surah, _ in ayat_index})
+    if len(surahs) == 1:
+        numbers = [ayah for _, ayah in ayat_index]
+        return " AND surah_num = ? AND ayah_num BETWEEN ? AND ?", (
+            surahs[0],
+            min(numbers),
+            max(numbers),
+        )
+
+    placeholders = ",".join("?" * len(surahs))
+    return f" AND surah_num IN ({placeholders})", tuple(surahs)
+
+
 def db_candidate_spans_ngram(
     conn,
     ayat: list[dict],
@@ -282,12 +316,13 @@ def db_candidate_spans_ngram(
         return []
 
     placeholders = ",".join("?" * len(grams))
+    scope_sql, scope_params = _scope_clause(ayat_index)
     rows = conn.execute(
         f"SELECT surah_num, ayah_num, COUNT(DISTINCT gram) AS hits"  # noqa: S608
-        f" FROM citation_ngrams WHERE gram IN ({placeholders})"
+        f" FROM citation_ngrams WHERE gram IN ({placeholders}){scope_sql}"
         f" GROUP BY surah_num, ayah_num HAVING hits >= ?"
         f" ORDER BY hits DESC, surah_num, ayah_num LIMIT ?",
-        (*grams, min_gram_hits, candidate_limit),
+        (*grams, *scope_params, min_gram_hits, candidate_limit),
     ).fetchall()
 
     spans: list[dict] = []
@@ -542,9 +577,7 @@ def _apply_surah_continuity(cards: list[list], consolidated: list[dict], rank) -
     """
     for i, card in enumerate(cards):
         start, end, winner = card
-        neighbour_surahs = {
-            cards[j][2]["surah_num"] for j in (i - 1, i + 1) if 0 <= j < len(cards)
-        }
+        neighbour_surahs = {cards[j][2]["surah_num"] for j in (i - 1, i + 1) if 0 <= j < len(cards)}
         if winner["surah_num"] in neighbour_surahs or not neighbour_surahs:
             continue
 
