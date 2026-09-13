@@ -16,9 +16,7 @@ from qurantext.data.quran_db import (
 
 QURAN_FILE = QURAN_INPUT_DIR / "UthmanicQaloon1-Ver05.txt"
 
-pytestmark = pytest.mark.skipif(
-    not QURAN_FILE.exists(), reason="shipped Quran file not present"
-)
+pytestmark = pytest.mark.skipif(not QURAN_FILE.exists(), reason="shipped Quran file not present")
 
 
 @pytest.fixture(scope="module")
@@ -38,12 +36,8 @@ def test_meta_records_provenance(db: str) -> None:
     assert len(meta["source_sha256"]) == 64
     assert meta["data_version"] == meta["source_sha256"][:12]
     # Counts in meta agree with the actual tables.
-    assert int(meta["surah_count"]) == conn.execute(
-        "SELECT COUNT(*) FROM surahs"
-    ).fetchone()[0]
-    assert int(meta["word_count"]) == conn.execute(
-        "SELECT COUNT(*) FROM words"
-    ).fetchone()[0]
+    assert int(meta["surah_count"]) == conn.execute("SELECT COUNT(*) FROM surahs").fetchone()[0]
+    assert int(meta["word_count"]) == conn.execute("SELECT COUNT(*) FROM words").fetchone()[0]
 
 
 def test_table_shapes(db: str) -> None:
@@ -61,8 +55,7 @@ def test_referential_integrity(db: str) -> None:
     # Every word joins to a real ayah; every ayah to a real surah.
     assert (
         conn.execute(
-            "SELECT COUNT(*) FROM words w LEFT JOIN ayat a ON w.ayah_id = a.id"
-            " WHERE a.id IS NULL"
+            "SELECT COUNT(*) FROM words w LEFT JOIN ayat a ON w.ayah_id = a.id WHERE a.id IS NULL"
         ).fetchone()[0]
         == 0
     )
@@ -118,3 +111,24 @@ def test_build_is_deterministic(tmp_path) -> None:
     # Same source → same data version and identical row counts.
     assert sa["data_version"] == sb["data_version"]
     assert (sa["surahs"], sa["ayat"], sa["words"]) == (sb["surahs"], sb["ayat"], sb["words"])
+
+
+@pytest.mark.parametrize("dirname", ["plain", "has#hash", "has?question", "الفرقان"])
+def test_connect_handles_uri_significant_characters_in_path(tmp_path, dirname) -> None:
+    """A '#' or '?' in the path must not truncate the SQLite URI.
+
+    These characters are legal in filenames on Windows, macOS and Linux, and an
+    installer or a user's own folder can easily contain one. Interpolating the
+    raw path into the URI silently opened a different, empty database instead of
+    raising, so the failure surfaced much later as missing ayat.
+    """
+    directory = tmp_path / dirname
+    directory.mkdir()
+    path = directory / "quran.sqlite"
+    build_quran_db(QURAN_FILE, path)
+
+    conn = connect(path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM ayat").fetchone()[0] > 0
+    finally:
+        conn.close()

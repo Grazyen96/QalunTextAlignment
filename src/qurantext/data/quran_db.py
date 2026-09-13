@@ -190,8 +190,7 @@ def _verify_against_parser(quran_path: str | Path, ayah_rows: list[dict]) -> Non
     for ayah_id, text in expected_by_id.items():
         if got_by_id[ayah_id] != text:
             raise QuranDataError(
-                f"text mismatch vs parse_ayat at {ayah_id}: "
-                f"{got_by_id[ayah_id]!r} != {text!r}"
+                f"text mismatch vs parse_ayat at {ayah_id}: {got_by_id[ayah_id]!r} != {text!r}"
             )
 
 
@@ -308,7 +307,12 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     db_path = Path(db_path).expanduser().resolve()
     if not db_path.exists():
         raise FileNotFoundError(f"Quran DB not found at {db_path}; build it first.")
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    # Build the URI with Path.as_uri() rather than an f-string: it percent-encodes
+    # the characters that are significant in a URI and handles Windows drive
+    # letters. Interpolating the raw path let a '#' or '?' anywhere in it (legal in
+    # filenames on every target platform) truncate the URI, so SQLite silently
+    # opened a different, empty database instead of failing.
+    conn = sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     return conn
 
