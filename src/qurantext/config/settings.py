@@ -105,6 +105,11 @@ DEFAULT_WHISPERX_INPUT = {
     "align_output": True,
     "language_detection_min_prob": 0,
     "language_detection_max_tries": 5,
+    # Fake "previous transcript" text Whisper conditions its first window on.
+    # A sentence of Quranic/tafseer Arabic biases decoding toward classical
+    # vocabulary and spellings, which cleans up quoted ayat inside dars audio.
+    # Empty disables the parameter (it is omitted from the request payload).
+    "initial_prompt": "",
 }
 
 
@@ -207,10 +212,11 @@ class WhisperXSettings:
     align_output: bool
     language_detection_min_prob: float
     language_detection_max_tries: int
+    initial_prompt: str
 
     def input_kwargs(self) -> dict[str, Any]:
         """Return the Replicate input payload excluding the audio file handle."""
-        return {
+        kwargs: dict[str, Any] = {
             "debug": self.debug,
             "language": self.language,
             "vad_onset": self.vad_onset,
@@ -222,6 +228,9 @@ class WhisperXSettings:
             "language_detection_min_prob": self.language_detection_min_prob,
             "language_detection_max_tries": self.language_detection_max_tries,
         }
+        if self.initial_prompt:
+            kwargs["initial_prompt"] = self.initial_prompt
+        return kwargs
 
 
 @dataclass(frozen=True, slots=True)
@@ -323,6 +332,10 @@ def get_settings() -> AppSettings:
             "QURANTEXT_WHISPERX_LANGUAGE_DETECTION_MAX_TRIES",
             int(DEFAULT_WHISPERX_INPUT["language_detection_max_tries"]),
         ),
+        initial_prompt=_env_str(
+            "QURANTEXT_WHISPERX_INITIAL_PROMPT",
+            str(DEFAULT_WHISPERX_INPUT["initial_prompt"]),
+        ),
     )
 
     range_matching = RangeMatchingSettings(
@@ -371,12 +384,8 @@ def get_settings() -> AppSettings:
     )
 
     alignment = AlignmentSettings(
-        highlight_offset_s=_env_float(
-            "QURANTEXT_HIGHLIGHT_OFFSET_S", DEFAULT_HIGHLIGHT_OFFSET_S
-        ),
-        bridge_max_s=_env_float(
-            "QURANTEXT_TIMING_BRIDGE_MAX_S", DEFAULT_TIMING_BRIDGE_MAX_S
-        ),
+        highlight_offset_s=_env_float("QURANTEXT_HIGHLIGHT_OFFSET_S", DEFAULT_HIGHLIGHT_OFFSET_S),
+        bridge_max_s=_env_float("QURANTEXT_TIMING_BRIDGE_MAX_S", DEFAULT_TIMING_BRIDGE_MAX_S),
     )
 
     video = VideoSettings(
@@ -387,9 +396,7 @@ def get_settings() -> AppSettings:
         gap_midpoint_threshold=_env_float(
             "QURANTEXT_VIDEO_GAP_MIDPOINT_THRESHOLD", DEFAULT_VIDEO_GAP_MIDPOINT_THRESHOLD
         ),
-        prepend_basmala=_env_bool(
-            "QURANTEXT_VIDEO_PREPEND_BASMALA", DEFAULT_VIDEO_PREPEND_BASMALA
-        ),
+        prepend_basmala=_env_bool("QURANTEXT_VIDEO_PREPEND_BASMALA", DEFAULT_VIDEO_PREPEND_BASMALA),
     )
 
     return AppSettings(

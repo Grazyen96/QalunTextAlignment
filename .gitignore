@@ -48,3 +48,20 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+
+# Generated output tree (renders, match JSON, export packages)
+/output/
+
+# Hand-carried deployment copy of the panel + a sample package (build artifact)
+/qalun-for-windows/
+/qalun-for-windows.zip
+
+# Render intermediates and manual verification scaffolding
+/tmp_render_tests/
+*.ffmpeg.log
+*.silent.mp4
+
+# Media inputs are the user's own; keep them out of the repo regardless of case
+/input/lectures/
+/input/recitations/
+/input/basmala/

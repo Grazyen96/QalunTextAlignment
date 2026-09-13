@@ -7,6 +7,7 @@ from pathlib import Path
 
 from qurantext import __version__
 from qurantext.config.paths import (
+    EXPORT_PACKAGES_OUTPUT_DIR,
     LECTURE_MATCHING_OUTPUT_DIR,
     QURAN_DB_PATH,
     RANGE_MATCHING_OUTPUT_DIR,
@@ -19,6 +20,7 @@ from qurantext.data.citation_index import DEFAULT_NGRAM_N
 from qurantext.data.quran_db import build_quran_db
 from qurantext.io.readers import load_json
 from qurantext.pipelines.detection import run_detection
+from qurantext.pipelines.edit_spec import export_edit_spec_package
 from qurantext.pipelines.recitation import build_recitation_output_paths, run_word_alignment
 from qurantext.pipelines.video import run_video_generation
 from qurantext.services.transcription import WhisperXServiceError, transcribe_audio
@@ -121,7 +123,9 @@ def _resolve_preset(args: argparse.Namespace) -> argparse.Namespace:
         args.width, args.height, args.fps = VIDEO_PRESETS[preset]
         return args
 
-    phone_video = getattr(args, "render_video", False) and getattr(args, "mode", None) in (
+    phone_video = (
+        getattr(args, "render_video", False) or getattr(args, "edit_spec", False)
+    ) and getattr(args, "mode", None) in (
         "lecture",
         "recitation",
     )
@@ -142,6 +146,24 @@ def _resolve_preset(args: argparse.Namespace) -> argparse.Namespace:
     return args
 
 
+def _export_edit_spec(args: argparse.Namespace, matches: str, video_output: str | None) -> None:
+    """Write the edit-spec package companion for a rendered (or renderable) job."""
+    result = export_edit_spec_package(
+        audio=args.audio,
+        matches=matches,
+        output_dir=getattr(args, "edit_spec_output_dir", None) or str(EXPORT_PACKAGES_OUTPUT_DIR),
+        video=video_output,
+        preset=getattr(args, "preset", None),
+        width=args.width,
+        height=args.height,
+        fps=args.fps,
+        font_file=args.font_file,
+    )
+    print(f"Edit-spec package saved to: {result.package_dir}")
+    if result.warnings:
+        print(f"  ({len(result.warnings)} timing warning(s) — see edit_spec.json meta)")
+
+
 def _run_generate_video(args: argparse.Namespace) -> int:
     _resolve_preset(args)
     output_path = args.output or _default_detection_output(
@@ -149,7 +171,7 @@ def _run_generate_video(args: argparse.Namespace) -> int:
         args.output_dir,
         f"_{args.renderer}.mp4",
     )
-    return run_video_generation(
+    return_code = run_video_generation(
         audio=args.audio,
         matches=args.matches,
         output=output_path,
@@ -164,12 +186,17 @@ def _run_generate_video(args: argparse.Namespace) -> int:
         debug_detected_text=args.debug_detected_text,
         title=getattr(args, "title", None),
     )
+    if return_code == 0 and getattr(args, "edit_spec", False):
+        _export_edit_spec(args, args.matches, output_path)
+    return return_code
 
 
 def _run_all(args: argparse.Namespace) -> int:
     # Pre-flight: reject incompatible flags BEFORE running any (billed) work.
     if args.render_video and args.mode == "range":
         raise SystemExit("--render-video is only supported for lecture or recitation workflows.")
+    if args.edit_spec and args.mode == "range":
+        raise SystemExit("--edit-spec is only supported for lecture or recitation workflows.")
     _resolve_preset(args)
     default_output_dir = {
         "range": str(RANGE_MATCHING_OUTPUT_DIR),
@@ -203,6 +230,8 @@ def _run_all(args: argparse.Namespace) -> int:
     )
 
     if not args.render_video:
+        if args.edit_spec:
+            _export_edit_spec(args, output_path, None)
         return 0
 
     video_output = args.video_output or _default_detection_output(
@@ -210,7 +239,7 @@ def _run_all(args: argparse.Namespace) -> int:
         args.video_output_dir,
         f"_{args.renderer}.mp4",
     )
-    return run_video_generation(
+    return_code = run_video_generation(
         audio=args.audio,
         matches=output_path,
         output=video_output,
@@ -225,6 +254,28 @@ def _run_all(args: argparse.Namespace) -> int:
         debug_detected_text=args.debug_detected_text,
         title=getattr(args, "title", None),
     )
+    if return_code == 0 and args.edit_spec:
+        _export_edit_spec(args, output_path, video_output)
+    return return_code
+
+
+def _run_export_editspec(args: argparse.Namespace) -> int:
+    result = export_edit_spec_package(
+        audio=args.audio,
+        matches=args.matches,
+        output_dir=args.output_dir,
+        video=args.video,
+        preset=args.preset,
+        width=args.width,
+        height=args.height,
+        fps=args.fps,
+        font_file=args.font_file,
+        db_path=args.db,
+    )
+    print(f"Edit-spec package saved to: {result.package_dir}")
+    for warning in result.warnings:
+        print(f"  timing warning: {warning}")
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -407,7 +458,57 @@ def build_parser() -> argparse.ArgumentParser:
     video_parser.add_argument("--fps", type=int, default=None)
     video_parser.add_argument("--keep-temp", action="store_true")
     video_parser.add_argument("--debug-detected-text", action="store_true")
+    video_parser.add_argument(
+        "--edit-spec",
+        action="store_true",
+        help="Also write an edit-spec package (editable-project export) next to the MP4.",
+    )
+    video_parser.add_argument(
+        "--edit-spec-output-dir",
+        default=None,
+        help="Directory for the edit-spec package. Defaults to output/export_packages.",
+    )
     video_parser.set_defaults(handler=_run_generate_video)
+
+    editspec_parser = subparsers.add_parser(
+        "export-editspec",
+        help="Write the format-neutral edit-spec package for a match result (architecture §8).",
+    )
+    editspec_parser.add_argument("--audio", required=True, help="Path to the original audio file.")
+    editspec_parser.add_argument(
+        "--matches", required=True, help="Path to the match JSON result file."
+    )
+    editspec_parser.add_argument(
+        "--output-dir",
+        default=str(EXPORT_PACKAGES_OUTPUT_DIR),
+        help="Directory the ExportPackage_<basename> folder is created in.",
+    )
+    editspec_parser.add_argument(
+        "--video",
+        default=None,
+        help="Optional rendered MP4 to stage as the reference/proxy video.",
+    )
+    editspec_parser.add_argument(
+        "--preset",
+        choices=sorted(VIDEO_PRESETS),
+        default=None,
+        help=(
+            "Named quality preset that sets width, height and fps together. "
+            "Overrides --width / --height / --fps when specified."
+        ),
+    )
+    editspec_parser.add_argument("--width", type=int, default=None)
+    editspec_parser.add_argument("--height", type=int, default=None)
+    editspec_parser.add_argument("--fps", type=int, default=None)
+    editspec_parser.add_argument(
+        "--font-file", default=None, help="Font file used to render the interim overlay PNGs."
+    )
+    editspec_parser.add_argument(
+        "--db",
+        default=str(QURAN_DB_PATH),
+        help="Path to the SQLite Quran store (word identity source). Build it with build-db.",
+    )
+    editspec_parser.set_defaults(handler=_run_export_editspec)
 
     run_all_parser = subparsers.add_parser(
         "run-all",
@@ -482,6 +583,19 @@ def build_parser() -> argparse.ArgumentParser:
     run_all_parser.add_argument("--fps", type=int, default=None)
     run_all_parser.add_argument("--keep-temp", action="store_true")
     run_all_parser.add_argument("--debug-detected-text", action="store_true")
+    run_all_parser.add_argument(
+        "--edit-spec",
+        action="store_true",
+        help=(
+            "Also write an edit-spec package after matching (and rendering, when "
+            "--render-video is set). Only valid for lecture or recitation mode."
+        ),
+    )
+    run_all_parser.add_argument(
+        "--edit-spec-output-dir",
+        default=None,
+        help="Directory for the edit-spec package. Defaults to output/export_packages.",
+    )
     run_all_parser.set_defaults(handler=_run_all)
 
     return parser
