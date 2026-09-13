@@ -123,9 +123,7 @@ def _match_display_text(match: dict[str, Any], match_index: int) -> str:
     )
 
 
-def _bridge_match_gaps(
-    matches: list[dict[str, Any]], midpoint_threshold: float
-) -> None:
+def _bridge_match_gaps(matches: list[dict[str, Any]], midpoint_threshold: float) -> None:
     """Close black-screen gaps between consecutive groups, mutating in place.
 
     Each match only displays during ``[_start_time, _end_time]``, so any gap
@@ -238,7 +236,9 @@ def load_caption_segments(matches_path: Path) -> list[dict[str, Any]]:
     try:
         data = load_json(transcript_path)
     except (OSError, json.JSONDecodeError) as error:
-        warn(f"Could not parse transcript '{transcript_path}' ({error}); rendering without captions.")
+        warn(
+            f"Could not parse transcript '{transcript_path}' ({error}); rendering without captions."
+        )
         return []
 
     segments: list[dict[str, Any]] = []
@@ -266,9 +266,7 @@ def load_caption_segments(matches_path: Path) -> list[dict[str, Any]]:
 
         if not text or not math.isfinite(start) or not math.isfinite(end) or end < start:
             continue
-        segments.append(
-            {"text": text, "start": start, "end": end, "word_timings": word_timings}
-        )
+        segments.append({"text": text, "start": start, "end": end, "word_timings": word_timings})
 
     segments.sort(key=lambda seg: seg["start"])
     return segments

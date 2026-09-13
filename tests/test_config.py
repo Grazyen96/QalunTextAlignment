@@ -126,7 +126,16 @@ def test_lecture_render_respects_explicit_preset_and_dimensions() -> None:
     get_settings.cache_clear()
     from qurantext.cli.main import _resolve_preset
 
-    base = ["run-all", "--quran", "q.txt", "--audio", "a.wav", "--mode", "lecture", "--render-video"]
+    base = [
+        "run-all",
+        "--quran",
+        "q.txt",
+        "--audio",
+        "a.wav",
+        "--mode",
+        "lecture",
+        "--render-video",
+    ]
 
     with_preset = build_cli_parser().parse_args(base + ["--preset", "high"])
     _resolve_preset(with_preset)
@@ -144,7 +153,16 @@ def test_recitation_render_defaults_to_portrait_social_preset() -> None:
     from qurantext.cli.main import _resolve_preset
 
     args = build_cli_parser().parse_args(
-        ["run-all", "--quran", "q.txt", "--audio", "a.wav", "--mode", "recitation", "--render-video"]
+        [
+            "run-all",
+            "--quran",
+            "q.txt",
+            "--audio",
+            "a.wav",
+            "--mode",
+            "recitation",
+            "--render-video",
+        ]
     )
     _resolve_preset(args)
 

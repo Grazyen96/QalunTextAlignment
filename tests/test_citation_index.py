@@ -10,9 +10,7 @@ from qurantext.data.quran_db import build_quran_db, connect
 
 QURAN_FILE = QURAN_INPUT_DIR / "UthmanicQaloon1-Ver05.txt"
 
-pytestmark = pytest.mark.skipif(
-    not QURAN_FILE.exists(), reason="shipped Quran file not present"
-)
+pytestmark = pytest.mark.skipif(not QURAN_FILE.exists(), reason="shipped Quran file not present")
 
 
 @pytest.fixture(scope="module")
@@ -23,17 +21,15 @@ def db(tmp_path_factory: pytest.TempPathFactory) -> str:
 
 
 def _ayah_text(conn, ayah_id: str) -> str:
-    return conn.execute("SELECT text_raw FROM ayat WHERE id = ?", (ayah_id,)).fetchone()[
-        "text_raw"
-    ]
+    return conn.execute("SELECT text_raw FROM ayat WHERE id = ?", (ayah_id,)).fetchone()["text_raw"]
 
 
 def test_index_is_populated_and_recorded(db: str) -> None:
     conn = connect(db)
     assert conn.execute("SELECT COUNT(*) FROM citation_ngrams").fetchone()[0] > 0
-    assert conn.execute("SELECT value FROM meta WHERE key = 'citation_ngram_n'").fetchone()[
-        0
-    ] == "3"
+    assert (
+        conn.execute("SELECT value FROM meta WHERE key = 'citation_ngram_n'").fetchone()[0] == "3"
+    )
 
 
 @pytest.mark.parametrize("ayah_id", ["1:1", "1:4", "2:253", "112:1", "55:11", "36:40"])
@@ -49,17 +45,14 @@ def test_exact_ayah_text_pins_its_own_ayah(db: str, ayah_id: str) -> None:
     # Its own text yields the maximum possible hits → it must tie for the top rank.
     top_hits = results[0]["hits"]
     assert any(
-        r["surah_num"] == surah and r["ayah_num"] == ayah and r["hits"] == top_hits
-        for r in results
+        r["surah_num"] == surah and r["ayah_num"] == ayah and r["hits"] == top_hits for r in results
     )
 
 
 def test_madani_numbering_ayat_al_kursi(db: str) -> None:
     # In this file's Madani counting Ayat al-Kursi is 2:253 (not the Kufi 2:255).
     conn = connect(db)
-    norm = conn.execute("SELECT text_norm FROM ayat WHERE id = '2:253'").fetchone()[
-        "text_norm"
-    ]
+    norm = conn.execute("SELECT text_norm FROM ayat WHERE id = '2:253'").fetchone()["text_norm"]
     assert norm.startswith("الله لا اله الا هو الحي القيوم")
 
 

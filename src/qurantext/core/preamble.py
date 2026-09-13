@@ -143,9 +143,7 @@ def extract_preamble(words: list[dict]) -> tuple[list[dict[str, Any]], float | N
         return [], None
 
     matches = [match for span in spans if (match := _build_span_match(words, span))]
-    boundary_time = (
-        float(words[first_index]["start"]) if first_index < len(words) else None
-    )
+    boundary_time = float(words[first_index]["start"]) if first_index < len(words) else None
     return matches, boundary_time
 
 

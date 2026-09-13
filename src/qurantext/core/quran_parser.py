@@ -72,8 +72,6 @@ def _is_basmala(raw_line: str) -> bool:
     return normalize_detection_ar(raw_line) == _BASMALA_NORM
 
 
-
-
 def _is_taawwudh(raw_line: str) -> bool:
     """True when the line is a ta'awwudh preamble spoken before the recitation.
 

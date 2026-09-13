@@ -133,9 +133,7 @@ def align_segments(
     )
 
 
-def _interpolate_missing_timings(
-    timings: list[dict], transcript_words: list[dict]
-) -> None:
+def _interpolate_missing_timings(timings: list[dict], transcript_words: list[dict]) -> None:
     """Fill ``None`` timings in place by interpolating across timed neighbours.
 
     A canonical word with no aligned transcript word (a deletion in the

@@ -10,9 +10,7 @@ from qurantext.core.quran_structure import parse_words
 
 QURAN_FILE = QURAN_INPUT_DIR / "UthmanicQaloon1-Ver05.txt"
 
-pytestmark = pytest.mark.skipif(
-    not QURAN_FILE.exists(), reason="shipped Quran file not present"
-)
+pytestmark = pytest.mark.skipif(not QURAN_FILE.exists(), reason="shipped Quran file not present")
 
 
 @pytest.fixture(scope="module")
@@ -51,9 +49,7 @@ def test_matches_ayah_parser_exactly(words: list[dict]) -> None:
         joined.setdefault(f"{w['surah_num']}:{w['ayah_num']}", []).append(w["text_raw"])
     structural = {k: " ".join(v) for k, v in joined.items()}
 
-    expected = {
-        f"{a['surah_num']}:{a['ayah_num']}": a["text_raw"] for a in parse_ayat(QURAN_FILE)
-    }
+    expected = {f"{a['surah_num']}:{a['ayah_num']}": a["text_raw"] for a in parse_ayat(QURAN_FILE)}
     assert structural == expected
 
 
