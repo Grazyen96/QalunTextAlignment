@@ -62,6 +62,7 @@ jobs:
       # ----------------------------------------------------------------------
 
       - name: Get FriBiDi (Windows)
+        id: msys2
         if: runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
         with:
@@ -106,10 +107,45 @@ jobs:
 
           # Pillow asks for fribidi-0.dll, libfribidi-0.dll, then fribidi.dll.
           # MSYS2 ships it as the second; the app tries all three.
-          $dll = Get-ChildItem C:\msys64\mingw64\bin -Filter "*fribidi*.dll" -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-          if (-not $dll) { throw "FriBiDi not found; Arabic would not render." }
+          #
+          # MSYS2 does not install to a fixed path on a runner. It lands in the
+          # temp directory, not C:\msys64, which is what the last build failed
+          # on. Ask the action where it actually put it and keep the usual
+          # locations as a fallback.
+          $roots = @(
+            "${{ steps.msys2.outputs['msys2-location'] }}",
+            "$env:RUNNER_TEMP\msys64",
+            "C:\msys64"
+          ) | Where-Object { $_ -and (Test-Path $_) }
+
+          $dll = $null
+          $runtime = $null
+          foreach ($root in $roots) {
+            $bin = Join-Path $root "mingw64\bin"
+            if (-not (Test-Path $bin)) { continue }
+            $dll = Get-ChildItem $bin -Filter "*fribidi*.dll" -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            if ($dll) { $runtime = $bin; break }
+          }
+          if (-not $dll) {
+            Write-Host "Looked in: $($roots -join '; ')"
+            throw "FriBiDi not found; Arabic would not render."
+          }
+          Write-Host "Found $($dll.FullName)"
           Copy-Item $dll.FullName -Destination vendor\fribidi-0.dll -Force
+
+          # A MinGW build can lean on its own runtime libraries. Cheap insurance,
+          # and harmless when they turn out not to be needed.
+          foreach ($name in @("libwinpthread-1.dll", "libgcc_s_seh-1.dll")) {
+            $extra = Join-Path $runtime $name
+            if (Test-Path $extra) { Copy-Item $extra -Destination vendor -Force }
+          }
+
+          # Prove it loads now, the same way the app will, rather than finding
+          # out at the gate that a DLL was present but unusable.
+          $probe = 'import ctypes, os; d = os.path.abspath("vendor"); os.add_dll_directory(d); ctypes.CDLL(os.path.join(d, "fribidi-0.dll")); print("FriBiDi loads")'
+          python -c $probe
+          if ($LASTEXITCODE -ne 0) { throw "The FriBiDi DLL is there but will not load." }
 
           Get-ChildItem vendor
 
