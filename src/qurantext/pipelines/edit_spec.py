@@ -63,6 +63,13 @@ from qurantext import __version__
 from qurantext.config.paths import QURAN_DB_PATH
 from qurantext.config.settings import DEFAULT_VIDEO_FONT_FILE, VIDEO_PRESETS, get_settings
 from qurantext.core.basmala import load_matches_meta, maybe_prepend_basmala
+from qurantext.core.subtitles import (
+    ayah_caption_cues,
+    ayah_rows_for_card,
+    card_ref,
+    latched_card_windows,
+    lecture_caption_cues,
+)
 from qurantext.core.video_common import (
     get_audio_duration,
     load_caption_segments,
@@ -155,18 +162,6 @@ def resolve_export_format(
     )
 
 
-def card_ref(match: dict[str, Any]) -> str:
-    """Return the stable ref for one card: ``25:3``, ``25:1-5``, ``preamble:basmala``."""
-    if match.get("kind") == "preamble":
-        return f"preamble:{match.get('preamble_kind') or 'unknown'}"
-    surah = match.get("surah_num")
-    from_ayah = match.get("from_ayah")
-    to_ayah = match.get("to_ayah")
-    if from_ayah == to_ayah:
-        return f"{surah}:{from_ayah}"
-    return f"{surah}:{from_ayah}-{to_ayah}"
-
-
 def _overlay_stem(match: dict[str, Any]) -> str:
     """Filesystem-safe stem for a card's overlay assets."""
     if match.get("kind") == "preamble":
@@ -177,43 +172,6 @@ def _overlay_stem(match: dict[str, Any]) -> str:
     if from_ayah == to_ayah:
         return f"{surah:03d}_{from_ayah:03d}"
     return f"{surah:03d}_{from_ayah:03d}-{to_ayah:03d}"
-
-
-def latched_card_windows(cards: list[dict[str, Any]], duration: float) -> list[tuple[float, float]]:
-    """Return each card's display window under the frame renderer's latching.
-
-    A card holds from its own detected start until the next card's start (the
-    renderer never blanks between detections); the last card holds to the end
-    of the audio. Consequently the windows tile ``[first_start, duration]``
-    with no gaps — matching the rendered MP4 frame for frame.
-    """
-    windows: list[tuple[float, float]] = []
-    for index, card in enumerate(cards):
-        start = float(card["_start_time"])
-        if index + 1 < len(cards):
-            end = float(cards[index + 1]["_start_time"])
-        else:
-            end = max(duration, float(card["_end_time"]))
-        windows.append((start, max(start, end)))
-    return windows
-
-
-def ayah_rows_for_card(
-    conn: sqlite3.Connection, surah_num: int, from_ayah: int, to_ayah: int
-) -> list[sqlite3.Row]:
-    """Fetch canonical (ayah_num, text_raw, word_count) rows for a card's range."""
-    rows = conn.execute(
-        "SELECT ayah_num, text_raw, word_count FROM ayat"
-        " WHERE surah_num = ? AND ayah_num BETWEEN ? AND ? ORDER BY ayah_num",
-        (surah_num, from_ayah, to_ayah),
-    ).fetchall()
-    expected = to_ayah - from_ayah + 1
-    if len(rows) != expected:
-        raise ValueError(
-            f"Quran store returned {len(rows)} ayat for {surah_num}:{from_ayah}-{to_ayah}"
-            f" (expected {expected}); rebuild data/quran.sqlite with build-db."
-        )
-    return rows
 
 
 def word_ids_for_card(match: dict[str, Any], ayah_rows: list[sqlite3.Row] | None) -> list[str]:
@@ -236,87 +194,6 @@ def word_ids_for_card(match: dict[str, Any], ayah_rows: list[sqlite3.Row] | None
             for word_num in range(1, int(row["word_count"]) + 1)
         )
     return ids
-
-
-def ayah_caption_cues(
-    match: dict[str, Any],
-    window: tuple[float, float],
-    ayah_rows: list[sqlite3.Row] | None,
-) -> list[dict[str, Any]]:
-    """Build the per-ayah caption cues for one recitation card.
-
-    One cue per ayah, carrying the CANONICAL text (never the ASR's version).
-    Cue boundaries come from the aligned word timings: ayah *k* begins on its
-    first word's onset (the card's first ayah begins at the card window start)
-    and ends where the next ayah begins, so cues tile the card gaplessly. When
-    the card's timings cannot be split (no timings, or a count mismatch versus
-    the canonical word counts) one cue spans the whole card instead.
-    """
-    win_in, win_out = window
-
-    if match.get("kind") == "preamble":
-        return [
-            {
-                "in": round(win_in, 3),
-                "out": round(win_out, 3),
-                "text": str(match.get("_display_text") or ""),
-                "ref": card_ref(match),
-            }
-        ]
-
-    word_timings = match.get("_word_timings") or []
-    rows = ayah_rows or []
-    counts = [int(row["word_count"]) for row in rows]
-    if not rows:
-        return []
-    if not word_timings or sum(counts) != len(word_timings):
-        warn(
-            f"Card {card_ref(match)}: word timings ({len(word_timings)}) do not cover the"
-            f" canonical word count ({sum(counts)}); emitting one caption cue for the card."
-        )
-        return [
-            {
-                "in": round(win_in, 3),
-                "out": round(win_out, 3),
-                "text": "\n".join(str(row["text_raw"]) for row in rows),
-                "ref": card_ref(match),
-            }
-        ]
-
-    starts: list[float] = []
-    offset = 0
-    for index, count in enumerate(counts):
-        if index == 0:
-            starts.append(win_in)
-        else:
-            starts.append(float(word_timings[offset]["start"]))
-        offset += count
-
-    cues: list[dict[str, Any]] = []
-    for index, row in enumerate(rows):
-        cue_in = starts[index]
-        cue_out = starts[index + 1] if index + 1 < len(rows) else win_out
-        cues.append(
-            {
-                "in": round(cue_in, 3),
-                "out": round(cue_out, 3),
-                "text": str(row["text_raw"]),
-                "ref": f"{match.get('surah_num')}:{row['ayah_num']}",
-            }
-        )
-    return cues
-
-
-def lecture_caption_cues(caption_segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """One editable cue per WhisperX subtitle line (they always need correction)."""
-    return [
-        {
-            "in": round(float(segment["start"]), 3),
-            "out": round(float(segment["end"]), 3),
-            "text": str(segment["text"]),
-        }
-        for segment in caption_segments
-    ]
 
 
 def word_highlight_item(

@@ -1,0 +1,292 @@
+"""Producing the deliverables: a video, subtitle files, or both.
+
+This is what replaces the Premiere branch, so what matters is that the sidecar
+files actually line up with the video they accompany.
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess
+
+import pytest
+
+from qurantext.config.paths import DEFAULT_FONT_PATH, QURAN_INPUT_DIR
+from qurantext.data.quran_db import build_quran_db
+from qurantext.jobs.export import SUBTITLE_MODES, ExportRequest, build_cues, export_job
+
+QURAN_FILE = QURAN_INPUT_DIR / "UthmanicQaloon1-Ver05.txt"
+_FFMPEG = shutil.which("ffmpeg")
+_FFPROBE = shutil.which("ffprobe")
+
+pytestmark = pytest.mark.skipif(
+    not (_FFMPEG and _FFPROBE and QURAN_FILE.exists() and DEFAULT_FONT_PATH.exists()),
+    reason="needs ffmpeg, ffprobe, the shipped Quran file and the bundled font",
+)
+
+
+@pytest.fixture()
+def no_basmala(monkeypatch):
+    from qurantext.config.settings import get_settings
+
+    monkeypatch.setenv("QURANTEXT_VIDEO_PREPEND_BASMALA", "false")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.fixture(scope="module")
+def store(tmp_path_factory):
+    path = tmp_path_factory.mktemp("store") / "quran.sqlite"
+    build_quran_db(QURAN_FILE, path)
+    return path
+
+
+def _job(tmp_path, seconds=6.0):
+    """A two-ayah recitation whose words are timed one every half second."""
+    from qurantext.core.quran_parser import parse_ayat
+
+    chosen = [a for a in parse_ayat(QURAN_FILE) if a["surah_num"] == 25 and 7 <= a["ayah_num"] <= 8]
+    timings, t = [], 0.0
+    for ayah in chosen:
+        for token in str(ayah["text_raw"]).split():
+            if not all("٠" <= c <= "٩" for c in token.strip()):
+                timings.append({"word": token, "start": round(t, 3), "end": round(t + 0.3, 3)})
+                t += 0.4
+
+    matches = tmp_path / "m.json"
+    matches.write_text(
+        json.dumps(
+            {
+                "matches": [
+                    {
+                        "surah_num": 25,
+                        "surah_name": "سُورَةُ الفُرقَانِ",
+                        "from_ayah": 7,
+                        "to_ayah": 8,
+                        "full_text": "\n".join(a["text_raw"] for a in chosen),
+                        "confidence": 1.0,
+                        "start_time": 0.0,
+                        "end_time": round(t, 3),
+                        "word_timings": timings,
+                    }
+                ],
+                "meta": {"mode": "recitation"},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    audio = tmp_path / "a.m4a"
+    subprocess.run(
+        [
+            _FFMPEG,
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=44100:cl=mono",
+            "-t",
+            str(max(seconds, t)),
+            "-c:a",
+            "aac",
+            str(audio),
+        ],
+        check=True,
+    )
+    return audio, matches
+
+
+def test_burn_writes_only_a_video(tmp_path, store, no_basmala) -> None:
+    audio, matches = _job(tmp_path)
+    result = export_job(
+        ExportRequest(
+            audio=audio,
+            matches=matches,
+            output=tmp_path / "out.mp4",
+            subtitles="burn",
+            width=160,
+            height=120,
+            fps=8,
+            font_file=DEFAULT_FONT_PATH,
+            db_path=store,
+        )
+    )
+    assert result.video is not None and result.video.exists()
+    assert result.subtitles == []
+    assert list(tmp_path.glob("*.srt")) == []
+
+
+def test_both_writes_a_video_and_the_requested_formats(tmp_path, store, no_basmala) -> None:
+    audio, matches = _job(tmp_path)
+    result = export_job(
+        ExportRequest(
+            audio=audio,
+            matches=matches,
+            output=tmp_path / "out.mp4",
+            subtitles="both",
+            formats=("srt", "vtt"),
+            width=160,
+            height=120,
+            fps=8,
+            font_file=DEFAULT_FONT_PATH,
+            db_path=store,
+        )
+    )
+    assert result.video is not None and result.video.exists()
+    assert [p.suffix for p in result.subtitles] == [".srt", ".vtt"]
+    assert result.cues == 2, "one cue per ayah"
+
+
+def test_the_sidecar_carries_canonical_text_not_the_recogniser_version(
+    tmp_path, store, no_basmala
+) -> None:
+    """The Quran in a subtitle file must come from the store."""
+    from qurantext.core.quran_parser import parse_ayat
+
+    audio, matches = _job(tmp_path)
+    export_job(
+        ExportRequest(
+            audio=audio,
+            matches=matches,
+            output=tmp_path / "out.mp4",
+            subtitles="sidecar",
+            width=160,
+            height=120,
+            fps=8,
+            font_file=DEFAULT_FONT_PATH,
+            db_path=store,
+        )
+    )
+    text = (tmp_path / "out.srt").read_text(encoding="utf-8-sig")
+    for ayah in parse_ayat(QURAN_FILE):
+        if ayah["surah_num"] == 25 and ayah["ayah_num"] == 7:
+            first_words = " ".join(str(ayah["text_raw"]).split()[:3])
+            assert first_words in text
+            break
+    else:  # pragma: no cover - the shipped file always has 25:7
+        pytest.fail("25:7 not found in the shipped Quran text")
+
+
+def test_cues_end_with_the_video_when_a_basmala_is_spliced(tmp_path, store, monkeypatch) -> None:
+    """Regression: the splice offset was applied twice to the last cue.
+
+    The last cue holds to the end of the audio. Building the windows against the
+    post-splice duration and then shifting them added the offset a second time,
+    so the subtitle ran past the end of the video it accompanied.
+    """
+    from qurantext.jobs import export as export_module
+
+    audio, matches = _job(tmp_path)
+    offset = 4.0
+    real_render = export_module.render_video
+
+    def shifted_render(request, **kwargs):
+        result = real_render(request, **kwargs)
+        return type(result)(
+            output=result.output,
+            width=result.width,
+            height=result.height,
+            fps=result.fps,
+            duration_seconds=result.duration_seconds + offset,
+            basmala_offset_seconds=offset,
+            caption_segments=result.caption_segments,
+            ass_path=result.ass_path,
+        )
+
+    monkeypatch.setattr(export_module, "render_video", shifted_render)
+    monkeypatch.setenv("QURANTEXT_VIDEO_PREPEND_BASMALA", "false")
+    from qurantext.config.settings import get_settings
+
+    get_settings.cache_clear()
+
+    result = export_job(
+        ExportRequest(
+            audio=audio,
+            matches=matches,
+            output=tmp_path / "out.mp4",
+            subtitles="sidecar",
+            width=160,
+            height=120,
+            fps=8,
+            font_file=DEFAULT_FONT_PATH,
+            db_path=store,
+        )
+    )
+    get_settings.cache_clear()
+
+    duration = float(
+        subprocess.run(
+            [
+                _FFPROBE,
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "csv=p=0",
+                str(result.video),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    )
+
+    import re
+
+    text = (tmp_path / "out.srt").read_text(encoding="utf-8-sig")
+    stamps = re.findall(r"--> (\d\d):(\d\d):(\d\d),(\d\d\d)", text)
+    last_end = max(int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000 for h, m, s, ms in stamps)
+    # The video is the un-shifted render here; the cues were shifted by `offset`.
+    assert last_end <= duration + offset + 0.1, (
+        f"the last cue ends at {last_end:.2f}s, past the {duration + offset:.2f}s video"
+    )
+    first_start = min(
+        int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
+        for h, m, s, ms in re.findall(r"(\d\d):(\d\d):(\d\d),(\d\d\d) -->", text)
+    )
+    assert first_start == pytest.approx(offset, abs=0.1), "the splice must push cues later"
+
+
+@pytest.mark.parametrize("mode", SUBTITLE_MODES)
+def test_every_mode_is_accepted(tmp_path, store, no_basmala, mode) -> None:
+    audio, matches = _job(tmp_path)
+    result = export_job(
+        ExportRequest(
+            audio=audio,
+            matches=matches,
+            output=tmp_path / f"{mode}.mp4",
+            subtitles=mode,
+            width=160,
+            height=120,
+            fps=8,
+            font_file=DEFAULT_FONT_PATH,
+            db_path=store,
+        )
+    )
+    assert result.video is not None and result.video.exists()
+    assert bool(result.subtitles) == (mode != "burn")
+
+
+def test_an_unknown_mode_is_refused_at_construction(tmp_path) -> None:
+    with pytest.raises(ValueError, match="subtitles must be one of"):
+        ExportRequest(
+            audio=tmp_path / "a.m4a",
+            matches=tmp_path / "m.json",
+            output=tmp_path / "o.mp4",
+            subtitles="engrave",
+        )
+
+
+def test_cues_tile_with_no_gaps(tmp_path, store) -> None:
+    audio, matches = _job(tmp_path)
+    cues = build_cues(matches, duration=20.0, mode="recitation", db_path=store)
+    assert len(cues) == 2
+    assert cues[0].end == cues[1].start, "a gap would blank the subtitle mid-card"
+    assert cues[-1].end == 20.0, "the last cue holds to the end of the audio"
+    assert [c.ref for c in cues] == ["25:7", "25:8"]

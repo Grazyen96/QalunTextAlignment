@@ -206,6 +206,31 @@ Best for: continuous recitation clips where you want display timing.
 Use when you already have a match JSON and want an MP4. Pass `--project` to
 render from a project file instead, so any subtitle corrections in it are used.
 
+### Subtitles as files, not only burned in
+
+`generate-video` can write the subtitles beside the video instead of, or as well
+as, into the picture.
+
+```bash
+python3 -m qurantext generate-video \
+  --audio input/recitations/example.mp3 \
+  --matches output/recitation_matching/example_recitation.json \
+  --output output/videos/example.mp4 \
+  --subtitles both --subtitle-format srt vtt
+```
+
+`burn` puts them in the picture, `sidecar` writes a clean video plus subtitle
+files, `both` does what publishing usually wants. Formats are SRT, WebVTT and
+ASS.
+
+For a recitation the subtitle track is the canonical ayah text from the store,
+one cue per ayah, never the recogniser's version of the Quran. For a lecture it
+is the recognised speech, which is the thing you correct.
+
+A recitation's ayah card is the visual, so a clean recitation video is nearly
+empty; there the sidecar is an accessibility and platform deliverable rather
+than a substitute for the card.
+
 ### `project`
 Use when you want to correct the subtitles before rendering.
 

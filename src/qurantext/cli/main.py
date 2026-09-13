@@ -17,9 +17,11 @@ from qurantext.config.paths import (
 )
 from qurantext.config.settings import VIDEO_PRESETS, get_settings
 from qurantext.core.coverage import find_uncovered_speech
+from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.data.citation_index import DEFAULT_NGRAM_N
 from qurantext.data.quran_db import build_quran_db, ensure_quran_db, list_surahs
 from qurantext.io.readers import load_json
+from qurantext.jobs.export import SUBTITLE_MODES, ExportRequest, export_job
 from qurantext.jobs.project import Project, load_project, save_project
 from qurantext.pipelines.detection import run_detection, run_recitation_range
 from qurantext.pipelines.edit_spec import export_edit_spec_package
@@ -261,23 +263,47 @@ def _run_generate_video(args: argparse.Namespace) -> int:
         args.output_dir,
         f"_{args.renderer}.mp4",
     )
-    run_video_generation(
-        audio=args.audio,
-        matches=args.matches,
-        captions=tuple(project.caption_segments()) if project is not None else None,
-        output=output_path,
-        preset=getattr(args, "preset", None),
-        font_name=args.font_name,
-        font_file=args.font_file,
-        renderer=args.renderer,
-        width=args.width,
-        height=args.height,
-        fps=args.fps,
-        keep_temp=args.keep_temp,
-        debug_detected_text=args.debug_detected_text,
-        title=getattr(args, "title", None),
-        progress=ConsoleProgress(),
-    )
+    subtitles = getattr(args, "subtitles", "burn")
+    if subtitles != "burn" and args.renderer != "frame":
+        raise SystemExit("--subtitles only applies to the frame renderer.")
+    if subtitles == "burn" and args.renderer == "ass":
+        run_video_generation(
+            audio=args.audio,
+            matches=args.matches,
+            captions=tuple(project.caption_segments()) if project is not None else None,
+            output=output_path,
+            preset=getattr(args, "preset", None),
+            font_name=args.font_name,
+            font_file=args.font_file,
+            renderer=args.renderer,
+            width=args.width,
+            height=args.height,
+            fps=args.fps,
+            keep_temp=args.keep_temp,
+            debug_detected_text=args.debug_detected_text,
+            title=getattr(args, "title", None),
+            progress=ConsoleProgress(),
+        )
+    else:
+        result = export_job(
+            ExportRequest(
+                audio=Path(args.audio),
+                matches=Path(args.matches),
+                output=Path(output_path),
+                subtitles=subtitles,
+                formats=tuple(args.subtitle_format),
+                preset=getattr(args, "preset", None),
+                width=args.width,
+                height=args.height,
+                fps=args.fps,
+                font_file=Path(args.font_file) if args.font_file else None,
+                title=getattr(args, "title", None),
+                captions=tuple(project.caption_segments()) if project is not None else None,
+            ),
+            progress=ConsoleProgress(),
+        )
+        for path in result.subtitles:
+            print(f"Subtitles saved to: {path}")
     if getattr(args, "edit_spec", False):
         _export_edit_spec(args, args.matches, output_path)
     return 0
@@ -569,6 +595,22 @@ def build_parser() -> argparse.ArgumentParser:
     video_parser.add_argument("--width", type=int, default=None)
     video_parser.add_argument("--height", type=int, default=None)
     video_parser.add_argument("--fps", type=int, default=None)
+    video_parser.add_argument(
+        "--subtitles",
+        choices=list(SUBTITLE_MODES),
+        default="burn",
+        help=(
+            "burn: subtitles in the picture. sidecar: a clean video plus subtitle "
+            "files. both: the usual answer for publishing."
+        ),
+    )
+    video_parser.add_argument(
+        "--subtitle-format",
+        nargs="+",
+        choices=list(SUBTITLE_FORMATS),
+        default=["srt"],
+        help="Formats to write alongside the video when subtitles are not burned in.",
+    )
     video_parser.add_argument("--keep-temp", action="store_true")
     video_parser.add_argument("--debug-detected-text", action="store_true")
     video_parser.add_argument(
