@@ -182,8 +182,14 @@ def transcribe_audio(
             )
 
     if not settings.replicate_api_token:
+        from qurantext.config.paths import user_data_dir
+
         raise WhisperXServiceError(
-            "REPLICATE_API_TOKEN is not set. Add it to your shell environment, .env, or .env.local before running WhisperX."
+            "No Replicate API token is set, so audio cannot be transcribed.\n"
+            f"Create a file named .env in {user_data_dir()} containing one line:\n"
+            "  REPLICATE_API_TOKEN=your-token\n"
+            "Get a token from https://replicate.com/account/api-tokens, then "
+            "restart the app — settings are read once at startup."
         )
 
     try:
@@ -202,7 +208,26 @@ def transcribe_audio(
         raise
     except Exception as error:
         error_text = str(error)
-        if "status: 404" in error_text or getattr(error, "status", None) == 404:
+        status = getattr(error, "status", None)
+        if "status: 401" in error_text or status == 401 or "Unauthenticated" in error_text:
+            # Worth spelling out: a 401 means a token arrived and was refused,
+            # which looks identical to having no token unless the message says
+            # otherwise. The token is described rather than printed, because
+            # this text ends up in logs people send to other people.
+            from qurantext.config.paths import user_data_dir
+            from qurantext.config.settings import describe_secret
+
+            raise WhisperXServiceError(
+                "Replicate rejected the API token.\n"
+                f"What was sent: {describe_secret(settings.replicate_api_token)}.\n"
+                "Compare that against the token at "
+                "https://replicate.com/account/api-tokens — a Replicate token "
+                "starts with 'r8_'. If it does not match, the likely cause is "
+                "that REPLICATE_API_TOKEN is also set as a system environment "
+                "variable, which takes precedence over the .env file in "
+                f"{user_data_dir()}."
+            ) from error
+        if "status: 404" in error_text or status == 404:
             raise WhisperXServiceError(
                 f"Replicate could not find the model: {resolved_model_ref}\n"
                 "Check that the model exists and that your account has access to it."

@@ -113,6 +113,35 @@ DEFAULT_WHISPERX_INPUT = {
 }
 
 
+def clean_secret(value: str | None) -> str | None:
+    """Strip what a person's copy-paste leaves around a credential.
+
+    A token typed into a file by hand arrives with surrounding quotes, a
+    trailing newline, a stray space, or a non-breaking space from a web page.
+    The .env reader already strips quotes, but a value set directly as a system
+    environment variable did not go through it, and the difference showed up as
+    a 401 from the API rather than as anything a person could see. The service
+    rejects the characters; it does not tell you they are there.
+    """
+    if value is None:
+        return None
+    cleaned = value.strip().strip("\ufeff\u00a0").strip()
+    if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {'"', "'"}:
+        cleaned = cleaned[1:-1].strip()
+    return cleaned or None
+
+
+def describe_secret(value: str | None) -> str:
+    """Enough of a credential to compare against the original, and no more.
+
+    This goes into error messages and the doctor's report, which people are
+    asked to send to someone else, so it must never carry the whole token.
+    """
+    if not value:
+        return "no token at all"
+    return f"{len(value)} characters, starting {value[:3]!r} and ending {value[-4:]!r}"
+
+
 def _parse_env_line(line: str) -> tuple[str, str] | None:
     line = line.strip()
     if not line or line.startswith("#"):
@@ -407,7 +436,7 @@ def get_settings() -> AppSettings:
     )
 
     return AppSettings(
-        replicate_api_token=os.getenv("REPLICATE_API_TOKEN"),
+        replicate_api_token=clean_secret(os.getenv("REPLICATE_API_TOKEN")),
         whisperx=whisperx,
         range_matching=range_matching,
         lecture_matching=lecture_matching,

@@ -250,10 +250,14 @@ def _transcription() -> CheckResult:
             "REPLICATE_API_TOKEN=your-token. Then restart the app — settings are "
             "read once at startup. Everything else works without it.",
         )
+    # Described the same way the rejection message describes it, so the two can
+    # be held side by side when a token is refused.
+    from qurantext.config.settings import describe_secret
+
     return CheckResult(
         "Transcription",
         Status.OK,
-        f"Replicate client {client_version}, API token set (\u2026{token[-4:]})",
+        f"Replicate client {client_version}, token: {describe_secret(token)}",
     )
 
 

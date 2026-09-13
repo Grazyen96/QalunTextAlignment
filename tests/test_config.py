@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from qurantext.cli.main import build_parser as build_cli_parser
 from qurantext.config.paths import ensure_required_directories
 from qurantext.config.settings import VIDEO_PRESETS, get_settings
@@ -177,3 +179,71 @@ def test_recitation_render_defaults_to_portrait_social_preset() -> None:
     assert (args.width, args.height, args.fps) == (sw, sh, sf)
 
     get_settings.cache_clear()
+
+
+class TestCredentialCleaning:
+    """A token typed into a file by hand rarely arrives clean.
+
+    The .env reader already stripped quotes, but a value set as a system
+    environment variable never went through it, and the difference surfaced as a
+    401 from the API rather than as anything a person could see.
+    """
+
+    def test_leaves_a_clean_token_alone(self) -> None:
+        from qurantext.config.settings import clean_secret
+
+        assert clean_secret("r8_abc123") == "r8_abc123"
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "  r8_abc123  ",
+            '"r8_abc123"',
+            "'r8_abc123'",
+            "r8_abc123\r\n",
+            "﻿r8_abc123",
+            " r8_abc123",  # a web page's non-breaking space
+        ],
+    )
+    def test_strips_what_a_copy_paste_leaves_behind(self, raw: str) -> None:
+        from qurantext.config.settings import clean_secret
+
+        assert clean_secret(raw) == "r8_abc123"
+
+    def test_nothing_becomes_none_rather_than_empty(self) -> None:
+        from qurantext.config.settings import clean_secret
+
+        assert clean_secret(None) is None
+        assert clean_secret("   ") is None
+        assert clean_secret('""') is None
+
+    def test_a_system_variable_is_cleaned_too(self, monkeypatch) -> None:
+        """The path that was not cleaned before, and caused the 401."""
+        from qurantext.config.settings import get_settings
+
+        get_settings.cache_clear()
+        monkeypatch.setenv("REPLICATE_API_TOKEN", '  "r8_from_the_environment"  ')
+        assert get_settings().replicate_api_token == "r8_from_the_environment"
+        get_settings.cache_clear()
+
+
+class TestSecretDescription:
+    def test_says_enough_to_compare_against_the_original(self) -> None:
+        from qurantext.config.settings import describe_secret
+
+        described = describe_secret("r8_abcdefghijklmnop")
+        assert "19 characters" in described
+        assert "'r8_'" in described
+        assert "'mnop'" in described
+
+    def test_never_contains_the_whole_secret(self) -> None:
+        """It goes into messages people paste into support threads."""
+        from qurantext.config.settings import describe_secret
+
+        secret = "r8_averylongsecrettokenvalue"
+        assert secret not in describe_secret(secret)
+
+    def test_says_so_when_there_is_nothing(self) -> None:
+        from qurantext.config.settings import describe_secret
+
+        assert describe_secret(None) == "no token at all"

@@ -83,3 +83,58 @@ def test_await_prediction_output_propagates_non_transient_error(monkeypatch) -> 
     )
     with pytest.raises(_FakeReplicateError):
         _await_prediction_output(prediction)
+
+
+class TestRejectedToken:
+    """A 401 means a token arrived and was refused.
+
+    That is a different problem from having no token, and it used to surface as
+    the raw text of whatever the client threw, which says nothing a person can
+    act on.
+    """
+
+    class _Unauthenticated(Exception):
+        status = 401
+
+        def __str__(self) -> str:
+            return "ReplicateError Details:\ntitle: Unauthenticated\nstatus: 401"
+
+    def _run(self, monkeypatch, tmp_path, token: str):
+        import qurantext.config.settings as settings_module
+        from qurantext.services import transcription
+
+        audio = tmp_path / "a.wav"
+        audio.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfmt ")
+        settings_module.get_settings.cache_clear()
+        monkeypatch.setenv("REPLICATE_API_TOKEN", token)
+        monkeypatch.setattr(
+            transcription,
+            "_create_prediction",
+            lambda *a, **k: (_ for _ in ()).throw(self._Unauthenticated()),
+        )
+        try:
+            transcription.transcribe_audio(str(audio), use_cache=False)
+        except Exception as error:
+            return str(error)
+        finally:
+            settings_module.get_settings.cache_clear()
+        raise AssertionError("expected a failure")
+
+    def test_says_the_token_was_rejected_not_that_it_is_missing(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        message = self._run(monkeypatch, tmp_path, "r8_a_token_that_is_wrong")
+        assert "rejected" in message.lower()
+        assert "is not set" not in message
+
+    def test_describes_the_token_without_printing_it(self, monkeypatch, tmp_path) -> None:
+        secret = "r8_a_token_that_is_wrong"
+        message = self._run(monkeypatch, tmp_path, secret)
+        assert secret not in message
+        assert secret[-4:] in message
+
+    def test_names_the_thing_that_silently_overrides_the_file(self, monkeypatch, tmp_path) -> None:
+        """A system variable beats the .env file, which is invisible otherwise."""
+        message = self._run(monkeypatch, tmp_path, "r8_a_token_that_is_wrong")
+        assert "environment variable" in message
+        assert ".env" in message

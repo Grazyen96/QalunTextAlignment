@@ -15,7 +15,14 @@ from .paths import (
     VIDEOS_OUTPUT_DIR,
     WHISPERX_TRANSCRIPTS_OUTPUT_DIR,
 )
-from .settings import AppSettings, WhisperXSettings, get_settings, load_project_env
+from .settings import (
+    AppSettings,
+    WhisperXSettings,
+    clean_secret,
+    describe_secret,
+    get_settings,
+    load_project_env,
+)
 
 __all__ = [
     "AppSettings",
@@ -34,5 +41,7 @@ __all__ = [
     "WHISPERX_TRANSCRIPTS_OUTPUT_DIR",
     "WhisperXSettings",
     "get_settings",
+    "clean_secret",
+    "describe_secret",
     "load_project_env",
 ]
