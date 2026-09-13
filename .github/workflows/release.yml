@@ -17,6 +17,11 @@ on:
   push:
     tags: ["v*"]
 
+# The action versions below are the first of each that run on Node.js 24.
+# GitHub deprecated Node.js 20 and was already forcing these onto 24, which is
+# what the warning in every build was about. Each bump is a runtime change only:
+# no input, output or behaviour changed, which is why several majors were
+# crossed at once without touching anything else.
 permissions:
   contents: write
 
@@ -39,9 +44,9 @@ jobs:
             artifact: qalun-linux
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -115,7 +120,7 @@ jobs:
         shell: bash
         run: bash packaging/ci/package.sh ${{ matrix.artifact }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact }}
           path: out/*.zip
@@ -127,10 +132,10 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: artifacts
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           # Until the release checklist's blockers are settled (and the app is 1.0),
           # a release is a pre-release: never shown as the repository's latest.
