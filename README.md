@@ -48,6 +48,17 @@ Install development tooling when you want tests and linting:
 python3 -m pip install pytest ruff
 ```
 
+## Is this machine set up?
+
+```bash
+python3 -m qurantext doctor
+```
+
+Checks Arabic shaping, FFmpeg, the bundled font, the Quran store and the output
+folder, and tells you what to do about anything that is not ready. The packaged
+app answers the same question with `qalun --doctor`, which matters because a
+packaged app that will not render is exactly when there is no Python to hand.
+
 ## The window
 
 ```bash
@@ -116,6 +127,12 @@ QURANTEXT_VIDEO_WIDTH=1920
 QURANTEXT_VIDEO_HEIGHT=1080
 QURANTEXT_VIDEO_FPS=25
 ```
+
+## Packaging
+
+`packaging/` builds a self-contained desktop app with PyInstaller. See
+[packaging/README.md](packaging/README.md) for the per-platform wrappers and
+the two mistakes that are easy to make.
 
 ## Project Layout
 

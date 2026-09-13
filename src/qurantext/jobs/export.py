@@ -127,7 +127,18 @@ def build_cues(
     if needs_store:
         from qurantext.data.quran_db import connect
 
-        conn = connect(db_path)
+        try:
+            conn = connect(db_path)
+        except FileNotFoundError:
+            # The video is already rendered by the time this runs, so a missing
+            # store must cost the subtitles, not the job. Found by running the
+            # packaged app on a machine that had never built one.
+            warn(
+                f"No Quran store at {db_path}, so the canonical ayah text for the "
+                "subtitles cannot be read. The video is unaffected. Build the store "
+                "with `build-db --quran <the Qalun text file>` and export again."
+            )
+            return []
 
     cues: list[Cue] = []
     try:

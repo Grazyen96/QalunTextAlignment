@@ -14,6 +14,7 @@ from qurantext.config.paths import (
     VIDEOS_OUTPUT_DIR,
     WHISPERX_TRANSCRIPTS_OUTPUT_DIR,
 )
+from qurantext.config.preflight import Status, format_report, run_checks
 from qurantext.config.settings import VIDEO_PRESETS, get_settings
 from qurantext.core.coverage import find_uncovered_speech
 from qurantext.core.subtitles import SUBTITLE_FORMATS
@@ -216,6 +217,13 @@ def _run_check_timing(args: argparse.Namespace) -> int:
         "before trusting the timeline."
     )
     return 0
+
+
+def _run_doctor(args: argparse.Namespace) -> int:
+    """Report whether this machine can render, and what to do if not."""
+    results = run_checks()
+    print(format_report(results))
+    return 1 if any(r.status == Status.FAIL for r in results) else 0
 
 
 def _run_preview(args: argparse.Namespace) -> int:
@@ -596,6 +604,12 @@ def build_parser() -> argparse.ArgumentParser:
     video_parser.add_argument("--keep-temp", action="store_true")
     video_parser.add_argument("--debug-detected-text", action="store_true")
     video_parser.set_defaults(handler=_run_generate_video)
+
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="Check that this machine can render, and say what to do if not.",
+    )
+    doctor_parser.set_defaults(handler=_run_doctor)
 
     preview_parser = subparsers.add_parser(
         "preview",

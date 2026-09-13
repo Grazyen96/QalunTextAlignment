@@ -290,3 +290,28 @@ def test_cues_tile_with_no_gaps(tmp_path, store) -> None:
     assert cues[0].end == cues[1].start, "a gap would blank the subtitle mid-card"
     assert cues[-1].end == 20.0, "the last cue holds to the end of the audio"
     assert [c.ref for c in cues] == ["25:7", "25:8"]
+
+
+def test_a_missing_store_costs_the_subtitles_not_the_video(tmp_path, no_basmala) -> None:
+    """The video is already rendered when the subtitles are built.
+
+    Found by running the packaged app on a machine that had never built a store:
+    it produced the video and then failed, leaving an error beside a good file.
+    """
+    audio, matches = _job(tmp_path)
+    result = export_job(
+        ExportRequest(
+            audio=audio,
+            matches=matches,
+            output=tmp_path / "out.mp4",
+            subtitles="both",
+            width=160,
+            height=120,
+            fps=8,
+            font_file=DEFAULT_FONT_PATH,
+            db_path=tmp_path / "absent.sqlite",
+        )
+    )
+    assert result.video is not None and result.video.exists()
+    assert result.subtitles == []
+    assert result.cues == 0
