@@ -214,6 +214,21 @@ python3 -m qurantext generate-video \
   --output output/videos/example.mp4
 ```
 
+### `check-timing`
+Use when you want to know whether the word timings actually cover the recitation.
+
+Recognition can drop speech outright: on one 97-second clip it reported a
+7.5-second gap between two words whose waveform sits two tenths of a decibel from
+the level of known recitation either side. The highlight holds on the previous
+word through stretches like that. This finds them from the waveform alone, with
+no model and no confidence score.
+
+```bash
+python3 -m qurantext check-timing \
+  --audio input/recitations/example.mp3 \
+  --matches output/recitation_matching/example_recitation.json
+```
+
 ### `build-db`
 Builds the versioned SQLite store from the certified Qalun text. Lecture
 matching builds it on demand; `export-editspec` requires it up front.

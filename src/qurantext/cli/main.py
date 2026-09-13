@@ -16,6 +16,7 @@ from qurantext.config.paths import (
     WHISPERX_TRANSCRIPTS_OUTPUT_DIR,
 )
 from qurantext.config.settings import VIDEO_PRESETS, get_settings
+from qurantext.core.coverage import find_uncovered_speech
 from qurantext.data.citation_index import DEFAULT_NGRAM_N
 from qurantext.data.quran_db import build_quran_db
 from qurantext.io.readers import load_json
@@ -164,6 +165,37 @@ def _export_edit_spec(args: argparse.Namespace, matches: str, video_output: str 
     print(f"Edit-spec package saved to: {result.package_dir}")
     if result.warnings:
         print(f"  ({len(result.warnings)} timing warning(s) — see edit_spec.json meta)")
+
+
+def _run_check_timing(args: argparse.Namespace) -> int:
+    """Report recited audio that no word timing covers."""
+    matches = load_json(args.matches)
+    words = [
+        timing
+        for match in (matches.get("matches") or [])
+        for timing in (match.get("word_timings") or [])
+    ]
+    if not words:
+        print("This match file carries no word timings, so there is nothing to check against.")
+        return 1
+
+    gaps = find_uncovered_speech(
+        args.audio, words, min_seconds=args.min_seconds, margin_db=args.margin_db
+    )
+    total = sum(gap.duration for gap in gaps)
+    print(f"Checked {len(words)} word timings against {args.audio}")
+    if not gaps:
+        print("  Every stretch of speech-level audio is covered by a word.")
+        return 0
+
+    print(f"  {len(gaps)} stretch(es) of recitation carry no word, {total:.1f}s in total:")
+    for gap in gaps:
+        print(f"    {gap.describe()}")
+    print(
+        "  The highlight holds on the previous word through these. Confirm them by ear "
+        "before trusting the timeline."
+    )
+    return 0
 
 
 def _run_project_init(args: argparse.Namespace) -> int:
@@ -502,6 +534,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory for the edit-spec package. Defaults to output/export_packages.",
     )
     video_parser.set_defaults(handler=_run_generate_video)
+
+    check_parser = subparsers.add_parser(
+        "check-timing",
+        help="Find recited audio that no word timing covers.",
+    )
+    check_parser.add_argument("--audio", required=True, help="Path to the original audio file.")
+    check_parser.add_argument(
+        "--matches", required=True, help="Path to a match JSON result carrying word timings."
+    )
+    check_parser.add_argument(
+        "--min-seconds",
+        type=float,
+        default=1.5,
+        help="Ignore shorter stretches; below this they are breaths and word junctures.",
+    )
+    check_parser.add_argument(
+        "--margin-db",
+        type=float,
+        default=8.0,
+        help="How far above the clip's noise floor a frame must sit to count as speech.",
+    )
+    check_parser.set_defaults(handler=_run_check_timing)
 
     project_parser = subparsers.add_parser(
         "project",
