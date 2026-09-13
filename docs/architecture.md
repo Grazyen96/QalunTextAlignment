@@ -18,6 +18,8 @@ QuranText is organized around a small number of stable layers:
 - `io/` loads and saves JSON, WhisperX transcript structures, and subtitle output.
 - `services/` contains external integrations such as WhisperX transcription via Replicate.
 - `pipelines/` coordinates complete workflows such as recitation matching, detect-range matching, and video generation.
+- `gui/` is the desktop window: widgets, a worker thread, and the one call it makes
+  into the pipeline. Qt is optional, so nothing outside this package imports it.
 - `scripts/` and root scripts are thin compatibility entry points.
 
 ## Module Responsibilities

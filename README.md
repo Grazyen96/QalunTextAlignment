@@ -48,6 +48,20 @@ Install development tooling when you want tests and linting:
 python3 -m pip install pytest ruff
 ```
 
+## The window
+
+```bash
+python3 -m pip install -e '.[gui]'
+qalun
+```
+
+Drop an audio file, say whether it is a recitation or a lecture, pick the surah
+and the ayat if you know them, press Start. Progress and remaining time show as
+it runs, Cancel stops it, and a cancelled job leaves nothing behind.
+
+Qt is an optional dependency, so the command line installs without it. Running
+`qalun` without it prints one line telling you what to install.
+
 ## How To Run The CLI
 
 You have **three** common ways to run the project.
