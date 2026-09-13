@@ -24,7 +24,11 @@ QuranText is organized around a small number of stable layers:
 
 ### `src/qurantext/config`
 
-- `paths.py` defines `PROJECT_ROOT` plus the standard `input/` and `output/` tree.
+- `paths.py` resolves every file location for both modes the code runs in. From a
+  checkout it keeps the repository layout unchanged; installed, user files go to the
+  platform's own directories (`%LOCALAPPDATA%`, `~/Library/Application Support`,
+  `$XDG_DATA_HOME`) and bundled assets are read from inside the package.
+  `QURANTEXT_DATA_DIR` and `QURANTEXT_OUTPUT_DIR` override either.
 - `settings.py` loads `.env` and `.env.local`, exposes WhisperX defaults, and centralizes runtime defaults for range matching, lecture matching, and video rendering.
 
 ### `src/qurantext/core`

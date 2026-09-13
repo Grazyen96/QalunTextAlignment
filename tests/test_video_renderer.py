@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 import qurantext.core.frame_renderer as frame_renderer
-from qurantext.config.paths import PROJECT_ROOT
+from qurantext.config.paths import DEFAULT_FONT_PATH
 from qurantext.core.ass_renderer import _audio_encode_args, _probe_audio_codec, _wrap_ass_body_text
 from qurantext.core.frame_renderer import (
     ActiveMatchTracker,
@@ -19,7 +19,7 @@ from qurantext.core.frame_renderer import (
 )
 from qurantext.core.video_common import load_caption_segments, validated_matches
 
-_BUNDLED_FONT = PROJECT_ROOT / "fonts" / "qaloon.10.ttf"
+_BUNDLED_FONT = DEFAULT_FONT_PATH
 
 
 def _timed_matches() -> list[dict]:

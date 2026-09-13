@@ -30,6 +30,11 @@ qurantext = "qurantext.cli.main:main"
 [tool.setuptools]
 package-dir = {"" = "src"}
 
+# The renderer's default font must travel with the wheel. Without this the wheel
+# is Python files only, and the font path resolves into the Python installation.
+[tool.setuptools.package-data]
+qurantext = ["assets/**/*"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

@@ -13,7 +13,7 @@ import threading
 
 import pytest
 
-from qurantext.config.paths import BASMALA_AUDIO_PATH, PROJECT_ROOT
+from qurantext.config.paths import BASMALA_AUDIO_PATH, DEFAULT_FONT_PATH
 from qurantext.jobs import (
     CancelToken,
     ConsoleProgress,
@@ -24,7 +24,7 @@ from qurantext.jobs import (
 )
 from qurantext.utils.progress import report
 
-_BUNDLED_FONT = PROJECT_ROOT / "fonts" / "qaloon.10.ttf"
+_BUNDLED_FONT = DEFAULT_FONT_PATH
 _FFMPEG = shutil.which("ffmpeg")
 _FFPROBE = shutil.which("ffprobe")
 

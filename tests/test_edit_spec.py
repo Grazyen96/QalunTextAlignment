@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
-from qurantext.config.paths import PROJECT_ROOT
+from qurantext.config.paths import DEFAULT_FONT_PATH
 from qurantext.core.basmala import BasmalaPrepend, basmala_card, offset_matches
 from qurantext.pipelines.edit_spec import (
     ayah_caption_cues,
@@ -29,7 +29,7 @@ from qurantext.pipelines.edit_spec import (
 )
 from qurantext.utils.time_utils import seconds_to_srt_time
 
-_BUNDLED_FONT = PROJECT_ROOT / "fonts" / "qaloon.10.ttf"
+_BUNDLED_FONT = DEFAULT_FONT_PATH
 
 _BASMALA_OFFSET = 4.0
 _AUDIO_DURATION = 34.0

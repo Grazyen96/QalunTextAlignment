@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from .paths import PROJECT_ROOT
+from .paths import DEFAULT_FONT_PATH, checkout_root, user_data_dir
 
 DEFAULT_MODEL_REF = (
     "victor-upmeet/whisperx:84d2ad2d6194fe98a17d2b60bef1c7f910c46b2f6fd38996ca457afd9c8abfcb"
@@ -72,7 +72,7 @@ DEFAULT_VIDEO_FPS = 25
 # end; longer gaps (a genuine pause) split the difference at the midpoint so the
 # next card does not sit idle for the whole pause.
 DEFAULT_VIDEO_GAP_MIDPOINT_THRESHOLD = 3.0
-DEFAULT_VIDEO_FONT_FILE = str(PROJECT_ROOT / "fonts" / "qaloon.10.ttf")
+DEFAULT_VIDEO_FONT_FILE = str(DEFAULT_FONT_PATH)
 # Splice the shipped input/basmala/basmala.mp3 before each recitation video when
 # the recitation does not already open with one (see core.basmala).
 DEFAULT_VIDEO_PREPEND_BASMALA = True
@@ -153,10 +153,17 @@ def _load_env_file(path: Path) -> None:
 
 
 def load_project_env() -> None:
-    """Load .env files while keeping the current process environment authoritative."""
+    """Load .env files while keeping the current process environment authoritative.
+
+    From a checkout these sit at the repository root, where they always have.
+    Installed there is no repository, so the platform data directory is the only
+    sensible home for them — a desktop app should be writing settings there
+    rather than asking the user to keep a dotfile next to the code.
+    """
     existing_env = dict(os.environ)
-    _load_env_file(PROJECT_ROOT / ".env")
-    _load_env_file(PROJECT_ROOT / ".env.local")
+    root = checkout_root() or user_data_dir()
+    _load_env_file(root / ".env")
+    _load_env_file(root / ".env.local")
 
     for key, value in existing_env.items():
         os.environ[key] = value
