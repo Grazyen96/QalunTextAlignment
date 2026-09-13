@@ -11,10 +11,14 @@ What this has to get right, beyond the obvious:
 * **Package data.** The Qalun font lives inside the package and a frozen build
   does not copy it on its own. Without it the renderer cannot find its default
   font, which is the failure the wheel had before it declared package data.
-* **FriBiDi.** Pillow's raqm support loads it at runtime and it is the single
-  most likely reason a packaged build draws nothing. On Linux and macOS the
-  shared library is collected below when present; on Windows put fribidi.dll
-  next to the executable. `qurantext doctor` reports whether it resolved.
+* **FriBiDi.** Pillow loads it by name at runtime, and no Pillow wheel on any
+  platform contains one — opening the Windows, macOS and Linux wheels shows
+  HarfBuzz vendored and FriBiDi absent, because FriBiDi is LGPL and loading it
+  at runtime is what keeps the wheel redistributable. Without it Arabic does
+  not shape and the renderer refuses to draw, which was exactly the macOS build
+  failure. The build copies one in beside the executable, and the app loads it
+  itself at startup rather than trusting three different loaders to find it;
+  see qurantext.config.fribidi. `--doctor` reports whether it resolved.
 * **FFmpeg.** Not bundled here, because the binary is large and its licensing
   depends on the build you choose. Ship one beside the executable and put that
   directory on PATH, or accept the system install. `doctor` reports which.
@@ -30,10 +34,11 @@ datas = [
 ]
 
 # Pillow's own shared libraries are collected by PyInstaller's Pillow hook into
-# pillow.libs/ with the right search path, raqm and FriBiDi included. Do NOT add
-# collect_dynamic_libs("PIL") here: that copies them to the bundle root as well,
-# where Pillow's libharfbuzz shadows the one Qt ships, and the app hangs on
-# startup before reaching a single line of its own code.
+# pillow.libs/ with the right search path. Do NOT add collect_dynamic_libs("PIL")
+# here: that copies them to the bundle root as well, where Pillow's libharfbuzz
+# shadows the one Qt ships, and the app hangs on startup before reaching a single
+# line of its own code. Note that no amount of collecting produces FriBiDi — it
+# is not in the wheel to collect. The build supplies that separately.
 binaries = []
 
 a = Analysis(

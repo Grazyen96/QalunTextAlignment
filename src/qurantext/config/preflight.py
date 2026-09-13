@@ -21,11 +21,11 @@ an instruction.
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
 
+from qurantext.config.fribidi import fribidi_names
 from qurantext.config.paths import (
     DEFAULT_FONT_PATH,
     DEFAULT_QURAN_PATH,
@@ -34,6 +34,7 @@ from qurantext.config.paths import (
     checkout_root,
     user_data_dir,
 )
+from qurantext.core.video_common import require_binary
 
 __all__ = ["CheckResult", "Status", "format_report", "run_checks"]
 
@@ -58,12 +59,17 @@ class CheckResult:
 
 
 def _ffmpeg_binary(name: str) -> CheckResult:
-    found = shutil.which(name)
-    if not found:
+    # Ask the same way the renderer asks. Checking PATH here while the renderer
+    # looks beside the executable first made this report a packaged app broken
+    # when it would in fact have rendered — a check that disagrees with the code
+    # it is checking is worse than no check.
+    try:
+        found: str | None = require_binary(name)
+    except RuntimeError as error:
         return CheckResult(
             name,
             Status.FAIL,
-            "not found on PATH",
+            str(error).rstrip("."),
             f"Install FFmpeg, which provides {name}. A packaged build should ship "
             "it beside the application rather than rely on PATH.",
         )
@@ -96,17 +102,32 @@ def _arabic_shaping() -> CheckResult:
         )
 
     if not features.check("raqm"):
-        have = [n for n in ("harfbuzz", "fribidi") if features.check(n)]
-        missing = [n for n in ("harfbuzz", "fribidi") if not features.check(n)]
+        # Pillow reports HarfBuzz and FriBiDi versions *through* raqm, so when
+        # raqm is unavailable all three read as missing. Only one of them is
+        # ever actually absent: raqm and HarfBuzz are linked into Pillow, and
+        # FriBiDi is the one it loads by name at runtime. Naming all three here
+        # sent a previous reader looking for two libraries that were present.
+        names = ", ".join(fribidi_names())
+        if getattr(sys, "frozen", False):
+            remedy = (
+                "Arabic will not render. This build should carry its own copy of "
+                f"FriBiDi ({names}) next to the application and it is missing or "
+                "would not load, which is a packaging fault rather than anything "
+                "to fix on this machine. Please report it."
+            )
+        else:
+            remedy = (
+                "Arabic will not render. Pillow loads FriBiDi at runtime and no "
+                "Pillow wheel contains one, so the system must provide it: on "
+                "Debian/Ubuntu `apt install libfribidi0`, on macOS `brew install "
+                "fribidi`, on Windows put fribidi.dll beside the application. "
+                "Reinstalling Pillow does not help."
+            )
         return CheckResult(
             "Arabic shaping",
             Status.FAIL,
-            f"Pillow {pillow_version} has no raqm support"
-            + (f" (has {', '.join(have)}; missing {', '.join(missing)})" if missing else ""),
-            "Arabic will not render. Pillow's wheels need FriBiDi installed "
-            "separately: on Debian/Ubuntu `apt install libfribidi0`, on macOS "
-            "`brew install fribidi`, on Windows ship fribidi.dll beside the "
-            "application. Then reinstall Pillow.",
+            f"Pillow {pillow_version} reports no raqm support (FriBiDi did not load)",
+            remedy,
         )
 
     parts = [

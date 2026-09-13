@@ -33,7 +33,7 @@ qalun --cli <command>   any command-line subcommand
 |---|---|---|---|
 | Wrapper | Inno Setup or MSIX | AppImage or a tarball | `Qalun.app`, made by the spec |
 | Signing | Authenticode | not required | `codesign` then `notarytool`, mandatory |
-| FriBiDi | ship `fribidi.dll` beside the executable | collected from the build machine | collected from the build machine |
+| FriBiDi | ship it beside the executable | ship it beside the executable | ship it beside the executable |
 | FFmpeg | ship beside the executable | ship beside the executable | ship beside the executable |
 
 Build on the platform you are shipping to. PyInstaller does not cross-compile.
@@ -41,9 +41,22 @@ Build on the platform you are shipping to. PyInstaller does not cross-compile.
 ## Two things that are easy to get wrong
 
 **Do not add `collect_dynamic_libs("PIL")`.** PyInstaller's Pillow hook already
-collects raqm, HarfBuzz and FriBiDi into `pillow.libs/` with the right search
-path. Adding them again puts a second copy at the bundle root, where Pillow's
-HarfBuzz shadows the one Qt ships.
+collects Pillow's own libraries into `pillow.libs/` with the right search path.
+Adding them again puts a second copy at the bundle root, where Pillow's HarfBuzz
+shadows the one Qt ships. Note this does not get you FriBiDi, which is not in
+the wheel to collect — see below.
+
+**FriBiDi has to be supplied, on every platform.** Pillow links raqm and
+HarfBuzz statically but loads FriBiDi by name at runtime, because FriBiDi is
+LGPL and loading it at runtime is what keeps the wheel redistributable. No
+Pillow wheel for any platform contains one. Without it Pillow reports no raqm
+support, Arabic does not shape, and the renderer refuses to draw. A developer
+never notices, because `apt` or Homebrew already put one on the system; a person
+who downloads the app has nothing. The build copies one in beside the executable
+and the app loads it itself at startup, rather than trusting three different
+loaders to find a bare name in the application directory — which Windows does,
+Linux does only because PyInstaller arranges it, and macOS does not do at all.
+See `qurantext.config.fribidi`.
 
 **`multiprocessing.freeze_support()` belongs behind a Windows check.** It is only
 needed where a frozen app re-executes itself to start a child process. Called
