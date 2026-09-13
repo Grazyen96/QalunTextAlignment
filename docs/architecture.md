@@ -28,7 +28,8 @@ QuranText is organized around a small number of stable layers:
 - `alignment.py` holds the legacy word- and segment-alignment fuzzy matching helpers.
 - `video_common.py` contains shared validation, timing, JSON loading, and rendering helpers.
 - `ass_renderer.py` contains ASS subtitle generation, FFmpeg ASS rendering, and font-family validation.
-- `frame_renderer.py` contains the Pillow/OpenCV frame renderer and active-match tracking.
+- `frame_renderer.py` contains the Pillow frame renderer and active-match tracking. Frames are
+  streamed straight into FFmpeg, so the video is encoded once with no intermediate file.
 - `video_renderer.py` is now the thin CLI/orchestration layer over the renderer modules.
 
 ### `src/qurantext/io`

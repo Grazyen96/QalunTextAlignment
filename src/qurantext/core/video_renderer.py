@@ -21,7 +21,7 @@ from qurantext.core.frame_renderer import (
     render_frame_pillow,
     render_frame_video,
     validate_font_file,
-    write_silent_frame_video,
+    write_frame_video,
 )
 from qurantext.core.video_common import (
     ass_time,
@@ -229,7 +229,7 @@ __all__ = [
     "render_frame_video",
     "validate_font_file",
     "validate_font_name",
-    "write_silent_frame_video",
+    "write_frame_video",
 ]
 
 

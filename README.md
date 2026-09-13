@@ -462,5 +462,6 @@ python3 -m pip install pytest ruff
 - If transcription fails, verify `REPLICATE_API_TOKEN` in `.env`, `.env.local`, or your shell environment.
 - If you already have a WhisperX transcript, use `--whisperx-json` instead of `--audio` to skip retranscription.
 - If `generate-video --renderer ass` fails, confirm your FFmpeg build has `libass` support and that the font name exists on the system.
-- If `generate-video --renderer frame` fails, install `Pillow`, `numpy`, and `opencv-python`, and use a valid `--font-file`.
+- If `generate-video --renderer frame` fails, install `Pillow` and `numpy`, check that FFmpeg is on your PATH, and use a valid `--font-file`.
+- If it fails with a libraqm error, your Pillow build cannot shape Arabic. Pillow's wheels need FriBiDi installed separately; install it and reinstall Pillow.
 - If matching confidence is low, increase `--head-words`, `--tail-words`, or `--search-range`, and confirm the Quran file matches the recitation riwaya.

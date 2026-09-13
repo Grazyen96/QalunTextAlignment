@@ -4,6 +4,7 @@ import math
 import subprocess
 import tempfile
 import time
+from contextlib import suppress
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -71,19 +72,12 @@ PLACEHOLDER_FONT_MIN_RATIO = 0.030
 
 
 @lru_cache(maxsize=1)
-def _frame_dependencies() -> tuple[Any, Any, Any, Any, Any, Any]:
+def _frame_dependencies() -> tuple[Any, Any, Any, Any, Any]:
     try:
         import numpy as np
     except ModuleNotFoundError as error:
         raise RuntimeError(
             "frame renderer requires numpy. Install it with: pip install numpy"
-        ) from error
-
-    try:
-        import cv2  # type: ignore[import-not-found]
-    except ModuleNotFoundError as error:
-        raise RuntimeError(
-            "frame renderer requires opencv-python. Install it with: pip install opencv-python"
         ) from error
 
     try:
@@ -93,12 +87,12 @@ def _frame_dependencies() -> tuple[Any, Any, Any, Any, Any, Any]:
             "frame renderer requires Pillow. Install it with: pip install pillow"
         ) from error
 
-    return np, cv2, Image, ImageDraw, ImageFont, features
+    return np, Image, ImageDraw, ImageFont, features
 
 
 @lru_cache(maxsize=1)
 def _require_raqm_support() -> None:
-    _, _, _, _, _, features = _frame_dependencies()
+    _, _, _, _, features = _frame_dependencies()
     if not features.check("raqm"):
         raise RuntimeError(
             "Pillow was not built with libraqm. Arabic shaping/RTL rendering may be incorrect. "
@@ -173,11 +167,24 @@ def load_font(font_file: Path, size: int) -> Any:
     re-parsing the TTF every call dominated render time. PIL font objects are
     safe to reuse for measuring and drawing.
     """
-    _, _, _, _, image_font, _ = _frame_dependencies()
+    _, _, _, image_font, _ = _frame_dependencies()
     try:
         return image_font.truetype(str(font_file), size=size)
     except OSError as error:
         raise RuntimeError(f"Failed to load font file '{font_file}': {error}") from error
+
+
+@lru_cache(maxsize=1)
+def _measure_probe() -> Any:
+    """A 1x1 canvas used only for text measurement.
+
+    ``textbbox`` derives its result from the font's own metrics, so the size and
+    mode of the canvas it is called on never affect the answer. Keeping one
+    shared probe lets the layout caches below key on the text and the box alone,
+    without dragging a per-frame ``ImageDraw`` into the cache key.
+    """
+    _, image_module, image_draw, _, _ = _frame_dependencies()
+    return image_draw.Draw(image_module.new("RGBA", (1, 1)))
 
 
 def measure_text_bbox(draw: Any, text: str, font: Any) -> tuple[int, int]:
@@ -233,16 +240,25 @@ def _multiline_metrics(
     return (max(widths) if widths else 0), total_height
 
 
-def fit_font_size(
-    draw: Any,
+@lru_cache(maxsize=512)
+def _fit_font_size_cached(
     text: str,
     font_file: Path,
     max_width: int,
     max_height: int,
     start_size: int,
     min_size: int,
-) -> tuple[Any, list[str]]:
-    """Fit wrapped text into the given box by reducing the font size."""
+) -> tuple[Any, tuple[str, ...]]:
+    """Cached core of :func:`fit_font_size` (see it for the contract).
+
+    The size sweep re-wraps and re-measures the whole text at every candidate
+    size, and each wrap issues one Raqm shaping call per word and per line, so
+    this is the single most expensive thing a frame does. The result depends
+    only on the text and the box, while the renderer asks for the same card or
+    caption again on every word of the highlight, so it is cached rather than
+    recomputed per rendered frame.
+    """
+    draw = _measure_probe()
     min_size = max(8, min_size)
     best_font = load_font(font_file, min_size)
     best_lines = wrap_text_to_width(draw, text, best_font, max_width)
@@ -253,11 +269,67 @@ def fit_font_size(
         line_spacing = max(4, int(size * LINE_SPACING_RATIO))
         width, height = _multiline_metrics(draw, lines, font, line_spacing)
         if width <= max_width and height <= max_height:
-            return font, lines
+            return font, tuple(lines)
         best_font = font
         best_lines = lines
 
-    return best_font, best_lines
+    return best_font, tuple(best_lines)
+
+
+def fit_font_size(
+    draw: Any,
+    text: str,
+    font_file: Path,
+    max_width: int,
+    max_height: int,
+    start_size: int,
+    min_size: int,
+) -> tuple[Any, list[str]]:
+    """Fit wrapped text into the given box by reducing the font size.
+
+    *draw* is accepted for call-site compatibility but not used for measurement:
+    text metrics come from the font, not the canvas, so the cached core measures
+    against a shared probe instead.
+    """
+    font, lines = _fit_font_size_cached(
+        text, font_file, max_width, max_height, start_size, min_size
+    )
+    return font, list(lines)
+
+
+@lru_cache(maxsize=512)
+def _paginate_lines_cached(
+    lines: tuple[str, ...],
+    font: Any,
+    line_spacing: int,
+    max_height: int,
+) -> tuple[tuple[str, ...], ...]:
+    """Cached core of :func:`paginate_lines`.
+
+    Measures a growing run of lines, so it costs a shaping call per line per
+    page. Like the fit above, the answer depends only on the lines and the box,
+    and the renderer re-asks for it on every word of the highlight.
+    """
+    if not lines:
+        return ((),)
+
+    draw = _measure_probe()
+    pages: list[tuple[str, ...]] = []
+    current: list[str] = []
+
+    for line in lines:
+        candidate = current + [line]
+        _, h = _multiline_metrics(draw, candidate, font, line_spacing)
+        if h <= max_height or not current:
+            current = candidate
+        else:
+            pages.append(tuple(current))
+            current = [line]
+
+    if current:
+        pages.append(tuple(current))
+
+    return tuple(pages) or ((),)
 
 
 def paginate_lines(
@@ -267,33 +339,21 @@ def paginate_lines(
     line_spacing: int,
     max_height: int,
 ) -> list[list[str]]:
-    """Split a list of wrapped lines into pages that each fit within max_height."""
-    if not lines:
-        return [[]]
+    """Split a list of wrapped lines into pages that each fit within max_height.
 
-    pages: list[list[str]] = []
-    current: list[str] = []
-
-    for line in lines:
-        candidate = current + [line]
-        _, h = _multiline_metrics(draw, candidate, font, line_spacing)
-        if h <= max_height or not current:
-            current = candidate
-        else:
-            pages.append(current)
-            current = [line]
-
-    if current:
-        pages.append(current)
-
-    return pages or [[]]
+    *draw* is accepted for call-site compatibility but not used: see
+    :func:`fit_font_size`.
+    """
+    return [
+        list(page) for page in _paginate_lines_cached(tuple(lines), font, line_spacing, max_height)
+    ]
 
 
 def draw_rounded_rectangle(
     image: Any, box: tuple[int, int, int, int], radius: int, fill: tuple[int, int, int, int]
 ) -> None:
     """Draw a semi-transparent rounded rectangle using Pillow."""
-    _, _, image_module, image_draw, _, _ = _frame_dependencies()
+    _, image_module, image_draw, _, _ = _frame_dependencies()
     overlay = image_module.new("RGBA", image.size, (0, 0, 0, 0))
     draw = image_draw.Draw(overlay, "RGBA")
 
@@ -603,9 +663,7 @@ class _FrameLayout:
     caption_band: tuple[int, int, int, int]
 
 
-def _frame_layout(
-    width: int, height: int, *, reserve_caption_band: bool = True
-) -> _FrameLayout:
+def _frame_layout(width: int, height: int, *, reserve_caption_band: bool = True) -> _FrameLayout:
     """Split the frame into a centred card region and a bottom caption band.
 
     When *reserve_caption_band* is False (recitation mode, or any render without
@@ -808,7 +866,12 @@ def _draw_ayah_card(
             card_y1 - pad_y,
         )
         draw_centered_multiline_text(
-            draw, content.debug_lines, content.debug_font, debug_box, COLOUR_DEBUG_TEXT, debug_spacing
+            draw,
+            content.debug_lines,
+            content.debug_font,
+            debug_box,
+            COLOUR_DEBUG_TEXT,
+            debug_spacing,
         )
 
 
@@ -910,7 +973,12 @@ def _caption_window(
 
 
 def _draw_caption(
-    image: Any, draw: Any, caption_text: str, layout: _FrameLayout, width: int, height: int,
+    image: Any,
+    draw: Any,
+    caption_text: str,
+    layout: _FrameLayout,
+    width: int,
+    height: int,
     font_file: Path,
     *,
     word_timings: list[dict[str, Any]] | None = None,
@@ -923,7 +991,7 @@ def _draw_caption(
     upcoming (see :func:`draw_caption_progressive`). The caption text is built
     from the same word tokens upstream, so token N is timing N.
     """
-    _, _, image_module, image_draw, _, _ = _frame_dependencies()
+    _, image_module, image_draw, _, _ = _frame_dependencies()
     bx0, by0, bx1, by1 = layout.caption_band
 
     overlay = image_module.new("RGBA", image.size, (0, 0, 0, 0))
@@ -986,7 +1054,7 @@ def render_frame_pillow(
     *caption_text* for the current moment. When *reserve_caption_band* is False
     the band is dropped and the card centres in the full frame.
     """
-    np, _, image_module, image_draw, _, _ = _frame_dependencies()
+    np, image_module, image_draw, _, _ = _frame_dependencies()
     image = image_module.new("RGBA", (width, height), COLOUR_BG)
     layout = _frame_layout(width, height, reserve_caption_band=reserve_caption_band)
 
@@ -1038,7 +1106,7 @@ def _body_pages(
     Mirrors the pagination ``render_frame_pillow`` performs so page counts and
     per-page word counts stay consistent with what is actually drawn.
     """
-    _, _, image_module, image_draw, _, _ = _frame_dependencies()
+    _, image_module, image_draw, _, _ = _frame_dependencies()
     probe = image_module.new("RGBA", (width, height))
     draw = image_draw.Draw(probe)
 
@@ -1047,10 +1115,76 @@ def _body_pages(
     return content.body_pages or [[]]
 
 
-def write_silent_frame_video(
+def _start_frame_encoder(
+    audio_path: Path,
+    output_path: Path,
+    width: int,
+    height: int,
+    fps: int,
+    log_handle: Any,
+) -> Any:
+    """Start FFmpeg reading raw BGR frames on stdin and writing the final MP4.
+
+    Frames go straight from Pillow into the H.264 encoder, so the video is
+    encoded exactly once. The previous route wrote an OpenCV ``mp4v`` (MPEG-4
+    Part 2) intermediate beside the user's output and then had FFmpeg decode and
+    re-encode it, which cost a second full encode, a gigabyte-scale temp file per
+    render, and a dependency on an OpenCV build with video support.
+    """
+    ffmpeg_path = require_binary("ffmpeg", "Install FFmpeg and try again.")
+    command = [
+        ffmpeg_path,
+        "-y",
+        # Raw frames on stdin. render_frame_pillow hands back BGR, so declare it
+        # rather than paying for a channel swap on every frame.
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "bgr24",
+        "-s",
+        f"{width}x{height}",
+        "-framerate",
+        str(fps),
+        "-i",
+        "pipe:0",
+        "-i",
+        str(audio_path),
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "18",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-shortest",
+        "-movflags",
+        "+faststart",
+        str(output_path),
+    ]
+    return subprocess.Popen(
+        command,
+        stdin=subprocess.PIPE,
+        # FFmpeg is chatty and a render can run for minutes; send its output to a
+        # file rather than a pipe nobody drains, which would eventually block it.
+        stdout=log_handle,
+        stderr=log_handle,
+    )
+
+
+def write_frame_video(
     matches: list[dict[str, Any]],
     duration: float,
-    temp_video_path: Path,
+    audio_path: Path,
+    output_path: Path,
     width: int,
     height: int,
     fps: int,
@@ -1059,8 +1193,9 @@ def write_silent_frame_video(
     captions: list[dict[str, Any]] | None = None,
     title: str = DEFAULT_PLACEHOLDER_TITLE,
     debug_detected_text: bool = False,
+    log_path: Path | None = None,
 ) -> None:
-    """Write a silent temporary MP4 using OpenCV.
+    """Render every frame and stream it into FFmpeg, producing the final MP4.
 
     The centre ayah card is *latched*: the most recently started match is shown
     and held until the next match starts, so it only changes when a new ayah is
@@ -1070,14 +1205,7 @@ def write_silent_frame_video(
     Frames with identical content are rendered once and written multiple times,
     reducing per-frame PIL overhead for long videos with static ayah cards.
     """
-    _, cv2, _, _, _, _ = _frame_dependencies()
     total_frames = max(1, int(math.ceil(duration * fps)))
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(str(temp_video_path), fourcc, float(fps), (width, height))
-    if not writer.isOpened():
-        raise RuntimeError(
-            f"OpenCV failed to open the temporary video writer for '{temp_video_path}'."
-        )
 
     sorted_matches = sorted(matches, key=lambda m: float(m.get("_start_time", math.inf)))
     caption_list = sorted(captions or [], key=lambda c: float(c.get("start", math.inf)))
@@ -1181,7 +1309,22 @@ def write_silent_frame_video(
     n_events = len(events)
     report_every = max(1, n_events // 10)
 
+    encoder_log = log_path or output_path.with_suffix(".ffmpeg.log")
+    encoder_log.parent.mkdir(parents=True, exist_ok=True)
+    log_handle = encoder_log.open("wb")
+
+    def _encoder_failure(reason: str) -> RuntimeError:
+        log_handle.flush()
+        try:
+            tail = encoder_log.read_text(encoding="utf-8", errors="replace").strip().splitlines()
+        except OSError:
+            tail = []
+        details = "\n".join(tail[-12:]) or "no FFmpeg output was captured"
+        return RuntimeError(f"{reason}\n{details}")
+
+    process: Any = None
     try:
+        process = _start_frame_encoder(audio_path, output_path, width, height, fps, log_handle)
         for ev_idx, (ev_start, ev_match, ev_caption) in enumerate(events):
             ev_end = events[ev_idx + 1][0] if ev_idx + 1 < n_events else total_frames
             ev_caption_text = str(ev_caption["text"]) if ev_caption else ""
@@ -1199,8 +1342,14 @@ def write_silent_frame_video(
                 debug_detected_text=debug_detected_text,
                 reserve_caption_band=reserve_caption_band,
             )
-            for _ in range(ev_end - ev_start):
-                writer.write(frame)
+            # Serialise once, then hand the encoder the same bytes for every
+            # frame this event covers.
+            payload = frame.tobytes()
+            try:
+                for _ in range(ev_end - ev_start):
+                    process.stdin.write(payload)
+            except (BrokenPipeError, OSError) as error:
+                raise _encoder_failure("FFmpeg stopped while frames were being written:") from error
 
             if ev_idx % report_every == 0 or ev_idx == n_events - 1:
                 elapsed = time.monotonic() - t0
@@ -1215,36 +1364,22 @@ def write_silent_frame_video(
                     flush=True,
                 )
         print()
+
+        # Closing stdin tells FFmpeg the stream ended; it then finalises the
+        # container (moov atom, +faststart) before exiting.
+        process.stdin.close()
+        if process.wait() != 0:
+            raise _encoder_failure(
+                f"FFmpeg exited with status {process.returncode} while encoding the video:"
+            )
     finally:
-        writer.release()
-
-
-def mux_audio_video(silent_video_path: Path, audio_path: Path, output_path: Path) -> None:
-    """Mux the original audio into the temporary silent video."""
-    ffmpeg_path = require_binary("ffmpeg", "Install FFmpeg and try again.")
-    command = [
-        ffmpeg_path,
-        "-y",
-        "-i",
-        str(silent_video_path),
-        "-i",
-        str(audio_path),
-        "-c:v",
-        "copy",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        "-shortest",
-        "-movflags",
-        "+faststart",
-        str(output_path),
-    ]
-
-    completed = subprocess.run(command, check=False, capture_output=True, text=True)
-    if completed.returncode != 0:
-        details = (completed.stderr or completed.stdout or "unknown FFmpeg error").strip()
-        raise RuntimeError(f"FFmpeg failed while muxing the final video: {details}")
+        if process is not None:
+            if process.stdin and not process.stdin.closed:
+                process.stdin.close()
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+        log_handle.close()
 
 
 def render_frame_video(
@@ -1278,26 +1413,21 @@ def render_frame_video(
     total_frames = max(1, int(math.ceil(duration * fps)))
     print(f"  Video: {duration:.1f}s  ×  {fps} fps  =  {total_frames:,} frames  ({width}×{height})")
 
-    temp_dir = output_path.parent
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    temp_handle = tempfile.NamedTemporaryFile(
-        prefix=f"{output_path.stem}.",
-        suffix=".silent.mp4",
-        dir=temp_dir,
-        delete=False,
-    )
-    temp_handle.close()
-    temp_video_path = Path(temp_handle.name)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    # The encoder log is the only intermediate left, and it goes to a temp
+    # directory so the user's output folder holds deliverables only.
+    log_dir = Path(tempfile.mkdtemp(prefix="qurantext-render-"))
+    log_path = log_dir / f"{output_path.stem}.ffmpeg.log"
 
     grand_start = time.monotonic()
 
     try:
-        print("  [1/2] Rendering frames...")
-        t0 = time.monotonic()
-        write_silent_frame_video(
+        print("  Rendering frames and encoding H.264...")
+        write_frame_video(
             valid_matches,
             duration,
-            temp_video_path,
+            audio_path,
+            output_path,
             width,
             height,
             fps,
@@ -1305,29 +1435,22 @@ def render_frame_video(
             captions=captions,
             title=title,
             debug_detected_text=debug_detected_text,
+            log_path=log_path,
         )
-        frame_elapsed = time.monotonic() - t0
-        print(
-            f"  [1/2] Done — {frame_elapsed:.1f}s  ({total_frames / frame_elapsed:.1f} fps rendered)"
-        )
-
-        print("  [2/2] Muxing audio...")
-        t0 = time.monotonic()
-        mux_audio_video(temp_video_path, audio_path, output_path)
-        mux_elapsed = time.monotonic() - t0
-        print(f"  [2/2] Done — {mux_elapsed:.1f}s")
-
     finally:
         if keep_temp:
-            print(f"Temporary silent video kept at: {temp_video_path}")
+            print(f"FFmpeg log kept at: {log_path}")
         else:
-            temp_video_path.unlink(missing_ok=True)
+            log_path.unlink(missing_ok=True)
+            with suppress(OSError):
+                log_dir.rmdir()
 
     total_elapsed = time.monotonic() - grand_start
     mins, secs = divmod(int(total_elapsed), 60)
-    print(f"  Total render time: {mins}m {secs:02d}s")
+    rendered_fps = total_frames / total_elapsed if total_elapsed > 0 else 0.0
+    print(f"  Total render time: {mins}m {secs:02d}s  ({rendered_fps:.1f} fps)")
 
-    return temp_video_path if keep_temp else None
+    return log_path if keep_temp else None
 
 
 def validate_font_file(font_file: Path) -> None:

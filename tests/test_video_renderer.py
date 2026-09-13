@@ -1,11 +1,13 @@
 import json
+import shutil
+import subprocess
 from unittest.mock import patch
 
 import pytest
 
+import qurantext.core.frame_renderer as frame_renderer
 from qurantext.config.paths import PROJECT_ROOT
 from qurantext.core.ass_renderer import _audio_encode_args, _probe_audio_codec, _wrap_ass_body_text
-import qurantext.core.frame_renderer as frame_renderer
 from qurantext.core.frame_renderer import (
     ActiveMatchTracker,
     _caption_window,
@@ -436,3 +438,114 @@ def test_render_frame_pillow_produces_valid_highlighted_frame() -> None:
     # t=0.7 falls on the second word; should render without raising.
     frame = render_frame_pillow(0.7, match, 480, 320, _BUNDLED_FONT)
     assert frame.shape == (320, 480, 3)
+
+
+# --- frame encoder (B3: frames stream straight into FFmpeg) -------------------
+
+_FFMPEG = shutil.which("ffmpeg")
+_FFPROBE = shutil.which("ffprobe")
+
+
+@pytest.mark.skipif(
+    not (_FFMPEG and _FFPROBE and _BUNDLED_FONT.exists()),
+    reason="needs ffmpeg, ffprobe and the bundled font",
+)
+def test_write_frame_video_produces_h264_with_audio_and_no_leftovers(tmp_path) -> None:
+    """The renderer must emit a playable H.264 file in one encode.
+
+    Frames used to go through an OpenCV MPEG-4 Part 2 intermediate that FFmpeg
+    then decoded and re-encoded, which cost a second full encode and left a
+    large temp file beside the user's output. This pins the replacement: correct
+    codec, correct geometry, the audio carried through, and nothing left behind.
+    """
+    audio = tmp_path / "silence.m4a"
+    subprocess.run(
+        [
+            _FFMPEG,
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=44100:cl=mono",
+            "-t",
+            "2",
+            "-c:a",
+            "aac",
+            str(audio),
+        ],
+        check=True,
+    )
+
+    output = tmp_path / "out.mp4"
+    matches = validated_matches(
+        [
+            {
+                "surah_num": 25,
+                "surah_name": "سُورَةُ الفُرقَانِ",
+                "from_ayah": 7,
+                "to_ayah": 7,
+                "full_text": "وَقَالُواْ مَالِ هَٰذَا اَ۬لرَّسُولِ",
+                "confidence": 0.9,
+                "start_time": 0.0,
+                "end_time": 2.0,
+            }
+        ],
+        bridge_gaps=False,
+    )
+
+    frame_renderer.write_frame_video(
+        matches,
+        2.0,
+        audio,
+        output,
+        320,
+        240,
+        10,
+        _BUNDLED_FONT,
+        log_path=tmp_path / "enc.log",
+    )
+
+    assert output.exists() and output.stat().st_size > 0
+
+    probe = subprocess.run(
+        [
+            _FFPROBE,
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=codec_name,codec_type,width,height",
+            "-of",
+            "csv=p=0",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "h264" in probe, probe
+    assert "320,240" in probe.replace(" ", ""), probe
+    assert "audio" in probe, probe
+
+    # One encode, no silent intermediate anywhere near the deliverable.
+    assert list(tmp_path.glob("*.silent.mp4")) == []
+
+
+@pytest.mark.skipif(not _BUNDLED_FONT.exists(), reason="bundled font not present")
+def test_write_frame_video_reports_ffmpeg_failure(tmp_path) -> None:
+    """A dead encoder must surface FFmpeg's own output, not a bare exit code."""
+    output = tmp_path / "out.mp4"
+    with pytest.raises(RuntimeError) as excinfo:
+        frame_renderer.write_frame_video(
+            [],
+            1.0,
+            tmp_path / "missing-audio.m4a",
+            output,
+            160,
+            120,
+            5,
+            _BUNDLED_FONT,
+            log_path=tmp_path / "enc.log",
+        )
+    assert "FFmpeg" in str(excinfo.value)

@@ -1,5 +1,4 @@
 numpy>=1.24,<3
-opencv-python>=4.8,<5
 # Pillow must be built with libraqm for correct Arabic shaping/RTL (frame renderer).
 Pillow>=10.0,<13
 replicate>=1.0,<2
