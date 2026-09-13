@@ -7,6 +7,11 @@ name: Build the app
 #
 #   Actions -> Build the app -> Run workflow      builds and attaches the zips
 #   git tag v0.2.0 && git push --tags             the same, plus a Release
+#
+# This file is orchestration only. Everything platform-specific lives in
+# packaging/ci/, because changing a file under .github/workflows/ needs a token
+# scope that ordinary pushes do not have, and a Windows fix should not be
+# gated on that. See packaging/ci/README.md.
 on:
   workflow_dispatch:
   push:
@@ -46,21 +51,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[gui]" pyinstaller
 
-      # ----------------------------------------------------------------------
-      # Everything the app needs at runtime but does not carry itself goes into
-      # vendor/, and vendor/ is copied in beside the executable after the build.
-      #
-      # FFmpeg, because a user should not have to install an encoder.
-      #
-      # FriBiDi, because Pillow loads it by name at runtime and NO Pillow wheel
-      # on any platform contains one — HarfBuzz is vendored into the wheel and
-      # FriBiDi deliberately is not, since loading an LGPL library at runtime is
-      # what keeps the wheel redistributable. Without it Pillow reports no raqm
-      # support, Arabic does not shape, and the renderer refuses to draw. A
-      # developer never sees this because the system has a copy. This is what
-      # the first macOS build failed on.
-      # ----------------------------------------------------------------------
-
       - name: Get FriBiDi (Windows)
         id: msys2
         if: runner.os == 'Windows'
@@ -73,183 +63,36 @@ jobs:
       - name: Collect what the app needs (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          New-Item -ItemType Directory -Force -Path vendor | Out-Null
-
-          # Two sources, three tries each. The first is on GitHub's own CDN, so
-          # it is up whenever the runner is. The second is the well-known
-          # Windows build, kept because one third-party host answering 503
-          # should not be able to fail a release — which it did once already.
-          $sources = @(
-            "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
-            "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
-          )
-          $got = $false
-          foreach ($url in $sources) {
-            for ($try = 1; $try -le 3 -and -not $got; $try++) {
-              try {
-                Write-Host "Fetching $url (attempt $try)"
-                Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip -UseBasicParsing -TimeoutSec 300
-                $got = $true
-              } catch {
-                Write-Host "  failed: $($_.Exception.Message)"
-                Start-Sleep -Seconds (5 * $try)
-              }
-            }
-            if ($got) { break }
-          }
-          if (-not $got) { throw "Could not download FFmpeg from any source." }
-
-          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-src -Force
-          Get-ChildItem -Path ffmpeg-src -Recurse -Include ffmpeg.exe,ffprobe.exe |
-            ForEach-Object { Copy-Item $_.FullName -Destination vendor -Force }
-
-          # Pillow asks for fribidi-0.dll, libfribidi-0.dll, then fribidi.dll.
-          # MSYS2 ships it as the second; the app tries all three.
-          #
-          # MSYS2 does not install to a fixed path on a runner. It lands in the
-          # temp directory, not C:\msys64, which is what the last build failed
-          # on. Ask the action where it actually put it and keep the usual
-          # locations as a fallback.
-          $roots = @(
-            "${{ steps.msys2.outputs['msys2-location'] }}",
-            "$env:RUNNER_TEMP\msys64",
-            "C:\msys64"
-          ) | Where-Object { $_ -and (Test-Path $_) }
-
-          $dll = $null
-          $runtime = $null
-          foreach ($root in $roots) {
-            $bin = Join-Path $root "mingw64\bin"
-            if (-not (Test-Path $bin)) { continue }
-            $dll = Get-ChildItem $bin -Filter "*fribidi*.dll" -ErrorAction SilentlyContinue |
-              Select-Object -First 1
-            if ($dll) { $runtime = $bin; break }
-          }
-          if (-not $dll) {
-            Write-Host "Looked in: $($roots -join '; ')"
-            throw "FriBiDi not found; Arabic would not render."
-          }
-          Write-Host "Found $($dll.FullName)"
-          Copy-Item $dll.FullName -Destination vendor\fribidi-0.dll -Force
-
-          # A MinGW build can lean on its own runtime libraries. Cheap insurance,
-          # and harmless when they turn out not to be needed.
-          foreach ($name in @("libwinpthread-1.dll", "libgcc_s_seh-1.dll")) {
-            $extra = Join-Path $runtime $name
-            if (Test-Path $extra) { Copy-Item $extra -Destination vendor -Force }
-          }
-
-          # Prove it loads now, the same way the app will, rather than finding
-          # out at the gate that a DLL was present but unusable.
-          $probe = 'import ctypes, os; d = os.path.abspath("vendor"); os.add_dll_directory(d); ctypes.CDLL(os.path.join(d, "fribidi-0.dll")); print("FriBiDi loads")'
-          python -c $probe
-          if ($LASTEXITCODE -ne 0) { throw "The FriBiDi DLL is there but will not load." }
-
-          Get-ChildItem vendor
+        env:
+          MSYS2_LOCATION: ${{ steps.msys2.outputs['msys2-location'] }}
+        run: packaging/ci/collect-windows.ps1
 
       - name: Collect what the app needs (macOS)
         if: runner.os == 'macOS'
-        run: |
-          set -euo pipefail
-          brew install ffmpeg fribidi dylibbundler
-          mkdir -p vendor
-          cp "$(command -v ffmpeg)" "$(command -v ffprobe)" vendor/
-
-          # Homebrew's FFmpeg is linked against ~60 libraries under the Homebrew
-          # prefix. Copying the bare binary produces a Mac app that works only on
-          # a machine that already has Homebrew FFmpeg installed — which is to
-          # say, on almost nobody's. dylibbundler copies those libraries in and
-          # rewrites the load paths to point beside the binary.
-          dylibbundler -od -b -x vendor/ffmpeg -x vendor/ffprobe \
-            -d vendor/libs -p @executable_path/libs
-
-          fribidi_lib="$(brew --prefix fribidi)/lib/libfribidi.0.dylib"
-          cp "$fribidi_lib" vendor/libfribidi.dylib
-          # The app loads this by absolute path and the loader then answers
-          # Pillow's bare-name request with it, but only if the name it carries
-          # matches what Pillow asks for.
-          install_name_tool -id libfribidi.dylib vendor/libfribidi.dylib
-          ls -la vendor
+        run: bash packaging/ci/collect-macos.sh
 
       - name: Collect what the app needs (Linux)
         if: runner.os == 'Linux'
-        run: |
-          set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends libfribidi0
-          mkdir -p vendor
-
-          fetch() {
-            local out="$1"; shift
-            for url in "$@"; do
-              for attempt in 1 2 3; do
-                echo "Fetching $url (attempt $attempt)"
-                if curl -fsSL --max-time 300 -o "$out" "$url"; then return 0; fi
-                sleep $((5 * attempt))
-              done
-            done
-            return 1
-          }
-          fetch ffmpeg.tar.xz \
-            "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz" \
-            "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
-
-          mkdir -p ffmpeg-src
-          tar -xJf ffmpeg.tar.xz -C ffmpeg-src --strip-components=1
-          find ffmpeg-src -type f -name ffmpeg -o -type f -name ffprobe | \
-            xargs -I{} cp {} vendor/
-          chmod +x vendor/ffmpeg vendor/ffprobe
-
-          cp /usr/lib/x86_64-linux-gnu/libfribidi.so.0 vendor/
-          ls -la vendor
+        run: bash packaging/ci/collect-linux.sh
 
       - name: Build
         run: pyinstaller packaging/qalun.spec --noconfirm
 
       - name: Put them beside the app
         shell: bash
-        run: |
-          set -euo pipefail
-          target="dist/qalun"
-          [ -d "dist/Qalun.app" ] && target="dist/Qalun.app/Contents/MacOS"
-          cp -R vendor/* "$target/"
-          ls "$target" | head -25
+        run: bash packaging/ci/stage.sh
 
-      # ----------------------------------------------------------------------
       # The gate. An app that cannot shape Arabic is not worth shipping, and
       # this finds out on the platform it matters on rather than by inference
       # from a Linux build.
-      #
-      # PATH is stripped on purpose. Someone who downloads an app and
-      # double-clicks it has put nothing on PATH, so anything the app can only
-      # find there it cannot find at all. Leaving the real PATH in place is how
-      # a build passes here and then fails on a real machine.
-      # ----------------------------------------------------------------------
       - name: Check the built app can render (Unix)
         if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          if [ -d "dist/Qalun.app" ]; then
-            app="dist/Qalun.app/Contents/MacOS/qalun"
-          else
-            app="dist/qalun/qalun"
-          fi
-          PATH=/nonexistent "$app" --doctor
+        run: bash packaging/ci/check.sh
 
       - name: Check the built app can render (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          $env:PATH = "$env:SystemRoot\system32;$env:SystemRoot"
-          & dist\qalun\qalun.exe --doctor
-          $code = $LASTEXITCODE
-          # A windowed app cannot always reach this console, so fall back to the
-          # copy the report writes to disk. Without this a failure here is mute.
-          $report = "$env:LOCALAPPDATA\Qalun\doctor-report.txt"
-          if (Test-Path $report) { Write-Host "--- report ---"; Get-Content $report }
-          if ($code -ne 0) { throw "The built app cannot render yet (see above)." }
+        run: packaging/ci/check.ps1
 
       - name: Package
         shell: bash
