@@ -8,8 +8,8 @@ QuranText is organized around a small number of stable layers:
   the project. The duplicate CLIs that lived in `pipelines/detection.py` and
   `core/video_renderer.py` are gone.
 - `jobs/` is the callable boundary a user interface drives: typed requests
-  (`RenderRequest`), described results (`RenderResult`), the project file that
-  owns a job's cards and editable captions, and the render entry point.
+  (`RenderRequest`, `ExportRequest`), described results, the project file that
+  owns a job's cards and editable captions, and the render and export entry points.
 - `utils/progress.py` carries the progress event, the console reporter and the
   cancellation token. It sits below `jobs/` so `core/` can depend on it without
   a cycle.
@@ -42,6 +42,8 @@ QuranText is organized around a small number of stable layers:
 - `alignment.py` holds the legacy word- and segment-alignment fuzzy matching helpers.
 - `video_common.py` contains shared validation, timing, JSON loading, and rendering helpers.
 - `ass_renderer.py` contains ASS subtitle generation, FFmpeg ASS rendering, and font-family validation.
+- `subtitles.py` builds subtitle cues and writes them as SRT, WebVTT or ASS.
+- `coverage.py` finds recited audio that no word timing covers, from the waveform.
 - `frame_renderer.py` contains the Pillow frame renderer and active-match tracking. Frames are
   streamed straight into FFmpeg, so the video is encoded once with no intermediate file.
 - `video_renderer.py` is now the thin CLI/orchestration layer over the renderer modules.

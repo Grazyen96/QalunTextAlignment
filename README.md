@@ -270,17 +270,7 @@ python3 -m qurantext check-timing \
 
 ### `build-db`
 Builds the versioned SQLite store from the certified Qalun text. Lecture
-matching builds it on demand; `export-editspec` requires it up front.
-
-### `export-editspec` (deprecated)
-
-Superseded by `--subtitles sidecar` above and the in-app editor. The Premiere
-panel it feeds cannot export (no preset is ever written), cannot apply the word
-highlight (its template was never authored), and has never been run against a
-live Premiere. Kept so nothing is lost.
-
-### `export-editspec`, in detail
-Writes the format-neutral edit-spec package for a match result.
+matching and the range picker build it on demand.
 
 ### `run-all`
 Use when you want one command to:
@@ -551,7 +541,7 @@ python3 scripts/render_ayat_video.py ... -> python3 -m qurantext generate-video 
 - `range-match` returns `first_ayah`, `last_ayah`, warnings, and metadata.
 - `lecture-match` returns `matches` for Quran mentions in lecture-style audio.
 - `recitation-match` returns the detected range plus forward-moving display spans.
-- `generate-video` supports `ass` and `frame` renderers.
+- `generate-video` supports `ass` and `frame` renderers, and can write subtitles as sidecar files.
 - `word-align` is kept only for legacy compatibility.
 
 ## Testing And Checks

@@ -2,6 +2,32 @@
 
 > **Purpose of this document.** This is the target architecture. Use it to audit the current project and bring it into line. Where the existing code diverges, prefer this design unless there's a concrete reason recorded otherwise.
 >
+> **RECORDED DIVERGENCE — 13 Sep 2026.** This document says to prefer its design
+> "unless there's a concrete reason recorded otherwise". Here is that reason for
+> decisions 2, 3 and 4.
+>
+> The Premiere/UXP output layer has been removed. It was built and then measured
+> against the shipped code, and three parts of it could not work without further
+> authoring: the panel's Export button returns early on every package the backend
+> produced, because it needs an `.epr` preset nothing writes; the word-highlight
+> keyframes — the largest structure in the edit-spec — cannot be applied because
+> `highlight_v1.mogrt` was never authored; and the plugin host has no
+> caption-writing API in any shipped version, so captions still needed a manual
+> drag. It was never run against a live Premiere.
+>
+> The editable artifact it was chasing is a subtitle file. The app now writes SRT,
+> WebVTT and ASS beside the video (`--subtitles sidecar`), and corrects them in
+> its own editor first, which needs no paid application. The `.prproj` half of
+> "two outputs, every job" is gone; the two outputs are now the rendered video and
+> the subtitle files.
+>
+> Decision 8 (own-voice out of scope) and the data-layer decisions are unaffected.
+> Decision 1 is strengthened: recitation is now a stated range plus alignment,
+> with no runtime search at all.
+>
+> See `docs/findings/forced-alignment-prototype.md` for the separate measurement
+> that also revises decision 7's premise.
+
 > **Locked decisions (do not re-litigate):**
 > 1. **Single reciter voice** — recitation is a pre-aligned lookup; no runtime ML for recitation.
 > 2. **Two outputs, every job:** an editable Premiere project (`.prproj`) **and** a rendered `.mp4`.

@@ -35,7 +35,6 @@ __all__ = [
     "BASMALA_INPUT_DIR",
     "DATA_DIR",
     "DEFAULT_FONT_PATH",
-    "EXPORT_PACKAGES_OUTPUT_DIR",
     "INPUT_DIR",
     "LECTURES_INPUT_DIR",
     "LECTURE_MATCHING_OUTPUT_DIR",
@@ -131,8 +130,6 @@ BASMALA_AUDIO_PATH = BASMALA_INPUT_DIR / "basmala.mp3"
 
 OUTPUT_DIR = _output_root()
 VIDEOS_OUTPUT_DIR = OUTPUT_DIR / "videos"
-# Edit-spec packages staged for the Premiere UXP panel (architecture §8/§9).
-EXPORT_PACKAGES_OUTPUT_DIR = OUTPUT_DIR / "export_packages"
 
 # On-device data store (versioned SQLite build of the certified Qalun text).
 DATA_DIR = _store_root()
