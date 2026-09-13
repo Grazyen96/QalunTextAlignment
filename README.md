@@ -317,7 +317,31 @@ Useful optional flags:
 --min-matched-words    minimum Quran-word overlap
 ```
 
-### 4. Detect recitation range plus timestamped ayah spans
+### 4. Time a recitation whose range you already know (fastest)
+
+If you know which surah and ayat were recited, say so. There is then nothing to
+detect and the job becomes alignment over known text.
+
+```bash
+python3 -m qurantext recitation-match \
+  --quran input/quran/UthmanicQaloon1-Ver05.txt \
+  --audio input/recitations/example.mp3 \
+  --surah-num 25 --from-ayah 7 --to-ayah 11
+```
+
+Measured on a 19-minute recitation of Al-Furqan, against searching for the range:
+
+| | detected | stated |
+|---|---|---|
+| time | 583 s | 3.7 s |
+| ayat covered | 74 / 77 | 77 / 77 |
+| words timed | 876 | 902 |
+| recitation with no word on it | 59.2 s | 25.5 s |
+
+Faster and better, because the search was never the right question. Use
+`python3 -m qurantext surahs --quran ...` to list surah numbers and ayah counts.
+
+### 8. Detect recitation range plus timestamped ayah spans
 
 From audio:
 

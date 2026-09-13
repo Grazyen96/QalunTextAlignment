@@ -18,10 +18,10 @@ from qurantext.config.paths import (
 from qurantext.config.settings import VIDEO_PRESETS, get_settings
 from qurantext.core.coverage import find_uncovered_speech
 from qurantext.data.citation_index import DEFAULT_NGRAM_N
-from qurantext.data.quran_db import build_quran_db
+from qurantext.data.quran_db import build_quran_db, ensure_quran_db, list_surahs
 from qurantext.io.readers import load_json
 from qurantext.jobs.project import Project, load_project, save_project
-from qurantext.pipelines.detection import run_detection
+from qurantext.pipelines.detection import run_detection, run_recitation_range
 from qurantext.pipelines.edit_spec import export_edit_spec_package
 from qurantext.pipelines.recitation import build_recitation_output_paths, run_word_alignment
 from qurantext.pipelines.video import run_video_generation
@@ -64,6 +64,30 @@ def _run_detection_mode(args: argparse.Namespace) -> int:
         args.output_dir,
         args.output_suffix,
     )
+    stated = (
+        getattr(args, "surah_num", None),
+        getattr(args, "from_ayah", None),
+        getattr(args, "to_ayah", None),
+    )
+    if any(v is not None for v in stated):
+        if args.mode != "recitation":
+            raise SystemExit("--surah-num/--from-ayah/--to-ayah only apply to recitation-match.")
+        if not all(v is not None for v in stated):
+            raise SystemExit(
+                "Give all three of --surah-num, --from-ayah and --to-ayah, or none of them."
+            )
+        run_recitation_range(
+            quran=args.quran,
+            output=output_path,
+            surah_num=stated[0],
+            from_ayah=stated[1],
+            to_ayah=stated[2],
+            whisperx=args.whisperx_json,
+            audio=args.audio,
+            max_span=args.max_span,
+            echo=True,
+        )
+        return 0
     run_detection(
         quran=args.quran,
         output=output_path,
@@ -165,6 +189,18 @@ def _export_edit_spec(args: argparse.Namespace, matches: str, video_output: str 
     print(f"Edit-spec package saved to: {result.package_dir}")
     if result.warnings:
         print(f"  ({len(result.warnings)} timing warning(s) — see edit_spec.json meta)")
+
+
+def _run_surahs(args: argparse.Namespace) -> int:
+    """List the surahs, which is what a range picker populates from."""
+    conn = ensure_quran_db(args.quran, args.db)
+    try:
+        rows = list_surahs(conn)
+    finally:
+        conn.close()
+    for row in rows:
+        print(f"{row['surah_num']:3d}  {row['name']}  ({row['ayah_count']} ayat)")
+    return 0
 
 
 def _run_check_timing(args: argparse.Namespace) -> int:
@@ -458,6 +494,18 @@ def build_parser() -> argparse.ArgumentParser:
             type=int,
             default=settings.lecture_matching.min_matched_words,
         )
+        if mode == "recitation":
+            # Stating the range skips detection entirely. Detection cost ~583 s
+            # on a 19-minute recitation against 3.7 s here, and covered fewer
+            # ayat: it is a search for something the user already knows.
+            subparser.add_argument(
+                "--surah-num",
+                type=int,
+                default=None,
+                help="Surah number (1-114). With --from-ayah and --to-ayah, skips detection.",
+            )
+            subparser.add_argument("--from-ayah", type=int, default=None)
+            subparser.add_argument("--to-ayah", type=int, default=None)
         subparser.set_defaults(
             handler=_run_detection_mode,
             mode=mode,
@@ -534,6 +582,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory for the edit-spec package. Defaults to output/export_packages.",
     )
     video_parser.set_defaults(handler=_run_generate_video)
+
+    surahs_parser = subparsers.add_parser(
+        "surahs",
+        help="List surahs and their ayah counts (the range picker's data).",
+    )
+    surahs_parser.add_argument(
+        "--quran", required=True, help="Path to the certified Qalun text file."
+    )
+    surahs_parser.add_argument(
+        "--db", default=str(QURAN_DB_PATH), help="Path to the SQLite Quran store."
+    )
+    surahs_parser.set_defaults(handler=_run_surahs)
 
     check_parser = subparsers.add_parser(
         "check-timing",

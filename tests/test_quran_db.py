@@ -12,6 +12,8 @@ from qurantext.data.quran_db import (
     connect,
     db_matches_source,
     ensure_quran_db,
+    list_surahs,
+    surah_ayah_count,
 )
 
 QURAN_FILE = QURAN_INPUT_DIR / "UthmanicQaloon1-Ver05.txt"
@@ -130,5 +132,22 @@ def test_connect_handles_uri_significant_characters_in_path(tmp_path, dirname) -
     conn = connect(path)
     try:
         assert conn.execute("SELECT COUNT(*) FROM ayat").fetchone()[0] > 0
+    finally:
+        conn.close()
+
+
+def test_list_surahs_gives_a_picker_everything_it_needs(tmp_path) -> None:
+    """A range picker needs number, name and ayah count for all 114."""
+    path = tmp_path / "quran.sqlite"
+    build_quran_db(QURAN_FILE, path)
+    conn = connect(path)
+    try:
+        rows = list_surahs(conn)
+        assert len(rows) == 114
+        assert [r["surah_num"] for r in rows] == list(range(1, 115))
+        assert all(r["name"] and r["ayah_count"] > 0 for r in rows)
+        assert surah_ayah_count(conn, 1) == 7
+        with pytest.raises(ValueError, match="expected 1-114"):
+            surah_ayah_count(conn, 999)
     finally:
         conn.close()

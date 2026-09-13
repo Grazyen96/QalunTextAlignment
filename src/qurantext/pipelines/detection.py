@@ -8,7 +8,7 @@ from typing import cast
 from qurantext.config.paths import QURAN_DB_PATH
 from qurantext.config.settings import get_settings
 from qurantext.core.alignment import align_canonical_word_timings, refine_word_timings
-from qurantext.core.arabic import normalize_alignment_ar
+from qurantext.core.arabic import ayah_text_with_marker, normalize_alignment_ar
 from qurantext.core.lecture_matching import (
     detect_quran_mentions_in_lecture,
     select_lecture_timeline,
@@ -89,6 +89,179 @@ def assign_recitation_word_timings(
             match["start_time"] = round(min(starts), 2)
         if ends:
             match["end_time"] = round(max(ends), 2)
+
+
+def cards_for_range(ayat: list[dict], *, max_span: int) -> list[dict]:
+    """Chunk a known ayah range into display cards.
+
+    When the surah and the ayat are known there is nothing to detect: the cards
+    are simply consecutive runs of at most *max_span* ayat. Their timings are
+    filled in afterwards from the word alignment, exactly as the detected path
+    does, so the two produce the same shape.
+    """
+    cards: list[dict] = []
+    for start in range(0, len(ayat), max_span):
+        chunk = ayat[start : start + max_span]
+        full_text = "\n".join(
+            ayah_text_with_marker(ayah["text_raw"], ayah["ayah_num"]) for ayah in chunk
+        )
+        cards.append(
+            {
+                "surah_num": chunk[0]["surah_num"],
+                "surah_name": chunk[0]["surah_name"],
+                "from_ayah": chunk[0]["ayah_num"],
+                "to_ayah": chunk[-1]["ayah_num"],
+                "detected_text": "",
+                "text": full_text,
+                "full_text": full_text,
+                # The range was stated, not inferred, so there is nothing to be
+                # uncertain about. Only the timings below come from a model.
+                "confidence": 1.0,
+                "start_time": 0.0,
+                "end_time": 0.0,
+            }
+        )
+    return cards
+
+
+def run_recitation_range(
+    *,
+    quran: str | Path,
+    output: str | Path,
+    surah_num: int,
+    from_ayah: int,
+    to_ayah: int,
+    whisperx: str | Path | None = None,
+    audio: str | Path | None = None,
+    max_span: int | None = None,
+    echo: bool = True,
+    progress: ProgressCallback | None = None,
+    cancel: CancelToken | None = None,
+) -> dict:
+    """Time a recitation whose surah and ayah range the user stated.
+
+    This is the fast path, and it exists because detection was never the right
+    question for recitation. Searching for the range cost ~583 s on a
+    nineteen-minute recitation — 99% of the mode's runtime — and could not
+    decline to answer: the range finder returns its best candidate no matter how
+    poor the score, so non-Quran audio yields a confident wrong result.
+
+    Told the range, the work is alignment over known text: chunk the range into
+    cards, align every canonical word once, and read each card's window off the
+    aligned onsets.
+    """
+    if (whisperx is None) == (audio is None):
+        raise ValueError("Exactly one of whisperx or audio must be provided.")
+    if not 1 <= surah_num <= 114:
+        raise ValueError(f"surah_num must be between 1 and 114, got {surah_num}.")
+    if from_ayah < 1 or to_ayah < from_ayah:
+        raise ValueError(
+            f"Invalid ayah range {from_ayah}-{to_ayah}: it must start at 1 or more "
+            "and end at or after it starts."
+        )
+
+    settings = get_settings()
+    resolved_max_span = max_span if max_span is not None else settings.lecture_matching.max_span
+    out_path = Path(output)
+
+    if progress is None and echo:
+        progress = ConsoleProgress()
+
+    def emit(message: str = "") -> None:
+        report(progress, "detect", message)
+
+    emit(f"[1/3] Parsing Quran text: {quran}")
+    ayat = parse_ayat(quran)
+    chosen = [
+        ayah
+        for ayah in ayat
+        if ayah["surah_num"] == surah_num and from_ayah <= ayah["ayah_num"] <= to_ayah
+    ]
+    if not chosen:
+        available = sorted({a["ayah_num"] for a in ayat if a["surah_num"] == surah_num})
+        hint = (
+            f"surah {surah_num} has ayat {available[0]}-{available[-1]}"
+            if available
+            else f"surah {surah_num} is not in this Quran file"
+        )
+        raise ValueError(f"No ayat found for {surah_num}:{from_ayah}-{to_ayah} ({hint}).")
+    emit(f"      {len(chosen)} ayah(s) selected: {chosen[0]['surah_name']} {from_ayah}-{to_ayah}")
+
+    if cancel is not None:
+        cancel.raise_if_cancelled("detect")
+
+    if whisperx is not None:
+        emit(f"[2/3] Loading WhisperX JSON: {whisperx}")
+        wx_path = Path(whisperx)
+        if not wx_path.exists():
+            raise FileNotFoundError(f"WhisperX file not found: {whisperx}")
+        try:
+            wx_data = load_json(wx_path)
+        except json.JSONDecodeError as error:
+            raise ValueError(f"Failed to parse WhisperX JSON '{whisperx}': {error}") from error
+        transcript_source = "whisperx_json"
+        transcript_input_path = str(wx_path.resolve())
+        whisperx_raw_output_path = str(wx_path.resolve())
+        whisperx_model_ref = None
+    else:
+        assert audio is not None
+        emit(f"[2/3] Transcribing audio with WhisperX: {audio}")
+        service_result = transcribe_audio(audio, save_raw_to=default_whisperx_raw_path(out_path))
+        wx_data = service_result.output
+        transcript_source = "audio"
+        transcript_input_path = str(Path(audio).resolve())
+        whisperx_raw_output_path = service_result.raw_output_path
+        whisperx_model_ref = service_result.model_ref
+
+    words = extract_matching_words(wx_data)
+    if not words:
+        raise ValueError("No word tokens extracted from WhisperX output.")
+
+    if cancel is not None:
+        cancel.raise_if_cancelled("detect")
+
+    emit("[3/3] Aligning the recitation against the chosen ayat...")
+    mentions = cards_for_range(chosen, max_span=resolved_max_span)
+    assign_recitation_word_timings(
+        mentions,
+        chosen,
+        words,
+        offset=settings.alignment.highlight_offset_s,
+        bridge_max=settings.alignment.bridge_max_s,
+    )
+
+    preamble_matches, boundary_time = extract_preamble(words)
+    if preamble_matches and boundary_time is not None:
+        trim_leading_preamble(mentions, boundary_time)
+        mentions = preamble_matches + mentions
+
+    duration = words[-1]["end"] - words[0]["start"]
+    result = {
+        "matches": mentions,
+        "warnings": [],
+        "meta": {
+            "input_type": transcript_source,
+            "input_path": transcript_input_path,
+            "whisperx_raw_output_path": whisperx_raw_output_path,
+            "whisperx_model_ref": whisperx_model_ref,
+            "whisperx_words": len(words),
+            "audio_start_s": words[0]["start"],
+            "audio_end_s": words[-1]["end"],
+            "audio_duration_s": round(duration, 2),
+            "mode": "recitation",
+            "range_source": "stated",
+            "detected_surah_num": surah_num,
+            "detected_surah_name": chosen[0]["surah_name"],
+            "from_ayah": from_ayah,
+            "to_ayah": to_ayah,
+            "recitation_ayat_scanned": len(chosen),
+            "max_span": resolved_max_span,
+            "preamble_segments": [m["preamble_kind"] for m in preamble_matches],
+        },
+    }
+    write_json(result, out_path)
+    emit(f"Saved to: {out_path.resolve()}")
+    return result
 
 
 def count_whisperx_segments(data: dict | list) -> int:

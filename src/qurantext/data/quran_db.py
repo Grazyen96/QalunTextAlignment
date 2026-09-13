@@ -359,3 +359,28 @@ def ensure_quran_db(
     if not db_matches_source(db_path, quran_path, ngram_n=ngram_n):
         build_quran_db(quran_path, db_path, ngram_n=ngram_n)
     return connect(db_path)
+
+
+def list_surahs(conn: sqlite3.Connection) -> list[dict]:
+    """Every surah with its ayah count, for a picker to populate from.
+
+    This is what lets a user say which surah and which ayat they recited instead
+    of the pipeline guessing. Guessing cost roughly ten minutes of fuzzy scoring
+    on a nineteen-minute recitation and had no way to say "I do not know" — the
+    range finder returns its best candidate whatever the score.
+    """
+    rows = conn.execute(
+        "SELECT surah_num, name, ayah_count FROM surahs ORDER BY surah_num"
+    ).fetchall()
+    return [
+        {"surah_num": r["surah_num"], "name": r["name"], "ayah_count": r["ayah_count"]}
+        for r in rows
+    ]
+
+
+def surah_ayah_count(conn: sqlite3.Connection, surah_num: int) -> int:
+    """How many ayat a surah has, in the shipped text's own Madani counting."""
+    row = conn.execute("SELECT ayah_count FROM surahs WHERE surah_num = ?", (surah_num,)).fetchone()
+    if row is None:
+        raise ValueError(f"No surah {surah_num} in the store (expected 1-114).")
+    return int(row["ayah_count"])
