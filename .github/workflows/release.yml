@@ -1,0 +1,173 @@
+name: Build the app
+
+# Builds a ready-to-run app for Windows, macOS and Linux on GitHub's own
+# machines. Nobody needs Python: not the people who use the app, and not the
+# person releasing it. PyInstaller cannot cross-compile, which is the only
+# reason this has to run three times.
+#
+#   Actions -> Build the app -> Run workflow      builds and attaches the zips
+#   git tag v0.2.0 && git push --tags             the same, plus a Release
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows
+            artifact: qalun-windows
+          - os: macos-latest
+            label: macOS
+            artifact: qalun-macos
+          - os: ubuntu-latest
+            label: Linux
+            artifact: qalun-linux
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install the app and the builder
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[gui]" pyinstaller
+
+      # Pillow's raqm support loads FriBiDi at runtime and Windows ships none,
+      # so without this the app builds and then draws nothing. The doctor step
+      # below is what proves whether it worked.
+      - name: Get FriBiDi (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: mingw-w64-x86_64-fribidi
+
+      - name: Put FriBiDi where Pillow will find it (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dll = Get-ChildItem -Path C:\msys64\mingw64\bin -Filter "*fribidi*.dll" -ErrorAction SilentlyContinue
+          if ($dll) {
+            $target = Split-Path (Get-Command python).Source
+            $dll | ForEach-Object { Copy-Item $_.FullName -Destination $target -Force }
+            Write-Host "Copied $($dll.Count) FriBiDi DLL(s) next to python.exe"
+          } else {
+            Write-Host "::warning::No FriBiDi DLL found; the doctor step will say whether it matters"
+          }
+
+      # The app must not depend on the user having installed FFmpeg. NOTE these
+      # are GPL builds; swap the URLs for LGPL "shared" builds if you need to
+      # distribute under different terms.
+      - name: Fetch FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-src
+          New-Item -ItemType Directory -Force -Path vendor | Out-Null
+          Get-ChildItem -Path ffmpeg-src -Recurse -Include ffmpeg.exe,ffprobe.exe |
+            ForEach-Object { Copy-Item $_.FullName -Destination vendor -Force }
+          Get-ChildItem vendor
+
+      - name: Fetch FFmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install ffmpeg
+          mkdir -p vendor
+          cp "$(command -v ffmpeg)" "$(command -v ffprobe)" vendor/
+
+      - name: Fetch FFmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          curl -sSL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -o ffmpeg.tar.xz
+          mkdir -p ffmpeg-src && tar -xJf ffmpeg.tar.xz -C ffmpeg-src --strip-components=1
+          mkdir -p vendor && cp ffmpeg-src/ffmpeg ffmpeg-src/ffprobe vendor/
+          chmod +x vendor/*
+
+      - name: Build
+        run: pyinstaller packaging/qalun.spec --noconfirm
+
+      - name: Ship FFmpeg inside the app
+        shell: bash
+        run: |
+          target="dist/qalun"
+          [ -d "dist/Qalun.app" ] && target="dist/Qalun.app/Contents/MacOS"
+          cp vendor/* "$target/"
+          ls "$target" | head -20
+
+      # The gate. An app that cannot shape Arabic is not worth shipping, and
+      # this is the step that finds out — on the platform it actually matters
+      # on, rather than by inference from a Linux build.
+      - name: Check the built app can render
+        shell: bash
+        run: |
+          if [ -d "dist/Qalun.app" ]; then
+            app="dist/Qalun.app/Contents/MacOS/qalun"
+          elif [ "$RUNNER_OS" = "Windows" ]; then
+            app="dist/qalun/qalun.exe"
+          else
+            app="dist/qalun/qalun"
+          fi
+          PATH="$(dirname "$app"):$PATH" "$app" --doctor
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p out
+          if [ -d "dist/Qalun.app" ]; then
+            ditto -c -k --keepParent "dist/Qalun.app" "out/${{ matrix.artifact }}.zip"
+          else
+            python -c "
+          import shutil
+          shutil.make_archive('out/${{ matrix.artifact }}', 'zip', 'dist', 'qalun')
+          "
+          fi
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: out/*.zip
+          retention-days: 30
+
+  release:
+    name: Attach to the release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.zip
+          body: |
+            Download the file for your system, unzip it, and run **Qalun**.
+            Nothing else to install.
+
+            - `qalun-windows.zip` — unzip, open the folder, run `qalun.exe`.
+              Windows will warn that the publisher is unknown because the app is
+              not code-signed yet: choose **More info → Run anyway**.
+            - `qalun-macos.zip` — unzip and drag **Qalun** to Applications.
+              macOS will refuse it the first time because it is not notarized
+              yet: right-click it and choose **Open**.
+            - `qalun-linux.zip` — unzip and run `qalun`.
+
+            If it will not render, run `qalun --doctor` (Windows: open the folder
+            in Terminal first) and send the output.
