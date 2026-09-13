@@ -1207,6 +1207,12 @@ def write_frame_video(
 
     Frames with identical content are rendered once and written multiple times,
     reducing per-frame PIL overhead for long videos with static ayah cards.
+
+    Deliberately single-threaded. On the 13-minute lecture this draws 1,319
+    distinct frames of 23,445 at 55 ms each, about 72 s against roughly 39 s for
+    the encode, so drawing is no longer dominant. A process pool would also have
+    to move 8.2 GB of frames between processes to save that. See
+    docs/findings/parallel-rendering.md for when to revisit.
     """
     total_frames = max(1, int(math.ceil(duration * fps)))
 
