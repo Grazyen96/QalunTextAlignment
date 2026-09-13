@@ -22,7 +22,7 @@ from qurantext.jobs import (
     RenderRequest,
     render_video,
 )
-from qurantext.jobs.progress import report
+from qurantext.utils.progress import report
 
 _BUNDLED_FONT = PROJECT_ROOT / "fonts" / "qaloon.10.ttf"
 _FFMPEG = shutil.which("ffmpeg")

@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from qurantext.jobs.progress import CancelToken, ProgressCallback
 from qurantext.jobs.render import RenderRequest, RenderResult, render_video
+from qurantext.utils.progress import CancelToken, ProgressCallback
 
 __all__ = ["RenderRequest", "RenderResult", "render_video", "run_video_generation"]
 
@@ -31,6 +31,7 @@ def run_video_generation(
     keep_temp: bool = False,
     debug_detected_text: bool = False,
     title: str | None = None,
+    captions: tuple[dict, ...] | None = None,
     progress: ProgressCallback | None = None,
     cancel: CancelToken | None = None,
 ) -> RenderResult:
@@ -51,5 +52,6 @@ def run_video_generation(
         title=title,
         debug_detected_text=debug_detected_text,
         keep_temp=keep_temp,
+        captions=captions,
     )
     return render_video(request, progress=progress, cancel=cancel)

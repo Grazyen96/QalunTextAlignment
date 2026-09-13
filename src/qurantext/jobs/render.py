@@ -7,7 +7,7 @@ produced, could not follow progress, and could not stop a render once it began.
 
 This module is the real entry point. It takes a typed :class:`RenderRequest`,
 reports progress through an optional callback, honours an optional
-:class:`~qurantext.jobs.progress.CancelToken`, and returns a
+:class:`~qurantext.utils.progress.CancelToken`, and returns a
 :class:`RenderResult` describing what it wrote. The CLI is now one caller of it
 among others.
 """
@@ -34,7 +34,7 @@ from qurantext.core.video_common import (
     validate_input_file,
     warn,
 )
-from qurantext.jobs.progress import CancelToken, ProgressCallback, report
+from qurantext.utils.progress import CancelToken, ProgressCallback, report
 
 __all__ = ["RenderRequest", "RenderResult", "render_video"]
 
@@ -63,6 +63,10 @@ class RenderRequest:
     title: str | None = None
     debug_detected_text: bool = False
     keep_temp: bool = False
+    #: Caption cues supplied by the caller, usually from a project file. When
+    #: given, the renderer uses these verbatim instead of re-deriving cues from
+    #: the raw recognition output, which is what lets a correction survive.
+    captions: tuple[dict, ...] | None = None
 
     def resolved_format(self) -> tuple[int, int, int]:
         """Return ``(width, height, fps)`` with preset and defaults applied."""
@@ -102,7 +106,7 @@ def render_video(
 
     Raises ``FileNotFoundError``/``ValueError`` for bad input, ``RuntimeError``
     when a tool fails, and
-    :class:`~qurantext.jobs.progress.JobCancelled` if *cancel* is set partway.
+    :class:`~qurantext.utils.progress.JobCancelled` if *cancel* is set partway.
     """
     width, height, fps = request.resolved_format()
 
@@ -173,7 +177,10 @@ def render_video(
             font_file_path = _resolve_frame_font(font_file_path, progress)
             validate_font_file(font_file_path)
 
-            captions = load_caption_segments(matches_path)
+            if request.captions is not None:
+                captions = [dict(cue) for cue in request.captions]
+            else:
+                captions = load_caption_segments(matches_path)
             caption_count = len(captions)
             if captions:
                 report(

@@ -6,7 +6,7 @@ turns them into something callable with real arguments, observable while it
 runs, and stoppable partway through.
 """
 
-from .progress import (
+from qurantext.utils.progress import (
     CancelToken,
     ConsoleProgress,
     JobCancelled,
@@ -14,16 +14,23 @@ from .progress import (
     ProgressEvent,
     report,
 )
+
+from .project import PROJECT_VERSION, CaptionCue, Project, load_project, save_project
 from .render import RenderRequest, RenderResult, render_video
 
 __all__ = [
+    "PROJECT_VERSION",
     "CancelToken",
+    "CaptionCue",
     "ConsoleProgress",
     "JobCancelled",
     "ProgressCallback",
     "ProgressEvent",
+    "Project",
     "RenderRequest",
     "RenderResult",
+    "load_project",
     "render_video",
     "report",
+    "save_project",
 ]

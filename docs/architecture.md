@@ -4,7 +4,15 @@
 
 QuranText is organized around a small number of stable layers:
 
-- `cli/` handles command-line argument parsing only.
+- `cli/` handles command-line argument parsing only, and is the ONLY parser in
+  the project. The duplicate CLIs that lived in `pipelines/detection.py` and
+  `core/video_renderer.py` are gone.
+- `jobs/` is the callable boundary a user interface drives: typed requests
+  (`RenderRequest`), described results (`RenderResult`), the project file that
+  owns a job's cards and editable captions, and the render entry point.
+- `utils/progress.py` carries the progress event, the console reporter and the
+  cancellation token. It sits below `jobs/` so `core/` can depend on it without
+  a cycle.
 - `config/` centralizes project paths, environment loading, and runtime settings.
 - `core/` contains pure Quran parsing, transcript matching, lecture matching, and video rendering logic.
 - `io/` loads and saves JSON, WhisperX transcript structures, and subtitle output.
@@ -43,6 +51,8 @@ QuranText is organized around a small number of stable layers:
 
 ### `src/qurantext/pipelines`
 
+- `video.py` is a thin wrapper over `jobs.render.render_video`; it no longer
+  marshals arguments into command-line strings.
 - `recitation.py` runs the legacy word-alignment pipeline.
 - `detection.py` runs `range`, `lecture`, and `recitation` detect-range workflows.
 - `video.py` invokes the packaged video renderer.

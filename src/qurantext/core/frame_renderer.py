@@ -19,7 +19,7 @@ from qurantext.core.video_common import (
     validated_matches,
     warn,
 )
-from qurantext.jobs.progress import CancelToken, ProgressCallback, report
+from qurantext.utils.progress import CancelToken, ProgressCallback, report
 
 COLOUR_BG = (10, 10, 12, 255)
 COLOUR_CARD = (36, 36, 42, 230)

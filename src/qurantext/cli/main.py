@@ -19,12 +19,13 @@ from qurantext.config.settings import VIDEO_PRESETS, get_settings
 from qurantext.data.citation_index import DEFAULT_NGRAM_N
 from qurantext.data.quran_db import build_quran_db
 from qurantext.io.readers import load_json
-from qurantext.jobs.progress import ConsoleProgress, JobCancelled
+from qurantext.jobs.project import Project, load_project, save_project
 from qurantext.pipelines.detection import run_detection
 from qurantext.pipelines.edit_spec import export_edit_spec_package
 from qurantext.pipelines.recitation import build_recitation_output_paths, run_word_alignment
 from qurantext.pipelines.video import run_video_generation
 from qurantext.services.transcription import WhisperXServiceError, transcribe_audio
+from qurantext.utils.progress import ConsoleProgress, JobCancelled
 
 
 def _default_detection_output(
@@ -165,7 +166,27 @@ def _export_edit_spec(args: argparse.Namespace, matches: str, video_output: str 
         print(f"  ({len(result.warnings)} timing warning(s) — see edit_spec.json meta)")
 
 
+def _run_project_init(args: argparse.Namespace) -> int:
+    project = Project.from_match_file(args.matches, args.audio, mode=getattr(args, "mode", None))
+    output = args.output or str(Path(args.audio).with_suffix(".qalun.json"))
+    path = save_project(project, output)
+    print(f"Project saved to: {path}")
+    print(f"  mode={project.mode}  cards={len(project.cards)}  captions={len(project.captions)}")
+    if project.captions:
+        print("  Edit the caption text in this file; renders will use your corrections.")
+    return 0
+
+
 def _run_generate_video(args: argparse.Namespace) -> int:
+    project = load_project(args.project) if getattr(args, "project", None) else None
+    if project is not None:
+        # The project owns the job: its audio and its (possibly corrected)
+        # caption cues win over anything re-derived from the match file.
+        args.audio = args.audio or str(project.audio)
+        args.mode = project.mode
+    if not args.audio or not args.matches:
+        raise SystemExit("generate-video needs --audio and --matches, or a --project.")
+
     _resolve_preset(args)
     output_path = args.output or _default_detection_output(
         args.audio,
@@ -175,6 +196,7 @@ def _run_generate_video(args: argparse.Namespace) -> int:
     run_video_generation(
         audio=args.audio,
         matches=args.matches,
+        captions=tuple(project.caption_segments()) if project is not None else None,
         output=output_path,
         preset=getattr(args, "preset", None),
         font_name=args.font_name,
@@ -427,9 +449,15 @@ def build_parser() -> argparse.ArgumentParser:
         "generate-video",
         help="Render an MP4 from lecture or recitation match results.",
     )
-    video_parser.add_argument("--audio", required=True, help="Path to the original audio file.")
+    video_parser.add_argument("--audio", default=None, help="Path to the original audio file.")
+    video_parser.add_argument("--matches", default=None, help="Path to the match JSON result file.")
     video_parser.add_argument(
-        "--matches", required=True, help="Path to the match JSON result file."
+        "--project",
+        default=None,
+        help=(
+            "Render from a project file. Its caption cues are used verbatim, so "
+            "corrections made there survive the render."
+        ),
     )
     video_parser.add_argument("--output", help="Explicit path for the output MP4 video.")
     video_parser.add_argument(
@@ -474,6 +502,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory for the edit-spec package. Defaults to output/export_packages.",
     )
     video_parser.set_defaults(handler=_run_generate_video)
+
+    project_parser = subparsers.add_parser(
+        "project",
+        help="Create a project file that owns a job's cards and editable captions.",
+    )
+    project_sub = project_parser.add_subparsers(dest="project_command")
+    project_init = project_sub.add_parser(
+        "init",
+        help="Derive a project from a match result so its captions can be corrected.",
+    )
+    project_init.add_argument("--audio", required=True, help="Path to the original audio file.")
+    project_init.add_argument(
+        "--matches", required=True, help="Path to the match JSON result file."
+    )
+    project_init.add_argument(
+        "--mode",
+        default=None,
+        choices=["lecture", "recitation"],
+        help="Override the mode recorded in the match file's metadata.",
+    )
+    project_init.add_argument(
+        "--output",
+        default=None,
+        help="Path for the project file. Defaults to <audio>.qalun.json.",
+    )
+    project_init.set_defaults(handler=_run_project_init)
+    project_parser.set_defaults(
+        handler=lambda _args: project_parser.print_help() or 0,
+        project_command=None,
+    )
 
     editspec_parser = subparsers.add_parser(
         "export-editspec",

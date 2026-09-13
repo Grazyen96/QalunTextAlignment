@@ -26,8 +26,8 @@ from qurantext.core.range_matching import (
 from qurantext.data.quran_db import QuranDataError, ensure_quran_db
 from qurantext.io.readers import extract_matching_words, load_json
 from qurantext.io.writers import write_json
-from qurantext.jobs.progress import CancelToken, ConsoleProgress, ProgressCallback, report
 from qurantext.services.transcription import transcribe_audio
+from qurantext.utils.progress import CancelToken, ConsoleProgress, ProgressCallback, report
 
 
 def _is_ayah_marker(token: str) -> bool:

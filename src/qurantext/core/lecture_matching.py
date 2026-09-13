@@ -15,7 +15,7 @@ from qurantext.config.settings import (
     DEFAULT_LECTURE_WINDOW_STEP,
 )
 from qurantext.core.arabic import ayah_text_with_marker, partial_ratio, word_recall
-from qurantext.jobs.progress import CancelToken, ProgressCallback, report
+from qurantext.utils.progress import CancelToken, ProgressCallback, report
 
 # When two ayat compete for the same time slice and the top one would switch
 # surah, keep the current surah if its best candidate is within this confidence

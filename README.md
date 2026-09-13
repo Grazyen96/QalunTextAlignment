@@ -189,7 +189,37 @@ Use when you want:
 Best for: continuous recitation clips where you want display timing.
 
 ### `generate-video`
-Use when you already have a match JSON and want an MP4.
+Use when you already have a match JSON and want an MP4. Pass `--project` to
+render from a project file instead, so any subtitle corrections in it are used.
+
+### `project`
+Use when you want to correct the subtitles before rendering.
+
+`project init` turns a match result into a project file that owns the job's
+ayah cards and its subtitle cues. Recognition output is converted to cues once,
+here; after that the project is the source of truth and rendering never rebuilds
+them, so an edit survives. The Quran text itself is not editable through the
+project: a card records which ayah and when, and the canonical text is looked up
+at render time.
+
+```bash
+python3 -m qurantext project init \
+  --audio input/lectures/example.mp3 \
+  --matches output/lecture_matching/example_lecture.json
+
+# correct the caption text in example.qalun.json, then:
+python3 -m qurantext generate-video \
+  --project example.qalun.json \
+  --matches output/lecture_matching/example_lecture.json \
+  --output output/videos/example.mp4
+```
+
+### `build-db`
+Builds the versioned SQLite store from the certified Qalun text. Lecture
+matching builds it on demand; `export-editspec` requires it up front.
+
+### `export-editspec`
+Writes the format-neutral edit-spec package for a match result.
 
 ### `run-all`
 Use when you want one command to:
