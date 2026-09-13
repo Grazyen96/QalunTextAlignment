@@ -3,7 +3,6 @@ from pathlib import Path
 from qurantext.cli.main import build_parser as build_cli_parser
 from qurantext.config.paths import ensure_required_directories
 from qurantext.config.settings import VIDEO_PRESETS, get_settings
-from qurantext.pipelines.detection import build_parser as build_detection_parser
 
 
 def test_ensure_required_directories_creates_standard_tree() -> None:
@@ -42,13 +41,19 @@ def test_get_settings_reads_matching_and_video_env_overrides(monkeypatch) -> Non
 
 
 def test_cli_parsers_use_centralized_settings_defaults(monkeypatch) -> None:
+    """One parser now, and it must still read its defaults from settings.
+
+    detection and video rendering each carried their own argparse CLI with
+    independently drifting defaults; both are gone and `qurantext` is the only
+    parser. These are the same assertions, made against it.
+    """
     get_settings.cache_clear()
     monkeypatch.setenv("QURANTEXT_RANGE_TAIL_WORDS", "14")
     monkeypatch.setenv("QURANTEXT_LECTURE_MAX_SPAN", "8")
     monkeypatch.setenv("QURANTEXT_VIDEO_FPS", "30")
 
-    detection_args = build_detection_parser().parse_args(
-        ["--quran", "sample.txt", "--whisperx", "sample.json"]
+    detection_args = build_cli_parser().parse_args(
+        ["range-match", "--quran", "sample.txt", "--whisperx", "sample.json"]
     )
     cli_args = build_cli_parser().parse_args(
         ["generate-video", "--audio", "a.mp3", "--matches", "m.json"]
@@ -63,6 +68,8 @@ def test_cli_parsers_use_centralized_settings_defaults(monkeypatch) -> None:
     assert detection_args.tail_words == 14
     assert detection_args.max_span == 8
     assert cli_args.fps == 30
+    # The `--whisperx` alias the compatibility shims forward still resolves.
+    assert detection_args.whisperx_json == "sample.json"
 
 
 def test_default_video_settings_are_frame_renderer_720p(monkeypatch) -> None:

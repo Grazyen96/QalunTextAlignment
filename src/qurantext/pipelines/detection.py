@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import argparse
 import json
 import sqlite3
-import sys
 from pathlib import Path
 from typing import cast
 
@@ -28,7 +26,8 @@ from qurantext.core.range_matching import (
 from qurantext.data.quran_db import QuranDataError, ensure_quran_db
 from qurantext.io.readers import extract_matching_words, load_json
 from qurantext.io.writers import write_json
-from qurantext.services.transcription import WhisperXServiceError, transcribe_audio
+from qurantext.jobs.progress import CancelToken, ConsoleProgress, ProgressCallback, report
+from qurantext.services.transcription import transcribe_audio
 
 
 def _is_ayah_marker(token: str) -> bool:
@@ -123,6 +122,8 @@ def run_detection(
     lecture_threshold: float | None = None,
     min_matched_words: int | None = None,
     echo: bool = True,
+    progress: ProgressCallback | None = None,
+    cancel: CancelToken | None = None,
 ) -> dict:
     """Run the detect-range workflow in range, lecture, or recitation mode."""
     if (whisperx is None) == (audio is None):
@@ -156,9 +157,14 @@ def run_detection(
         min_matched_words if min_matched_words is not None else lecture_settings.min_matched_words,
     )
 
+    # Stage output goes through the progress reporter, so a user interface gets
+    # the same information as the terminal. `echo` stays as the convenience it
+    # always was: it simply supplies the console reporter when no other is given.
+    if progress is None and echo:
+        progress = ConsoleProgress()
+
     def emit(message: str = "") -> None:
-        if echo:
-            print(message)
+        report(progress, "detect", message)
 
     emit(f"[1/4] Parsing Quran text: {quran}")
     effective_surah = None if mode == "lecture" else surah
@@ -247,6 +253,8 @@ def run_detection(
                 candidate_limit=lecture_settings.candidate_limit,
                 conn=conn,
                 db_strategy="ngram" if conn is not None else "word_overlap",
+                progress=progress,
+                cancel=cancel,
             )
         finally:
             if conn is not None:
@@ -368,6 +376,8 @@ def run_detection(
             min_matched_words=resolved_min_matched_words,
             candidate_limit=lecture_settings.candidate_limit,
             max_merged_ayat=resolved_max_span,
+            progress=progress,
+            cancel=cancel,
         )
         mentions = select_recitation_timeline(
             raw_mentions,
@@ -491,118 +501,3 @@ def run_detection(
     emit(separator)
     emit(f"\nSaved to: {out_path.resolve()}\n")
     return result
-
-
-def build_parser() -> argparse.ArgumentParser:
-    """Build the standalone detect-range compatibility CLI parser."""
-    parser = argparse.ArgumentParser(
-        description="Detect Quran content in a WhisperX transcription.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    settings = get_settings()
-    parser.add_argument(
-        "--quran",
-        required=True,
-        help="Path to Qalun Quran text file (single-surah or full Quran).",
-    )
-    source_group = parser.add_mutually_exclusive_group(required=True)
-    source_group.add_argument(
-        "--whisperx",
-        help="Path to an existing WhisperX JSON transcription output.",
-    )
-    source_group.add_argument(
-        "--audio",
-        help="Path to an audio file to transcribe with WhisperX via Replicate.",
-    )
-    parser.add_argument("--output", default="result.json", help="Path for the output JSON.")
-    parser.add_argument(
-        "--surah",
-        default=None,
-        help=(
-            "Optional: surah name to restrict search to (as it appears in the file, "
-            "e.g. 'سُورَةُ الفُرقَانِ'). Used in range/recitation modes; lecture mode always scans the full Quran."
-        ),
-    )
-    parser.add_argument(
-        "--mode",
-        choices=["range", "lecture", "recitation"],
-        default="range",
-        help=(
-            "range = detect first/last ayah; lecture = detect Quran mentions in lecture audio; "
-            "recitation = detect range, then emit timestamped ayah spans inside it."
-        ),
-    )
-    parser.add_argument(
-        "--head-words",
-        type=int,
-        default=settings.range_matching.head_words,
-        help="WhisperX words from the start used for first-ayah detection.",
-    )
-    parser.add_argument(
-        "--tail-words",
-        type=int,
-        default=settings.range_matching.tail_words,
-        help="WhisperX words from the end used for last-ayah detection.",
-    )
-    parser.add_argument(
-        "--search-range",
-        type=int,
-        default=settings.range_matching.search_range,
-        help="Number of candidate ayat scanned from each end of the surah.",
-    )
-    parser.add_argument(
-        "--low-conf",
-        type=float,
-        default=settings.range_matching.low_conf,
-        help="Confidence threshold below which a warning is emitted.",
-    )
-    parser.add_argument(
-        "--max-span",
-        type=int,
-        default=settings.lecture_matching.max_span,
-        help="Maximum number of consecutive ayat to match in lecture mode.",
-    )
-    parser.add_argument(
-        "--lecture-threshold",
-        type=float,
-        default=settings.lecture_matching.min_score,
-        help="Minimum confidence for accepting Quran matches in lecture mode.",
-    )
-    parser.add_argument(
-        "--min-matched-words",
-        type=int,
-        default=settings.lecture_matching.min_matched_words,
-        help="Minimum overlapping Quran words required in lecture mode.",
-    )
-    return parser
-
-
-def main(argv: list[str] | None = None) -> int:
-    """Run the standalone detect-range compatibility CLI."""
-    try:
-        parser = build_parser()
-    except ValueError as error:
-        print(f"ERROR: {error}", file=sys.stderr)
-        return 1
-    args = parser.parse_args(argv)
-    try:
-        run_detection(
-            quran=args.quran,
-            output=args.output,
-            mode=args.mode,
-            whisperx=args.whisperx,
-            audio=args.audio,
-            surah=args.surah,
-            head_words=args.head_words,
-            tail_words=args.tail_words,
-            search_range=args.search_range,
-            low_conf=args.low_conf,
-            max_span=args.max_span,
-            lecture_threshold=args.lecture_threshold,
-            min_matched_words=args.min_matched_words,
-            echo=True,
-        )
-    except (FileNotFoundError, ValueError, WhisperXServiceError) as error:
-        print(f"ERROR: {error}", file=sys.stderr)
-        return 1
-    return 0

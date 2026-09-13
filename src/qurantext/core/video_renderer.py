@@ -1,17 +1,15 @@
+"""Compatibility surface for the renderer modules.
+
+This module used to carry a second, complete argparse CLI that duplicated the
+flags ``qurantext generate-video`` already declared, with its own drifting
+defaults. Rendering is now a callable job — see
+:mod:`qurantext.jobs.render` — and the package CLI is the only parser.
+
+What remains here is the re-export surface older imports rely on.
+"""
+
 from __future__ import annotations
 
-import argparse
-import sys
-from pathlib import Path
-
-from qurantext.config.settings import (
-    DEFAULT_VIDEO_FONT_FILE,
-    DEFAULT_VIDEO_FPS,
-    DEFAULT_VIDEO_HEIGHT,
-    DEFAULT_VIDEO_WIDTH,
-    VIDEO_PRESETS,
-    get_settings,
-)
 from qurantext.core.ass_renderer import build_ass, render_ass_video, validate_font_name
 from qurantext.core.basmala import maybe_prepend_basmala
 from qurantext.core.frame_renderer import (
@@ -34,204 +32,37 @@ from qurantext.core.video_common import (
     validate_input_file,
     warn,
 )
+from qurantext.jobs.render import RenderRequest, RenderResult, render_video
 
-DEFAULT_WIDTH = DEFAULT_VIDEO_WIDTH
-DEFAULT_HEIGHT = DEFAULT_VIDEO_HEIGHT
-DEFAULT_FRAME_RATE = DEFAULT_VIDEO_FPS
-
-
-def build_parser() -> argparse.ArgumentParser:
-    """Build the video-rendering CLI parser."""
-    settings = get_settings()
-    parser = argparse.ArgumentParser(
-        description="Render an MP4 with Qur'an ayat using ASS subtitles or a frame-based renderer.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    parser.add_argument("--audio", required=True, help="Path to the original audio file.")
-    parser.add_argument("--matches", required=True, help="Path to the lecture JSON result file.")
-    parser.add_argument("--output", required=True, help="Path to the output MP4 video.")
-    parser.add_argument(
-        "--font-name", default=None, help="Installed font family name for ASS rendering."
-    )
-    parser.add_argument("--font-file", default=None, help="Font file path for frame rendering.")
-    parser.add_argument(
-        "--title",
-        default=None,
-        help=(
-            "Placeholder text shown in the centre (frame renderer) before the first ayah "
-            f"is detected. Defaults to '{DEFAULT_PLACEHOLDER_TITLE}'."
-        ),
-    )
-    parser.add_argument(
-        "--renderer",
-        choices=["ass", "frame"],
-        default=settings.video.renderer,
-        help="Choose the renderer implementation.",
-    )
-    parser.add_argument(
-        "--preset",
-        choices=sorted(VIDEO_PRESETS),
-        default=None,
-        help="Named quality preset (fast/standard/high/social). Overrides --width, --height, --fps.",
-    )
-    parser.add_argument(
-        "--width", type=int, default=settings.video.width, help="Output video width."
-    )
-    parser.add_argument(
-        "--height", type=int, default=settings.video.height, help="Output video height."
-    )
-    parser.add_argument(
-        "--fps", type=int, default=settings.video.fps, help="Output video frame rate."
-    )
-    parser.add_argument(
-        "--keep-temp", action="store_true", help="Keep temporary intermediate files."
-    )
-    parser.add_argument(
-        "--debug-detected-text",
-        action="store_true",
-        help="Render the detected transcript fragment in small debug text in frame mode.",
-    )
-    return parser
-
-
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """Parse video-rendering CLI arguments."""
-    return build_parser().parse_args(argv)
-
-
-def main(argv: list[str] | None = None) -> int:
-    """Run the packaged video-rendering CLI."""
-    try:
-        args = parse_args(argv)
-    except ValueError as error:
-        # Malformed QURANTEXT_* env override surfaced while building defaults.
-        print(f"ERROR: {error}", file=sys.stderr)
-        return 1
-
-    # Apply preset overrides before any validation.
-    if args.preset is not None:
-        w, h, f = VIDEO_PRESETS[args.preset]
-        args.width, args.height, args.fps = w, h, f
-
-    basmala_temp_audio: Path | None = None
-    try:
-        audio_path = Path(args.audio).expanduser().resolve()
-        matches_path = Path(args.matches).expanduser().resolve()
-        output_path = Path(args.output).expanduser().resolve()
-        font_file_path = Path(args.font_file).expanduser().resolve() if args.font_file else None
-        ass_path = output_path.with_suffix(".ass")
-
-        validate_input_file(audio_path, "Audio file")
-        validate_input_file(matches_path, "Matches JSON")
-        validate_dimensions(args.width, args.height)
-        validate_fps(args.fps)
-
-        matches = load_matches(matches_path)
-        if not matches:
-            print(
-                "No matches were found in the lecture JSON. Rendering a black video with the original audio and no active ayah overlays.",
-                file=sys.stderr,
-            )
-
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Splice the shipped basmala before recitations that do not already open
-        # with one, shifting every timing back by its duration (see core.basmala).
-        if get_settings().video.prepend_basmala:
-            prepend = maybe_prepend_basmala(
-                matches_path, matches, audio_path, work_dir=output_path.parent
-            )
-            if prepend is not None:
-                print(
-                    f"Prepending shipped basmala; shifting recitation timings by "
-                    f"{prepend.offset:.2f}s."
-                )
-                matches = prepend.matches
-                audio_path = prepend.audio_path
-                basmala_temp_audio = prepend.audio_path
-
-        if args.renderer == "ass":
-            if font_file_path is not None:
-                warn(
-                    "Ignoring --font-file because --renderer ass uses installed --font-name fonts."
-                )
-            if args.debug_detected_text:
-                warn("Ignoring --debug-detected-text because it only applies to --renderer frame.")
-            if args.title:
-                warn("Ignoring --title because it only applies to --renderer frame.")
-            if not args.font_name:
-                raise ValueError("--font-name is required when --renderer ass is selected")
-            validate_font_name(args.font_name)
-
-            ass_document = build_ass(matches, args.font_name.strip(), args.width, args.height)
-            ass_path.write_text(ass_document, encoding="utf-8-sig")
-            render_ass_video(
-                audio_path, ass_path, output_path, args.width, args.height, fps=args.fps
-            )
-            print(f"ASS subtitle saved to: {ass_path}")
-        else:
-            if args.font_name:
-                warn("Ignoring --font-name because --renderer frame uses --font-file instead.")
-            if font_file_path is None:
-                default_font = Path(DEFAULT_VIDEO_FONT_FILE)
-                if not default_font.exists():
-                    raise ValueError(
-                        "--font-file is required when --renderer frame is selected "
-                        "(the bundled default font was not found)."
-                    )
-                print(f"No --font-file given; using bundled default font: {default_font}")
-                font_file_path = default_font
-            validate_font_file(font_file_path)
-            captions = load_caption_segments(matches_path)
-            if captions:
-                print(f"Loaded {len(captions)} caption segment(s) for the bottom band.")
-            render_frame_video(
-                audio_path,
-                matches,
-                output_path,
-                args.width,
-                args.height,
-                args.fps,
-                font_file_path,
-                keep_temp=args.keep_temp,
-                debug_detected_text=args.debug_detected_text,
-                captions=captions,
-                title=args.title or DEFAULT_PLACEHOLDER_TITLE,
-            )
-
-    except (FileNotFoundError, ValueError, RuntimeError) as error:
-        print(f"ERROR: {error}", file=sys.stderr)
-        return 1
-    finally:
-        # The concatenated basmala+recitation audio is a throwaway render input.
-        if basmala_temp_audio is not None and not args.keep_temp:
-            basmala_temp_audio.unlink(missing_ok=True)
-
-    print(f"MP4 video saved to: {output_path}")
-    return 0
-
+DEFAULT_WIDTH = 1280
+DEFAULT_HEIGHT = 720
+DEFAULT_FRAME_RATE = 25
 
 __all__ = [
-    "ActiveMatchTracker",
     "DEFAULT_FRAME_RATE",
     "DEFAULT_HEIGHT",
+    "DEFAULT_PLACEHOLDER_TITLE",
     "DEFAULT_WIDTH",
+    "ActiveMatchTracker",
+    "RenderRequest",
+    "RenderResult",
     "active_match_at",
     "ass_time",
     "ayah_label",
     "build_ass",
-    "build_parser",
     "escape_ass",
+    "load_caption_segments",
     "load_matches",
-    "main",
-    "parse_args",
+    "maybe_prepend_basmala",
+    "render_ass_video",
     "render_frame_pillow",
     "render_frame_video",
+    "render_video",
+    "validate_dimensions",
     "validate_font_file",
     "validate_font_name",
+    "validate_fps",
+    "validate_input_file",
+    "warn",
     "write_frame_video",
 ]
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from collections import defaultdict
 
 from qurantext.config.settings import (
@@ -14,6 +15,7 @@ from qurantext.config.settings import (
     DEFAULT_LECTURE_WINDOW_STEP,
 )
 from qurantext.core.arabic import ayah_text_with_marker, partial_ratio, word_recall
+from qurantext.jobs.progress import CancelToken, ProgressCallback, report
 
 # When two ayat compete for the same time slice and the top one would switch
 # surah, keep the current surah if its best candidate is within this confidence
@@ -612,6 +614,8 @@ def detect_quran_mentions_in_lecture(
     conn=None,
     db_strategy: str = "word_overlap",
     db_candidate_min_overlap: int = 2,
+    progress: ProgressCallback | None = None,
+    cancel: CancelToken | None = None,
 ) -> list[dict]:
     """Detect Qur'an ayat mentioned inside lecture-style audio.
 
@@ -656,12 +660,38 @@ def detect_quran_mentions_in_lecture(
 
     matches: list[dict] = []
 
+    # This loop is the slow stage: it fuzzy-scores tens of thousands of windows
+    # and used to run for minutes in total silence with no way to stop it.
+    # Progress is keyed off the window's position in the transcript, which is
+    # monotonic and cheap, rather than counting windows up front.
+    total_words = max(1, len(words))
+    started = time.monotonic()
+    next_report = 0.0
+    report(progress, "match", f"Scanning {total_words:,} transcript words for Quran citations...")
+
     for window in iter_word_windows(
         words,
         min_words=min_window_words,
         max_words=max_window_words,
         step=window_step,
     ):
+        scanned = float(window["start_word"])
+        if scanned >= next_report:
+            next_report = scanned + max(1.0, total_words / 200.0)
+            if cancel is not None:
+                cancel.raise_if_cancelled("match")
+            fraction = min(1.0, scanned / total_words)
+            elapsed = time.monotonic() - started
+            eta = (elapsed / fraction - elapsed) if fraction > 0.01 else None
+            report(
+                progress,
+                "match",
+                f"  Matching  word {int(scanned):>6,}/{total_words:,}"
+                f"  {len(matches):>4} candidate(s)  elapsed {elapsed:.0f}s",
+                fraction=fraction,
+                eta_seconds=eta,
+            )
+
         window_text_norm = str(window["text_norm"])
         if conn is None:
             candidates = candidate_spans_by_word_overlap(
@@ -730,5 +760,13 @@ def detect_quran_mentions_in_lecture(
                 }
             )
 
+    report(
+        progress,
+        "match",
+        f"  Matching  word {total_words:>6,}/{total_words:,}"
+        f"  {len(matches):>4} candidate(s)  elapsed {time.monotonic() - started:.0f}s",
+        fraction=1.0,
+        done=True,
+    )
     merged = merge_quran_matches(matches, max_merged_ayat=max_merged_ayat, min_score=min_score)
     return hydrate_merged_matches(merged, ayat, words)

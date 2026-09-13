@@ -19,6 +19,7 @@ from qurantext.config.settings import VIDEO_PRESETS, get_settings
 from qurantext.data.citation_index import DEFAULT_NGRAM_N
 from qurantext.data.quran_db import build_quran_db
 from qurantext.io.readers import load_json
+from qurantext.jobs.progress import ConsoleProgress, JobCancelled
 from qurantext.pipelines.detection import run_detection
 from qurantext.pipelines.edit_spec import export_edit_spec_package
 from qurantext.pipelines.recitation import build_recitation_output_paths, run_word_alignment
@@ -171,7 +172,7 @@ def _run_generate_video(args: argparse.Namespace) -> int:
         args.output_dir,
         f"_{args.renderer}.mp4",
     )
-    return_code = run_video_generation(
+    run_video_generation(
         audio=args.audio,
         matches=args.matches,
         output=output_path,
@@ -185,10 +186,11 @@ def _run_generate_video(args: argparse.Namespace) -> int:
         keep_temp=args.keep_temp,
         debug_detected_text=args.debug_detected_text,
         title=getattr(args, "title", None),
+        progress=ConsoleProgress(),
     )
-    if return_code == 0 and getattr(args, "edit_spec", False):
+    if getattr(args, "edit_spec", False):
         _export_edit_spec(args, args.matches, output_path)
-    return return_code
+    return 0
 
 
 def _run_all(args: argparse.Namespace) -> int:
@@ -239,7 +241,7 @@ def _run_all(args: argparse.Namespace) -> int:
         args.video_output_dir,
         f"_{args.renderer}.mp4",
     )
-    return_code = run_video_generation(
+    run_video_generation(
         audio=args.audio,
         matches=output_path,
         output=video_output,
@@ -253,10 +255,11 @@ def _run_all(args: argparse.Namespace) -> int:
         keep_temp=args.keep_temp,
         debug_detected_text=args.debug_detected_text,
         title=getattr(args, "title", None),
+        progress=ConsoleProgress(),
     )
-    if return_code == 0 and args.edit_spec:
+    if args.edit_spec:
         _export_edit_spec(args, output_path, video_output)
-    return return_code
+    return 0
 
 
 def _run_export_editspec(args: argparse.Namespace) -> int:
@@ -367,6 +370,8 @@ def build_parser() -> argparse.ArgumentParser:
         source_group = subparser.add_mutually_exclusive_group(required=True)
         source_group.add_argument(
             "--whisperx-json",
+            "--whisperx",
+            dest="whisperx_json",
             help="Path to an existing WhisperX JSON transcription output.",
         )
         source_group.add_argument(
@@ -616,6 +621,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         return args.handler(args)
+    except JobCancelled as error:
+        print(f"Cancelled: {error}", file=sys.stderr)
+        return 130
     except (FileNotFoundError, ValueError, RuntimeError, json.JSONDecodeError) as error:
         # WhisperXServiceError is a RuntimeError; json.JSONDecodeError is a
         # ValueError — both are covered. SystemExit (used for pre-flight guards)

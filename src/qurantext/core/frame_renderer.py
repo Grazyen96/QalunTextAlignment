@@ -19,6 +19,7 @@ from qurantext.core.video_common import (
     validated_matches,
     warn,
 )
+from qurantext.jobs.progress import CancelToken, ProgressCallback, report
 
 COLOUR_BG = (10, 10, 12, 255)
 COLOUR_CARD = (36, 36, 42, 230)
@@ -1194,6 +1195,8 @@ def write_frame_video(
     title: str = DEFAULT_PLACEHOLDER_TITLE,
     debug_detected_text: bool = False,
     log_path: Path | None = None,
+    progress: ProgressCallback | None = None,
+    cancel: CancelToken | None = None,
 ) -> None:
     """Render every frame and stream it into FFmpeg, producing the final MP4.
 
@@ -1323,9 +1326,15 @@ def write_frame_video(
         return RuntimeError(f"{reason}\n{details}")
 
     process: Any = None
+    completed = False
     try:
         process = _start_frame_encoder(audio_path, output_path, width, height, fps, log_handle)
         for ev_idx, (ev_start, ev_match, ev_caption) in enumerate(events):
+            # Checked per event rather than per frame: an event is one Pillow
+            # render, so this bounds how long Cancel takes to take effect while
+            # costing nothing measurable.
+            if cancel is not None:
+                cancel.raise_if_cancelled("render")
             ev_end = events[ev_idx + 1][0] if ev_idx + 1 < n_events else total_frames
             ev_caption_text = str(ev_caption["text"]) if ev_caption else ""
             ev_caption_wt = ev_caption.get("word_timings") if ev_caption else None
@@ -1343,10 +1352,16 @@ def write_frame_video(
                 reserve_caption_band=reserve_caption_band,
             )
             # Serialise once, then hand the encoder the same bytes for every
-            # frame this event covers.
+            # frame this event covers. A latched card with no word highlight can
+            # span the whole video as a single event, so cancellation is also
+            # checked inside this loop — once per second of video — or a long
+            # static card would be uninterruptible however often the outer loop
+            # polls.
             payload = frame.tobytes()
             try:
-                for _ in range(ev_end - ev_start):
+                for offset in range(ev_end - ev_start):
+                    if cancel is not None and offset and offset % fps == 0:
+                        cancel.raise_if_cancelled("render")
                     process.stdin.write(payload)
             except (BrokenPipeError, OSError) as error:
                 raise _encoder_failure("FFmpeg stopped while frames were being written:") from error
@@ -1355,15 +1370,16 @@ def write_frame_video(
                 elapsed = time.monotonic() - t0
                 pct = (ev_idx + 1) / n_events
                 eta = (elapsed / pct - elapsed) if pct > 0 else 0
-                print(
-                    f"\r  Segments {ev_idx + 1:>5}/{n_events}"
+                report(
+                    progress,
+                    "render",
+                    f"  Segments {ev_idx + 1:>5}/{n_events}"
                     f"  ({ev_end:>6}/{total_frames} frames)"
-                    f"  elapsed {elapsed:.0f}s"
-                    f"  ETA {eta:.0f}s      ",
-                    end="",
-                    flush=True,
+                    f"  elapsed {elapsed:.0f}s",
+                    fraction=pct,
+                    eta_seconds=eta,
+                    done=ev_idx == n_events - 1,
                 )
-        print()
 
         # Closing stdin tells FFmpeg the stream ended; it then finalises the
         # container (moov atom, +faststart) before exiting.
@@ -1372,6 +1388,7 @@ def write_frame_video(
             raise _encoder_failure(
                 f"FFmpeg exited with status {process.returncode} while encoding the video:"
             )
+        completed = True
     finally:
         if process is not None:
             if process.stdin and not process.stdin.closed:
@@ -1380,6 +1397,11 @@ def write_frame_video(
                 process.kill()
                 process.wait()
         log_handle.close()
+        # A killed encoder leaves a container it never finalised — a few dozen
+        # bytes that no player opens. Cancelling should leave nothing behind
+        # rather than a broken file where the user expects their video.
+        if not completed:
+            output_path.unlink(missing_ok=True)
 
 
 def render_frame_video(
@@ -1394,8 +1416,10 @@ def render_frame_video(
     debug_detected_text: bool = False,
     captions: list[dict[str, Any]] | None = None,
     title: str = DEFAULT_PLACEHOLDER_TITLE,
-) -> Path | None:
-    """Render a styled frame-by-frame video and mux the original audio."""
+    progress: ProgressCallback | None = None,
+    cancel: CancelToken | None = None,
+) -> float:
+    """Render a styled frame-by-frame video with its audio. Returns the duration."""
     _frame_dependencies()
     _require_raqm_support()
     require_binary("ffmpeg", "Install FFmpeg and try again.")
@@ -1411,7 +1435,11 @@ def render_frame_video(
         )
 
     total_frames = max(1, int(math.ceil(duration * fps)))
-    print(f"  Video: {duration:.1f}s  ×  {fps} fps  =  {total_frames:,} frames  ({width}×{height})")
+    report(
+        progress,
+        "render",
+        f"  Video: {duration:.1f}s  ×  {fps} fps  =  {total_frames:,} frames  ({width}×{height})",
+    )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     # The encoder log is the only intermediate left, and it goes to a temp
@@ -1422,7 +1450,7 @@ def render_frame_video(
     grand_start = time.monotonic()
 
     try:
-        print("  Rendering frames and encoding H.264...")
+        report(progress, "render", "  Rendering frames and encoding H.264...")
         write_frame_video(
             valid_matches,
             duration,
@@ -1436,10 +1464,12 @@ def render_frame_video(
             title=title,
             debug_detected_text=debug_detected_text,
             log_path=log_path,
+            progress=progress,
+            cancel=cancel,
         )
     finally:
         if keep_temp:
-            print(f"FFmpeg log kept at: {log_path}")
+            report(progress, "render", f"FFmpeg log kept at: {log_path}")
         else:
             log_path.unlink(missing_ok=True)
             with suppress(OSError):
@@ -1448,9 +1478,13 @@ def render_frame_video(
     total_elapsed = time.monotonic() - grand_start
     mins, secs = divmod(int(total_elapsed), 60)
     rendered_fps = total_frames / total_elapsed if total_elapsed > 0 else 0.0
-    print(f"  Total render time: {mins}m {secs:02d}s  ({rendered_fps:.1f} fps)")
+    report(
+        progress,
+        "render",
+        f"  Total render time: {mins}m {secs:02d}s  ({rendered_fps:.1f} fps)",
+    )
 
-    return log_path if keep_temp else None
+    return duration
 
 
 def validate_font_file(font_file: Path) -> None:
