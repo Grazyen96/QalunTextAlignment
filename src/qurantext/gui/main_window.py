@@ -13,9 +13,10 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QDesktopServices, QDragEnterEvent, QDropEvent, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
+    QDialog,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -36,6 +37,7 @@ from qurantext.data.quran_db import ensure_quran_db, list_surahs
 from qurantext.gui.editor import SubtitleEditor
 from qurantext.gui.jobs import JobOutcome, JobSpec, run_job
 from qurantext.gui.worker import run_in_thread
+from qurantext.jobs.preview import PreviewRequest, render_preview
 from qurantext.jobs.project import Project, load_project, save_project
 from qurantext.utils.progress import CancelToken, ProgressEvent
 
@@ -148,6 +150,9 @@ class MainWindow(QMainWindow):
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.setEnabled(False)
         self.cancel_button.clicked.connect(self._request_cancel)
+        self.preview_button = QPushButton("Preview a frame")
+        self.preview_button.setEnabled(False)
+        self.preview_button.clicked.connect(self._preview)
         self.check_button = QPushButton("Check the subtitles")
         self.check_button.setEnabled(False)
         self.check_button.clicked.connect(self._open_editor)
@@ -157,6 +162,7 @@ class MainWindow(QMainWindow):
         buttons.addWidget(self.start_button)
         buttons.addWidget(self.cancel_button)
         buttons.addStretch(1)
+        buttons.addWidget(self.preview_button)
         buttons.addWidget(self.check_button)
         buttons.addWidget(self.reveal_button)
         layout.addLayout(buttons)
@@ -342,6 +348,7 @@ class MainWindow(QMainWindow):
         self.status.setText(f"{outcome.cards} card(s). Saved to {where}")
         self.reveal_button.setEnabled(outcome.video is not None)
         self.check_button.setEnabled(True)
+        self.preview_button.setEnabled(True)
 
     def _on_failed(self, message: str) -> None:
         self.progress.setFormat("Stopped")
@@ -356,6 +363,34 @@ class MainWindow(QMainWindow):
     def _on_done(self) -> None:
         self._cancel = None
         self._refresh_enabled()
+
+    def _preview(self) -> None:
+        """Show one frame, so a style can be judged without re-rendering."""
+        if self._outcome is None:
+            return
+        target = self._outcome.matches.with_suffix(".preview.png")
+        try:
+            result = render_preview(
+                PreviewRequest(
+                    matches=self._outcome.matches,
+                    output=target,
+                    preset=str(self.preset_box.currentData()),
+                    audio=self._audio,
+                )
+            )
+        except (FileNotFoundError, ValueError, RuntimeError) as error:
+            QMessageBox.warning(self, "Could not draw a preview", str(error))
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Preview at {result.at:.1f}s — {result.card or 'opening card'}")
+        layout = QVBoxLayout(dialog)
+        label = QLabel()
+        pixmap = QPixmap(str(result.output))
+        # Fit a portrait frame on an ordinary screen without distorting it.
+        label.setPixmap(pixmap.scaledToHeight(700, Qt.TransformationMode.SmoothTransformation))
+        layout.addWidget(label)
+        dialog.exec()
 
     def _open_editor(self) -> None:
         """Open the finished job's subtitles for correction.

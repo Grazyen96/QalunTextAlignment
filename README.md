@@ -253,6 +253,18 @@ python3 -m qurantext generate-video \
   --output output/videos/example.mp4
 ```
 
+### `preview`
+Use when you want to see how the video will look before rendering it.
+
+```bash
+python3 -m qurantext preview \
+  --matches output/recitation_matching/example_recitation.json \
+  --preset social
+```
+
+Draws one frame to a PNG in well under a second, at the moment the first ayah
+card is on screen. The window has the same thing on a button.
+
 ### `check-timing`
 Use when you want to know whether the word timings actually cover the recitation.
 

@@ -21,6 +21,7 @@ from qurantext.data.citation_index import DEFAULT_NGRAM_N
 from qurantext.data.quran_db import build_quran_db, ensure_quran_db, list_surahs
 from qurantext.io.readers import load_json
 from qurantext.jobs.export import SUBTITLE_MODES, ExportRequest, export_job
+from qurantext.jobs.preview import PreviewRequest, render_preview
 from qurantext.jobs.project import Project, load_project, save_project
 from qurantext.pipelines.detection import run_detection, run_recitation_range
 from qurantext.pipelines.recitation import build_recitation_output_paths, run_word_alignment
@@ -214,6 +215,28 @@ def _run_check_timing(args: argparse.Namespace) -> int:
         "  The highlight holds on the previous word through these. Confirm them by ear "
         "before trusting the timeline."
     )
+    return 0
+
+
+def _run_preview(args: argparse.Namespace) -> int:
+    """Draw one frame, so a style can be judged without rendering the video."""
+    output = args.output or str(Path(args.matches).with_suffix(".preview.png"))
+    result = render_preview(
+        PreviewRequest(
+            matches=Path(args.matches),
+            output=Path(output),
+            at=args.at,
+            preset=args.preset,
+            width=args.width,
+            height=args.height,
+            font_file=Path(args.font_file) if args.font_file else None,
+            title=args.title,
+            audio=Path(args.audio) if args.audio else None,
+        )
+    )
+    card = result.card or "the opening placeholder"
+    print(f"Preview saved to: {result.output}")
+    print(f"  {result.width}×{result.height} at {result.at:.2f}s, showing {card}")
     return 0
 
 
@@ -573,6 +596,28 @@ def build_parser() -> argparse.ArgumentParser:
     video_parser.add_argument("--keep-temp", action="store_true")
     video_parser.add_argument("--debug-detected-text", action="store_true")
     video_parser.set_defaults(handler=_run_generate_video)
+
+    preview_parser = subparsers.add_parser(
+        "preview",
+        help="Render one frame to a PNG, to judge a style without rendering the video.",
+    )
+    preview_parser.add_argument(
+        "--matches", required=True, help="Path to the match JSON result file."
+    )
+    preview_parser.add_argument("--output", help="Path for the PNG. Defaults beside the matches.")
+    preview_parser.add_argument(
+        "--at",
+        type=float,
+        default=None,
+        help="Seconds into the video. Defaults to halfway through the first card.",
+    )
+    preview_parser.add_argument("--audio", default=None, help="Optional, to clamp --at.")
+    preview_parser.add_argument("--preset", choices=sorted(VIDEO_PRESETS), default=None)
+    preview_parser.add_argument("--width", type=int, default=None)
+    preview_parser.add_argument("--height", type=int, default=None)
+    preview_parser.add_argument("--font-file", default=None)
+    preview_parser.add_argument("--title", default=None)
+    preview_parser.set_defaults(handler=_run_preview)
 
     surahs_parser = subparsers.add_parser(
         "surahs",
