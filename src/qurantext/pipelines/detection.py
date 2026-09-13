@@ -375,8 +375,9 @@ def run_detection(
         whisperx_model_ref = service_result.model_ref
         whisperx_segment_count = service_result.segment_count
         emit(
-            f"      WhisperX raw JSON saved to {service_result.raw_output_path} "
-            f"({service_result.segment_count} segments, {service_result.word_count} words)."
+            f"      {'Reused the cached transcript' if service_result.from_cache else 'WhisperX raw JSON saved'}"
+            f" → {service_result.raw_output_path}"
+            f" ({service_result.segment_count} segments, {service_result.word_count} words)."
         )
 
     words = extract_matching_words(wx_data)

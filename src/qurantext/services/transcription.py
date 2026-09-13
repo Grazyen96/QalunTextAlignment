@@ -8,6 +8,7 @@ from typing import Any
 
 from qurantext.config.settings import DEFAULT_MODEL_REF, get_settings
 from qurantext.io.writers import write_json
+from qurantext.services.transcript_cache import cache_key, load_cached, store_cached
 
 # Gateway/rate-limit statuses that reflect a transient edge failure rather than a
 # real problem with the prediction — safe to retry against the same prediction.
@@ -30,6 +31,8 @@ class WhisperXResult:
     model_ref: str
     segment_count: int
     word_count: int
+    #: True when the result came from the cache and nothing was sent anywhere.
+    from_cache: bool = False
 
 
 def _count_segments(output: Any) -> int:
@@ -141,14 +144,42 @@ def transcribe_audio(
     *,
     save_raw_to: str | PathLike[str] | None = None,
     model_ref: str | None = None,
+    use_cache: bool = True,
 ) -> WhisperXResult:
-    """Transcribe an audio file with WhisperX on Replicate."""
+    """Transcribe an audio file with WhisperX on Replicate.
+
+    The same audio with the same settings always gives the same transcript, so
+    the result is cached against the audio's content. A repeat run — correcting
+    one subtitle line and rendering again, say — costs nothing and needs no
+    network. Pass ``use_cache=False`` to force a fresh call.
+    """
     audio_file_path = Path(audio_path)
     if not audio_file_path.exists():
         raise FileNotFoundError(f"Audio file not found: {audio_file_path}")
 
     settings = get_settings()
     resolved_model_ref = model_ref or settings.whisperx.model_ref or DEFAULT_MODEL_REF
+
+    key: str | None = None
+    if use_cache:
+        key = cache_key(
+            audio_file_path,
+            {"model": resolved_model_ref, **settings.whisperx.input_kwargs()},
+        )
+        cached = load_cached(key)
+        if cached is not None:
+            raw_output_path = (
+                save_raw_output(cached, save_raw_to) if save_raw_to is not None else None
+            )
+            return WhisperXResult(
+                output=cached,
+                audio_path=str(audio_file_path),
+                raw_output_path=raw_output_path,
+                model_ref=resolved_model_ref,
+                segment_count=_count_segments(cached),
+                word_count=_count_words(cached),
+                from_cache=True,
+            )
 
     if not settings.replicate_api_token:
         raise WhisperXServiceError(
@@ -177,6 +208,9 @@ def transcribe_audio(
                 "Check that the model exists and that your account has access to it."
             ) from error
         raise WhisperXServiceError(f"WhisperX transcription failed: {error_text}") from error
+
+    if key is not None:
+        store_cached(key, _normalize_output_for_json(output))
 
     raw_output_path: str | None = None
     if save_raw_to is not None:

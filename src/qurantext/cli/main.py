@@ -114,10 +114,13 @@ def _run_transcribe(args: argparse.Namespace) -> int:
         "_whisperx_raw.json",
     )
     try:
-        result = transcribe_audio(args.audio, save_raw_to=output_path)
+        result = transcribe_audio(args.audio, save_raw_to=output_path, use_cache=not args.no_cache)
     except (FileNotFoundError, WhisperXServiceError) as error:
         raise SystemExit(str(error)) from error
-    print(f"Saved WhisperX raw JSON to {result.raw_output_path}")
+    if result.from_cache:
+        print(f"Reused the cached transcript for this audio → {result.raw_output_path}")
+    else:
+        print(f"Saved WhisperX raw JSON to {result.raw_output_path}")
     print(f"Segments: {result.segment_count}; words: {result.word_count}")
     return 0
 
@@ -494,6 +497,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run WhisperX transcription and save the raw JSON output.",
     )
     transcribe_parser.add_argument("--audio", required=True, help="Path to the audio file.")
+    transcribe_parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Transcribe again even if this audio has been transcribed before.",
+    )
     transcribe_parser.add_argument("--output", help="Explicit path for the raw WhisperX JSON.")
     transcribe_parser.add_argument(
         "--output-dir",

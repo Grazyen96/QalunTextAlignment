@@ -51,6 +51,7 @@ __all__ = [
     "bundled_asset",
     "checkout_root",
     "ensure_required_directories",
+    "user_cache_dir",
     "user_data_dir",
 ]
 
@@ -83,6 +84,23 @@ def user_data_dir() -> Path:
     # Linux and the rest follow the XDG base directory specification.
     base = os.getenv("XDG_DATA_HOME")
     root = Path(base).expanduser() if base else Path.home() / ".local" / "share"
+    return root / _APP_DIR_POSIX
+
+
+def user_cache_dir() -> Path:
+    """Where derived files live: recomputable, safe to delete, not user data."""
+    override = os.getenv("QURANTEXT_CACHE_DIR")
+    if override:
+        return Path(override).expanduser()
+
+    if sys.platform == "win32":
+        base = os.getenv("LOCALAPPDATA") or os.getenv("APPDATA")
+        root = Path(base).expanduser() if base else Path.home()
+        return root / APP_NAME / "cache"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches" / APP_NAME
+    base = os.getenv("XDG_CACHE_HOME")
+    root = Path(base).expanduser() if base else Path.home() / ".cache"
     return root / _APP_DIR_POSIX
 
 
