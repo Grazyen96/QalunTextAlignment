@@ -1,5 +1,11 @@
 # Packaging
 
+**You probably do not need any of this.** GitHub builds the app for all three
+platforms on its own machines — see `.github/workflows/release.yml`. Push a tag
+or press *Run workflow* in the Actions tab, and download the zips. Nobody needs
+Python installed: not the people who use the app, and not the person releasing
+it. What follows is for building by hand.
+
 Builds the desktop app as a self-contained bundle. `qalun.spec` is shared by all
 three platforms; what differs is the wrapper around the result and the signing.
 
@@ -47,10 +53,14 @@ here uses multiprocessing anyway.
 
 ## FFmpeg
 
-Not bundled by the spec: the binary is large and which build you may redistribute
-depends on how it was compiled. Ship one next to the executable and put that
-directory on `PATH` before launching, or accept the system install. `--doctor`
-reports which one was found, and the version.
+Not bundled by the spec, because the binary is large and which build you may
+redistribute depends on how it was compiled. The release workflow fetches one
+per platform and copies it into the app folder.
+
+Copying it there is enough: `require_binary` looks beside the running executable
+before it looks at `PATH`, so a packaged app uses the FFmpeg it shipped with and
+a user who has installed nothing still gets a video. Verified by rendering with
+an empty `PATH`. `--doctor` reports which one was found and its version.
 
 ## Not done here
 

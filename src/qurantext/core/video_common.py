@@ -272,13 +272,38 @@ def load_caption_segments(matches_path: Path) -> list[dict[str, Any]]:
     return segments
 
 
+def bundled_binary_dir() -> Path | None:
+    """The folder the running application lives in, when it is a packaged build.
+
+    A packaged app ships FFmpeg beside its own executable, and the person who
+    double-clicks it has not put anything on PATH. Looking here first is what
+    makes that work.
+    """
+    if not getattr(sys, "frozen", False):
+        return None
+    return Path(sys.executable).resolve().parent
+
+
 def require_binary(binary_name: str, install_hint: str | None = None) -> str:
+    """Locate a helper binary: beside the application first, then on PATH.
+
+    Order matters. A packaged build must use the FFmpeg it shipped with rather
+    than whatever happens to be installed, so the version it was tested against
+    is the one that runs.
+    """
+    bundled = bundled_binary_dir()
+    if bundled is not None:
+        for candidate in (bundled / binary_name, bundled / f"{binary_name}.exe"):
+            if candidate.is_file():
+                return str(candidate)
+
     binary_path = cast(str | None, shutil.which(binary_name))
     if binary_path:
         return binary_path
 
     hint = f" {install_hint}" if install_hint else ""
-    raise RuntimeError(f"{binary_name} was not found in PATH.{hint}")
+    where = " (looked beside the application and on PATH)" if bundled else " in PATH"
+    raise RuntimeError(f"{binary_name} was not found{where}.{hint}")
 
 
 def get_audio_duration(audio_path: Path) -> float:

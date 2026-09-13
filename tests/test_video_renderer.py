@@ -549,3 +549,59 @@ def test_write_frame_video_reports_ffmpeg_failure(tmp_path) -> None:
             log_path=tmp_path / "enc.log",
         )
     assert "FFmpeg" in str(excinfo.value)
+
+
+# --- locating helper binaries -------------------------------------------------
+
+
+def test_a_packaged_app_uses_the_ffmpeg_it_shipped_with(tmp_path, monkeypatch) -> None:
+    """Someone who double-clicks an app has put nothing on PATH.
+
+    A packaged build ships FFmpeg beside its own executable, and must prefer it
+    so the version it was tested against is the one that runs.
+    """
+    from qurantext.core import video_common
+
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    shipped = app_dir / "ffmpeg"
+    shipped.write_text("#!/bin/sh\n", encoding="utf-8")
+    shipped.chmod(0o755)
+
+    monkeypatch.setattr(video_common.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(video_common.sys, "executable", str(app_dir / "qalun"))
+
+    assert video_common.require_binary("ffmpeg") == str(shipped)
+
+
+def test_windows_executables_are_found_too(tmp_path, monkeypatch) -> None:
+    from qurantext.core import video_common
+
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    shipped = app_dir / "ffprobe.exe"
+    shipped.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(video_common.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(video_common.sys, "executable", str(app_dir / "qalun.exe"))
+
+    assert video_common.require_binary("ffprobe") == str(shipped)
+
+
+def test_a_normal_install_still_uses_path(monkeypatch) -> None:
+    from qurantext.core import video_common
+
+    monkeypatch.delattr(video_common.sys, "frozen", raising=False)
+    assert video_common.bundled_binary_dir() is None
+    # ffmpeg is a hard requirement of the suite's render tests, so it is present.
+    if shutil.which("ffmpeg"):
+        assert video_common.require_binary("ffmpeg") == shutil.which("ffmpeg")
+
+
+def test_a_missing_binary_says_where_it_looked(monkeypatch) -> None:
+    from qurantext.core import video_common
+
+    monkeypatch.delattr(video_common.sys, "frozen", raising=False)
+    monkeypatch.setattr(video_common.shutil, "which", lambda _name: None)
+    with pytest.raises(RuntimeError, match="in PATH"):
+        video_common.require_binary("definitely-not-a-real-binary", "Install it.")

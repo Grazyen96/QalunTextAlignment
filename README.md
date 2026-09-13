@@ -48,6 +48,13 @@ Install development tooling when you want tests and linting:
 python3 -m pip install pytest ruff
 ```
 
+## Just want to use it?
+
+Download the app for your system from the
+[Releases page](https://github.com/Grazyen96/QalunTextAlignment/releases),
+unzip it, and run **Qalun**. There is nothing to install: no Python, no FFmpeg,
+no Quran text file. Everything below is for working on the code.
+
 ## Is this machine set up?
 
 ```bash
