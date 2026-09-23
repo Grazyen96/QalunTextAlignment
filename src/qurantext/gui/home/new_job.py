@@ -278,8 +278,18 @@ class NewJobPanel(QWidget):
 
     # -- the Quran store ----------------------------------------------------------
 
+    def _usable_override(self) -> Path | None:
+        """The override while its file is there, else None.
+
+        The choice itself stays in ``prefs``: a file on a drive that is not
+        plugged in right now must not erase it, only step aside for the default.
+        """
+        if self._quran_override is not None and self._quran_override.is_file():
+            return self._quran_override
+        return None
+
     def _effective_quran(self) -> Path | None:
-        return self._quran_override or self._quran_default
+        return self._usable_override() or self._quran_default
 
     def _load_surahs(self) -> None:
         """Populate the picker from the store, so the user names the range."""
@@ -370,10 +380,9 @@ class NewJobPanel(QWidget):
         self._refresh()
 
     def _update_quran_label(self) -> None:
-        if self._quran_override is not None:
-            self.quran_label.setText(
-                t("home.quran_override.custom", path=str(self._quran_override))
-            )
+        override = self._usable_override()
+        if override is not None:
+            self.quran_label.setText(t("home.quran_override.custom", path=str(override)))
         elif self._quran_default is not None:
             self.quran_label.setText(t("home.quran_override.default"))
         else:
@@ -521,6 +530,15 @@ class NewJobPanel(QWidget):
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(int(max(0.0, min(1.0, fraction)) * 100))
         self.status_label.setText(text)
+
+    def show_status(self, text: str) -> None:
+        """Show *text* on the status line (hidden when empty), running or not.
+
+        How the last job ended, or why a job could not be opened, is said here
+        after ``set_running(False)`` has put the progress away.
+        """
+        self.status_label.setText(text)
+        self.status_label.setVisible(bool(text))
 
 
 def _first_audio(urls) -> Path | None:

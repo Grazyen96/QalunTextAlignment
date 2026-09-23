@@ -1,329 +1,143 @@
-"""The window: drop an audio file, pick what it is, press Start.
+"""The home window: every job on the left, a new one on the right.
 
 What this replaces: installing Python, creating a virtual environment,
 installing FFmpeg, opening a cloud account, writing a token into a dotfile,
 knowing the path to a Quran text file, and choosing among a dozen subcommands
 with their flags.
+
+The two panels (``gui/home/``) only collect and show; this window runs the job
+Start asks for, keeps the list in step with what is on disk, and owns the
+review windows it opens — one per project.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent, QPixmap
-from PySide6.QtWidgets import (
-    QComboBox,
-    QDialog,
-    QFileDialog,
-    QFormLayout,
-    QGroupBox,
-    QHBoxLayout,
-    QLabel,
-    QMainWindow,
-    QMessageBox,
-    QProgressBar,
-    QPushButton,
-    QSpinBox,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtGui import QCloseEvent
+from PySide6.QtWidgets import QMainWindow, QMessageBox, QSplitter, QVBoxLayout, QWidget
 
-from qurantext.config.paths import DEFAULT_QURAN_PATH, QURAN_DB_PATH, QURAN_INPUT_DIR
-from qurantext.config.settings import VIDEO_PRESETS
-from qurantext.data.quran_db import ensure_quran_db, list_surahs
+from qurantext.config.paths import DEFAULT_QURAN_PATH, QURAN_INPUT_DIR
 from qurantext.gui.files import show_in_folder
-from qurantext.gui.home.new_job import _first_audio
+from qurantext.gui.home.job_list import JobListPanel
+from qurantext.gui.home.new_job import NewJobPanel
 from qurantext.gui.i18n import t
-from qurantext.gui.jobs import JobOutcome, JobSpec, run_job
+from qurantext.gui.jobs import JobOutcome, JobSpec, run_matching, run_render
+from qurantext.gui.prefs import Prefs
 from qurantext.gui.review import ReviewWindow
 from qurantext.gui.worker import run_in_thread
-from qurantext.jobs.preview import PreviewRequest, render_preview
-from qurantext.jobs.project import load_project, project_path_for
-from qurantext.utils.progress import CancelToken, ProgressEvent
+from qurantext.jobs.project import Project, load_project, project_path_for
+from qurantext.utils.progress import CancelToken, ProgressCallback, ProgressEvent
 
 __all__ = ["MainWindow"]
 
+#: The job list's share of the window; the form takes the rest.
+_JOB_LIST_WIDTH = 300
+
+
+@dataclass(frozen=True, slots=True)
+class _Finished:
+    """What Start's job hands back: the project, and the render when one was asked for."""
+
+    project: Project
+    outcome: JobOutcome | None = None
+
+
+def _match_then_render(
+    spec: JobSpec,
+    *,
+    progress: ProgressCallback | None,
+    cancel: CancelToken | None,
+) -> _Finished:
+    """Match, then render only when the job skips the review.
+
+    Runs on the worker thread, so it touches no widget. A Cancel that lands
+    between the two stages stops before the render starts.
+    """
+    project = run_matching(spec, progress=progress, cancel=cancel)
+    if not spec.render_right_away:
+        return _Finished(project)
+    if cancel is not None:
+        cancel.raise_if_cancelled("render")
+    return _Finished(project, run_render(project, progress=progress, cancel=cancel))
+
 
 class MainWindow(QMainWindow):
-    """One window, one job at a time."""
+    """The job list beside the new-job form; one job runs at a time."""
 
-    def __init__(self) -> None:
+    def __init__(self, prefs: Prefs | None = None) -> None:
         super().__init__()
-        self.setWindowTitle("Qalun")
-        self.setAcceptDrops(True)
-        self.setMinimumWidth(560)
+        self._prefs = prefs if prefs is not None else Prefs()
+        self.setWindowTitle(t("app.title"))
 
-        self._audio: Path | None = None
-        self._quran: Path | None = _default_quran_file()
         self._cancel: CancelToken | None = None
+        # Kept for the whole run and until the next Start replaces them: a
+        # QThread collected while it is still winding down crashes Qt.
         self._thread = None
         self._worker = None
-        self._outcome: JobOutcome | None = None
+        #: The job running now, and how it ended (said once the form stops running).
+        self._running_spec: JobSpec | None = None
+        self._ending = ""
         #: One review window per open project, keyed by its file: reopening the
         #: same project raises what is already there instead of a second window.
         #: A window leaves this once it closes, so the next review reads the file afresh.
         self._reviews: dict[Path, ReviewWindow] = {}
 
         self._build()
-        self._refresh_enabled()
 
     # -- construction ---------------------------------------------------------
 
     def _build(self) -> None:
+        self.job_list = JobListPanel(self._prefs)
+        self.job_list.open_requested.connect(self._open_review)
+        self.job_list.reveal_requested.connect(self._reveal)
+        self.job_list.damaged_activated.connect(self._show_damaged)
+
+        self.new_job = NewJobPanel(self._prefs, quran_default=_default_quran_file())
+        self.new_job.start_requested.connect(self._start)
+        self.new_job.cancel_requested.connect(self._request_cancel)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        splitter.addWidget(self.job_list)
+        splitter.addWidget(self.new_job)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+
         root = QWidget()
         layout = QVBoxLayout(root)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(14)
-
-        self.drop_label = QLabel("Drop an audio file here, or choose one.")
-        self.drop_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.drop_label.setMinimumHeight(84)
-        self.drop_label.setStyleSheet(
-            "QLabel { border: 2px dashed palette(mid); border-radius: 6px; padding: 18px; }"
-        )
-        layout.addWidget(self.drop_label)
-
-        choose_row = QHBoxLayout()
-        self.choose_button = QPushButton("Choose audio…")
-        self.choose_button.clicked.connect(self._choose_audio)
-        choose_row.addWidget(self.choose_button)
-        self.quran_button = QPushButton("Quran text…")
-        self.quran_button.clicked.connect(self._choose_quran)
-        choose_row.addWidget(self.quran_button)
-        choose_row.addStretch(1)
-        layout.addLayout(choose_row)
-
-        self.quran_label = QLabel()
-        self.quran_label.setWordWrap(True)
-        layout.addWidget(self.quran_label)
-
-        options = QGroupBox("What is this recording?")
-        form = QFormLayout(options)
-
-        self.mode_box = QComboBox()
-        self.mode_box.addItem("Recitation — I know which ayat", "recitation")
-        self.mode_box.addItem("Lecture — find the ayat that are quoted", "lecture")
-        self.mode_box.currentIndexChanged.connect(self._mode_changed)
-        form.addRow("Recording", self.mode_box)
-
-        self.surah_box = QComboBox()
-        self.surah_box.currentIndexChanged.connect(self._surah_changed)
-        form.addRow("Surah", self.surah_box)
-
-        range_row = QHBoxLayout()
-        self.from_spin = QSpinBox()
-        self.from_spin.setMinimum(1)
-        self.to_spin = QSpinBox()
-        self.to_spin.setMinimum(1)
-        self.from_spin.valueChanged.connect(self._range_changed)
-        range_row.addWidget(QLabel("from"))
-        range_row.addWidget(self.from_spin)
-        range_row.addWidget(QLabel("to"))
-        range_row.addWidget(self.to_spin)
-        range_row.addStretch(1)
-        self.range_widget = QWidget()
-        self.range_widget.setLayout(range_row)
-        form.addRow("Ayat", self.range_widget)
-
-        self.preset_box = QComboBox()
-        for name, (width, height, fps) in sorted(VIDEO_PRESETS.items()):
-            self.preset_box.addItem(f"{name} — {width}×{height} at {fps} fps", name)
-        self.preset_box.setCurrentIndex(max(0, self.preset_box.findData("social")))
-        form.addRow("Video size", self.preset_box)
-
-        layout.addWidget(options)
-
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 100)
-        self.progress.setValue(0)
-        self.progress.setTextVisible(True)
-        self.progress.setFormat("Ready")
-        layout.addWidget(self.progress)
-
-        self.status = QLabel(" ")
-        self.status.setWordWrap(True)
-        layout.addWidget(self.status)
-
-        buttons = QHBoxLayout()
-        self.start_button = QPushButton("Start")
-        self.start_button.setDefault(True)
-        self.start_button.clicked.connect(self._start)
-        self.cancel_button = QPushButton("Cancel")
-        self.cancel_button.setEnabled(False)
-        self.cancel_button.clicked.connect(self._request_cancel)
-        self.preview_button = QPushButton("Preview a frame")
-        self.preview_button.setEnabled(False)
-        self.preview_button.clicked.connect(self._preview)
-        self.check_button = QPushButton(t("main.review"))
-        self.check_button.setEnabled(False)
-        self.check_button.clicked.connect(self._open_editor)
-        self.reveal_button = QPushButton("Show the video")
-        self.reveal_button.setEnabled(False)
-        self.reveal_button.clicked.connect(self._reveal)
-        buttons.addWidget(self.start_button)
-        buttons.addWidget(self.cancel_button)
-        buttons.addStretch(1)
-        buttons.addWidget(self.preview_button)
-        buttons.addWidget(self.check_button)
-        buttons.addWidget(self.reveal_button)
-        layout.addLayout(buttons)
-
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.addWidget(splitter)
         self.setCentralWidget(root)
-        self._load_surahs()
-        self._update_quran_label()
 
-    def _load_surahs(self) -> None:
-        """Populate the picker from the store, so the user names the range."""
-        self.surah_box.clear()
-        if self._quran is None:
-            self.surah_box.addItem("Choose the Quran text file first", None)
-            self.surah_box.setEnabled(False)
-            return
-        try:
-            conn = ensure_quran_db(self._quran, QURAN_DB_PATH)
-            try:
-                surahs = list_surahs(conn)
-            finally:
-                conn.close()
-        except Exception as error:  # noqa: BLE001 — a bad store must not kill the window
-            self.surah_box.addItem(f"Could not read the Quran store: {error}", None)
-            self.surah_box.setEnabled(False)
-            return
-
-        self.surah_box.setEnabled(True)
-        for surah in surahs:
-            self.surah_box.addItem(
-                f"{surah['surah_num']}. {surah['name']}  ({surah['ayah_count']} ayat)", surah
-            )
-        self._surah_changed()
-
-    # -- input ----------------------------------------------------------------
-
-    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 — Qt's name
-        if _first_audio(event.mimeData().urls()) is not None:
-            event.acceptProposedAction()
-
-    def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802 — Qt's name
-        path = _first_audio(event.mimeData().urls())
-        if path is not None:
-            self._set_audio(path)
-            event.acceptProposedAction()
-
-    def _choose_audio(self) -> None:
-        name, _ = QFileDialog.getOpenFileName(
-            self,
-            "Choose an audio file",
-            str(Path.home()),
-            "Audio and video (*.mp3 *.wav *.m4a *.aac *.flac *.ogg *.opus *.mp4 *.mkv);;All files (*)",
-        )
-        if name:
-            self._set_audio(Path(name))
-
-    def _choose_quran(self) -> None:
-        name, _ = QFileDialog.getOpenFileName(
-            self,
-            "Choose the Quran text file",
-            str(QURAN_INPUT_DIR),
-            "Text files (*.txt);;All files (*)",
-        )
-        if name:
-            self._quran = Path(name)
-            self._update_quran_label()
-            self._load_surahs()
-            self._refresh_enabled()
-
-    def _set_audio(self, path: Path) -> None:
-        self._audio = path
-        self.drop_label.setText(f"{path.name}\n{path.parent}")
-        self._refresh_enabled()
-
-    def _update_quran_label(self) -> None:
-        if self._quran is None:
-            self.quran_label.setText("Quran text: not chosen yet")
-        elif self._quran == DEFAULT_QURAN_PATH:
-            self.quran_label.setText("Quran text: the certified Qalun text that ships with Qalun")
-        else:
-            self.quran_label.setText(f"Quran text: {self._quran}")
-
-    def _mode_changed(self) -> None:
-        recitation = self.mode_box.currentData() == "recitation"
-        self.surah_box.setVisible(recitation)
-        self.range_widget.setVisible(recitation)
-        form = self.surah_box.parentWidget().layout()
-        if isinstance(form, QFormLayout):
-            for widget in (self.surah_box, self.range_widget):
-                label = form.labelForField(widget)
-                if label is not None:
-                    label.setVisible(recitation)
-        self._refresh_enabled()
-
-    def _surah_changed(self) -> None:
-        surah = self.surah_box.currentData()
-        count = int(surah["ayah_count"]) if surah else 1
-        for spin in (self.from_spin, self.to_spin):
-            spin.setMaximum(count)
-        self.from_spin.setValue(1)
-        self.to_spin.setValue(count)
-        self._refresh_enabled()
-
-    def _range_changed(self) -> None:
-        if self.to_spin.value() < self.from_spin.value():
-            self.to_spin.setValue(self.from_spin.value())
-
-    def current_spec(self) -> JobSpec:
-        """The job the window would run right now."""
-        surah = self.surah_box.currentData()
-        recitation = self.mode_box.currentData() == "recitation"
-        return JobSpec(
-            audio=self._audio or Path(),
-            quran=self._quran or Path(),
-            mode=str(self.mode_box.currentData()),
-            surah_num=int(surah["surah_num"]) if (recitation and surah) else None,
-            from_ayah=self.from_spin.value() if (recitation and surah) else None,
-            to_ayah=self.to_spin.value() if (recitation and surah) else None,
-            preset=str(self.preset_box.currentData()),
-            # This window renders on Start, as it always has; the home window
-            # that replaces it makes skipping the review a choice.
-            render_right_away=True,
-        )
-
-    def _refresh_enabled(self) -> None:
-        running = self._cancel is not None
-        problem = self.current_spec().validate()
-        self.start_button.setEnabled(not running and problem is None)
-        self.start_button.setToolTip(t(problem) if problem else "")
-        for widget in (
-            self.choose_button,
-            self.quran_button,
-            self.mode_box,
-            self.surah_box,
-            self.range_widget,
-            self.preset_box,
-        ):
-            widget.setEnabled(not running)
-        self.cancel_button.setEnabled(running)
+        self.resize(1024, 680)
+        splitter.setSizes([_JOB_LIST_WIDTH, self.width() - _JOB_LIST_WIDTH])
 
     # -- running --------------------------------------------------------------
 
-    def _start(self) -> None:
-        spec = self.current_spec()
+    def _start(self, spec: JobSpec) -> None:
+        if self._cancel is not None:
+            return  # one job at a time; the form is disabled while one runs
         problem = spec.validate()
         if problem is not None:
-            QMessageBox.information(self, "Not ready yet", t(problem))
+            self.new_job.show_status(t(problem))
             return
 
-        self._outcome = None
-        self.reveal_button.setEnabled(False)
-        self.progress.setValue(0)
-        self.progress.setFormat("Starting…")
-        self.status.setText(" ")
+        self._running_spec = spec
+        self._ending = ""
         self._cancel = CancelToken()
-        self._refresh_enabled()
+        starting = t("home.progress.starting")
+        self.new_job.set_running(True)
+        self.new_job.set_progress(None, starting)
+        self.job_list.set_running(Path(spec.audio).name, starting)
 
+        # The job may be a closure; every callback is a bound method, so it
+        # runs on this (the UI) thread rather than the worker's.
         self._thread, self._worker = run_in_thread(
-            lambda progress, cancel: run_job(spec, progress=progress, cancel=cancel),
+            partial(_match_then_render, spec),
             self._cancel,
             on_progress=self._on_progress,
             on_finished=self._on_finished,
@@ -335,115 +149,105 @@ class MainWindow(QMainWindow):
     def _request_cancel(self) -> None:
         if self._cancel is not None:
             self._cancel.cancel()
-            self.cancel_button.setEnabled(False)
-            self.progress.setFormat("Stopping…")
+            self.new_job.show_status(t("home.progress.stopping"))
 
     def _on_progress(self, event: ProgressEvent) -> None:
         if event.fraction is None:
-            self.status.setText(event.message.strip() or " ")
+            if event.message.strip():
+                self.new_job.show_status(event.message.strip())
             return
-        self.progress.setValue(int(max(0.0, min(1.0, event.fraction)) * 100))
-        stage = "Rendering" if event.stage == "render" else "Matching"
-        if event.eta_seconds is not None and not event.done:
-            self.progress.setFormat(f"{stage} — %p%, about {_minutes(event.eta_seconds)} left")
-        else:
-            self.progress.setFormat(f"{stage} — %p%")
+        text = _progress_text(event)
+        self.new_job.set_progress(event.fraction, text)
+        if self._running_spec is not None:
+            self.job_list.set_running(Path(self._running_spec.audio).name, text)
 
-    def _on_finished(self, outcome: JobOutcome) -> None:
-        self._outcome = outcome
-        self.progress.setValue(100)
-        self.progress.setFormat("Finished")
-        where = outcome.video or outcome.matches
-        self.status.setText(f"{outcome.cards} card(s). Saved to {where}")
-        self.reveal_button.setEnabled(outcome.video is not None)
-        self.check_button.setEnabled(True)
-        self.preview_button.setEnabled(True)
+    def _on_finished(self, finished: _Finished) -> None:
+        spec = self._running_spec
+        if spec is not None and spec.output_dir:
+            # A job saved somewhere unusual must still be listed next time.
+            self._prefs.job_dirs = [*self._prefs.job_dirs, Path(spec.output_dir)]
+        self.job_list.set_running("", None)
+        self.job_list.refresh()
+
+        outcome = finished.outcome
+        if outcome is not None and outcome.video is not None:
+            # Rendered right away: the person chose to skip the review.
+            self._ending = t("home.finished.rendered", path=str(outcome.video))
+            return
+        project = finished.project
+        problem = self._show_review(project.path or project_path_for(project.matches))
+        self._ending = problem or t("home.finished.matched", count=len(project.cards))
 
     def _on_failed(self, message: str) -> None:
-        self.progress.setFormat("Stopped")
-        self.status.setText(message)
-        QMessageBox.warning(self, "That did not finish", message)
+        self._ending = t("home.failed", details=message)
+        QMessageBox.warning(self, t("home.failed.title"), message)
 
     def _on_cancelled(self) -> None:
-        self.progress.setValue(0)
-        self.progress.setFormat("Cancelled")
-        self.status.setText("Stopped. Nothing was left behind.")
+        self._ending = t("home.cancelled")
 
     def _on_done(self) -> None:
         self._cancel = None
-        self._refresh_enabled()
+        self._running_spec = None
+        self.job_list.set_running("", None)
+        self.new_job.set_running(False)
+        self.new_job.show_status(self._ending)
 
-    def _preview(self) -> None:
-        """Show one frame, so a style can be judged without re-rendering."""
-        if self._outcome is None:
-            return
-        target = self._outcome.matches.with_suffix(".preview.png")
-        try:
-            result = render_preview(
-                PreviewRequest(
-                    matches=self._outcome.matches,
-                    output=target,
-                    preset=str(self.preset_box.currentData()),
-                    audio=self._audio,
-                )
-            )
-        except (FileNotFoundError, ValueError, RuntimeError) as error:
-            QMessageBox.warning(self, "Could not draw a preview", str(error))
-            return
+    # -- the job list -----------------------------------------------------------
 
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"Preview at {result.at:.1f}s — {result.card or 'opening card'}")
-        layout = QVBoxLayout(dialog)
-        label = QLabel()
-        pixmap = QPixmap(str(result.output))
-        # Fit a portrait frame on an ordinary screen without distorting it.
-        label.setPixmap(pixmap.scaledToHeight(700, Qt.TransformationMode.SmoothTransformation))
-        layout.addWidget(label)
-        dialog.exec()
+    def _reveal(self, path: Path) -> None:
+        show_in_folder(path)
 
-    def _open_editor(self) -> None:
-        """Open the finished job's project for review.
+    def _show_damaged(self, error: str) -> None:
+        self.new_job.show_status(t("home.damaged", details=error))
 
-        The project path is the one ``run_job`` already wrote (or, for an
-        older outcome, wherever it would have put it beside the match file).
-        Reopening the same project raises the window already open on it
-        rather than making a second one, so a correction is only ever made
-        in one place at a time. A closed window is not kept: the next review
-        loads the project from disk again, so it shows what was saved (never
-        edits that were discarded) and anything that changed the file since.
+    # -- review windows -------------------------------------------------------
+
+    def _open_review(self, project_path: Path) -> None:
+        """Open *project_path* for review, or say on the status line why it cannot be."""
+        problem = self._show_review(project_path)
+        if problem is not None:
+            self.new_job.show_status(problem)
+
+    def _show_review(self, project_path: Path) -> str | None:
+        """Show the review window for *project_path*; return why not, or None.
+
+        Reopening the same project raises the window already open on it rather
+        than making a second one, so a correction is only ever made in one
+        place at a time. A closed window is not kept: the next review loads the
+        project from disk again, so it shows what was saved (never edits that
+        were discarded) and anything that changed the file since.
         """
-        if self._outcome is None:
-            return
-        project_path = self._outcome.project or project_path_for(self._outcome.matches)
+        project_path = Path(project_path)
         existing = self._reviews.get(project_path)
         if existing is not None:
             existing.show()
             existing.raise_()
             existing.activateWindow()
-            return
+            return None
         try:
             project = load_project(project_path)
-        except (OSError, ValueError) as error:
-            QMessageBox.warning(self, "Could not open the review", str(error))
-            return
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            return t("home.review_failed", name=project_path.name, details=str(error))
 
         window = ReviewWindow(project)
-        window.saved.connect(lambda path: self.status.setText(t("main.saved", path=path)))
+        window.saved.connect(self._review_saved)
         window.closed.connect(partial(self._forget_review, project_path, window))
         window.show()
         # Keep a reference: a window without one is collected and vanishes.
         self._reviews[project_path] = window
+        return None
+
+    def _review_saved(self, path: Path) -> None:
+        self.job_list.refresh()
+        if self._cancel is None:  # while a job runs, the status line is its progress
+            self.new_job.show_status(t("main.saved", path=path))
 
     def _forget_review(self, project_path: Path, window: ReviewWindow) -> None:
         """Let a closed review window go, unless another has taken its place."""
         if self._reviews.get(project_path) is window:
             del self._reviews[project_path]
         window.deleteLater()
-
-    def _reveal(self) -> None:
-        if self._outcome is None or self._outcome.video is None:
-            return
-        show_in_folder(self._outcome.video)
+        self.job_list.refresh()
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt override
         """Close every open review window first; a refusal keeps this window open too.
@@ -459,10 +263,24 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
+def _progress_text(event: ProgressEvent) -> str:
+    """``Matching — 40%, about 2m 05s left``: the stage, how far, and how long when known."""
+    percent = int(max(0.0, min(1.0, event.fraction or 0.0)) * 100)
+    rendering = event.stage == "render"
+    if event.eta_seconds is not None and not event.done:
+        eta = _minutes(event.eta_seconds)
+        if rendering:
+            return t("home.progress.rendering_eta", percent=percent, eta=eta)
+        return t("home.progress.matching_eta", percent=percent, eta=eta)
+    if rendering:
+        return t("home.progress.rendering", percent=percent)
+    return t("home.progress.matching", percent=percent)
+
+
 def _minutes(seconds: float) -> str:
     if seconds < 60:
-        return f"{int(seconds)}s"
-    return f"{int(seconds // 60)}m {int(seconds % 60):02d}s"
+        return t("home.eta.seconds", seconds=int(seconds))
+    return t("home.eta.minutes", minutes=int(seconds // 60), seconds=f"{int(seconds % 60):02d}")
 
 
 def _default_quran_file() -> Path | None:

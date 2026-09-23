@@ -7,8 +7,9 @@ job — see ``jobs/catalog.py`` — it never touches the file, so a mistaken
 removal costs nothing to undo (re-add the folder, or edit the prefs file).
 
 A row that cannot be read (``DAMAGED``) is still listed, with its error kept
-on the row as a status tip; double-clicking it shows that error instead of
-trying to open a project that failed to load.
+on the row as a status tip; double-clicking it hands that error to whoever
+shows it (``damaged_activated``) instead of trying to open a project that
+failed to load.
 """
 
 from __future__ import annotations
@@ -68,10 +69,15 @@ class JobListPanel(QWidget):
     #: "Show in folder" was chosen; carries the project's Path. The panel does
     #: not reveal it itself — ``MainWindow`` owns that call.
     reveal_requested = Signal(object)
+    #: A damaged row was opened; carries its error, for ``MainWindow`` to show.
+    damaged_activated = Signal(str)
 
     def __init__(self, prefs: Prefs, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._prefs = prefs
+        #: The running job's row label, or None. Kept apart from the row itself
+        #: so :meth:`refresh` can put the row back after rebuilding the list.
+        self._running_label: str | None = None
         #: The transient "matching…" row set_running adds, or None.
         self._running_item: QListWidgetItem | None = None
 
@@ -108,17 +114,17 @@ class JobListPanel(QWidget):
     # -- filling ----------------------------------------------------------------
 
     def refresh(self) -> None:
-        """Rebuild the list from disk.
+        """Rebuild the list from disk, keeping the running job's row on top.
 
-        Drops any transient running row: the job it described either finished
-        (and now appears from disk, read back like any other project) or the
-        caller will call :meth:`set_running` again for its next update.
+        A refresh can come mid-job (a review saved, or Refresh pressed); the
+        running job has no project file to be read back yet, so its row is put
+        back rather than vanishing until the next progress update.
         """
         self.list.clear()
         self._running_item = None
         for entry in list_jobs(job_dirs_for(self._prefs.job_dirs), hidden=self._prefs.hidden_jobs):
             self._add_entry(entry)
-        self._update_empty_state()
+        self._show_running_row()
 
     def _add_entry(self, entry: JobEntry) -> None:
         item = QListWidgetItem()
@@ -136,21 +142,23 @@ class JobListPanel(QWidget):
         Used while a job is being matched, before it has a project file of its
         own to show up from disk, e.g. ``set_running("recitation.m4a", "Aligning… 40%")``.
         """
-        if text is None:
+        self._running_label = None if text is None else f"{name} — {text}"
+        self._show_running_row()
+
+    def _show_running_row(self) -> None:
+        """Make the top row match ``_running_label``: added, relabelled or removed."""
+        if self._running_label is None:
             if self._running_item is not None:
                 row = self.list.row(self._running_item)
                 if row >= 0:
                     self.list.takeItem(row)
                 self._running_item = None
-            self._update_empty_state()
-            return
-        label = f"{name} — {text}"
-        if self._running_item is None:
-            self._running_item = QListWidgetItem(label)
+        elif self._running_item is None:
+            self._running_item = QListWidgetItem(self._running_label)
             self._running_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self.list.insertItem(0, self._running_item)
         else:
-            self._running_item.setText(label)
+            self._running_item.setText(self._running_label)
         self._update_empty_state()
 
     def _update_empty_state(self) -> None:
@@ -165,7 +173,8 @@ class JobListPanel(QWidget):
         if not isinstance(entry, JobEntry):
             return  # the transient running row carries no entry
         if entry.status == DAMAGED:
-            return  # the error is already on the row as its status tip
+            self.damaged_activated.emit(entry.error or t("home.status.damaged"))
+            return
         self.open_requested.emit(entry.project)
 
     def _on_context_menu(self, pos: QPoint) -> None:

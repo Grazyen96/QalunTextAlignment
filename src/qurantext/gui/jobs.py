@@ -8,7 +8,7 @@ calls, so the window can put review between them.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -36,7 +36,6 @@ __all__ = [
     "project_path_for",
     "run_matching",
     "run_render",
-    "run_job",
 ]
 
 
@@ -106,8 +105,6 @@ class JobOutcome:
     mode: str
     project: Path | None = None
     subtitles: tuple[Path, ...] = ()
-    #: Where re-matching put an earlier project whose content differed, if it did.
-    backup: Path | None = None
 
 
 def _set_aside(path: Path) -> Path | None:
@@ -164,17 +161,6 @@ def run_matching(
     An earlier project for the same match file is kept as a backup when its
     content differs, and the backup is reported as progress.
     """
-    project, _backup = _match(spec, progress=progress, cancel=cancel)
-    return project
-
-
-def _match(
-    spec: JobSpec,
-    *,
-    progress: ProgressCallback | None = None,
-    cancel: CancelToken | None = None,
-) -> tuple[Project, Path | None]:
-    """:func:`run_matching`, also returning the backup so :func:`run_job` can report it."""
     audio = Path(spec.audio)
     match_dir = Path(
         spec.output_dir
@@ -222,12 +208,11 @@ def _match(
         if job_settings(existing) != job_settings(project):
             set_job_settings(existing, job_settings(project))
             save_project(existing, destination)
-        return existing, None
-    backup = kept if isinstance(kept, Path) else None
-    if backup is not None:
-        report(progress, "detect", f"Kept your earlier corrections in {backup.name}")
+        return existing
+    if isinstance(kept, Path):
+        report(progress, "detect", f"Kept your earlier corrections in {kept.name}")
     save_project(project, destination)
-    return project, backup
+    return project
 
 
 def run_render(
@@ -266,31 +251,3 @@ def run_render(
         project=project.path,
         subtitles=tuple(result.subtitles),
     )
-
-
-def run_job(
-    spec: JobSpec,
-    *,
-    progress: ProgressCallback | None = None,
-    cancel: CancelToken | None = None,
-) -> JobOutcome:
-    """Match, then render when the job asks to skip the review.
-
-    Both stages report progress and honour Cancel. The render reads the
-    choices matching just recorded in the project, so it is the same render a
-    later one from the review would be.
-    """
-    project, backup = _match(spec, progress=progress, cancel=cancel)
-    if not spec.render_right_away:
-        return JobOutcome(
-            matches=Path(project.matches),
-            video=None,
-            cards=len(project.cards),
-            mode=spec.mode,
-            project=project.path,
-            backup=backup,
-        )
-    if cancel is not None:
-        cancel.raise_if_cancelled("render")
-    outcome = run_render(project, progress=progress, cancel=cancel)
-    return replace(outcome, backup=backup)

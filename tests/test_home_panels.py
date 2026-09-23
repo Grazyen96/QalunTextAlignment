@@ -138,6 +138,41 @@ def test_damaged_file_is_listed_and_does_not_open(qt_app, prefs) -> None:
     assert received == []
 
 
+def test_double_clicking_a_damaged_row_emits_its_error(qt_app, prefs) -> None:
+    jobs_dir = prefs.job_dirs[0]
+    (jobs_dir / "broken.qalun.json").write_text("{not json", encoding="utf-8")
+
+    panel = JobListPanel(prefs)
+    errors = []
+    panel.damaged_activated.connect(errors.append)
+
+    panel.list.itemActivated.emit(panel.list.item(0))
+
+    entry = panel.list.item(0).data(Qt.ItemDataRole.UserRole)
+    assert errors == [entry.error] and entry.error
+
+
+def test_refresh_keeps_the_running_row(qt_app, prefs) -> None:
+    """A job saved elsewhere (a review's Save) refreshes the list mid-job; the row stays."""
+    jobs_dir = prefs.job_dirs[0]
+    _save(jobs_dir, "done")
+    panel = JobListPanel(prefs)
+
+    panel.set_running("recitation.m4a", "Aligning… 40%")
+    panel.refresh()
+
+    assert panel.list.count() == 2
+    assert "40%" in panel.list.item(0).text()
+    assert panel.list.item(0).data(Qt.ItemDataRole.UserRole) is None
+
+    panel.set_running("recitation.m4a", "Aligning… 60%")
+    assert panel.list.count() == 2 and "60%" in panel.list.item(0).text()
+
+    panel.set_running("recitation.m4a", None)
+    panel.refresh()
+    assert panel.list.count() == 1
+
+
 # -- NewJobPanel ----------------------------------------------------------------------
 
 
@@ -356,3 +391,42 @@ def test_set_running_true_disables_inputs(qt_app, prefs, store) -> None:
     assert panel.start_button.isVisible()
     assert not panel.cancel_button.isVisible()
     assert not panel.progress_bar.isVisible()
+
+
+def test_show_status_says_how_the_last_job_ended(qt_app, prefs, store) -> None:
+    """``set_running(False)`` hides the running status; the ending is shown after it."""
+    panel = _panel(prefs, store)
+    panel.show()
+    panel.set_running(True)
+    panel.set_running(False)
+
+    panel.show_status("Stopped.")
+    assert panel.status_label.isVisible() and panel.status_label.text() == "Stopped."
+
+    panel.show_status("")
+    assert not panel.status_label.isVisible()
+
+
+def test_a_quran_override_that_is_gone_falls_back_to_the_default(
+    qt_app, prefs, store, tmp_path
+) -> None:
+    """The override wins only while its file exists; the choice itself is kept."""
+    gone = tmp_path / "gone.txt"
+    prefs.quran_override = gone
+
+    panel = _panel(prefs, store)
+
+    assert panel.spec().quran == QURAN_FILE
+    assert panel.quran_label.text() == t("home.quran_override.default")
+    assert prefs.quran_override == gone.resolve(), "an unmounted drive must not erase it"
+
+
+def test_a_quran_override_that_exists_wins_over_the_default(qt_app, prefs, store, tmp_path) -> None:
+    prefs.quran_override = QURAN_FILE
+
+    panel = _panel(prefs, store, quran_default=tmp_path / "default.txt")
+
+    assert panel.spec().quran == QURAN_FILE.resolve()
+    assert panel.quran_label.text() == t(
+        "home.quran_override.custom", path=str(QURAN_FILE.resolve())
+    )
