@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QFocusEvent,
@@ -34,6 +34,11 @@ __all__ = ["WordStrip"]
 
 _PLAYHEAD_OUTLINE = QColor(226, 75, 74)
 _EDITED_DOT = QColor(239, 159, 39)
+
+#: Below this box width, skip text layout entirely and draw only the box —
+#: at deep zoom-out on a long lecture, thousands of boxes are only a
+#: fraction of a pixel wide and the label would not be legible anyway.
+_MIN_TEXT_WIDTH_PX = 12.0
 
 
 @dataclass(slots=True)
@@ -71,6 +76,12 @@ class WordStrip(QWidget):
         super().__init__(parent)
         self.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         self.setMouseTracking(True)
+        # A child widget never receives ActivationChange or (with the default
+        # NoFocus policy) FocusOut, so without this a lost grab — the window
+        # deactivating, a modal opening — would go unnoticed mid-drag. A
+        # press giving the strip real focus makes Qt deliver a genuine
+        # FocusOut when that happens.
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self._viewport = viewport
         self._session = session
         self._selected: WordRef | None = None
@@ -235,12 +246,11 @@ class WordStrip(QWidget):
         self._finish_drag()
         super().hideEvent(event)
 
-    def changeEvent(self, event: QEvent) -> None:  # noqa: N802 - Qt override
-        super().changeEvent(event)
-        # Not leaveEvent: during a grab the pointer may legitimately leave
-        # the widget and come back, and that must not end the gesture.
-        if event.type() == QEvent.Type.ActivationChange and not self.isActiveWindow():
-            self._finish_drag()
+    # Not leaveEvent or a changeEvent/ActivationChange override: during a
+    # grab the pointer may legitimately leave the widget and come back, and
+    # ActivationChange is only ever delivered to a top-level widget anyway —
+    # dead code here. focusOutEvent (above) covers the window losing
+    # activation instead, now that a press gives the strip real focus.
 
     # -- painting ---------------------------------------------------------------
 
@@ -268,9 +278,6 @@ class WordStrip(QWidget):
         selected = tw.ref == self._selected
         if selected:
             painter.fillRect(rect, palette.highlight())
-            text_color = palette.highlightedText().color()
-        else:
-            text_color = palette.windowText().color()
 
         border_pen = QPen(_PLAYHEAD_OUTLINE if is_under_playhead else palette.mid().color())
         border_pen.setWidth(2 if is_under_playhead else 1)
@@ -278,6 +285,14 @@ class WordStrip(QWidget):
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRect(rect)
 
+        if rect.width() < _MIN_TEXT_WIDTH_PX:
+            # Too narrow to read at this zoom (thousands of boxes fit in view
+            # at once); the box alone is the useful signal, and skipping the
+            # text layout is what keeps painting a fully zoomed-out long
+            # lecture cheap.
+            return
+
+        text_color = palette.highlightedText().color() if selected else palette.windowText().color()
         painter.setPen(text_color)
         elided = metrics.elidedText(
             tw.text, Qt.TextElideMode.ElideRight, max(0, int(rect.width()) - 4)

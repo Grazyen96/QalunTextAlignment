@@ -157,21 +157,48 @@ def test_shift_dragging_ripples_the_rest(qt_app) -> None:
 
 
 def test_losing_focus_mid_drag_closes_the_gesture(qt_app) -> None:
-    from PySide6.QtCore import QEvent
-    from PySide6.QtGui import QFocusEvent
-    from PySide6.QtWidgets import QApplication
+    """A genuine focus change (not a synthetic event) mid-drag closes the gesture.
+
+    ``WordStrip`` is a child widget: it never receives ``ActivationChange``
+    (only a top-level widget does), and with the default ``Qt.NoFocus``
+    policy it never receives ``FocusOut`` either, since it never holds focus
+    in the first place. ``ClickFocus`` fixes both: a press gives the strip
+    real focus, so moving focus elsewhere delivers a real ``FocusOut``. This
+    is exercised end to end — a real top-level window, a real second
+    focusable widget, ``other.setFocus()`` — rather than a synthetic
+    ``QFocusEvent`` sent straight to the strip, which passed even before
+    ``ClickFocus`` was added and so did not catch the bug.
+    """
+    from PySide6.QtWidgets import QLineEdit, QWidget
 
     from qurantext.gui.review.session import CARD, WordRef
 
     session, strip = _strip(qt_app)
+    container = QWidget()
+    strip.setParent(container)
+    strip.move(0, 0)
+    strip.resize(1000, 34)
+    other = QLineEdit(container)
+    other.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+    other.move(0, 40)
+    other.resize(200, 24)
+    container.resize(1000, 80)
+    container.show()
+    qt_app.processEvents()
+
     QTest.mousePress(strip, Qt.MouseButton.LeftButton, pos=QPoint(200, 17))
+    assert strip.hasFocus(), "a press must give the strip real focus (ClickFocus policy)"
     QTest.mouseMove(strip, QPoint(210, 17))
     assert session.can_undo  # the edge drag already opened a gesture
 
-    QApplication.sendEvent(strip, QFocusEvent(QEvent.Type.FocusOut))
+    other.setFocus(Qt.FocusReason.MouseFocusReason)
+    qt_app.processEvents()
+    assert other.hasFocus()
+    assert not strip.hasFocus()  # the strip really lost focus; this is not a synthetic event
 
-    # A retime from outside the strip, after the gesture was force-closed,
-    # must open an undo entry of its own rather than merging into the drag.
+    # A retime from outside the strip, after the gesture was closed by the
+    # real FocusOut, must open an undo entry of its own rather than merging
+    # into the drag.
     session.retime(WordRef(CARD, 0, 2), end=4.5)
     assert session.words()[2].end == pytest.approx(4.5)
 
@@ -180,6 +207,8 @@ def test_losing_focus_mid_drag_closes_the_gesture(qt_app) -> None:
     assert session.undo()
     assert session.words()[1].start == pytest.approx(2.0)
     assert not session.can_undo
+
+    container.close()
 
 
 def test_a_selection_that_no_longer_exists_is_dropped(qt_app) -> None:
