@@ -460,3 +460,36 @@ def test_a_quran_override_that_exists_wins_over_the_default(qt_app, prefs, store
     assert panel.quran_label.text() == t(
         "home.quran_override.custom", path=str(QURAN_FILE.resolve())
     )
+
+
+def test_the_form_reads_top_down_with_choose_inside_the_drop_zone(qt_app, prefs, store) -> None:
+    from PySide6.QtWidgets import QHBoxLayout
+
+    panel = _panel(prefs, store)
+    panel.resize(700, 640)
+    panel.show()
+
+    assert panel.heading_label.text() == "New job"
+    assert panel.drop_zone.height() == panel.drop_zone.maximumHeight() == 96
+    assert panel.choose_button.parentWidget() is panel.drop_zone
+    assert panel.choose_button.text() == t("home.choose")
+
+    # The reason Start is disabled sits beside Start, not at the far end of the form.
+    row = panel.start_button.parentWidget().layout()
+    buttons_row = next(
+        item.layout()
+        for item in (row.itemAt(i) for i in range(row.count()))
+        if isinstance(item.layout(), QHBoxLayout) and item.layout().indexOf(panel.start_button) >= 0
+    )
+    assert buttons_row.indexOf(panel.problem_label) >= 0
+
+    # The free space goes to the bottom, so the controls stay together at the top.
+    last = row.itemAt(row.count() - 1)
+    assert last.spacerItem() is not None
+
+    margins = panel.range_widget.layout().contentsMargins()
+    assert (margins.left(), margins.top(), margins.right(), margins.bottom()) == (0, 0, 0, 0)
+
+    assert ":checked" in panel.recitation_button.styleSheet()
+    assert "palette(highlight)" in panel.recitation_button.styleSheet()
+    panel.close()

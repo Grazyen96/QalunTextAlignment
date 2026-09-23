@@ -20,11 +20,13 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QProgressBar,
     QPushButton,
     QRadioButton,
+    QSizePolicy,
     QSpinBox,
     QToolButton,
     QVBoxLayout,
@@ -57,6 +59,20 @@ _SUBTITLE_KEYS = {
     "sidecar": "home.subtitles.sidecar",
     "both": "home.subtitles.both",
 }
+#: The drop zone's height: room for the file's name, its folder and "Choose…".
+_DROP_ZONE_HEIGHT = 96
+
+#: The Recitation | Lecture toggle. Native checkable buttons barely show which
+#: one is down in some styles; the palette's highlight reads as "chosen" in a
+#: light and a dark theme alike.
+_TOGGLE_STYLE = (
+    "QPushButton { border: 1px solid palette(mid); border-radius: 4px; padding: 4px 14px;"
+    " background: palette(button); color: palette(button-text); }"
+    " QPushButton:checked { background: palette(highlight); color: palette(highlighted-text);"
+    " border-color: palette(highlight); }"
+    " QPushButton:disabled { color: palette(mid); }"
+)
+
 _FORMAT_KEYS = {
     "srt": "format.srt",
     "vtt": "format.vtt",
@@ -106,24 +122,48 @@ class NewJobPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
 
+        self.heading_label = QLabel(t("home.new_job"))
+        heading_font = self.heading_label.font()
+        heading_font.setBold(True)
+        self.heading_label.setFont(heading_font)
+        layout.addWidget(self.heading_label)
+
+        # The drop zone holds its own "Choose…": dropping and choosing are one
+        # control, not a box and a stray button under it.
+        self.drop_zone = QFrame()
+        self.drop_zone.setObjectName("dropZone")
+        self.drop_zone.setFixedHeight(_DROP_ZONE_HEIGHT)
+        self.drop_zone.setStyleSheet(
+            "QFrame#dropZone { border: 2px dashed palette(mid); border-radius: 6px; }"
+        )
+        drop_layout = QVBoxLayout(self.drop_zone)
+        drop_layout.setContentsMargins(12, 8, 12, 8)
+        drop_layout.setSpacing(4)
         self.drop_label = QLabel(t("home.drop"))
         self.drop_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.drop_label.setMinimumHeight(84)
         self.drop_label.setWordWrap(True)
-        self.drop_label.setStyleSheet(
-            "QLabel { border: 2px dashed palette(mid); border-radius: 6px; padding: 18px; }"
-        )
-        layout.addWidget(self.drop_label)
-
+        # A long folder path must not widen the whole window; it is clipped
+        # here and shown in full as the tooltip.
+        self.drop_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        drop_layout.addWidget(self.drop_label)
         self.choose_button = QPushButton(t("home.choose"))
+        self.choose_button.setFlat(True)
+        self.choose_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.choose_button.setStyleSheet(
+            "QPushButton { border: none; color: palette(link); text-decoration: underline; }"
+            " QPushButton:disabled { color: palette(mid); }"
+        )
         self.choose_button.clicked.connect(self._choose_audio)
-        layout.addWidget(self.choose_button)
+        drop_layout.addWidget(self.choose_button, 0, Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(self.drop_zone)
 
         mode_row = QHBoxLayout()
         self.recitation_button = QPushButton(t("home.mode.recitation"))
         self.recitation_button.setCheckable(True)
         self.lecture_button = QPushButton(t("home.mode.lecture"))
         self.lecture_button.setCheckable(True)
+        for button in (self.recitation_button, self.lecture_button):
+            button.setStyleSheet(_TOGGLE_STYLE)
         self._mode_group = QButtonGroup(self)
         self._mode_group.setExclusive(True)
         self._mode_group.addButton(self.recitation_button)
@@ -142,6 +182,7 @@ class NewJobPanel(QWidget):
         form.addRow(t("home.surah"), self.surah_box)
 
         range_row = QHBoxLayout()
+        range_row.setContentsMargins(0, 0, 0, 0)
         self.from_spin = QSpinBox()
         self.from_spin.setMinimum(1)
         self.to_spin = QSpinBox()
@@ -239,12 +280,13 @@ class NewJobPanel(QWidget):
         self.cancel_button.setVisible(False)
         buttons_row.addWidget(self.start_button)
         buttons_row.addWidget(self.cancel_button)
-        buttons_row.addStretch(1)
-        layout.addLayout(buttons_row)
-
+        # What stops Start is said beside it, where the eye already is.
         self.problem_label = QLabel()
         self.problem_label.setWordWrap(True)
-        layout.addWidget(self.problem_label)
+        buttons_row.addWidget(self.problem_label, 1)
+        # Takes the room the hidden label leaves, so Start keeps its own width.
+        buttons_row.addStretch(0)
+        layout.addLayout(buttons_row)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
@@ -255,6 +297,8 @@ class NewJobPanel(QWidget):
         self.status_label.setWordWrap(True)
         self.status_label.setVisible(False)
         layout.addWidget(self.status_label)
+        # Spare height goes below the form, so the controls stay together at the top.
+        layout.addStretch(1)
 
     def _apply_prefs(self) -> None:
         """Set every control from ``prefs``, once, after the widgets exist."""
@@ -345,6 +389,7 @@ class NewJobPanel(QWidget):
         """Set the chosen audio file; used by the dialog, and by drops."""
         self._audio = path
         self.drop_label.setText(f"{path.name}\n{path.parent}")
+        self.drop_label.setToolTip(str(path))
         self._refresh()
 
     def _choose_quran_override(self) -> None:

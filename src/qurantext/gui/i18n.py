@@ -26,6 +26,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "home.show_in_folder": "Show in folder",
         "home.remove_from_list": "Remove from list",
         "home.empty": "Your jobs appear here once you start one.",
+        "home.new_job": "New job",
         "home.drop": "Drop an audio file, or choose one",
         "home.choose": "Choose…",
         "home.choose_audio.dialog_title": "Choose an audio file",
