@@ -493,3 +493,28 @@ def test_the_form_reads_top_down_with_choose_inside_the_drop_zone(qt_app, prefs,
     assert ":checked" in panel.recitation_button.styleSheet()
     assert "palette(highlight)" in panel.recitation_button.styleSheet()
     panel.close()
+
+
+def test_the_surah_picker_and_file_filters_read_from_the_string_table(
+    qt_app, prefs, store, monkeypatch
+) -> None:
+    from qurantext.gui.home import new_job as module
+
+    panel = _panel(prefs, store)
+    first = panel.surah_box.itemData(0)
+    assert panel.surah_box.itemText(0) == t(
+        "home.surah_item", num=1, name=first["name"], count=first["ayah_count"]
+    )
+
+    filters: list = []
+
+    def fake_open(parent, title, folder, filter_text):
+        filters.append(filter_text)
+        return "", ""
+
+    monkeypatch.setattr(module.QFileDialog, "getOpenFileName", fake_open)
+    panel._choose_audio()
+    panel._choose_quran_override()
+    assert filters[0].startswith(t("home.filter.audio") + " (")
+    assert filters[1].startswith(t("home.filter.text") + " (")
+    assert all(f.endswith(t("home.filter.all") + " (*)") for f in filters)

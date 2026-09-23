@@ -359,7 +359,13 @@ class NewJobPanel(QWidget):
         self.surah_box.setEnabled(True)
         for surah in surahs:
             self.surah_box.addItem(
-                f"{surah['surah_num']}. {surah['name']}  ({surah['ayah_count']} ayat)", surah
+                t(
+                    "home.surah_item",
+                    num=surah["surah_num"],
+                    name=surah["name"],
+                    count=surah["ayah_count"],
+                ),
+                surah,
             )
         self._surah_changed()
 
@@ -380,7 +386,7 @@ class NewJobPanel(QWidget):
             self,
             t("home.choose_audio.dialog_title"),
             str(Path.home()),
-            "Audio and video (*.mp3 *.wav *.m4a *.aac *.flac *.ogg *.opus *.mp4 *.mkv);;All files (*)",
+            _file_filter(t("home.filter.audio"), sorted(AUDIO_SUFFIXES)),
         )
         if name:
             self.set_audio(Path(name))
@@ -397,7 +403,7 @@ class NewJobPanel(QWidget):
             self,
             t("home.quran_override.dialog_title"),
             str(QURAN_INPUT_DIR),
-            "Text files (*.txt);;All files (*)",
+            _file_filter(t("home.filter.text"), [".txt"]),
         )
         if name:
             self.set_quran(Path(name))
@@ -584,6 +590,12 @@ class NewJobPanel(QWidget):
         """
         self.status_label.setText(text)
         self.status_label.setVisible(bool(text))
+
+
+def _file_filter(name: str, suffixes: list[str]) -> str:
+    """A file dialog's filter: ``Name (*.a *.b);;All files (*)``, the names translated."""
+    patterns = " ".join(f"*{suffix}" for suffix in suffixes)
+    return f"{name} ({patterns});;{t('home.filter.all')} (*)"
 
 
 def _first_audio(urls) -> Path | None:

@@ -17,6 +17,7 @@ from qurantext.config.paths import (
     RECITATION_MATCHING_OUTPUT_DIR,
     VIDEOS_OUTPUT_DIR,
 )
+from qurantext.gui.i18n import t
 from qurantext.jobs.project import (
     JobSettings,
     Project,
@@ -181,7 +182,7 @@ def run_matching(
     match_path = match_path_for(spec)
 
     if spec.has_stated_range:
-        report(progress, "detect", "Aligning against the ayat you chose...")
+        report(progress, "detect", t("job.progress.aligning"))
         run_recitation_range(
             quran=spec.quran,
             output=match_path,
@@ -194,7 +195,7 @@ def run_matching(
             cancel=cancel,
         )
     else:
-        report(progress, "detect", "Looking for Quran in the audio...")
+        report(progress, "detect", t("job.progress.detecting"))
         run_detection(
             quran=spec.quran,
             output=match_path,
@@ -218,7 +219,7 @@ def run_matching(
             save_project(existing, destination)
         return existing
     if isinstance(kept, Path):
-        report(progress, "detect", f"Kept your earlier corrections in {kept.name}")
+        report(progress, "detect", t("job.progress.kept", name=kept.name))
     save_project(project, destination)
     return project
 

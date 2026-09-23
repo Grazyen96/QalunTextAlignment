@@ -378,12 +378,13 @@ def test_a_changed_rematch_keeps_a_backup_and_says_so(tmp_path, monkeypatch) -> 
     events: list[ProgressEvent] = []
     run_matching(spec, progress=events.append)
 
+    from qurantext.gui.i18n import t
+
     (backup,) = tmp_path.glob("clip_recitation.*.qalun-backup.json")
     assert load_project(backup).cards[0]["start_time"] == 0.25
-    assert any(
-        e.stage == "detect" and e.message == f"Kept your earlier corrections in {backup.name}"
-        for e in events
-    )
+    kept = t("job.progress.kept", name=backup.name)
+    assert kept == f"Kept your earlier corrections in {backup.name}"
+    assert any(e.stage == "detect" and e.message == kept for e in events)
 
 
 def test_an_unreadable_earlier_project_is_always_kept(tmp_path, monkeypatch) -> None:
