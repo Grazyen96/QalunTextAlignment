@@ -249,3 +249,30 @@ def test_record_render_takes_a_given_content_hash_verbatim(tmp_path) -> None:
     assert project.render["content_hash"] == "abc"
     assert project.render_is_stale is True
     assert project.render["width"] == 10
+
+
+def test_project_path_for_sits_beside_the_match_file(tmp_path) -> None:
+    from qurantext.jobs.project import project_path_for
+
+    assert project_path_for(tmp_path / "clip_recitation.json") == (
+        tmp_path / "clip_recitation.qalun.json"
+    )
+
+
+def test_project_init_writes_where_the_app_looks_by_default(tmp_path, capsys) -> None:
+    """The CLI and the window must agree, or the job list never shows a CLI project."""
+    from qurantext.cli.main import main
+    from qurantext.jobs.project import project_path_for
+
+    matches = tmp_path / "matching" / "clip_lecture.json"
+    matches.parent.mkdir()
+    matches.write_text(json.dumps(_match_payload(), ensure_ascii=False), encoding="utf-8")
+    audio = tmp_path / "media" / "clip.mp3"
+    audio.parent.mkdir()
+    audio.write_bytes(b"")
+
+    assert main(["project", "init", "--audio", str(audio), "--matches", str(matches)]) == 0
+    expected = project_path_for(matches.resolve())
+    assert expected.is_file()
+    assert not audio.with_suffix(".qalun.json").exists()
+    assert str(expected) in capsys.readouterr().out

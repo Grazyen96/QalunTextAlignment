@@ -35,6 +35,7 @@ __all__ = [
     "CaptionCue",
     "Project",
     "load_project",
+    "project_path_for",
     "save_project",
 ]
 
@@ -308,6 +309,15 @@ class Project:
             }
             for cue in self.captions
         ]
+
+
+def project_path_for(match_path: str | PathLike[str]) -> Path:
+    """Where a job's project lives: beside its match file.
+
+    The one rule every writer follows, so the window, the command line and the
+    job list all find the same file.
+    """
+    return Path(match_path).with_suffix(".qalun.json")
 
 
 def save_project(project: Project, destination: str | PathLike[str]) -> Path:

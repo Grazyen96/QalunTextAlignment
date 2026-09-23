@@ -17,7 +17,7 @@ from qurantext.config.paths import (
     RECITATION_MATCHING_OUTPUT_DIR,
     VIDEOS_OUTPUT_DIR,
 )
-from qurantext.jobs.project import Project, load_project, save_project
+from qurantext.jobs.project import Project, load_project, project_path_for, save_project
 from qurantext.jobs.project_render import render_project
 from qurantext.pipelines.detection import run_detection, run_recitation_range
 from qurantext.utils.progress import CancelToken, ProgressCallback, report
@@ -83,11 +83,6 @@ class JobOutcome:
     subtitles: tuple[Path, ...] = ()
     #: Where re-matching put an earlier project whose content differed, if it did.
     backup: Path | None = None
-
-
-def project_path_for(match_path: Path) -> Path:
-    """Where a job's project lives: beside its match file."""
-    return Path(match_path).with_suffix(".qalun.json")
 
 
 def _set_aside(path: Path) -> Path | None:
