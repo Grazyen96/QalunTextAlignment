@@ -178,10 +178,7 @@ class MainWindow(QMainWindow):
     def _on_finished(self, finished: _Finished) -> None:
         if self._closing:
             return  # no review, and no list, under a window that is going away
-        spec = self._running_spec
-        if spec is not None and spec.output_dir:
-            # A job saved somewhere unusual must still be listed next time.
-            self._prefs.job_dirs = [*self._prefs.job_dirs, Path(spec.output_dir)]
+        self._remember_output_dir()
         project = finished.project
         project_path = project.path or project_path_for(project.matches)
         # Running a job again is asking for it: one removed from the list comes back.
@@ -201,12 +198,29 @@ class MainWindow(QMainWindow):
         if self._closing:
             return  # the person closed the window; a dialog now would bring it back
         self._ending = t("home.failed", details=message)
+        self._list_a_half_done_job()
         QMessageBox.warning(self, t("home.failed.title"), message)
 
     def _on_cancelled(self) -> None:
         if self._closing:
             return
         self._ending = t("home.cancelled")
+        self._list_a_half_done_job()
+
+    def _remember_output_dir(self) -> None:
+        """A job saved somewhere unusual must still be listed next time."""
+        spec = self._running_spec
+        if spec is not None and spec.output_dir:
+            self._prefs.job_dirs = [*self._prefs.job_dirs, Path(spec.output_dir)]
+
+    def _list_a_half_done_job(self) -> None:
+        """A render right away that stopped may follow a matching that saved its project."""
+        spec = self._running_spec
+        if spec is None or not spec.render_right_away:
+            return
+        self._remember_output_dir()
+        self.job_list.set_running("", None)
+        self.job_list.refresh()
 
     def _on_done(self) -> None:
         if self._closing:

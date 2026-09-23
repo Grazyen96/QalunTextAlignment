@@ -1269,3 +1269,34 @@ def test_rerunning_a_removed_job_lists_it_again(
     ]
     assert listed == [project_path]
     assert project_path.resolve() not in prefs.hidden_jobs
+
+
+@pytest.mark.parametrize("ending", ["fails", "is cancelled"])
+def test_a_render_right_away_that_does_not_finish_still_lists_the_matched_job(
+    qt_app, home, prefs, reviews, tmp_path, monkeypatch, ending
+) -> None:
+    """Matching wrote the project before the render stopped; the list must show it."""
+    from PySide6.QtCore import Qt
+
+    from qurantext.gui import main_window as module
+    from qurantext.utils.progress import JobCancelled
+
+    _fake_matching(monkeypatch)
+
+    def render(project, *, progress=None, cancel=None):
+        if ending == "fails":
+            raise RuntimeError("the encoder gave up")
+        raise JobCancelled("render")
+
+    monkeypatch.setattr(module, "run_render", render)
+    monkeypatch.setattr(module.QMessageBox, "warning", lambda *a: None)
+    custom = tmp_path / "elsewhere"
+
+    _run_start(qt_app, home, _spec(tmp_path, output_dir=custom, render_right_away=True))
+
+    listed = [
+        home.job_list.list.item(i).data(Qt.ItemDataRole.UserRole).project
+        for i in range(home.job_list.list.count())
+    ]
+    assert listed == [custom / "a_recitation.qalun.json"]
+    assert custom.resolve() in prefs.job_dirs
