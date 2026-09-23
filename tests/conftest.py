@@ -30,3 +30,12 @@ def store(tmp_path_factory):
     path = tmp_path_factory.mktemp("store") / "quran.sqlite"
     build_quran_db(QURAN_FILE, path)
     return path
+
+
+@pytest.fixture(scope="module")
+def qt_app():
+    """One QApplication for widget tests; skipped where Qt is not installed."""
+    pytest.importorskip("PySide6", reason="the window needs Qt: pip install 'qurantext[gui]'")
+    from PySide6.QtWidgets import QApplication
+
+    return QApplication.instance() or QApplication([])
