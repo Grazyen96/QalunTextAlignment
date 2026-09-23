@@ -24,12 +24,13 @@ from typing import Any
 
 from qurantext.config.paths import user_cache_dir
 
-__all__ = ["cache_key", "cache_path", "load_cached", "store_cached"]
+__all__ = ["audio_digest", "cache_key", "cache_path", "load_cached", "store_cached"]
 
 _CHUNK = 1 << 20
 
 
-def _audio_digest(audio_path: Path) -> str:
+def audio_digest(audio_path: Path) -> str:
+    """SHA-256 of the audio file's bytes, read in chunks."""
     digest = hashlib.sha256()
     with audio_path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(_CHUNK), b""):
@@ -41,7 +42,7 @@ def cache_key(audio_path: str | PathLike[str], settings: dict[str, Any]) -> str:
     """A key over the audio's bytes and the settings that shape the result."""
     payload = json.dumps(settings, sort_keys=True, ensure_ascii=False, default=str)
     combined = hashlib.sha256()
-    combined.update(_audio_digest(Path(audio_path)).encode("ascii"))
+    combined.update(audio_digest(Path(audio_path)).encode("ascii"))
     combined.update(b"\0")
     combined.update(payload.encode("utf-8"))
     return combined.hexdigest()
