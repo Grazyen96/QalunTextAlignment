@@ -1206,3 +1206,56 @@ def test_opening_twice_while_open_keeps_one_window(qt_app, tmp_path, real_review
     real_reviews._open_review(project_path)
     assert real_reviews._reviews[project_path] is first
     assert len(real_reviews._reviews) == 1
+
+
+def test_the_project_path_a_spec_will_write_is_beside_its_match_file(tmp_path) -> None:
+    from qurantext.gui.jobs import match_path_for
+    from qurantext.jobs.project import project_path_for
+
+    spec = _spec(tmp_path, output_dir=tmp_path / "jobs")
+    assert match_path_for(spec) == tmp_path / "jobs" / "a_recitation.json"
+    assert project_path_for(match_path_for(spec)) == tmp_path / "jobs" / "a_recitation.qalun.json"
+
+
+def test_a_job_whose_review_is_open_is_not_run_again(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    """Re-matching would replace the project under unsaved corrections in its review."""
+    calls: list = []
+    _fake_matching(monkeypatch, calls)
+    project_path = _saved_job(tmp_path / "jobs", "a")
+    home._open_review(project_path)
+
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    qt_app.processEvents()
+
+    assert calls == [] and home._cancel is None
+    assert (
+        home.new_job.status_label.text() == "Close the review of this job before running it again."
+    )
+    assert reviews[0].raised == 1 and reviews[0].activated == 1
+
+    reviews[0].close()
+    _run_start(qt_app, home, _spec(tmp_path, output_dir=tmp_path / "jobs"))
+    assert len(calls) == 1, "once its review is closed, the job runs"
+
+
+def test_rerunning_a_removed_job_lists_it_again(
+    qt_app, home, prefs, reviews, tmp_path, monkeypatch
+) -> None:
+    from PySide6.QtCore import Qt
+
+    _fake_matching(monkeypatch)
+    project_path = _saved_job(tmp_path / "jobs", "a")
+    home.job_list.refresh()
+    home.job_list.remove_from_list(project_path)
+    assert home.job_list.list.count() == 0
+
+    _run_start(qt_app, home, _spec(tmp_path, output_dir=tmp_path / "jobs"))
+
+    listed = [
+        home.job_list.list.item(i).data(Qt.ItemDataRole.UserRole).project
+        for i in range(home.job_list.list.count())
+    ]
+    assert listed == [project_path]
+    assert project_path.resolve() not in prefs.hidden_jobs

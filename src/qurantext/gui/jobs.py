@@ -33,6 +33,7 @@ from qurantext.utils.progress import CancelToken, ProgressCallback, report
 __all__ = [
     "JobSpec",
     "JobOutcome",
+    "match_path_for",
     "project_path_for",
     "run_matching",
     "run_render",
@@ -148,6 +149,23 @@ def _keep_earlier(destination: Path, derived: Project) -> Path | str | None:
     return _set_aside(destination)
 
 
+def match_path_for(spec: JobSpec) -> Path:
+    """The match file *spec* writes; its project goes beside it (``project_path_for``).
+
+    The one place the rule lives, so the window can tell before Start which
+    project a job will replace (and refuse while that project is open in a review).
+    """
+    match_dir = Path(
+        spec.output_dir
+        or (
+            RECITATION_MATCHING_OUTPUT_DIR
+            if spec.mode == "recitation"
+            else LECTURE_MATCHING_OUTPUT_DIR
+        )
+    )
+    return match_dir / f"{Path(spec.audio).stem}_{spec.mode}.json"
+
+
 def run_matching(
     spec: JobSpec,
     *,
@@ -160,15 +178,7 @@ def run_matching(
     content differs, and the backup is reported as progress.
     """
     audio = Path(spec.audio)
-    match_dir = Path(
-        spec.output_dir
-        or (
-            RECITATION_MATCHING_OUTPUT_DIR
-            if spec.mode == "recitation"
-            else LECTURE_MATCHING_OUTPUT_DIR
-        )
-    )
-    match_path = match_dir / f"{audio.stem}_{spec.mode}.json"
+    match_path = match_path_for(spec)
 
     if spec.has_stated_range:
         report(progress, "detect", "Aligning against the ayat you chose...")

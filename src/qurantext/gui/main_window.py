@@ -32,7 +32,7 @@ from qurantext.gui.files import show_in_folder
 from qurantext.gui.home.job_list import JobListPanel
 from qurantext.gui.home.new_job import NewJobPanel
 from qurantext.gui.i18n import t
-from qurantext.gui.jobs import JobOutcome, JobSpec, run_matching, run_render
+from qurantext.gui.jobs import JobOutcome, JobSpec, match_path_for, run_matching, run_render
 from qurantext.gui.prefs import Prefs
 from qurantext.gui.review import ReviewWindow
 from qurantext.gui.review.background import BackgroundJobs
@@ -133,6 +133,14 @@ class MainWindow(QMainWindow):
         if problem is not None:
             self.new_job.show_status(t(problem))
             return
+        open_review = self._review_of(project_path_for(match_path_for(spec)))
+        if open_review is not None:
+            # Re-matching replaces that project on disk, under whatever the
+            # person has not saved in its review; saving then would overwrite
+            # the new match with the old one. They finish there first.
+            self.new_job.show_status(t("home.close_review_first"))
+            _raise(open_review)
+            return
 
         self._running_spec = spec
         self._ending = ""
@@ -174,6 +182,10 @@ class MainWindow(QMainWindow):
         if spec is not None and spec.output_dir:
             # A job saved somewhere unusual must still be listed next time.
             self._prefs.job_dirs = [*self._prefs.job_dirs, Path(spec.output_dir)]
+        project = finished.project
+        project_path = project.path or project_path_for(project.matches)
+        # Running a job again is asking for it: one removed from the list comes back.
+        self._prefs.unhide_job(project_path)
         self.job_list.set_running("", None)
         self.job_list.refresh()
 
@@ -182,8 +194,7 @@ class MainWindow(QMainWindow):
             # Rendered right away: the person chose to skip the review.
             self._ending = t("home.finished.rendered", path=str(outcome.video))
             return
-        project = finished.project
-        problem = self._show_review(project.path or project_path_for(project.matches))
+        problem = self._show_review(project_path)
         self._ending = problem or t("home.finished.matched", count=len(project.cards))
 
     def _on_failed(self, message: str) -> None:
@@ -237,11 +248,9 @@ class MainWindow(QMainWindow):
         were discarded) and anything that changed the file since.
         """
         project_path = Path(project_path)
-        existing = self._reviews.get(project_path)
+        existing = self._review_of(project_path)
         if existing is not None:
-            existing.show()
-            existing.raise_()
-            existing.activateWindow()
+            _raise(existing)
             return None
         try:
             project = load_project(project_path)
@@ -254,6 +263,14 @@ class MainWindow(QMainWindow):
         window.show()
         # Keep a reference: a window without one is collected and vanishes.
         self._reviews[project_path] = window
+        return None
+
+    def _review_of(self, project_path: Path) -> ReviewWindow | None:
+        """The review open on *project_path*, however either path was spelled."""
+        target = Path(project_path).resolve()
+        for path, window in self._reviews.items():
+            if Path(path).resolve() == target:
+                return window
         return None
 
     def _review_saved(self, path: Path) -> None:
@@ -293,6 +310,13 @@ class MainWindow(QMainWindow):
             return
         self._jobs.stop()
         super().closeEvent(event)
+
+
+def _raise(window: QWidget) -> None:
+    """Bring *window* to the front, shown and focused."""
+    window.show()
+    window.raise_()
+    window.activateWindow()
 
 
 def _progress_text(event: ProgressEvent) -> str:
