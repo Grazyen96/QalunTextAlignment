@@ -19,8 +19,8 @@ from tests.media_helpers import QURAN_FILE
 
 
 @pytest.fixture()
-def prefs(tmp_path):
-    """A ``Prefs`` over a throwaway INI, scanning one tmp folder for jobs."""
+def prefs(tmp_path, no_default_job_dirs):
+    """A ``Prefs`` over a throwaway INI, scanning one tmp folder for jobs (and nothing else)."""
     settings = QSettings(str(tmp_path / "prefs.ini"), QSettings.Format.IniFormat)
     result = Prefs(settings)
     jobs_dir = tmp_path / "jobs"

@@ -24,6 +24,20 @@ def no_basmala(monkeypatch):
     get_settings.cache_clear()
 
 
+@pytest.fixture()
+def no_default_job_dirs(monkeypatch):
+    """Keep the job list away from the checkout's real ``output/`` folders.
+
+    ``JobListPanel`` (and so ``MainWindow``) scans ``catalog.default_job_dirs()``
+    on top of ``Prefs.job_dirs``; left live, a test counting rows fails as soon
+    as the person running it has a job of their own in ``output/``. Opt in from
+    every fixture or test that builds either.
+    """
+    from qurantext.jobs import catalog
+
+    monkeypatch.setattr(catalog, "default_job_dirs", lambda: [])
+
+
 @pytest.fixture(scope="module")
 def store(tmp_path_factory):
     """A word-level store built from the shipped Quran text, once per module."""

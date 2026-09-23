@@ -618,11 +618,8 @@ def _saved_job(folder: Path, name: str = "clip") -> Path:
 
 
 @pytest.fixture()
-def prefs(tmp_path, monkeypatch):
+def prefs(tmp_path, no_default_job_dirs):
     """``Prefs`` on a throwaway INI; the job list sees only folders under tmp_path."""
-    from qurantext.jobs import catalog
-
-    monkeypatch.setattr(catalog, "default_job_dirs", lambda: [])
     result = Prefs(QSettings(str(tmp_path / "prefs.ini"), QSettings.Format.IniFormat))
     result.job_dirs = [tmp_path / "jobs"]
     return result
