@@ -1,0 +1,483 @@
+"""The review window: listen to a job, watch its frame, and correct its timings.
+
+This module is layout and wiring only. What an edit may do lives in
+:class:`ReviewSession` (and below it ``core.timing_edit``); how each widget
+draws lives in that widget (the small bars included: :class:`WarningsStrip`,
+:class:`SelectionBar`, :class:`ZoomSlider`); the slow reads of the recording
+run through :class:`BackgroundJobs`. The window turns what the person does — a key, a
+click, a drag the strip reports — into session calls, and after every change
+brings the widgets, the toolbar and the title back in line with the session.
+
+Keys are bound twice on purpose. ``QShortcut``\\ s make them work whichever
+child has focus (a focused table would otherwise swallow ``.`` as a type-ahead
+search, a focused button would take Space as a click), and
+:meth:`ReviewWindow.keyPressEvent` handles the same keys when they reach the
+window as plain key presses — which is how they arrive before the window is
+active, as in an offscreen test. A key a shortcut consumes never becomes a key
+press, so nothing runs twice.
+"""
+
+from __future__ import annotations
+
+import math
+from collections.abc import Callable
+from functools import partial
+from pathlib import Path
+
+from PySide6.QtCore import QKeyCombination, Qt, QTimer, Signal
+from PySide6.QtGui import QCloseEvent, QKeyEvent, QKeySequence, QShortcut
+from PySide6.QtWidgets import (
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
+)
+
+from qurantext.config.settings import VIDEO_PRESETS
+from qurantext.core.coverage import find_uncovered_speech
+from qurantext.core.waveform import Peaks, load_or_compute_peaks, peaks_path_for
+from qurantext.gui.i18n import t
+from qurantext.gui.review.background import BackgroundJobs
+from qurantext.gui.review.frame_view import FrameView
+from qurantext.gui.review.player import RATES, Player, create_player
+from qurantext.gui.review.segment_list import SegmentList
+from qurantext.gui.review.selection_bar import NUDGE_S, SelectionBar
+from qurantext.gui.review.session import ReviewSession, WordRef
+from qurantext.gui.review.viewport import Viewport
+from qurantext.gui.review.warnings_strip import WarningsStrip
+from qurantext.gui.review.waveform_view import WaveformView
+from qurantext.gui.review.word_strip import WordStrip
+from qurantext.gui.review.zoom_slider import ZoomSlider
+from qurantext.jobs.project import Project
+
+__all__ = ["ReviewWindow"]
+
+#: The playhead poll while playing: often enough that the highlight looks continuous.
+_TICK_MS = 16
+#: How long after the last edit the coverage check re-runs.
+_COVERAGE_DEBOUNCE_MS = 1000
+#: The nudge step with Shift held, in seconds (the plain step is ``NUDGE_S``).
+_FINE_NUDGE_S = 0.01
+#: The timeline window shown on open, before the person zooms.
+_DEFAULT_SPAN_S = 20.0
+
+
+def _clock(seconds: float) -> str:
+    """*seconds* as ``mm:ss.cc``, rounded once so 59.999 never reads as ``00:60.00``."""
+    centis = max(0, int(round(seconds * 100)))
+    minutes, rest = divmod(centis, 6000)
+    return f"{minutes:02d}:{rest // 100:02d}.{rest % 100:02d}"
+
+
+def _is_portrait(project: Project) -> bool:
+    """Whether the job's video is taller than wide: its last render, else its preset."""
+    render = project.render or {}
+    width, height = render.get("width"), render.get("height")
+    if not (isinstance(width, int) and isinstance(height, int)):
+        preset = VIDEO_PRESETS.get(str(project.export.get("preset") or "social"))
+        width, height = preset[:2] if preset else (1080, 1920)
+    return height >= width
+
+
+def _content_end(project: Project) -> float:
+    """The latest time any card or caption reaches: a timeline length before the audio is read."""
+    ends = [float(card.get("end_time") or 0.0) for card in project.cards]
+    ends += [float(cue.end) for cue in project.captions]
+    return max(ends, default=0.0)
+
+
+class ReviewWindow(QMainWindow):
+    """One project under review: toolbar, warnings, frame, timeline, segment list."""
+
+    #: The project file was written; carries its path.
+    saved = Signal(object)
+    #: The person asked to export subtitles (handled by whoever opened the window).
+    export_requested = Signal()
+    #: The person asked to render with the corrections.
+    render_requested = Signal()
+
+    def __init__(
+        self, project: Project, *, player: Player | None = None, parent: QWidget | None = None
+    ) -> None:
+        super().__init__(parent)
+        self.session = ReviewSession(project)
+        self.player = player if player is not None else create_player(self)
+        self.viewport = Viewport(self)
+        self._jobs = BackgroundJobs(self)
+        self._audio = Path(project.audio)
+        self._coverage_generation = 0
+        self._closed = False
+        #: The session revision the views last caught up with (see ``_after_caption_edit``).
+        self._seen_revision = self.session.revision
+
+        self._build()
+        self._wire()
+        self._bind_keys()
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(_TICK_MS)
+        self._timer.timeout.connect(self._tick)
+        self._coverage_timer = QTimer(self)
+        self._coverage_timer.setSingleShot(True)
+        self._coverage_timer.setInterval(_COVERAGE_DEBOUNCE_MS)
+        self._coverage_timer.timeout.connect(self._start_coverage)
+
+        self._set_duration(_content_end(project), measured=False)
+        if not self.player.available:
+            self.play_button.setEnabled(False)
+            self.play_button.setToolTip(self.player.reason)
+            self.warnings.add_notice(self.player.reason)
+        if self._audio.is_file():
+            self.player.load(self._audio)
+            self._start_peaks()
+            self._start_coverage()
+        else:
+            self.warnings.add_notice(t("review.audio_missing", path=str(self._audio)))
+        self._sync_state()
+        self._show_time(self.player.position(), force=True)
+
+    # -- layout ---------------------------------------------------------------
+
+    def _build(self) -> None:
+        central = QWidget(self)
+        column = QVBoxLayout(central)
+
+        toolbar = QHBoxLayout()
+        self.save_button = QPushButton(t("review.save"))
+        self.undo_button = QPushButton(t("review.undo"))
+        self.redo_button = QPushButton(t("review.redo"))
+        self.reviewed_button = QPushButton(t("review.mark_reviewed"))
+        self.export_button = QPushButton(t("review.export"))
+        self.render_button = QPushButton(t("review.render"))
+        for button in (self.save_button, self.undo_button, self.redo_button, self.reviewed_button):
+            toolbar.addWidget(button)
+        toolbar.addStretch(1)
+        toolbar.addWidget(self.export_button)
+        toolbar.addWidget(self.render_button)
+        column.addLayout(toolbar)
+
+        self.warnings = WarningsStrip()
+        column.addWidget(self.warnings)
+
+        body = QWidget()
+        body_row = QHBoxLayout(body)
+        body_row.setContentsMargins(0, 0, 0, 0)
+        self.frame_view = FrameView(self.session, portrait=_is_portrait(self.session.project))
+        body_row.addWidget(self.frame_view, 0, Qt.AlignmentFlag.AlignTop)
+        body_row.addLayout(self._build_timeline(), 1)
+
+        self.segment_list = SegmentList(self.session)
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(body)
+        splitter.addWidget(self.segment_list)
+        column.addWidget(splitter, 1)
+
+        self.statusBar().addWidget(QLabel(t("review.shortcuts")))
+        self.setCentralWidget(central)
+
+    def _build_timeline(self) -> QVBoxLayout:
+        right = QVBoxLayout()
+
+        zoom_row = QHBoxLayout()
+        zoom_row.addWidget(QLabel(t("review.zoom")))
+        self.zoom_slider = ZoomSlider(self.viewport, self.player.position)
+        zoom_row.addWidget(self.zoom_slider, 1)
+        right.addLayout(zoom_row)
+
+        self.waveform = WaveformView(self.viewport)
+        self.strip = WordStrip(self.viewport, self.session)
+        right.addWidget(self.waveform)
+        right.addWidget(self.strip)
+
+        transport = QHBoxLayout()
+        self.play_button = QPushButton(t("review.play"))
+        self.time_label = QLabel(_clock(0.0))
+        self.rate_combo = QComboBox()
+        for rate in RATES:
+            self.rate_combo.addItem(f"{rate:g}×", rate)
+        transport.addWidget(self.play_button)
+        transport.addWidget(self.time_label)
+        transport.addWidget(self.rate_combo)
+        transport.addStretch(1)
+        right.addLayout(transport)
+
+        self.selection_bar = SelectionBar()
+        right.addWidget(self.selection_bar)
+        right.addStretch(1)
+        return right
+
+    def _wire(self) -> None:
+        self.save_button.clicked.connect(self.save)
+        self.undo_button.clicked.connect(self.undo)
+        self.redo_button.clicked.connect(self.redo)
+        self.reviewed_button.clicked.connect(self._mark_reviewed)
+        self.export_button.clicked.connect(self.export_requested)
+        self.render_button.clicked.connect(self.render_requested)
+        self.warnings.jump_requested.connect(self.seek)
+        self.waveform.seek_requested.connect(self.seek)
+        self.strip.seek_requested.connect(self.seek)
+        self.strip.selection_changed.connect(self._show_selection)
+        self.strip.edited.connect(self._after_edit)
+        self.segment_list.seek_requested.connect(self.seek)
+        # Connected after the list's own handler, so the caption text is already in the session.
+        self.segment_list.itemChanged.connect(self._after_caption_edit)
+        self.play_button.clicked.connect(self.toggle_play)
+        self.rate_combo.currentIndexChanged.connect(self._on_rate)
+        self.selection_bar.nudge_requested.connect(self._nudge)
+        self.selection_bar.snap_requested.connect(self._snap_to_playhead)
+        self.player.playing_changed.connect(self._on_playing_changed)
+        self.player.duration_changed.connect(self._set_duration)
+        self.player.error.connect(self.warnings.add_notice)
+
+    def _bind_keys(self) -> None:
+        bindings: list[tuple[str, Callable[[], None]]] = [
+            ("Space", self.toggle_play),
+            ("Left", partial(self._step, -1)),
+            ("Right", partial(self._step, 1)),
+            ("[", self._set_start_at_playhead),
+            ("]", self._set_end_at_playhead),
+            (",", partial(self._nudge, -NUDGE_S)),
+            (".", partial(self._nudge, NUDGE_S)),
+            ("Shift+,", partial(self._nudge, -_FINE_NUDGE_S)),
+            ("Shift+.", partial(self._nudge, _FINE_NUDGE_S)),
+            ("Ctrl+Z", self.undo),
+            ("Ctrl+Shift+Z", self.redo),
+            ("Ctrl+S", self.save),
+        ]
+        self._keys: dict[str, Callable[[], None]] = {}
+        for text, action in bindings:
+            sequence = QKeySequence(text)
+            shortcut = QShortcut(sequence, self)
+            shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+            shortcut.activated.connect(action)
+            self._keys[sequence.toString()] = action
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 - Qt override
+        combination = event.keyCombination()
+        modifiers = combination.keyboardModifiers() & ~Qt.KeyboardModifier.KeypadModifier
+        text = QKeySequence(QKeyCombination(modifiers, combination.key())).toString()
+        action = self._keys.get(text)
+        if action is None:
+            super().keyPressEvent(event)
+            return
+        action()
+        event.accept()
+
+    # -- playback -------------------------------------------------------------
+
+    def toggle_play(self) -> None:
+        if self.player.available:
+            self.player.toggle()
+
+    def seek(self, seconds: float) -> None:
+        """Move the playhead to *seconds* and bring every view there at once."""
+        self.player.seek(seconds)
+        self._show_time(seconds, force=True)
+
+    def _tick(self) -> None:
+        self._show_time(self.player.position())
+
+    def _show_time(self, seconds: float, *, force: bool = False) -> None:
+        self.waveform.set_playhead(seconds)
+        self.strip.set_playhead(seconds)
+        self.viewport.follow(seconds)
+        self.time_label.setText(_clock(seconds))
+        self.segment_list.highlight_at(seconds)
+        self.frame_view.show_at(seconds, force=force)
+
+    def _on_playing_changed(self, playing: bool) -> None:
+        self.play_button.setText(t("review.pause") if playing else t("review.play"))
+        if playing:
+            self._timer.start()
+        else:
+            self._timer.stop()
+            self._show_time(self.player.position(), force=True)
+
+    def _on_rate(self, index: int) -> None:
+        self.player.set_rate(float(self.rate_combo.itemData(index)))
+
+    # -- timeline -------------------------------------------------------------
+
+    def _set_duration(self, duration: float, *, measured: bool = True) -> None:
+        """Size the timeline to *duration* seconds, keeping the view near the default span.
+
+        Only a *measured* length (the player's, or the decoded peaks') bounds
+        a ripple; the content's own extent, used until one arrives, does not.
+        """
+        duration = float(duration)
+        if measured and duration > 0:
+            self.session.duration = duration
+        if duration <= 0 or math.isclose(duration, self.viewport.duration):
+            return
+        self.viewport.set_duration(duration)
+        self.viewport.set_window(self.viewport.start, min(_DEFAULT_SPAN_S, duration))
+
+    # -- editing --------------------------------------------------------------
+
+    def _step(self, direction: int) -> None:
+        ref = self.session.step(self.strip.selected, direction)
+        if ref is None:
+            return
+        self.strip.select(ref)
+        self.seek(self.session.word(ref).start)
+
+    def _set_start_at_playhead(self) -> None:
+        ref = self.strip.selected
+        if ref is not None:
+            self.session.retime(ref, start=self.player.position())
+            self._after_edit()
+
+    def _set_end_at_playhead(self) -> None:
+        ref = self.strip.selected
+        if ref is not None:
+            self.session.retime(ref, end=self.player.position())
+            self._after_edit()
+
+    def _nudge(self, delta: float) -> None:
+        """Move the selected word's end by *delta* seconds.
+
+        The strip does not report which edge a drag grabbed, so the nudged
+        edge is always the end; ``[`` sets a start precisely instead.
+        """
+        ref = self.strip.selected
+        if ref is not None:
+            self.session.retime(ref, end=self.session.word(ref).end + delta)
+            self._after_edit()
+
+    def _snap_to_playhead(self) -> None:
+        """Move whichever edge of the selected word is nearer the playhead onto it."""
+        ref = self.strip.selected
+        if ref is None:
+            return
+        word = self.session.word(ref)
+        now = self.player.position()
+        if abs(now - word.start) <= abs(now - word.end):
+            self.session.retime(ref, start=now)
+        else:
+            self.session.retime(ref, end=now)
+        self._after_edit()
+
+    def _mark_reviewed(self) -> None:
+        self.session.mark_reviewed()
+        self._after_edit()
+
+    def undo(self) -> None:
+        if self.session.undo():
+            self._after_edit()
+
+    def redo(self) -> None:
+        if self.session.redo():
+            self._after_edit()
+
+    def _after_caption_edit(self, _item: object) -> None:
+        if self.session.revision != self._seen_revision:
+            # Not refreshing the list: it is mid-signal for the edited cell.
+            self._after_edit(refresh_list=False)
+
+    def _after_edit(self, *, refresh_list: bool = True) -> None:
+        """Bring every view back in line with the session after any change."""
+        self.strip.refresh()
+        if refresh_list:
+            self.segment_list.refresh()
+        self._sync_state()
+        self.frame_view.show_at(self.player.position(), force=True)
+        if self._audio.is_file():
+            self._coverage_timer.start()
+
+    def _sync_state(self) -> None:
+        session = self.session
+        self._seen_revision = session.revision
+        self.save_button.setEnabled(session.dirty)
+        self.undo_button.setEnabled(session.can_undo)
+        self.redo_button.setEnabled(session.can_redo)
+        self.reviewed_button.setEnabled(session.project.review.get("state") != "reviewed")
+        title = t("review.title", name=self._audio.stem)
+        self.setWindowTitle(f"{title} *" if session.dirty else title)
+        self._show_selection(self.strip.selected)
+
+    def _show_selection(self, ref: WordRef | None) -> None:
+        self.selection_bar.show_word(self.session.word(ref) if ref is not None else None)
+
+    # -- saving and closing ---------------------------------------------------
+
+    def save(self) -> bool:
+        """Write the corrections to the project file; ``False`` (after saying why) if it failed."""
+        try:
+            path = self.session.save()
+        except (OSError, ValueError) as error:
+            QMessageBox.warning(self, t("review.save"), str(error))
+            return False
+        self._sync_state()
+        self.saved.emit(path)
+        return True
+
+    def _confirm_discard(self) -> str:
+        """Ask what to do with unsaved changes: ``"save"``, ``"discard"`` or ``"cancel"``."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(t("review.discard_title"))
+        box.setText(t("review.discard_text"))
+        buttons = QMessageBox.StandardButton
+        box.setStandardButtons(buttons.Save | buttons.Discard | buttons.Cancel)
+        box.setDefaultButton(buttons.Save)
+        answer = box.exec()
+        if answer == buttons.Save:
+            return "save"
+        if answer == buttons.Discard:
+            return "discard"
+        return "cancel"
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt override
+        if not self._closed and self.session.dirty:
+            answer = self._confirm_discard()
+            if answer == "cancel" or (answer == "save" and not self.save()):
+                event.ignore()
+                return
+        self._closed = True
+        self._timer.stop()
+        self._coverage_timer.stop()
+        self.player.pause()
+        self._jobs.stop()
+        event.accept()
+
+    # -- background reads -------------------------------------------------------
+
+    def _start_peaks(self) -> None:
+        audio = self._audio
+        project_path = self.session.project.path or audio.with_suffix(".qalun.json")
+        cache = peaks_path_for(project_path)
+        self._jobs.start(
+            lambda progress, cancel: load_or_compute_peaks(audio, cache, cancel=cancel),
+            on_finished=self._on_peaks,
+            on_failed=self.warnings.add_notice,
+        )
+
+    def _on_peaks(self, peaks: Peaks) -> None:
+        self.waveform.set_peaks(peaks)
+        if self.player.duration() <= 0:
+            self._set_duration(peaks.duration)
+
+    def _start_coverage(self) -> None:
+        if self._closed:
+            return
+        self._coverage_generation += 1
+        generation = self._coverage_generation
+        audio = self._audio
+        words = self.session.coverage_words()
+        self._jobs.start(
+            lambda progress, cancel: (generation, find_uncovered_speech(audio, words)),
+            on_finished=self._on_coverage,
+            on_failed=self.warnings.add_notice,
+        )
+
+    def _on_coverage(self, result: object) -> None:
+        generation, gaps = result
+        if generation != self._coverage_generation:
+            return  # an edit came after this check started; a newer one is on its way
+        self.waveform.set_gaps([(gap.start, gap.end) for gap in gaps])
+        self.warnings.set_gaps(gaps)

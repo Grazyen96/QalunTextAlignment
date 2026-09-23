@@ -21,6 +21,32 @@ STRINGS: dict[str, dict[str, str]] = {
         "segments.text": "Text",
         "segments.retimed": "Retimed",
         "segments.locked": "Quran text is read from the store and cannot be edited here.",
+        "review.title": "Review — {name}",
+        "review.save": "Save",
+        "review.undo": "Undo",
+        "review.redo": "Redo",
+        "review.mark_reviewed": "Mark as reviewed",
+        "review.export": "Export subtitles…",
+        "review.render": "Render with corrections",
+        "review.play": "Play",
+        "review.pause": "Pause",
+        "review.zoom": "Zoom",
+        "review.snap": "Snap to playhead",
+        "review.minus": "−50 ms",
+        "review.plus": "+50 ms",
+        "review.no_selection": "Select a word to retime it",
+        "review.selected": "{word}  {start} → {end} s",
+        "review.gaps": "{count} stretch(es) of speech have no word:",
+        "review.gap": "{duration:.1f} s at {start:.1f}–{end:.1f} s",
+        "review.jump": "Jump",
+        "review.covered": "Every stretch of speech is covered by a word.",
+        "review.audio_missing": "The recording is not where the project says: {path}",
+        "review.discard_title": "Save your corrections?",
+        "review.discard_text": "This review has changes that are not saved.",
+        "review.shortcuts": (
+            "Space plays · ←/→ step words · [ and ] set start/end at the playhead · "
+            ", and . nudge · Ctrl+Z undoes"
+        ),
     },
 }
 LANGUAGES = tuple(STRINGS)
