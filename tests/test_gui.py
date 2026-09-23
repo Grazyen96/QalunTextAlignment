@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -240,6 +241,7 @@ def test_run_job_matches_then_renders(tmp_path, monkeypatch) -> None:
             from_ayah=7,
             to_ayah=8,
             preset="fast",
+            render_right_away=True,
             output_dir=tmp_path / "out",
         ),
         progress=events.append,
@@ -348,7 +350,6 @@ def _rematch_setup(tmp_path, monkeypatch):
         from_ayah=1,
         to_ayah=7,
         output_dir=tmp_path,
-        render=False,
     )
     return jobs_module, spec
 
@@ -405,7 +406,14 @@ def test_set_aside_returns_the_backup_path(tmp_path) -> None:
 
 def test_an_identical_rematch_leaves_the_project_file_untouched(tmp_path, monkeypatch) -> None:
     from qurantext.gui import jobs as jobs_module
-    from qurantext.jobs.project import Project, load_project, project_path_for, save_project
+    from qurantext.jobs.project import (
+        JobSettings,
+        Project,
+        load_project,
+        project_path_for,
+        save_project,
+        set_job_settings,
+    )
 
     match_path = tmp_path / "clip_recitation.json"
     match_path.write_text(
@@ -416,6 +424,8 @@ def test_an_identical_rematch_leaves_the_project_file_untouched(tmp_path, monkey
     existing = Project.from_match_file(match_path, audio, mode="recitation")
     existing.mark_reviewed()
     existing.style = {"theme": "night"}
+    # The same choices the re-run makes, so only the content could differ.
+    set_job_settings(existing, JobSettings(output_dir=tmp_path))
     destination = save_project(existing, project_path_for(match_path))
     before = destination.read_bytes()
 
@@ -429,6 +439,118 @@ def test_an_identical_rematch_leaves_the_project_file_untouched(tmp_path, monkey
     assert project.review["state"] == "reviewed" and project.style == {"theme": "night"}
     assert not list(tmp_path.glob("*.qalun-backup.json"))
     assert load_project(destination).review["state"] == "reviewed"
+
+
+# --- the job's choices, kept with the job -----------------------------------
+
+
+def test_matching_records_the_jobs_choices(tmp_path, monkeypatch) -> None:
+    from qurantext.jobs.project import JobSettings, job_settings, load_project
+
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    spec = replace(spec, preset="fast", subtitles="both", formats=("srt", "vtt"))
+    project = jobs_module.run_matching(spec)
+
+    expected = JobSettings("fast", "both", ("srt", "vtt"), tmp_path.resolve())
+    assert job_settings(project) == expected
+    assert job_settings(load_project(project.path)) == expected
+
+
+def test_an_unchanged_rematch_with_new_choices_updates_only_the_choices(
+    tmp_path, monkeypatch
+) -> None:
+    from qurantext.jobs.project import job_settings, load_project, save_project
+
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    first = jobs_module.run_matching(spec)
+    reviewed = load_project(first.path)
+    reviewed.mark_reviewed()
+    reviewed.style = {"theme": "night"}
+    save_project(reviewed, first.path)
+    before = json.loads(first.path.read_text(encoding="utf-8"))
+
+    events: list[ProgressEvent] = []
+    outcome = run_job(replace(spec, preset="high"), progress=events.append)
+
+    after = json.loads(first.path.read_text(encoding="utf-8"))
+    assert after["export"]["preset"] == "high"
+    assert {k: v for k, v in after.items() if k != "export"} == {
+        k: v for k, v in before.items() if k != "export"
+    }, "cards, captions, review and style are left as they were"
+    assert job_settings(load_project(first.path)).preset == "high"
+    assert outcome.backup is None and not list(tmp_path.glob("*.qalun-backup.json"))
+
+
+def _capture_render_project(jobs_module, monkeypatch, tmp_path):
+    from qurantext.jobs.export import ExportResult
+
+    seen: dict = {}
+
+    def fake_render_project(project, output, **kwargs):
+        seen.update(kwargs, output=output)
+        return ExportResult(video=output, subtitles=[], cues=0, render=None)
+
+    monkeypatch.setattr(jobs_module, "render_project", fake_render_project)
+    return seen
+
+
+def test_render_uses_the_recorded_choices(tmp_path, monkeypatch) -> None:
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.jobs.project import JobSettings, Project, set_job_settings
+
+    seen = _capture_render_project(jobs_module, monkeypatch, tmp_path)
+    project = Project(audio=tmp_path / "clip.m4a", matches=tmp_path / "clip_recitation.json")
+    set_job_settings(
+        project,
+        JobSettings("fast", "sidecar", ("vtt",), tmp_path / "videos"),
+    )
+    jobs_module.run_render(project)
+
+    assert seen["preset"] == "fast"
+    assert seen["subtitles"] == "sidecar"
+    assert seen["formats"] == ("vtt",)
+    assert seen["output"] == (tmp_path / "videos").resolve() / "clip.mp4"
+
+
+def test_render_without_recorded_choices_uses_the_defaults(tmp_path, monkeypatch) -> None:
+    from qurantext.config.paths import VIDEOS_OUTPUT_DIR
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.jobs.project import Project
+
+    seen = _capture_render_project(jobs_module, monkeypatch, tmp_path)
+    project = Project(audio=tmp_path / "clip.m4a", matches=tmp_path / "clip_recitation.json")
+    jobs_module.run_render(project)
+
+    assert (seen["preset"], seen["subtitles"], seen["formats"]) == ("social", "burn", ("srt",))
+    assert seen["output"] == Path(VIDEOS_OUTPUT_DIR) / "clip.mp4"
+
+
+def test_render_overrides_win_over_the_recorded_choices(tmp_path, monkeypatch) -> None:
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.jobs.project import JobSettings, Project, set_job_settings
+
+    seen = _capture_render_project(jobs_module, monkeypatch, tmp_path)
+    project = Project(audio=tmp_path / "clip.m4a", matches=tmp_path / "clip_recitation.json")
+    set_job_settings(project, JobSettings("fast", "sidecar", ("vtt",), tmp_path / "videos"))
+    jobs_module.run_render(
+        project, preset="high", subtitles="both", formats=("ass",), output_dir=tmp_path / "x"
+    )
+
+    assert (seen["preset"], seen["subtitles"], seen["formats"]) == ("high", "both", ("ass",))
+    assert seen["output"] == tmp_path / "x" / "clip.mp4"
+
+
+def test_run_job_renders_only_when_asked_to_right_away(tmp_path, monkeypatch) -> None:
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    seen = _capture_render_project(jobs_module, monkeypatch, tmp_path)
+
+    outcome = run_job(spec)
+    assert outcome.video is None and not seen
+
+    outcome = run_job(replace(spec, preset="fast", render_right_away=True))
+    assert seen["preset"] == "fast"
+    assert outcome.video == tmp_path.resolve() / "clip.mp4"
+    assert not hasattr(spec, "render"), "render_right_away is the one switch"
 
 
 # --- opening the review ---------------------------------------------------

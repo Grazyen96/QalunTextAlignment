@@ -468,6 +468,86 @@ def test_render_with_corrections_saves_then_renders_the_project(
     assert seen["end"] == 2.05 and seen["saved"] == 2.05
 
 
+def test_render_with_corrections_uses_the_jobs_own_choices(qt_app, tmp_path, monkeypatch) -> None:
+    """The review names no preset or subtitles of its own: ``run_render`` reads the job's."""
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.gui.jobs import JobOutcome
+
+    window, _, _ = _window(qt_app, tmp_path)
+    window.session.project.render = {"preset": "high", "width": 1920, "height": 1080}
+    window.show()
+    seen = {}
+
+    def fake_render(project, **kwargs):
+        seen["kwargs"] = kwargs
+        return JobOutcome(
+            matches=project.matches, video=tmp_path / "v.mp4", cards=1, mode="recitation"
+        )
+
+    monkeypatch.setattr(jobs_module, "run_render", fake_render)
+    monkeypatch.setattr(
+        window, "_announce_render", lambda outcome: seen.setdefault("done", outcome)
+    )
+    window.render_requested.emit()
+    assert _wait_for(lambda: "done" in seen, 5000)
+    assert set(seen["kwargs"]) == {"progress", "cancel"}
+
+
+def _captioned_job(tmp_path, subtitles: str, preset: str = "social"):
+    from qurantext.jobs.project import CaptionCue, JobSettings, set_job_settings
+
+    project = _project(tmp_path)
+    project.captions = [
+        CaptionCue(
+            1.0,
+            3.0,
+            "hello world",
+            words=[
+                {"word": "hello", "start": 1.0, "end": 2.0},
+                {"word": "world", "start": 2.0, "end": 3.0},
+            ],
+        )
+    ]
+    set_job_settings(project, JobSettings(preset=preset, subtitles=subtitles))
+    return project
+
+
+@pytest.mark.parametrize(
+    ("subtitles", "band"), [("sidecar", False), ("burn", True), ("both", True)]
+)
+def test_the_frame_reserves_the_caption_band_only_when_it_is_burned_in(
+    qt_app, tmp_path, monkeypatch, subtitles, band
+) -> None:
+    """A sidecar-only render drops the band (``jobs/export.py``), so the preview must too."""
+    import numpy as np
+
+    from qurantext.gui.review import frame_view
+    from qurantext.gui.review.window import ReviewWindow
+
+    calls = []
+    monkeypatch.setattr(
+        frame_view,
+        "render_frame_pillow",
+        lambda *a, **k: calls.append(k) or np.zeros((480, 270, 3), np.uint8),
+    )
+    window = ReviewWindow(
+        _captioned_job(tmp_path, subtitles), player=FakePlayer(duration=10.0, now=_Now())
+    )
+    window.frame_view.show_at(1.5, force=True)
+    assert calls and calls[-1]["reserve_caption_band"] is band
+
+
+def test_the_frames_shape_follows_the_jobs_preset_before_any_render(qt_app, tmp_path) -> None:
+    from qurantext.gui.review.window import ReviewWindow
+
+    window = ReviewWindow(
+        _captioned_job(tmp_path, "burn", preset="high"),
+        player=FakePlayer(duration=10.0, now=_Now()),
+    )
+    hint = window.frame_view.sizeHint()
+    assert hint.width() > hint.height(), "a 1920x1080 job previews in landscape"
+
+
 def test_render_disables_editing_actions_until_done(qt_app, tmp_path, monkeypatch) -> None:
     from qurantext.gui import jobs as jobs_module
     from qurantext.gui.jobs import JobOutcome

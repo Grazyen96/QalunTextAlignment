@@ -32,7 +32,7 @@ from qurantext.core.timing_edit import (
     ripple_in_cards,
 )
 from qurantext.core.video_common import validated_matches
-from qurantext.jobs.project import CaptionCue, Project, save_project
+from qurantext.jobs.project import CaptionCue, Project, job_settings, save_project
 
 __all__ = ["CAPTION", "CARD", "ReviewSession", "TimelineWord", "WordRef"]
 
@@ -319,10 +319,17 @@ class ReviewSession:
         return self._validated[1]
 
     def frame_inputs(self, t: float) -> tuple[dict | None, dict | None, bool]:
+        """The active card, the active caption, and whether the frame keeps a caption band.
+
+        The band is kept only when the job burns its captions in: a
+        sidecar-only render drops it (``jobs.export``), and the preview should
+        look like the video the job will make.
+        """
         active = [card for card in self.validated_cards() if float(card["_start_time"]) <= t]
         index = self.caption_at(t)
         caption = self._caption_segment(index) if index is not None else None
-        return (active[-1] if active else None), caption, bool(self.project.captions)
+        band = bool(self.project.captions) and job_settings(self.project).subtitles != "sidecar"
+        return (active[-1] if active else None), caption, band
 
     def _caption_segment(self, index: int) -> dict[str, Any]:
         """One cue in the shape ``Project.caption_segments()`` produces, built for this cue alone.

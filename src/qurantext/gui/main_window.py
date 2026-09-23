@@ -285,6 +285,9 @@ class MainWindow(QMainWindow):
             from_ayah=self.from_spin.value() if (recitation and surah) else None,
             to_ayah=self.to_spin.value() if (recitation and surah) else None,
             preset=str(self.preset_box.currentData()),
+            # This window renders on Start, as it always has; the home window
+            # that replaces it makes skipping the review a choice.
+            render_right_away=True,
         )
 
     def _refresh_enabled(self) -> None:
