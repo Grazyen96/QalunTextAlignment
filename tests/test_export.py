@@ -321,6 +321,54 @@ def test_a_missing_store_is_built_from_the_bundled_text(tmp_path, no_basmala) ->
     assert result.cues == 2
 
 
+def test_build_cues_uses_the_cards_it_is_given(tmp_path, store) -> None:
+    _, matches = _job(tmp_path)
+    card = json.loads(matches.read_text(encoding="utf-8"))["matches"][0]
+    moved = dict(card, start_time=1.5)
+
+    from_file = build_cues(matches, 20.0, mode="recitation", db_path=store)
+    from_project = build_cues(matches, 20.0, mode="recitation", db_path=store, cards=(moved,))
+    assert from_file[0].start == pytest.approx(0.0)
+    assert from_project[0].start == pytest.approx(1.5)
+
+
+def test_render_uses_the_cards_it_is_given(tmp_path, store, no_basmala, monkeypatch) -> None:
+    from qurantext.jobs import render as render_module
+    from qurantext.jobs.render import RenderRequest, render_video
+
+    audio, matches = _job(tmp_path)
+    seen = {}
+
+    def capture(audio_path, matches_list, output_path, *args, **kwargs):
+        seen["cards"] = matches_list
+        output_path.write_bytes(b"")
+        return 1.0
+
+    monkeypatch.setattr(render_module, "render_frame_video", capture)
+    replacement = {
+        "surah_num": 25,
+        "from_ayah": 9,
+        "to_ayah": 9,
+        "start_time": 2.0,
+        "end_time": 3.0,
+        "full_text": "x",
+        "confidence": 1.0,
+    }
+    render_video(
+        RenderRequest(
+            audio=audio,
+            matches=matches,
+            output=tmp_path / "v.mp4",
+            width=160,
+            height=120,
+            fps=8,
+            font_file=DEFAULT_FONT_PATH,
+            cards=(replacement,),
+        )
+    )
+    assert [c["from_ayah"] for c in seen["cards"]] == [9]
+
+
 def test_a_store_that_cannot_be_built_costs_the_subtitles_not_the_video(
     tmp_path, no_basmala, monkeypatch
 ) -> None:

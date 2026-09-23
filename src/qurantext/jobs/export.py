@@ -70,6 +70,8 @@ class ExportRequest:
     db_path: Path = QURAN_DB_PATH
     #: Caption cues from a project file, used verbatim when given.
     captions: tuple[dict, ...] | None = None
+    #: Ayah cards from a project file, used instead of the match file's.
+    cards: tuple[dict, ...] | None = None
 
     def __post_init__(self) -> None:
         if self.subtitles not in SUBTITLE_MODES:
@@ -95,12 +97,16 @@ def build_cues(
     mode: str,
     db_path: Path = QURAN_DB_PATH,
     captions: tuple[dict, ...] | None = None,
+    cards: tuple[dict, ...] | None = None,
 ) -> list[Cue]:
     """The subtitle track for a job.
 
     A lecture's track is the recognised speech, which is the thing a person
     corrects. A recitation's is the canonical ayah text split per ayah, taken
     from the store — never the recogniser's version of the Quran.
+
+    *cards*, when given, replace the match file's cards, so a project's
+    corrected timings are what the subtitles follow.
     """
     if mode == "lecture":
         segments = (
@@ -113,7 +119,10 @@ def build_cues(
         ]
 
     cards = sorted(
-        validated_matches(load_matches(matches_path), bridge_gaps=False),
+        validated_matches(
+            [dict(card) for card in cards] if cards is not None else load_matches(matches_path),
+            bridge_gaps=False,
+        ),
         key=lambda card: float(card["_start_time"]),
     )
     if not cards:
@@ -198,6 +207,7 @@ def export_job(
         font_file=request.font_file,
         title=request.title,
         captions=request.captions if burn_captions else (),
+        cards=request.cards,
     )
     render_result = render_video(render_request, progress=progress, cancel=cancel)
 
@@ -220,6 +230,7 @@ def export_job(
             mode=mode,
             db_path=Path(request.db_path),
             captions=request.captions,
+            cards=request.cards,
         )
         if offset:
             cues = [
