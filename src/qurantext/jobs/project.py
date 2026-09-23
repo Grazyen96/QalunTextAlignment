@@ -18,8 +18,10 @@ never the characters.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from os import PathLike
 from pathlib import Path
 from typing import Any
@@ -28,6 +30,8 @@ from qurantext.core.video_common import load_caption_segments, load_matches
 
 __all__ = [
     "PROJECT_VERSION",
+    "REVIEW_STATES",
+    "SUPPORTED_VERSIONS",
     "CaptionCue",
     "Project",
     "load_project",
@@ -35,7 +39,29 @@ __all__ = [
 ]
 
 #: Bumped when the on-disk shape changes incompatibly.
-PROJECT_VERSION = "1"
+PROJECT_VERSION = "2"
+#: Versions this build reads. Version 1 is upgraded on the next save.
+SUPPORTED_VERSIONS = ("1", "2")
+REVIEW_STATES = ("needs_review", "reviewed")
+
+_KNOWN_KEYS = frozenset(
+    {
+        "project_version",
+        "audio",
+        "mode",
+        "matches",
+        "cards",
+        "captions",
+        "style",
+        "export",
+        "review",
+        "render",
+    }
+)
+
+
+def _default_review() -> dict[str, Any]:
+    return {"state": "needs_review", "reviewed_at": None}
 
 
 @dataclass(slots=True)
@@ -54,10 +80,23 @@ class CaptionCue:
     words: list[dict[str, Any]] = field(default_factory=list)
 
     def edited(self, text: str) -> CaptionCue:
-        """Return this cue with corrected *text* and stale word timings dropped."""
+        """Return this cue with corrected *text*.
+
+        Fixing a misheard word keeps the word count, so the timings still
+        describe the words and are kept, relabelled in order. A rewrite that
+        changes the count drops them rather than leave a karaoke highlight
+        disagreeing with the line.
+        """
         if text == self.text:
             return self
-        return replace(self, text=text, words=[])
+        tokens = text.split()
+        if self.words and len(tokens) == len(self.words):
+            words = [
+                {**word, "word": token} for word, token in zip(self.words, tokens, strict=True)
+            ]
+        else:
+            words = []
+        return replace(self, text=text, words=words)
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -93,6 +132,15 @@ class Project:
     style: dict[str, Any] = field(default_factory=dict)
     #: Export choices (burn-in, sidecar files, formats). Preserved verbatim.
     export: dict[str, Any] = field(default_factory=dict)
+    #: The match file this project was derived from. The basmala splice reads
+    #: its metadata at render time.
+    matches: Path | None = None
+    #: ``{"state": "needs_review" | "reviewed", "reviewed_at": iso | None}``.
+    review: dict[str, Any] = field(default_factory=_default_review)
+    #: The last successful render, or None. See :meth:`record_render`.
+    render: dict[str, Any] | None = None
+    #: Top-level keys this build does not know, written back untouched.
+    extra: dict[str, Any] = field(default_factory=dict)
     #: Where this project was loaded from, when it was.
     path: Path | None = None
 
@@ -137,29 +185,50 @@ class Project:
             mode=resolved_mode,
             cards=raw,
             captions=cues,
+            matches=matches_path,
         )
 
     # -- serialisation --------------------------------------------------------
 
     def to_dict(self, *, relative_to: Path | None = None) -> dict[str, Any]:
-        return {
-            "project_version": PROJECT_VERSION,
-            "audio": _store_path(self.audio, relative_to),
-            "mode": self.mode,
-            "cards": self.cards,
-            "captions": [cue.to_dict() for cue in self.captions],
-            "style": self.style,
-            "export": self.export,
-        }
+        data: dict[str, Any] = dict(self.extra)
+        render = None
+        if self.render is not None:
+            render = dict(self.render)
+            if render.get("video"):
+                render["video"] = _store_path(Path(render["video"]), relative_to)
+        data.update(
+            {
+                "project_version": PROJECT_VERSION,
+                "audio": _store_path(self.audio, relative_to),
+                "matches": _store_path(self.matches, relative_to) if self.matches else None,
+                "mode": self.mode,
+                "cards": self.cards,
+                "captions": [cue.to_dict() for cue in self.captions],
+                "style": self.style,
+                "export": self.export,
+                "review": self.review,
+                "render": render,
+            }
+        )
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], *, base_dir: Path | None = None) -> Project:
         version = str(data.get("project_version") or "")
-        if version and version != PROJECT_VERSION:
+        if version and version not in SUPPORTED_VERSIONS:
             raise ValueError(
                 f"Project file version {version!r} is not supported by this build "
-                f"(expected {PROJECT_VERSION!r})."
+                f"(expected one of {', '.join(SUPPORTED_VERSIONS)})."
             )
+        render = data.get("render")
+        if isinstance(render, dict):
+            render = dict(render)
+            if render.get("video"):
+                render["video"] = _resolve_path(str(render["video"]), base_dir)
+        else:
+            render = None
+        review = data.get("review")
         return cls(
             audio=_resolve_path(str(data["audio"]), base_dir),
             mode=str(data.get("mode") or "recitation"),
@@ -167,7 +236,50 @@ class Project:
             captions=[CaptionCue.from_dict(cue) for cue in (data.get("captions") or [])],
             style=dict(data.get("style") or {}),
             export=dict(data.get("export") or {}),
+            matches=_resolve_path(str(data["matches"]), base_dir) if data.get("matches") else None,
+            review=dict(review) if isinstance(review, dict) else _default_review(),
+            render=render,
+            extra={k: v for k, v in data.items() if k not in _KNOWN_KEYS},
         )
+
+    def content_hash(self) -> str:
+        """A digest of what a render depends on: the cards and the captions."""
+        payload = json.dumps(
+            {"cards": self.cards, "captions": [cue.to_dict() for cue in self.captions]},
+            sort_keys=True,
+            ensure_ascii=False,
+            default=str,
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def record_render(
+        self,
+        video: Path,
+        *,
+        preset: str | None,
+        basmala_offset_s: float,
+        when: datetime | None = None,
+    ) -> None:
+        """Remember a successful render and the content it was made from."""
+        self.render = {
+            "video": Path(video).expanduser().resolve(),
+            "preset": preset,
+            "basmala_offset_s": round(float(basmala_offset_s), 3),
+            "rendered_at": (when or datetime.now()).isoformat(timespec="seconds"),
+            "content_hash": self.content_hash(),
+        }
+
+    @property
+    def render_is_stale(self) -> bool:
+        """True when the cards or captions changed after the last render."""
+        return self.render is not None and self.render.get("content_hash") != self.content_hash()
+
+    def mark_reviewed(self, when: datetime | None = None) -> None:
+        """Record that a person has reviewed this project's content."""
+        self.review = {
+            "state": "reviewed",
+            "reviewed_at": (when or datetime.now()).isoformat(timespec="seconds"),
+        }
 
     def caption_segments(self) -> list[dict[str, Any]]:
         """Cues in the shape the renderer's caption band expects."""

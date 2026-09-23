@@ -76,14 +76,30 @@ def test_a_corrected_caption_is_what_the_renderer_receives(tmp_path) -> None:
     assert segments[1]["text"] == "second line"
 
 
-def test_editing_text_drops_word_timings_that_no_longer_match() -> None:
-    cue = CaptionCue(0.0, 1.0, "original", words=[{"word": "original", "start": 0.0, "end": 1.0}])
-    assert cue.edited("original") is cue
+def test_editing_text_keeps_word_timings_when_the_word_count_is_unchanged() -> None:
+    cue = CaptionCue(
+        0.0,
+        2.0,
+        "one two",
+        words=[
+            {"word": "one", "start": 0.0, "end": 1.0},
+            {"word": "two", "start": 1.0, "end": 2.0},
+        ],
+    )
+    assert cue.edited("one two") is cue
 
-    changed = cue.edited("rewritten")
-    assert changed.text == "rewritten"
+    fixed = cue.edited("one too")
+    assert fixed.text == "one too"
+    assert [w["word"] for w in fixed.words] == ["one", "too"]
+    assert [w["start"] for w in fixed.words] == [0.0, 1.0]
+    assert cue.words[1]["word"] == "two", "the original cue must not be mutated"
+
+
+def test_editing_text_drops_word_timings_when_the_word_count_changes() -> None:
+    cue = CaptionCue(0.0, 1.0, "original", words=[{"word": "original", "start": 0.0, "end": 1.0}])
+    changed = cue.edited("two words")
     assert changed.words == []
-    assert cue.words, "the original cue must not be mutated"
+    assert cue.words
 
 
 def test_media_paths_are_stored_relative_so_a_project_folder_can_move(tmp_path) -> None:
@@ -143,3 +159,66 @@ def test_a_missing_or_malformed_project_fails_clearly(tmp_path) -> None:
 def test_current_version_is_written(tmp_path) -> None:
     path = save_project(_project(tmp_path), tmp_path / "job.qalun.json")
     assert json.loads(path.read_text(encoding="utf-8"))["project_version"] == PROJECT_VERSION
+
+
+def test_version_one_files_load_and_are_written_back_as_version_two(tmp_path) -> None:
+    path = tmp_path / "job.qalun.json"
+    path.write_text(
+        json.dumps({"project_version": "1", "audio": "a.mp3", "mode": "lecture", "cards": []}),
+        encoding="utf-8",
+    )
+    project = load_project(path)
+    assert project.matches is None
+    assert project.review["state"] == "needs_review"
+    assert project.render is None
+    save_project(project, path)
+    assert json.loads(path.read_text(encoding="utf-8"))["project_version"] == "2"
+
+
+def test_unknown_top_level_keys_survive_a_round_trip(tmp_path) -> None:
+    path = tmp_path / "job.qalun.json"
+    save_project(_project(tmp_path), path)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["written_by_a_newer_build"] = {"keep": True}
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    save_project(load_project(path), path)
+    assert json.loads(path.read_text(encoding="utf-8"))["written_by_a_newer_build"] == {
+        "keep": True
+    }
+
+
+def test_from_match_file_remembers_the_match_file(tmp_path) -> None:
+    matches = tmp_path / "m.json"
+    matches.write_text(json.dumps(_match_payload(), ensure_ascii=False), encoding="utf-8")
+    project = Project.from_match_file(matches, tmp_path / "dars.mp3")
+    assert project.matches == matches.resolve()
+
+    path = save_project(project, tmp_path / "job.qalun.json")
+    assert json.loads(path.read_text(encoding="utf-8"))["matches"] == "m.json"
+    assert load_project(path).matches == matches.resolve()
+
+
+def test_a_render_is_stale_only_after_the_content_changes(tmp_path) -> None:
+    project = _project(tmp_path)
+    assert project.render_is_stale is False
+
+    project.record_render(tmp_path / "v.mp4", preset="social", basmala_offset_s=3.25)
+    assert project.render["basmala_offset_s"] == 3.25
+    assert project.render_is_stale is False
+
+    path = save_project(project, tmp_path / "job.qalun.json")
+    reloaded = load_project(path)
+    assert reloaded.render_is_stale is False, "saving right after a render is not a change"
+    assert reloaded.render["video"] == (tmp_path / "v.mp4").resolve()
+
+    reloaded.cards[0]["start_time"] = 0.5
+    assert reloaded.render_is_stale is True
+
+
+def test_mark_reviewed_records_state_and_time(tmp_path) -> None:
+    from datetime import datetime
+
+    project = _project(tmp_path)
+    project.mark_reviewed(datetime(2026, 9, 23, 10, 0, 0))
+    assert project.review == {"state": "reviewed", "reviewed_at": "2026-09-23T10:00:00"}
