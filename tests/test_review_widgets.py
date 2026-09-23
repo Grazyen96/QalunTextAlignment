@@ -88,3 +88,67 @@ def test_waveform_paints_without_peaks_and_with_gaps(qt_app) -> None:
     view.set_gaps([(2.0, 4.0)])
     view.set_playhead(3.0)
     assert not view.grab().isNull()
+
+
+def _strip(qt_app):
+    from qurantext.gui.review.session import ReviewSession
+    from qurantext.gui.review.word_strip import WordStrip
+    from qurantext.jobs.project import Project
+
+    cards = [
+        {
+            "surah_num": 25,
+            "from_ayah": 7,
+            "to_ayah": 7,
+            "full_text": "a b c",
+            "confidence": 1.0,
+            "start_time": 0.0,
+            "end_time": 10.0,
+            "word_timings": [
+                {"word": "a", "start": 1.0, "end": 2.0},
+                {"word": "b", "start": 2.0, "end": 3.0},
+                {"word": "c", "start": 3.0, "end": 4.0},
+            ],
+        }
+    ]
+    session = ReviewSession(Project(audio=__import__("pathlib").Path("a.mp3"), cards=cards))
+    vp = Viewport()
+    vp.set_duration(10.0)
+    vp.set_window(0.0, 10.0)
+    strip = WordStrip(vp, session)
+    strip.resize(1000, 34)
+    return session, strip
+
+
+def test_clicking_a_word_selects_it_and_seeks(qt_app) -> None:
+    session, strip = _strip(qt_app)
+    seeks = []
+    strip.seek_requested.connect(seeks.append)
+    QTest.mouseClick(strip, Qt.MouseButton.LeftButton, pos=QPoint(250, 17))
+    assert strip.selected.word == 1 and seeks == [pytest.approx(2.0)]
+
+
+def test_dragging_an_edge_retimes_through_the_session_as_one_undo(qt_app) -> None:
+    session, strip = _strip(qt_app)
+    QTest.mousePress(strip, Qt.MouseButton.LeftButton, pos=QPoint(200, 17))
+    for x in (210, 230, 250):
+        QTest.mouseMove(strip, QPoint(x, 17))
+    QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, pos=QPoint(250, 17))
+    words = session.words()
+    assert words[1].start == pytest.approx(2.5, abs=0.02)
+    assert words[0].end == pytest.approx(2.5, abs=0.02)
+    session.undo()
+    assert session.words()[1].start == 2.0
+    assert not session.can_undo
+
+
+def test_shift_dragging_ripples_the_rest(qt_app) -> None:
+    session, strip = _strip(qt_app)
+    QTest.mousePress(
+        strip, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ShiftModifier, QPoint(250, 17)
+    )
+    QTest.mouseMove(strip, QPoint(300, 17))
+    QTest.mouseRelease(
+        strip, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ShiftModifier, QPoint(300, 17)
+    )
+    assert [w.start for w in session.words()] == pytest.approx([1.0, 2.5, 3.5], abs=0.02)
