@@ -284,3 +284,30 @@ def test_rematching_keeps_the_earlier_project_as_a_backup(tmp_path, monkeypatch)
     backups = list(tmp_path.glob("clip_recitation.*.qalun-backup.json"))
     assert len(backups) == 1
     assert '"audio": "a.mp3"' in backups[0].read_text(encoding="utf-8")
+
+
+def test_two_rematches_in_the_same_second_keep_both_backups(tmp_path, monkeypatch) -> None:
+    """Two backups computed in the same second must not overwrite each other."""
+    import datetime as datetime_module
+
+    from qurantext.gui import jobs as jobs_module
+
+    class _FrozenDatetime(datetime_module.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 9, 23, 12, 0, 0)
+
+    monkeypatch.setattr(jobs_module, "datetime", _FrozenDatetime)
+
+    project_path = tmp_path / "clip_recitation.qalun.json"
+    project_path.write_text("first", encoding="utf-8")
+    jobs_module._set_aside(project_path)
+
+    project_path.write_text("second", encoding="utf-8")
+    jobs_module._set_aside(project_path)
+
+    backups = sorted(tmp_path.glob("clip_recitation.*.qalun-backup.json"))
+    assert len(backups) == 2
+    contents = {p.read_text(encoding="utf-8") for p in backups}
+    assert contents == {"first", "second"}
+    assert all(p.name.endswith(".qalun-backup.json") for p in backups)

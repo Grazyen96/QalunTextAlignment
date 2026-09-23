@@ -92,9 +92,13 @@ def _set_aside(path: Path) -> None:
     """Keep an earlier project instead of overwriting its corrections."""
     if path.exists():
         stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
-        path.rename(
-            path.with_name(f"{path.name.removesuffix('.qalun.json')}.{stamp}.qalun-backup.json")
-        )
+        stem = path.name.removesuffix(".qalun.json")
+        backup = path.with_name(f"{stem}.{stamp}.qalun-backup.json")
+        count = 2
+        while backup.exists():
+            backup = path.with_name(f"{stem}.{stamp}-{count}.qalun-backup.json")
+            count += 1
+        path.rename(backup)
 
 
 def run_matching(
