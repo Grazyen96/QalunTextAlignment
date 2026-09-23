@@ -191,6 +191,40 @@ def test_gaps_are_listed_with_a_jump_and_rechecked_from_the_cached_levels(qt_app
     assert "Jump" not in window.warnings.text()
 
 
+def test_a_card_with_no_word_timings_still_flags_its_loud_audio_as_uncovered(
+    qt_app, tmp_path
+) -> None:
+    """Carried from the old editor's "nothing to check" case (no word timings at
+    all): rather than a special message saying there is nothing to compare, an
+    absent word simply covers nothing, so any loud stretch shows as a gap."""
+    cards = [
+        {
+            "surah_num": 25,
+            "from_ayah": 7,
+            "to_ayah": 7,
+            "full_text": "a b",
+            "confidence": 1.0,
+            "start_time": 0.0,
+            "end_time": 10.0,
+        }
+    ]
+    matches = tmp_path / "m.json"
+    matches.write_text(
+        json.dumps({"matches": cards, "meta": {"mode": "recitation"}}), encoding="utf-8"
+    )
+    project = Project(audio=tmp_path / "missing.mp3", cards=cards, matches=matches)
+    save_project(project, tmp_path / "m.qalun.json")
+
+    from qurantext.gui.review.window import ReviewWindow
+
+    window = ReviewWindow(project, player=FakePlayer(duration=10.0, now=_Now()))
+    window.show()
+    assert window.session.coverage_words() == []
+
+    window._on_levels(_levels_with_speech_between(4.0, 6.0))
+    assert "2.0 s at 4.0–6.0 s" in window.warnings.text()
+
+
 def test_the_zoom_slider_runs_from_the_whole_recording_to_one_second(qt_app, tmp_path) -> None:
     window, _, _ = _window(qt_app, tmp_path)
     window.zoom_slider.setValue(window.zoom_slider.maximum())
@@ -600,6 +634,41 @@ def test_no_render_announcement_after_the_window_is_closed(qt_app, tmp_path, mon
     assert _wait_for(lambda: not window._rendering, 5000)
     assert "announced" not in seen
     assert "said" not in seen
+
+
+def test_the_live_project_is_updated_even_though_the_render_finishes_after_close(
+    qt_app, tmp_path, monkeypatch
+) -> None:
+    """The render's outcome lands on the live project whether or not the
+    window is still open to announce it: only the announcement is skipped."""
+    import threading
+
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.gui.jobs import JobOutcome
+
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    release = threading.Event()
+
+    def fake_render(project, **kwargs):
+        release.wait(timeout=5)
+        project.record_render(tmp_path / "v.mp4", preset="social", basmala_offset_s=0.0)
+        return JobOutcome(
+            matches=project.matches, video=tmp_path / "v.mp4", cards=1, mode="recitation"
+        )
+
+    monkeypatch.setattr(jobs_module, "run_render", fake_render)
+    monkeypatch.setattr(window, "_announce_render", lambda outcome: None)
+
+    window.render_requested.emit()
+    assert window._rendering
+    window.close()
+    assert window._closed
+    assert window.session.project.render is None
+
+    release.set()
+    assert _wait_for(lambda: not window._rendering, 5000)
+    assert window.session.project.render is not None
 
 
 def test_cancelling_a_render_brings_the_buttons_back(qt_app, tmp_path, monkeypatch) -> None:

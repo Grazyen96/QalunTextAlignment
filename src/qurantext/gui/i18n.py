@@ -13,6 +13,8 @@ __all__ = ["LANGUAGES", "STRINGS", "current_language", "set_language", "t"]
 STRINGS: dict[str, dict[str, str]] = {
     "en": {
         # Tasks 3–9 add their keys here, grouped by widget.
+        "main.review": "Review and correct",
+        "main.saved": "Corrections saved to {path}",
         "player.unavailable": "Playback is off on this machine: {details}",
         "waveform.reading": "Reading the recording…",
         "frame.error": "Could not draw the frame: {details}",

@@ -552,14 +552,17 @@ class ReviewWindow(QMainWindow):
 
         Says nothing once the window has closed: the queued signal can still
         arrive after that (a render outlives a short close-time cancel wait).
+        The project update runs either way, so a render started before close
+        and finished after it still lands on the live project once the
+        window is shown again.
         """
-        if self._closed:
-            return
         if self._render_project_copy is not None:
             # ``render`` is the only field that may have changed underneath the
             # live project (editing was disabled): copy it back rather than the
             # whole snapshot, so it never overwrites an editing that snuck in.
             self.session.project.render = copy.deepcopy(self._render_project_copy.render)
+        if self._closed:
+            return
         self._announce_render(outcome)
 
     def _on_render_done(self) -> None:

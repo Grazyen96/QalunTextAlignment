@@ -429,3 +429,132 @@ def test_an_identical_rematch_leaves_the_project_file_untouched(tmp_path, monkey
     assert project.review["state"] == "reviewed" and project.style == {"theme": "night"}
     assert not list(tmp_path.glob("*.qalun-backup.json"))
     assert load_project(destination).review["state"] == "reviewed"
+
+
+# --- opening the review ---------------------------------------------------
+
+
+def test_review_opens_the_jobs_project(qt_app, tmp_path, monkeypatch) -> None:
+    from qurantext.gui import main_window as module
+    from qurantext.gui.jobs import JobOutcome
+    from qurantext.jobs.project import Project, save_project
+
+    matches = tmp_path / "clip_recitation.json"
+    matches.write_text(
+        json.dumps({"matches": [], "meta": {"mode": "recitation"}}), encoding="utf-8"
+    )
+    project_path = save_project(
+        Project(audio=tmp_path / "clip.mp3", matches=matches),
+        tmp_path / "clip_recitation.qalun.json",
+    )
+    opened = []
+    monkeypatch.setattr(
+        module,
+        "ReviewWindow",
+        lambda project, **kw: (
+            opened.append(project)
+            or type(
+                "W",
+                (),
+                {
+                    "show": lambda self: None,
+                    "saved": type("S", (), {"connect": lambda self, f: None})(),
+                },
+            )()
+        ),
+    )
+    window = module.MainWindow()
+    window._outcome = JobOutcome(
+        matches=matches, video=None, cards=0, mode="recitation", project=project_path
+    )
+    window._open_editor()
+    assert opened and opened[0].path == project_path
+
+
+def test_reopening_the_same_project_raises_the_existing_window(
+    qt_app, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui import main_window as module
+    from qurantext.gui.jobs import JobOutcome
+    from qurantext.jobs.project import Project, save_project
+
+    matches = tmp_path / "clip_recitation.json"
+    matches.write_text(
+        json.dumps({"matches": [], "meta": {"mode": "recitation"}}), encoding="utf-8"
+    )
+    project_path = save_project(
+        Project(audio=tmp_path / "clip.mp3", matches=matches),
+        tmp_path / "clip_recitation.qalun.json",
+    )
+    created = []
+
+    class FakeReview:
+        def __init__(self, project, **kw):
+            created.append(self)
+            self.project = project
+            self.saved = type("S", (), {"connect": lambda self, f: None})()
+            self.shown = 0
+            self.raised = 0
+            self.activated = 0
+
+        def show(self):
+            self.shown += 1
+
+        def raise_(self):
+            self.raised += 1
+
+        def activateWindow(self):
+            self.activated += 1
+
+    monkeypatch.setattr(module, "ReviewWindow", FakeReview)
+    window = module.MainWindow()
+    window._outcome = JobOutcome(
+        matches=matches, video=None, cards=0, mode="recitation", project=project_path
+    )
+    window._open_editor()
+    window._open_editor()
+
+    assert len(created) == 1
+    # Opened once, then re-shown, raised and activated on the second call.
+    assert created[0].shown == 2
+    assert created[0].raised == 1
+    assert created[0].activated == 1
+
+
+def test_a_review_window_that_refuses_to_close_keeps_the_main_window_open(
+    qt_app, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui import main_window as module
+    from qurantext.gui.jobs import JobOutcome
+    from qurantext.jobs.project import Project, save_project
+
+    matches = tmp_path / "clip_recitation.json"
+    matches.write_text(
+        json.dumps({"matches": [], "meta": {"mode": "recitation"}}), encoding="utf-8"
+    )
+    project_path = save_project(
+        Project(audio=tmp_path / "clip.mp3", matches=matches),
+        tmp_path / "clip_recitation.qalun.json",
+    )
+
+    class RefusingReview:
+        def __init__(self, project, **kw):
+            self.saved = type("S", (), {"connect": lambda self, f: None})()
+
+        def show(self):
+            pass
+
+        def close(self):
+            return False
+
+    monkeypatch.setattr(module, "ReviewWindow", RefusingReview)
+    window = module.MainWindow()
+    window._outcome = JobOutcome(
+        matches=matches, video=None, cards=0, mode="recitation", project=project_path
+    )
+    window._open_editor()
+    window.show()
+
+    window.close()
+
+    assert window.isVisible()
