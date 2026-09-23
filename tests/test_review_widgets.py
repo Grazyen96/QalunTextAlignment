@@ -449,3 +449,35 @@ def test_a_ripple_dragged_past_the_clamp_and_back_ends_where_it_began(qt_app) ->
     QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, shift, QPoint(350, 17))
     words = session.words()
     assert (words[1].end, words[2].start, words[2].end) == (3.0, 3.0, 4.0)
+
+
+def test_jobs_that_end_at_once_are_let_go_safely(qt_app) -> None:
+    """Dropping a finished thread before its OS thread exits crashed the process."""
+    from PySide6.QtCore import QObject
+
+    from qurantext.gui.review.background import BackgroundJobs
+
+    class _Sink(QObject):
+        def __init__(self) -> None:
+            super().__init__()
+            self.failures = 0
+
+        def failed(self, _message: str) -> None:
+            self.failures += 1
+
+        def finished(self, _result: object) -> None:
+            pass
+
+    def job(progress, cancel):
+        raise ValueError("unreadable")
+
+    sink = _Sink()
+    jobs = BackgroundJobs()
+    for _ in range(40):
+        jobs.start(job, on_finished=sink.finished, on_failed=sink.failed)
+        jobs.start(job, on_finished=sink.finished, on_failed=sink.failed)
+        deadline = time.monotonic() + 5
+        while jobs.active and time.monotonic() < deadline:
+            QTest.qWait(5)
+    QTest.qWait(20)
+    assert jobs.active == 0 and sink.failures == 80

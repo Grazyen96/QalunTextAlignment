@@ -6,12 +6,12 @@ thread bookkeeping out of the window: every job's thread, worker and cancel
 token stay referenced until it ends (Qt crashes if a running ``QThread`` is
 garbage collected), and closing the window cancels them all.
 
-A job that ignores its cancel token (``find_uncovered_speech`` takes none)
+A job that ignores its cancel token (``speech_levels`` takes none)
 may outlive the short wait on close. Its thread is then parked in
 :data:`_LINGERING` and dropped by a later :meth:`BackgroundJobs.stop` once it
 has finished, instead of being destroyed while it still runs. Nothing here is
 called back from a worker thread: finished entries are pruned lazily, on the
-UI thread.
+UI thread, and each is waited for first so its OS thread has fully exited.
 """
 
 from __future__ import annotations
@@ -80,7 +80,13 @@ class BackgroundJobs(QObject):
         return len(self._running)
 
     def _prune(self) -> None:
-        self._running = [entry for entry in self._running if not entry[0].isFinished()]
+        running = []
+        for entry in self._running:
+            if entry[0].isFinished():
+                _join(entry[0])
+            else:
+                running.append(entry)
+        self._running = running
 
     def stop(self) -> None:
         """Cancel every running job and wait briefly for each to end."""
@@ -91,4 +97,22 @@ class BackgroundJobs(QObject):
             thread.quit()
             if not thread.wait(_CLOSE_WAIT_MS):
                 _LINGERING.append((thread, worker))
-        _LINGERING[:] = [pair for pair in _LINGERING if not pair[0].isFinished()]
+        lingering = []
+        for pair in _LINGERING:
+            if pair[0].isFinished():
+                _join(pair[0])
+            else:
+                lingering.append(pair)
+        _LINGERING[:] = lingering
+
+
+def _join(thread: QThread) -> None:
+    """Wait for a finished *thread*'s OS thread to exit before its last reference goes.
+
+    ``isFinished()`` turns true while the thread is still unwinding, and
+    dropping the last reference then frees the ``QThread`` under it — a
+    use-after-free that crashed the process (segfault, bus error) when jobs
+    ended fast and were pruned at once. ``wait()`` returns as soon as the
+    unwinding is done.
+    """
+    thread.wait()
