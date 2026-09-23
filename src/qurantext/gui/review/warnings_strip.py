@@ -36,6 +36,9 @@ class WarningsStrip(QLabel):
         self.linkActivated.connect(self._on_link)
 
     def add_notice(self, text: str) -> None:
+        """Add *text* as a line, once: the same notice arriving again adds nothing."""
+        if text in self._notices:
+            return
         self._notices.append(text)
         self._render()
 

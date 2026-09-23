@@ -51,13 +51,28 @@ class BackgroundJobs(QObject):
         *,
         on_finished: Callable[[Any], None],
         on_failed: Callable[[str], None],
+        on_done: Callable[[], None] | None = None,
     ) -> CancelToken:
-        """Start *job* (called with ``progress=`` and ``cancel=``); returns its token."""
-        self._running = [entry for entry in self._running if not entry[0].isFinished()]
+        """Start *job* (called with ``progress=`` and ``cancel=``); returns its token.
+
+        *on_done* runs last whatever the outcome, cancellation included.
+        """
+        self._prune()
         cancel = CancelToken()
-        thread, worker = run_in_thread(job, cancel, on_finished=on_finished, on_failed=on_failed)
+        thread, worker = run_in_thread(
+            job, cancel, on_finished=on_finished, on_failed=on_failed, on_done=on_done
+        )
         self._running.append((thread, worker, cancel))
         return cancel
+
+    @property
+    def active(self) -> int:
+        """How many jobs started here are still running."""
+        self._prune()
+        return len(self._running)
+
+    def _prune(self) -> None:
+        self._running = [entry for entry in self._running if not entry[0].isFinished()]
 
     def stop(self) -> None:
         """Cancel every running job and wait briefly for each to end."""

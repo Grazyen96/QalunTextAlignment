@@ -44,6 +44,11 @@ class WaveformView(QWidget):
 
         return QSize(600, 90)
 
+    @property
+    def peaks(self) -> Peaks | None:
+        """The drawn recording, or ``None`` while it is still being read."""
+        return self._peaks
+
     def set_peaks(self, peaks: Peaks | None) -> None:
         """Replace the drawn recording; ``None`` shows the "reading" placeholder."""
         self._peaks = peaks

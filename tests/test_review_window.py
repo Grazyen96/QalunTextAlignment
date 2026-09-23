@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
 
@@ -12,7 +13,30 @@ from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 
 from qurantext.gui.review.player import FakePlayer  # noqa: E402
-from qurantext.jobs.project import Project, load_project, save_project  # noqa: E402
+from qurantext.jobs.project import (  # noqa: E402
+    Project,
+    load_project,
+    project_path_for,
+    save_project,
+)
+from tests.media_helpers import MEDIA_AVAILABLE, MEDIA_REASON, build_job  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_window_outlives_its_test(qt_app):
+    """Hide and delete every window a test leaves open.
+
+    A window left shown can become the active one once a later test spins the
+    event loop, and a ``QShortcut`` fires for the active window, so a later
+    test's key clicks would edit the earlier test's window instead of its own.
+    """
+    yield
+    from PySide6.QtCore import QEvent
+
+    for widget in qt_app.topLevelWidgets():
+        widget.hide()
+        widget.deleteLater()
+    qt_app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 class _Now:
@@ -20,6 +44,16 @@ class _Now:
 
     def __call__(self):
         return self.t
+
+
+def _wait_for(condition, timeout_ms):
+    """Spin the event loop until *condition()* holds (PySide6's QTest has no qWaitFor)."""
+    deadline = time.monotonic() + timeout_ms / 1000
+    while not condition():
+        if time.monotonic() > deadline:
+            return False
+        QTest.qWait(20)
+    return True
 
 
 def _project(tmp_path):
@@ -132,20 +166,29 @@ def test_shift_nudges_by_ten_milliseconds(qt_app, tmp_path) -> None:
     assert window.session.words()[0].end == pytest.approx(2.01)
 
 
-def test_gaps_are_listed_with_a_jump_that_seeks_and_stale_checks_are_dropped(
-    qt_app, tmp_path
-) -> None:
-    from qurantext.core.coverage import UncoveredSpeech
+def _levels_with_speech_between(start, end):
+    """Synthetic speech levels: 10 s of silence at -60 dB, loud from *start* to *end*."""
+    times = [i * 0.25 for i in range(40)]
+    levels = [-10.0 if start <= t < end else -60.0 for t in times]
+    return times, levels, -60.0
 
+
+def test_gaps_are_listed_with_a_jump_and_rechecked_from_the_cached_levels(qt_app, tmp_path) -> None:
     window, player, _ = _window(qt_app, tmp_path)
-    gap = UncoveredSpeech(start=4.0, end=6.0, mean_db=-20.0)
-    window._on_coverage((window._coverage_generation - 1, [gap]))
-    assert "Jump" not in window.warnings.text()
-    window._on_coverage((window._coverage_generation, [gap]))
+    window.show()
+    window._on_levels(_levels_with_speech_between(4.0, 6.0))
     assert "2.0 s at 4.0–6.0 s" in window.warnings.text()
     window.warnings.linkActivated.emit("4.000")
     assert player.position() == pytest.approx(4.0)
     assert window.time_label.text() == "00:04.00"
+
+    window._coverage_timer.setInterval(0)
+    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Right)
+    player.seek(6.0)
+    QTest.keyClick(window, Qt.Key.Key_BracketRight)
+    assert _wait_for(lambda: "covered by a word" in window.warnings.text(), 1000)
+    assert "Jump" not in window.warnings.text()
 
 
 def test_the_zoom_slider_runs_from_the_whole_recording_to_one_second(qt_app, tmp_path) -> None:
@@ -154,3 +197,112 @@ def test_the_zoom_slider_runs_from_the_whole_recording_to_one_second(qt_app, tmp
     assert window.viewport.span == pytest.approx(1.0)
     window.zoom_slider.setValue(0)
     assert window.viewport.span == pytest.approx(window.viewport.duration)
+
+
+def test_a_notice_that_arrives_twice_is_listed_once(qt_app, tmp_path) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    window.warnings.add_notice("FFmpeg failed")
+    window.warnings.add_notice("FFmpeg failed")
+    assert window.warnings.text().count("FFmpeg failed") == 1
+
+
+def test_a_caption_editor_stays_open_while_the_recording_plays(qt_app, tmp_path) -> None:
+    from PySide6.QtWidgets import QAbstractItemView
+
+    from qurantext.gui.review.window import ReviewWindow
+    from qurantext.jobs.project import CaptionCue
+
+    def cue(start, first, second):
+        words = [
+            {"word": first, "start": start, "end": start + 1.0},
+            {"word": second, "start": start + 1.0, "end": start + 2.0},
+        ]
+        return CaptionCue(start, start + 2.0, f"{first} {second}", words=words)
+
+    project = Project(
+        audio=tmp_path / "missing.mp3",
+        mode="lecture",
+        captions=[cue(0.0, "one", "two"), cue(2.0, "three", "four")],
+    )
+    player = FakePlayer(duration=4.0, now=_Now())
+    window = ReviewWindow(project, player=player)
+    window.show()
+    listing = window.segment_list
+    # As a double-click does: the edited cell becomes current, then its editor opens.
+    listing.setCurrentCell(0, 2)
+    listing.editItem(listing.item(0, 2))
+    assert listing.state() == QAbstractItemView.State.EditingState
+    for position in (0.2, 0.5, 1.5, 2.5, 3.0):
+        player.seek(position)
+        window._tick()
+        assert listing.state() == QAbstractItemView.State.EditingState, position
+
+
+def test_a_window_shown_again_after_closing_still_asks_about_changes(
+    qt_app, tmp_path, monkeypatch
+) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    window.close()
+    assert not window.isVisible()
+    window.show()
+    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Period)
+    asked = []
+    monkeypatch.setattr(window, "_confirm_discard", lambda: asked.append(True) or "cancel")
+    window.close()
+    assert asked
+    assert window.isVisible()
+
+
+def test_a_nudge_moves_the_edge_last_grabbed(qt_app, tmp_path) -> None:
+    from PySide6.QtCore import QPoint
+
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    strip = window.strip
+    x = round(window.viewport.x_for(1.0, strip.width()))
+    at = QPoint(x, strip.height() // 2)
+    QTest.mousePress(strip, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at)
+    QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at)
+    assert strip.last_edge == "start"
+    QTest.keyClick(window, Qt.Key.Key_Period)
+    assert window.session.words()[0].start == pytest.approx(1.05)
+    assert window.session.words()[0].end == pytest.approx(2.0)
+    QTest.keyClick(window, Qt.Key.Key_Right)
+    assert strip.last_edge == "end"
+
+
+@pytest.mark.skipif(not MEDIA_AVAILABLE, reason=MEDIA_REASON)
+def test_a_real_recording_is_read_in_the_background_and_close_stops_it(qt_app, tmp_path) -> None:
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.window import ReviewWindow
+
+    audio, matches = build_job(tmp_path, seconds=6.0)
+    project = Project.from_match_file(matches, audio)
+    save_project(project, project_path_for(matches))
+    player = FakePlayer(duration=6.0)
+    window = ReviewWindow(project, player=player)
+    window.show()
+
+    def read() -> bool:
+        text = window.warnings.text()
+        return window.waveform.peaks is not None and (t("review.covered") in text or "Jump" in text)
+
+    assert _wait_for(read, 30000)
+    player.play()
+    assert window._timer.isActive()
+    window.close()
+    assert window._jobs.active == 0
+    assert not player.is_playing()
+    assert not window._timer.isActive()
+
+
+def test_a_later_measured_length_keeps_the_chosen_zoom(qt_app, tmp_path) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    window._set_duration(12.0)
+    window.zoom_slider.setValue(window.zoom_slider.maximum())
+    assert window.viewport.span == pytest.approx(1.0)
+    window._set_duration(12.5)
+    assert window.viewport.duration == pytest.approx(12.5)
+    assert window.viewport.span == pytest.approx(1.0)

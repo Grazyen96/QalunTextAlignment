@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 from qurantext.gui.i18n import t
 from qurantext.gui.review.session import TimelineWord
 
-__all__ = ["SelectionBar"]
+__all__ = ["NUDGE_S", "SelectionBar"]
 
 #: What the −/+ buttons move an edge by, in seconds.
 NUDGE_S = 0.05

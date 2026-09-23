@@ -131,7 +131,7 @@ class SegmentList(QTableWidget):
 
     def highlight_at(self, t_seconds: float) -> None:
         """Select the row under *t_seconds*, without asking anyone to seek there."""
-        segment = self._segment_at(t_seconds)
+        segment = self.segment_at(t_seconds)
         if segment is None:
             return
         row = self._row_by_segment.get(segment)
@@ -140,7 +140,12 @@ class SegmentList(QTableWidget):
         self.setCurrentCell(row, _COLUMN_REF)
         self.scrollToItem(self.item(row, _COLUMN_REF))
 
-    def _segment_at(self, t_seconds: float) -> tuple[str, int] | None:
+    def segment_at(self, t_seconds: float) -> tuple[str, int] | None:
+        """The ``(kind, index)`` of the row :meth:`highlight_at` would select at *t_seconds*.
+
+        A lecture's caption wins over the card it quotes from; ``None`` before
+        the first segment.
+        """
         if self._session.project.mode == "lecture":
             caption_index = self._session.caption_at(t_seconds)
             if caption_index is not None:

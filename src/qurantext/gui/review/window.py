@@ -25,8 +25,9 @@ from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import QKeyCombination, Qt, QTimer, Signal
-from PySide6.QtGui import QCloseEvent, QKeyEvent, QKeySequence, QShortcut
+from PySide6.QtGui import QCloseEvent, QKeyEvent, QKeySequence, QShortcut, QShowEvent
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
     QHBoxLayout,
     QLabel,
@@ -39,7 +40,7 @@ from PySide6.QtWidgets import (
 )
 
 from qurantext.config.settings import VIDEO_PRESETS
-from qurantext.core.coverage import find_uncovered_speech
+from qurantext.core.coverage import speech_levels, uncovered_from_levels
 from qurantext.core.waveform import Peaks, load_or_compute_peaks, peaks_path_for
 from qurantext.gui.i18n import t
 from qurantext.gui.review.background import BackgroundJobs
@@ -110,7 +111,14 @@ class ReviewWindow(QMainWindow):
         self.viewport = Viewport(self)
         self._jobs = BackgroundJobs(self)
         self._audio = Path(project.audio)
-        self._coverage_generation = 0
+        #: The recording's speech levels, decoded once; coverage re-checks read these.
+        self._levels: tuple[list[float], list[float], float] | None = None
+        self._reading_levels = False
+        self._reading_peaks = False
+        #: A measured recording length has sized the timeline (so the zoom is the person's now).
+        self._measured = False
+        #: The segment the list last highlighted, so a tick only moves it on a change.
+        self._highlighted: tuple[str, int] | None = None
         self._closed = False
         #: The session revision the views last caught up with (see ``_after_caption_edit``).
         self._seen_revision = self.session.revision
@@ -125,7 +133,7 @@ class ReviewWindow(QMainWindow):
         self._coverage_timer = QTimer(self)
         self._coverage_timer.setSingleShot(True)
         self._coverage_timer.setInterval(_COVERAGE_DEBOUNCE_MS)
-        self._coverage_timer.timeout.connect(self._start_coverage)
+        self._coverage_timer.timeout.connect(self._recheck_coverage)
 
         self._set_duration(_content_end(project), measured=False)
         if not self.player.available:
@@ -134,8 +142,7 @@ class ReviewWindow(QMainWindow):
             self.warnings.add_notice(self.player.reason)
         if self._audio.is_file():
             self.player.load(self._audio)
-            self._start_peaks()
-            self._start_coverage()
+            self._start_reads()
         else:
             self.warnings.add_notice(t("review.audio_missing", path=str(self._audio)))
         self._sync_state()
@@ -199,7 +206,7 @@ class ReviewWindow(QMainWindow):
         self.time_label = QLabel(_clock(0.0))
         self.rate_combo = QComboBox()
         for rate in RATES:
-            self.rate_combo.addItem(f"{rate:g}×", rate)
+            self.rate_combo.addItem(t("review.rate", rate=rate), rate)
         transport.addWidget(self.play_button)
         transport.addWidget(self.time_label)
         transport.addWidget(self.rate_combo)
@@ -256,6 +263,12 @@ class ReviewWindow(QMainWindow):
             shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
             shortcut.activated.connect(action)
             self._keys[sequence.toString()] = action
+        # A real Shift+. on a US layout arrives as Key_Greater (Shift+, as Key_Less).
+        # The shortcut map already tries the unshifted key, so these are key-press
+        # aliases only: registering them as shortcuts too would make the press
+        # ambiguous. Other layouts put these characters elsewhere and may differ.
+        self._keys["Shift+>"] = self._keys["Shift+."]
+        self._keys["Shift+<"] = self._keys["Shift+,"]
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 - Qt override
         combination = event.keyCombination()
@@ -287,8 +300,23 @@ class ReviewWindow(QMainWindow):
         self.strip.set_playhead(seconds)
         self.viewport.follow(seconds)
         self.time_label.setText(_clock(seconds))
-        self.segment_list.highlight_at(seconds)
+        self._highlight_segment(seconds, force=force)
         self.frame_view.show_at(seconds, force=force)
+
+    def _highlight_segment(self, seconds: float, *, force: bool) -> None:
+        """Move the list's current row to the segment at *seconds*, but only on a change.
+
+        Moving the current cell closes an open editor, so while the person is
+        correcting a caption the list is left alone; it catches up on the
+        first tick after the edit ends.
+        """
+        if self.segment_list.state() == QAbstractItemView.State.EditingState:
+            return
+        segment = self.segment_list.segment_at(seconds)
+        if segment == self._highlighted and not force:
+            return
+        self._highlighted = segment
+        self.segment_list.highlight_at(seconds)
 
     def _on_playing_changed(self, playing: bool) -> None:
         self.play_button.setText(t("review.pause") if playing else t("review.play"))
@@ -310,12 +338,19 @@ class ReviewWindow(QMainWindow):
         a ripple; the content's own extent, used until one arrives, does not.
         """
         duration = float(duration)
-        if measured and duration > 0:
+        if duration <= 0:
+            return
+        if measured:
             self.session.duration = duration
-        if duration <= 0 or math.isclose(duration, self.viewport.duration):
+        # Once a measured length has sized the view, a later one (peaks after the
+        # player, say) only re-clamps it: the zoom is the person's by then.
+        choose_span = not self._measured
+        self._measured = self._measured or measured
+        if math.isclose(duration, self.viewport.duration):
             return
         self.viewport.set_duration(duration)
-        self.viewport.set_window(self.viewport.start, min(_DEFAULT_SPAN_S, duration))
+        if choose_span:
+            self.viewport.set_window(self.viewport.start, min(_DEFAULT_SPAN_S, duration))
 
     # -- editing --------------------------------------------------------------
 
@@ -339,15 +374,16 @@ class ReviewWindow(QMainWindow):
             self._after_edit()
 
     def _nudge(self, delta: float) -> None:
-        """Move the selected word's end by *delta* seconds.
-
-        The strip does not report which edge a drag grabbed, so the nudged
-        edge is always the end; ``[`` sets a start precisely instead.
-        """
+        """Move the selected word's last-grabbed edge (its end, by default) by *delta* seconds."""
         ref = self.strip.selected
-        if ref is not None:
-            self.session.retime(ref, end=self.session.word(ref).end + delta)
-            self._after_edit()
+        if ref is None:
+            return
+        word = self.session.word(ref)
+        if self.strip.last_edge == "start":
+            self.session.retime(ref, start=word.start + delta)
+        else:
+            self.session.retime(ref, end=word.end + delta)
+        self._after_edit()
 
     def _snap_to_playhead(self) -> None:
         """Move whichever edge of the selected word is nearer the playhead onto it."""
@@ -384,9 +420,10 @@ class ReviewWindow(QMainWindow):
         self.strip.refresh()
         if refresh_list:
             self.segment_list.refresh()
+            self._highlighted = None  # the refresh cleared the list's selection
         self._sync_state()
         self.frame_view.show_at(self.player.position(), force=True)
-        if self._audio.is_file():
+        if self._levels is not None:
             self._coverage_timer.start()
 
     def _sync_state(self) -> None:
@@ -432,6 +469,17 @@ class ReviewWindow(QMainWindow):
             return "discard"
         return "cancel"
 
+    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 - Qt override
+        """Shown again after a close: ask about changes next time, and resume what close stopped."""
+        super().showEvent(event)
+        if not self._closed:
+            return
+        self._closed = False
+        if self.player.is_playing():
+            self._timer.start()
+        if self._audio.is_file():
+            self._start_reads()
+
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt override
         if not self._closed and self.session.dirty:
             answer = self._confirm_discard()
@@ -447,37 +495,56 @@ class ReviewWindow(QMainWindow):
 
     # -- background reads -------------------------------------------------------
 
-    def _start_peaks(self) -> None:
+    def _start_reads(self) -> None:
+        """Read what is still missing: the peaks, and the levels coverage is checked from.
+
+        Each is read at most once at a time; a read that close cancelled is
+        started again when the window is shown again.
+        """
         audio = self._audio
-        project_path = self.session.project.path or audio.with_suffix(".qalun.json")
-        cache = peaks_path_for(project_path)
-        self._jobs.start(
-            lambda progress, cancel: load_or_compute_peaks(audio, cache, cancel=cancel),
-            on_finished=self._on_peaks,
-            on_failed=self.warnings.add_notice,
-        )
+        if self.waveform.peaks is None and not self._reading_peaks:
+            self._reading_peaks = True
+            project_path = self.session.project.path or audio.with_suffix(".qalun.json")
+            cache = peaks_path_for(project_path)
+            self._jobs.start(
+                lambda progress, cancel: load_or_compute_peaks(audio, cache, cancel=cancel),
+                on_finished=self._on_peaks,
+                on_failed=self.warnings.add_notice,
+                on_done=self._on_peaks_done,
+            )
+        if self._levels is None and not self._reading_levels:
+            self._reading_levels = True
+            self._jobs.start(
+                lambda progress, cancel: speech_levels(audio),
+                on_finished=self._on_levels,
+                on_failed=self.warnings.add_notice,
+                on_done=self._on_levels_done,
+            )
 
     def _on_peaks(self, peaks: Peaks) -> None:
         self.waveform.set_peaks(peaks)
         if self.player.duration() <= 0:
             self._set_duration(peaks.duration)
 
-    def _start_coverage(self) -> None:
-        if self._closed:
-            return
-        self._coverage_generation += 1
-        generation = self._coverage_generation
-        audio = self._audio
-        words = self.session.coverage_words()
-        self._jobs.start(
-            lambda progress, cancel: (generation, find_uncovered_speech(audio, words)),
-            on_finished=self._on_coverage,
-            on_failed=self.warnings.add_notice,
-        )
+    def _on_peaks_done(self) -> None:
+        self._reading_peaks = False
 
-    def _on_coverage(self, result: object) -> None:
-        generation, gaps = result
-        if generation != self._coverage_generation:
-            return  # an edit came after this check started; a newer one is on its way
+    def _on_levels(self, levels: tuple[list[float], list[float], float]) -> None:
+        self._levels = levels
+        self._recheck_coverage()
+
+    def _on_levels_done(self) -> None:
+        self._reading_levels = False
+
+    def _recheck_coverage(self) -> None:
+        """Find uncovered speech from the cached levels, on the UI thread.
+
+        Only the decode is slow; this part takes about 2.5 ms for an hour of
+        audio (14,400 frames) against 5,000 words, so it needs no worker.
+        """
+        if self._levels is None:
+            return
+        times, levels, floor = self._levels
+        gaps = uncovered_from_levels(times, levels, floor, self.session.coverage_words())
         self.waveform.set_gaps([(gap.start, gap.end) for gap in gaps])
         self.warnings.set_gaps(gaps)

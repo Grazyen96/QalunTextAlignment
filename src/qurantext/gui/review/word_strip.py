@@ -85,6 +85,7 @@ class WordStrip(QWidget):
         self._viewport = viewport
         self._session = session
         self._selected: WordRef | None = None
+        self._last_edge = "end"
         self._playhead = 0.0
         self._drag: _EdgeDrag | _RippleDrag | None = None
         viewport.changed.connect(self.update)
@@ -96,11 +97,22 @@ class WordStrip(QWidget):
     def selected(self) -> WordRef | None:
         return self._selected
 
+    @property
+    def last_edge(self) -> str:
+        """The selected word's edge the person last grabbed: ``"start"`` or ``"end"``.
+
+        Keyboard and button nudges move this edge. It is ``"end"`` until an
+        edge of the selected word is grabbed, and again whenever the
+        selection changes.
+        """
+        return self._last_edge
+
     def select(self, ref: WordRef | None) -> None:
         """Select *ref* (or clear the selection with ``None``) and repaint."""
         if ref == self._selected:
             return
         self._selected = ref
+        self._last_edge = "end"
         self.selection_changed.emit(ref)
         self.update()
 
@@ -174,6 +186,7 @@ class WordStrip(QWidget):
         kind, ref = hit
         if kind in ("start", "end"):
             self.select(ref)
+            self._last_edge = kind
             revision_before = self._session.revision
             self._session.begin_gesture()
             self._drag = _EdgeDrag(ref, kind, revision_before)

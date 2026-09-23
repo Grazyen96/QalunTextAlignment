@@ -30,6 +30,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "review.render": "Render with corrections",
         "review.play": "Play",
         "review.pause": "Pause",
+        "review.rate": "{rate:g}×",
         "review.zoom": "Zoom",
         "review.snap": "Snap to playhead",
         "review.minus": "−50 ms",
