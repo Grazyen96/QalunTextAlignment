@@ -289,3 +289,29 @@ def test_a_snap_only_noop_is_not_dirty() -> None:
     session = ReviewSession(project)
     session.retime(WordRef(CAPTION, 0, 0), end=1.0)
     assert not session.dirty
+
+
+def test_revert_restores_the_last_saved_state(tmp_path) -> None:
+    session = ReviewSession(_recitation(tmp_path))
+    ref = WordRef(CARD, 0, 0)
+    session.retime(ref, end=0.8)
+    session.save()
+    session.retime(ref, end=0.6)
+    session.remove_card(1)
+    before = session.revision
+    session.revert()
+    assert not session.dirty
+    assert session.revision != before
+    assert session.word(ref).end == 0.8
+    assert len(session.project.cards) == 2
+    # Discarded means discarded: nothing to undo back into.
+    assert not session.can_undo and not session.can_redo
+
+
+def test_revert_without_a_save_restores_the_loaded_state() -> None:
+    session = ReviewSession(_lecture())
+    session.set_caption_text(0, "one two!")
+    session.remove_caption(1)
+    session.revert()
+    assert not session.dirty
+    assert [cue.text for cue in session.project.captions] == ["one two", "three"]

@@ -704,3 +704,33 @@ def test_cancelling_a_render_brings_the_buttons_back(qt_app, tmp_path, monkeypat
     assert _wait_for(lambda: not window._rendering, 5000)
     assert seen.get("cancelled") == t("render.cancelled")
     assert window.render_button.isEnabled()
+
+
+def test_an_accepted_close_says_so_and_a_refused_one_does_not(
+    qt_app, tmp_path, monkeypatch
+) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    closed = []
+    window.closed.connect(lambda: closed.append(True))
+    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Period)
+    monkeypatch.setattr(window, "_confirm_discard", lambda: "cancel")
+    window.close()
+    assert not closed
+    monkeypatch.setattr(window, "_confirm_discard", lambda: "discard")
+    window.close()
+    assert closed == [True]
+    assert window._jobs.active == 0
+
+
+def test_discard_puts_the_saved_state_back(qt_app, tmp_path, monkeypatch) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Period)
+    assert window.session.dirty
+    monkeypatch.setattr(window, "_confirm_discard", lambda: "discard")
+    window.close()
+    assert not window.session.dirty
+    assert window.session.words()[0].end == 2.0

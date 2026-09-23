@@ -8,6 +8,7 @@ with their flags.
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -61,8 +62,9 @@ class MainWindow(QMainWindow):
         self._thread = None
         self._worker = None
         self._outcome: JobOutcome | None = None
-        #: One review window per project, keyed by its file: reopening the
+        #: One review window per open project, keyed by its file: reopening the
         #: same project raises what is already there instead of a second window.
+        #: A window leaves this once it closes, so the next review reads the file afresh.
         self._reviews: dict[Path, ReviewWindow] = {}
 
         self._build()
@@ -404,7 +406,9 @@ class MainWindow(QMainWindow):
         older outcome, wherever it would have put it beside the match file).
         Reopening the same project raises the window already open on it
         rather than making a second one, so a correction is only ever made
-        in one place at a time.
+        in one place at a time. A closed window is not kept: the next review
+        loads the project from disk again, so it shows what was saved (never
+        edits that were discarded) and anything that changed the file since.
         """
         if self._outcome is None:
             return
@@ -423,9 +427,16 @@ class MainWindow(QMainWindow):
 
         window = ReviewWindow(project)
         window.saved.connect(lambda path: self.status.setText(t("main.saved", path=path)))
+        window.closed.connect(partial(self._forget_review, project_path, window))
         window.show()
         # Keep a reference: a window without one is collected and vanishes.
         self._reviews[project_path] = window
+
+    def _forget_review(self, project_path: Path, window: ReviewWindow) -> None:
+        """Let a closed review window go, unless another has taken its place."""
+        if self._reviews.get(project_path) is window:
+            del self._reviews[project_path]
+        window.deleteLater()
 
     def _reveal(self) -> None:
         if self._outcome is None or self._outcome.video is None:

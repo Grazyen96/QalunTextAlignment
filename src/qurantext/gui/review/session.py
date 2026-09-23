@@ -92,6 +92,8 @@ class ReviewSession:
         self._gesture_start: tuple | None = None
         self._revision = 0
         self._saved_key = self._key()
+        #: What :meth:`revert` puts back: the state as loaded, or as last saved.
+        self._saved_snapshot = self._snapshot()
         self._validated: tuple[int, list[dict[str, Any]]] | None = None
         self._words_revision: int | None = None
         self._words_by_kind: dict[str, list[TimelineWord]] = {}
@@ -444,4 +446,19 @@ class ReviewSession:
             raise ValueError("This project has no file to write back to.")
         path = save_project(self.project, self.project.path)
         self._saved_key = self._key()
+        self._saved_snapshot = self._snapshot()
         return path
+
+    def revert(self) -> None:
+        """Put back the state as loaded or last saved: what "discard" means.
+
+        The undo and redo history goes too. Every step in it leads back into
+        the changes the person just chose to throw away, so keeping it would
+        let one Ctrl+Z quietly resurrect them.
+        """
+        self._in_gesture = False
+        self._gesture_start = None
+        self._undo.clear()
+        self._redo.clear()
+        self._restore(self._saved_snapshot)
+        self._changed()

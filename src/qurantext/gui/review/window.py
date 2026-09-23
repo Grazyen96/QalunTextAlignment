@@ -108,6 +108,9 @@ class ReviewWindow(QMainWindow):
     export_requested = Signal()
     #: The person asked to render with the corrections.
     render_requested = Signal()
+    #: A close was accepted and the window stopped everything it ran; whoever
+    #: opened it should let it go (the next review loads the project afresh).
+    closed = Signal()
 
     def __init__(
         self, project: Project, *, player: Player | None = None, parent: QWidget | None = None
@@ -682,12 +685,17 @@ class ReviewWindow(QMainWindow):
             if answer == "cancel" or (answer == "save" and not self.save()):
                 event.ignore()
                 return
+            if answer == "discard":
+                # Discard means the edits are gone, not parked in memory for a re-show.
+                self.session.revert()
+                self._after_edit()
         self._closed = True
         self._timer.stop()
         self._coverage_timer.stop()
         self.player.pause()
         self._jobs.stop()
         event.accept()
+        self.closed.emit()
 
     # -- background reads -------------------------------------------------------
 
