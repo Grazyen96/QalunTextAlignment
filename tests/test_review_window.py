@@ -734,3 +734,56 @@ def test_discard_puts_the_saved_state_back(qt_app, tmp_path, monkeypatch) -> Non
     window.close()
     assert not window.session.dirty
     assert window.session.words()[0].end == 2.0
+
+
+def _three_cue_window(tmp_path):
+    from qurantext.gui.review.window import ReviewWindow
+    from qurantext.jobs.project import CaptionCue
+
+    def cue(start, word):
+        return CaptionCue(
+            start, start + 1.0, word, words=[{"word": word, "start": start, "end": start + 1.0}]
+        )
+
+    project = Project(
+        audio=tmp_path / "missing.mp3",
+        mode="lecture",
+        captions=[cue(0.0, "one"), cue(2.0, "two"), cue(4.0, "three")],
+    )
+    player = FakePlayer(duration=6.0, now=_Now())
+    window = ReviewWindow(project, player=player)
+    window.resize(1100, 800)
+    return window, player
+
+
+def test_playback_marks_rows_but_remove_only_takes_what_was_selected(qt_app, tmp_path) -> None:
+    from qurantext.gui.i18n import t
+
+    window, player = _three_cue_window(tmp_path)
+    window.show()
+    for position in (0.5, 2.5, 4.5):
+        player.seek(position)
+        window._tick()
+    window.remove_button.click()
+    assert len(window.session.project.captions) == 3
+    assert window.statusBar().currentMessage() == t("review.remove_none")
+
+
+def test_removing_an_earlier_caption_drops_the_strip_selection(qt_app, tmp_path) -> None:
+    from qurantext.gui.review.session import CAPTION, WordRef
+
+    window, _ = _three_cue_window(tmp_path)
+    window.show()
+    window.strip.select(WordRef(CAPTION, 1, 0))
+    window.segment_list.selectRow(0)
+    window.remove_button.click()
+    assert len(window.session.project.captions) == 2
+    # Index 1 is now the old "three": keeping the ref would quietly select another word.
+    assert window.strip.selected is None
+    from qurantext.gui.i18n import t
+
+    assert window.selection_bar.label.text() == t("review.no_selection")
+    window.strip.select(WordRef(CAPTION, 1, 0))
+    QTest.keyClick(window, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+    assert len(window.session.project.captions) == 3
+    assert window.strip.selected is None

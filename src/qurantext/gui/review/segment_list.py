@@ -16,7 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSignalBlocker, Qt, Signal
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import QAbstractItemView, QTableWidget, QTableWidgetItem, QWidget
 
 from qurantext.core.subtitles import card_ref
@@ -50,6 +51,8 @@ class SegmentList(QTableWidget):
         #: Row order, parallel to the table: (kind, segment index, start time).
         self._rows: list[tuple[str, int, float]] = []
         self._row_by_segment: dict[tuple[str, int], int] = {}
+        #: The row :meth:`highlight_at` last marked as under the playhead.
+        self._playhead_row: int | None = None
         self.cellClicked.connect(self._on_cell_clicked)
         self.itemChanged.connect(self._on_item_changed)
         self.refresh()
@@ -70,6 +73,7 @@ class SegmentList(QTableWidget):
             self.setRowCount(len(entries))
             self._rows = []
             self._row_by_segment = {}
+            self._playhead_row = None  # every item is new, and none is marked
             for row, (kind, index) in enumerate(entries):
                 self._fill_row(row, kind, index)
         finally:
@@ -130,18 +134,39 @@ class SegmentList(QTableWidget):
     # -- reading --------------------------------------------------------------
 
     def highlight_at(self, t_seconds: float) -> None:
-        """Select the row under *t_seconds*, without asking anyone to seek there."""
+        """Mark the row under *t_seconds* as the playhead's, and scroll it into view.
+
+        A tinted background, never the selection or the current cell: the
+        selection is what the person chose (and what "Remove selected"
+        removes), so playback moving across rows must not change it.
+        """
         segment = self.segment_at(t_seconds)
-        if segment is None:
+        row = self._row_by_segment.get(segment) if segment is not None else None
+        if row == self._playhead_row:
             return
-        row = self._row_by_segment.get(segment)
+        if self._playhead_row is not None:
+            self._paint_row(self._playhead_row, QBrush())
+        self._playhead_row = row
         if row is None:
             return
-        self.setCurrentCell(row, _COLUMN_REF)
+        tint = QColor(self.palette().highlight().color())
+        tint.setAlpha(60)
+        self._paint_row(row, QBrush(tint))
         self.scrollToItem(self.item(row, _COLUMN_REF))
 
+    def _paint_row(self, row: int, brush: QBrush) -> None:
+        # A background change is an itemChanged too; it is not a text edit.
+        blocker = QSignalBlocker(self)
+        try:
+            for column in range(self.columnCount()):
+                item = self.item(row, column)
+                if item is not None:
+                    item.setBackground(brush)
+        finally:
+            blocker.unblock()
+
     def segment_at(self, t_seconds: float) -> tuple[str, int] | None:
-        """The ``(kind, index)`` of the row :meth:`highlight_at` would select at *t_seconds*.
+        """The ``(kind, index)`` of the row :meth:`highlight_at` would mark at *t_seconds*.
 
         A lecture's caption wins over the card it quotes from; ``None`` before
         the first segment.

@@ -132,6 +132,9 @@ class ReviewWindow(QMainWindow):
         self._closed = False
         #: The session revision the views last caught up with (see ``_after_caption_edit``).
         self._seen_revision = self.session.revision
+        #: How many cards and captions there were when the views last caught up
+        #: (see ``_drop_stale_selection``).
+        self._seen_counts = self._segment_counts()
         #: Whether a render job is running: gates the editing actions while it is.
         self._rendering = False
         self._render_cancel: CancelToken | None = None
@@ -458,8 +461,9 @@ class ReviewWindow(QMainWindow):
             self.statusBar().showMessage(t("review.remove_none"), 4000)
             return
         # The list already rebuilt itself; bring the rest of the window in line.
+        self._drop_stale_selection()
         self.strip.refresh()
-        self._highlighted = None
+        self._highlight_segment(self.player.position(), force=True)
         self._sync_state()
         self.frame_view.show_at(self.player.position(), force=True)
         if self._levels is not None:
@@ -484,18 +488,38 @@ class ReviewWindow(QMainWindow):
 
     def _after_edit(self, *, refresh_list: bool = True) -> None:
         """Bring every view back in line with the session after any change."""
+        self._drop_stale_selection()
         self.strip.refresh()
         if refresh_list:
             self.segment_list.refresh()
-            self._highlighted = None  # the refresh cleared the list's selection
+            # The rebuilt rows carry no playhead mark yet.
+            self._highlight_segment(self.player.position(), force=True)
         self._sync_state()
         self.frame_view.show_at(self.player.position(), force=True)
         if self._levels is not None:
             self._coverage_timer.start()
 
+    def _segment_counts(self) -> tuple[int, int]:
+        project = self.session.project
+        return len(project.cards), len(project.captions)
+
+    def _drop_stale_selection(self) -> None:
+        """Clear the strip's selection when the last change added or removed a segment.
+
+        A :class:`WordRef` is a position. Once a card or caption before it is
+        removed (or an undo puts one back) the same position names a
+        different word, which the strip would go on showing as selected and
+        a nudge would then retime. Only a change in the segment counts can do
+        that, so an ordinary retime keeps its selection.
+        """
+        if self._segment_counts() != self._seen_counts:
+            self.strip.select(None)
+            self._show_selection(None)
+
     def _sync_state(self) -> None:
         session = self.session
         self._seen_revision = session.revision
+        self._seen_counts = self._segment_counts()
         # A render reads the project's current content: nothing may edit it meanwhile.
         editable = not self._rendering
         self.save_button.setEnabled(session.dirty and editable)

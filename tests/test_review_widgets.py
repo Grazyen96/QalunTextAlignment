@@ -399,3 +399,32 @@ def test_removing_a_row_clears_the_selection(qt_app) -> None:
     assert table.remove_selected()
     assert table.rowCount() == 1
     assert not table.selectedIndexes()
+
+
+def _three_cue_session():
+    from qurantext.gui.review.session import ReviewSession
+    from qurantext.jobs.project import CaptionCue, Project
+
+    def cue(start, word):
+        return CaptionCue(
+            start, start + 1.0, word, words=[{"word": word, "start": start, "end": start + 1.0}]
+        )
+
+    project = Project(
+        audio=__import__("pathlib").Path("d.mp3"),
+        mode="lecture",
+        captions=[cue(0.0, "one"), cue(2.0, "two"), cue(4.0, "three")],
+    )
+    return ReviewSession(project)
+
+
+def test_the_playhead_row_is_marked_without_being_selected(qt_app) -> None:
+    from qurantext.gui.review.segment_list import SegmentList
+
+    table = SegmentList(_three_cue_session())
+    table.highlight_at(0.5)
+    table.highlight_at(2.5)
+    assert not table.selectedIndexes()
+    assert table.currentRow() == -1
+    assert table.item(1, 2).background().style() != Qt.BrushStyle.NoBrush
+    assert table.item(0, 2).background().style() == Qt.BrushStyle.NoBrush
