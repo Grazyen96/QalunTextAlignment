@@ -8,6 +8,7 @@ and read back from the store.
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -276,3 +277,32 @@ def test_project_init_writes_where_the_app_looks_by_default(tmp_path, capsys) ->
     assert expected.is_file()
     assert not audio.with_suffix(".qalun.json").exists()
     assert str(expected) in capsys.readouterr().out
+
+
+def test_a_save_that_fails_partway_leaves_the_previous_file_intact(tmp_path, monkeypatch) -> None:
+    from qurantext.jobs import project as project_module
+
+    path = save_project(_project(tmp_path), tmp_path / "p.qalun.json")
+    before = path.read_text(encoding="utf-8")
+
+    def failing_dump(obj, handle, **kwargs):
+        handle.write('{"project_version": "2", "cards": [')
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(project_module.json, "dump", failing_dump)
+    changed = _project(tmp_path)
+    changed.cards = []
+    with pytest.raises(OSError, match="No space"):
+        save_project(changed, path)
+
+    assert path.read_text(encoding="utf-8") == before
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["p.qalun.json"]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits")
+def test_an_atomic_save_keeps_ordinary_permissions(tmp_path) -> None:
+    path = save_project(_project(tmp_path), tmp_path / "p.qalun.json")
+    assert path.stat().st_mode & 0o777 == 0o644
+    path.chmod(0o640)
+    save_project(_project(tmp_path), path)
+    assert path.stat().st_mode & 0o777 == 0o640

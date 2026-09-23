@@ -20,6 +20,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import stat
+import tempfile
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from os import PathLike
@@ -321,16 +324,45 @@ def project_path_for(match_path: str | PathLike[str]) -> Path:
 
 
 def save_project(project: Project, destination: str | PathLike[str]) -> Path:
-    """Write *project* as JSON, with media paths relative to it where possible."""
+    """Write *project* as JSON, with media paths relative to it where possible.
+
+    The file holds a person's corrections, so it is written to a temporary file
+    beside it and moved into place: a crash or a full disk mid-write leaves the
+    previous version, never half of the new one.
+    """
     path = Path(destination).expanduser().resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = project.to_dict(relative_to=path.parent)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+    handle = tempfile.NamedTemporaryFile(
+        "w",
         encoding="utf-8",
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        delete=False,
     )
+    try:
+        with handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        # A temporary file is private to its owner; the project should not become so.
+        os.chmod(handle.name, _mode_for(path))
+        os.replace(handle.name, path)
+    except BaseException:
+        Path(handle.name).unlink(missing_ok=True)
+        raise
     project.path = path
     return path
+
+
+def _mode_for(path: Path) -> int:
+    """The existing file's permissions, or the usual ones for a new file."""
+    try:
+        return stat.S_IMODE(path.stat().st_mode)
+    except OSError:
+        return 0o644
 
 
 def load_project(source: str | PathLike[str]) -> Project:
