@@ -73,9 +73,10 @@ class CaptionCue:
     """One editable subtitle line.
 
     *text* is recognised speech and is meant to be corrected. *words* carries
-    the per-word timings the karaoke highlight needs; an editor that rewrites
-    *text* should drop them rather than leave them disagreeing with it, which
-    is what :meth:`edited` does.
+    the per-word timings the karaoke highlight needs. An editor changes *text*
+    through :meth:`edited`: a correction with the same word count keeps the
+    timings, relabelled in order; one that changes the count drops them rather
+    than leave them disagreeing with the line.
     """
 
     start: float
