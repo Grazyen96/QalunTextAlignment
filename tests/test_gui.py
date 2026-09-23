@@ -401,3 +401,31 @@ def test_set_aside_returns_the_backup_path(tmp_path) -> None:
     backup = jobs_module._set_aside(project_path)
     assert backup is not None and backup.read_text(encoding="utf-8") == "x"
     assert not project_path.exists()
+
+
+def test_an_identical_rematch_leaves_the_project_file_untouched(tmp_path, monkeypatch) -> None:
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.jobs.project import Project, load_project, project_path_for, save_project
+
+    match_path = tmp_path / "clip_recitation.json"
+    match_path.write_text(
+        json.dumps({"matches": [], "meta": {"mode": "recitation"}}), encoding="utf-8"
+    )
+    audio = tmp_path / "clip.m4a"
+    audio.write_bytes(b"")
+    existing = Project.from_match_file(match_path, audio, mode="recitation")
+    existing.mark_reviewed()
+    existing.style = {"theme": "night"}
+    destination = save_project(existing, project_path_for(match_path))
+    before = destination.read_bytes()
+
+    monkeypatch.setattr(jobs_module, "run_recitation_range", lambda **kwargs: {"matches": []})
+    spec = JobSpec(
+        audio=audio, quran=QURAN_FILE, surah_num=1, from_ayah=1, to_ayah=7, output_dir=tmp_path
+    )
+    project = jobs_module.run_matching(spec)
+
+    assert destination.read_bytes() == before
+    assert project.review["state"] == "reviewed" and project.style == {"theme": "night"}
+    assert not list(tmp_path.glob("*.qalun-backup.json"))
+    assert load_project(destination).review["state"] == "reviewed"

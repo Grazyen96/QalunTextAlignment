@@ -331,3 +331,48 @@ def test_editing_in_cards_does_not_mutate_the_input() -> None:
 def test_editing_a_card_without_words_is_an_error() -> None:
     with pytest.raises(ValueError, match="word timings"):
         retime_in_cards(_cards(), 1, 0, start=5.5)
+
+
+@pytest.mark.parametrize("index", [-1, 3, 99])
+def test_retime_and_ripple_refuse_an_index_that_is_not_there(index) -> None:
+    words = _words((0.0, 1.0), (1.0, 2.0), (2.0, 3.0))
+    with pytest.raises(IndexError):
+        retime(words, index, start=0.5)
+    with pytest.raises(IndexError):
+        ripple(words, index, 0.5)
+
+
+@pytest.mark.parametrize(("card_index", "word_index"), [(-1, 0), (5, 0), (0, -1), (0, 9)])
+def test_card_edits_refuse_an_index_that_is_not_there(card_index, word_index) -> None:
+    from qurantext.core.timing_edit import retime_in_cards, ripple_in_cards
+
+    cards = [
+        {"start_time": 0.0, "end_time": 2.0, "word_timings": _words((0.0, 1.0), (1.0, 2.0))},
+        {"start_time": 2.0, "end_time": 4.0, "word_timings": _words((2.0, 3.0), (3.0, 4.0))},
+    ]
+    with pytest.raises(IndexError):
+        retime_in_cards(cards, card_index, word_index, start=0.5)
+    with pytest.raises(IndexError):
+        ripple_in_cards(cards, card_index, word_index, 0.5)
+
+
+def test_off_grid_times_never_invert_a_neighbour() -> None:
+    words = [{"word": "a", "start": 0.4, "end": 0.5}, {"word": "b", "start": 0.5006, "end": 0.5009}]
+    out = retime(words, 0, end=1.0)
+    for word in out:
+        assert word["start"] <= word["end"]
+    assert out[0]["end"] <= out[1]["start"]
+
+
+def test_a_sub_millisecond_ripple_does_not_shorten_a_word() -> None:
+    words = _words((76.5, 76.563), (76.563, 76.603), (76.603, 77.0))
+    out = ripple(words, 1, -0.0025)
+    assert round(out[1]["end"] - out[1]["start"], 3) == 0.04
+
+
+def test_cue_bounds_grow_to_cover_the_words() -> None:
+    from qurantext.core.timing_edit import cue_bounds
+
+    assert cue_bounds(1.0, 2.0, _words((0.8, 1.2), (1.2, 2.5))) == (0.8, 2.5)
+    assert cue_bounds(1.0, 2.0, _words((1.1, 1.2))) == (1.0, 2.0)
+    assert cue_bounds(1.0, 2.0, []) == (1.0, 2.0)

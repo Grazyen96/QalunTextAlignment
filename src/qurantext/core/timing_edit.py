@@ -21,7 +21,8 @@ input that already satisfies 1 and 2, as alignment delivers it:
    cannot be met the edit is clamped to what is feasible, which in the middle
    of a collapsed run can mean not moving at all.
 4. A request that equals the current value changes nothing: no ``edited``
-   flag, identical output.
+   flag, output identical up to millisecond rounding (every time is snapped
+   to the millisecond grid on copy, and that snap is monotonic).
 
 Every function returns new lists and leaves its input alone, which is what
 makes undo a matter of keeping the previous list.
@@ -39,6 +40,7 @@ from typing import Any
 __all__ = [
     "MIN_WORD_S",
     "count_edited",
+    "cue_bounds",
     "derive_card_windows",
     "retime",
     "retime_in_cards",
@@ -50,8 +52,23 @@ __all__ = [
 MIN_WORD_S = 0.04
 
 
+def _snap(value: float) -> float:
+    return round(float(value), 3)
+
+
 def _copy(words: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [dict(word) for word in words]
+    """Copy *words*, on the millisecond grid every written time is on anyway.
+
+    Rounding is monotonic, so a list with no inverted and no overlapping words
+    keeps both properties; without this, rounding one edge after a clamp could
+    invert a neighbour that sits off the grid.
+    """
+    return [{**word, "start": _snap(word["start"]), "end": _snap(word["end"])} for word in words]
+
+
+def _check(index: int, count: int, what: str) -> None:
+    if not 0 <= index < count:
+        raise IndexError(f"There is no {what} {index} (there are {count}).")
 
 
 def _set(word: dict[str, Any], key: str, value: float) -> None:
@@ -84,12 +101,14 @@ def retime(
     Operates on one list. Widgets call :func:`retime_in_cards`, which applies this
     across card boundaries.
     """
+    _check(index, len(words), "word")
     out = _copy(words)
     word = out[index]
     prev = out[index - 1] if index > 0 else None
     nxt = out[index + 1] if index + 1 < len(out) else None
 
     if start is not None:
+        start = _snap(start)
         current = float(word["start"])
         low = float(prev["start"]) + _keep(prev) if prev else 0.0
         high = float(word["end"]) - _keep(word)
@@ -101,6 +120,7 @@ def retime(
             _set(prev, "end", new_start)
 
     if end is not None:
+        end = _snap(end)
         current = float(word["end"])
         low = float(word["start"]) + _keep(word)
         high = float(nxt["end"]) - _keep(nxt) if nxt else math.inf
@@ -126,12 +146,13 @@ def ripple(
     of the word before it and, with *duration*, never runs past the audio; a
     clamp never turns the shift around. Widgets call :func:`ripple_in_cards`.
     """
+    _check(index, len(words), "word")
     out = _copy(words)
     prev = out[index - 1] if index > 0 else None
     first_start = float(out[index]["start"])
     low = min(0.0, (float(prev["start"]) + _keep(prev) if prev else 0.0) - first_start)
     high = math.inf if duration is None else max(0.0, float(duration) - float(out[-1]["end"]))
-    delta = _clamp(float(delta), low, high)
+    delta = _clamp(_snap(delta), low, high)
     if delta == 0:
         return out
 
@@ -148,8 +169,10 @@ def _flatten(
     cards: list[dict[str, Any]], card_index: int, word_index: int
 ) -> tuple[list[dict[str, Any]], list[tuple[int, int]], int]:
     """All timed cards' words as one list, where each card's run sits, and the global index."""
+    _check(card_index, len(cards), "card")
     if not cards[card_index].get("word_timings"):
         raise ValueError(f"Card {card_index} has no word timings to edit.")
+    _check(word_index, len(cards[card_index]["word_timings"]), "word")
     flat: list[dict[str, Any]] = []
     spans: list[tuple[int, int]] = []
     target = -1
@@ -158,9 +181,7 @@ def _flatten(
         if not words:
             continue
         if i == card_index:
-            if not -len(words) <= word_index < len(words):
-                raise IndexError(f"Card {card_index} has no word {word_index}.")
-            target = len(flat) + word_index % len(words)
+            target = len(flat) + word_index
         spans.append((i, len(words)))
         flat.extend(words)
     return flat, spans, target
@@ -213,6 +234,16 @@ def ripple_in_cards(
     """
     flat, spans, target = _flatten(cards, card_index, word_index)
     return _split(cards, ripple(flat, target, delta, duration=duration), spans)
+
+
+def cue_bounds(start: float, end: float, words: list[dict[str, Any]]) -> tuple[float, float]:
+    """A caption line's window, grown to cover its words after they are retimed."""
+    if not words:
+        return start, end
+    return (
+        _snap(min(float(start), float(words[0]["start"]))),
+        _snap(max(float(end), float(words[-1]["end"]))),
+    )
 
 
 def derive_card_windows(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
