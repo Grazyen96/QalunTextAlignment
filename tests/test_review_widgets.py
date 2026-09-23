@@ -35,6 +35,15 @@ def test_viewport_clamps_and_zooms_around_an_anchor(qt_app) -> None:
     assert vp.span == Viewport.MIN_SPAN_S
 
 
+def test_zooming_to_the_limit_keeps_the_anchor_under_the_pointer(qt_app) -> None:
+    vp = Viewport()
+    vp.set_duration(100.0)
+    vp.set_window(80.0, 20.0)
+    vp.zoom(1000.0, 90.0)
+    assert vp.span == Viewport.MIN_SPAN_S
+    assert vp.x_for(90.0, 500) == pytest.approx(250.0)
+
+
 def test_viewport_follows_the_playhead(qt_app) -> None:
     vp = Viewport()
     vp.set_duration(100.0)

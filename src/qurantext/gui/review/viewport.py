@@ -72,7 +72,7 @@ class Viewport(QObject):
         if factor <= 0:
             return
         fraction = (anchor_t - self.start) / self.span if self.span else 0.0
-        new_span = self.span / factor
+        new_span = max(self.MIN_SPAN_S, min(self.span / factor, self.duration))
         new_start = anchor_t - fraction * new_span
         self._apply_window(new_start, new_span)
 
