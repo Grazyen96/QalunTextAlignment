@@ -15,6 +15,12 @@ STRINGS: dict[str, dict[str, str]] = {
         # Tasks 3–9 add their keys here, grouped by widget.
         "player.unavailable": "Playback is off on this machine: {details}",
         "waveform.reading": "Reading the recording…",
+        "frame.error": "Could not draw the frame: {details}",
+        "segments.ref": "Ayah",
+        "segments.time": "Time",
+        "segments.text": "Text",
+        "segments.retimed": "Retimed",
+        "segments.locked": "Quran text is read from the store and cannot be edited here.",
     },
 }
 LANGUAGES = tuple(STRINGS)

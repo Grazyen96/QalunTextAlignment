@@ -265,3 +265,68 @@ def test_strip_paints_a_long_lecture_quickly(qt_app) -> None:
         strip.grab()
     elapsed_ms = (time.perf_counter() - started) * 1000 / calls
     assert elapsed_ms < 8.0, f"grab() averaged {elapsed_ms:.3f} ms over {calls} calls"
+
+
+def test_frame_view_draws_the_active_card(qt_app) -> None:
+    from qurantext.config.paths import DEFAULT_FONT_PATH
+    from qurantext.gui.review.frame_view import FrameView
+
+    if not DEFAULT_FONT_PATH.exists():
+        pytest.skip("needs the bundled font")
+    session, _ = _strip(qt_app)
+    view = FrameView(session)
+    view.show_at(2.5, force=True)
+    assert view.pixmap() is not None and not view.pixmap().isNull()
+    assert (view.pixmap().width(), view.pixmap().height()) == (270, 480)
+
+
+def test_frame_view_throttles_while_playing(qt_app, monkeypatch) -> None:
+    from qurantext.gui.review import frame_view as module
+
+    session, _ = _strip(qt_app)
+    calls = []
+    monkeypatch.setattr(
+        module,
+        "render_frame_pillow",
+        lambda *a, **k: calls.append(a[0]) or np.zeros((480, 270, 3), np.uint8),
+    )
+    view = module.FrameView(session)
+    for t in (1.0, 1.05, 1.1):
+        view.show_at(t)
+    view.show_at(1.15, force=True)
+    assert calls == [1.0, 1.15]
+
+
+def test_segment_list_locks_quran_text_and_seeks(qt_app) -> None:
+    from qurantext.gui.review.segment_list import SegmentList
+
+    session, _ = _strip(qt_app)
+    table = SegmentList(session)
+    assert table.rowCount() == 1
+    text_item = table.item(0, 2)
+    assert not (text_item.flags() & Qt.ItemFlag.ItemIsEditable)
+    seeks = []
+    table.seek_requested.connect(seeks.append)
+    table.cellClicked.emit(0, 0)
+    assert seeks == [pytest.approx(0.0)]
+
+
+def test_segment_list_edits_caption_text_through_the_session(qt_app) -> None:
+    from qurantext.gui.review.segment_list import SegmentList
+    from qurantext.gui.review.session import ReviewSession
+    from qurantext.jobs.project import CaptionCue, Project
+
+    project = Project(
+        audio=__import__("pathlib").Path("d.mp3"),
+        mode="lecture",
+        captions=[CaptionCue(0.0, 1.0, "misheard", words=[])],
+    )
+    session = ReviewSession(project)
+    table = SegmentList(session)
+    row = next(
+        r
+        for r in range(table.rowCount())
+        if table.item(r, 0).data(Qt.ItemDataRole.UserRole) == ("caption", 0)
+    )
+    table.item(row, 2).setText("corrected")
+    assert session.project.captions[0].text == "corrected" and session.can_undo
