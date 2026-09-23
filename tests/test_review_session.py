@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import time
 from pathlib import Path
 
@@ -381,3 +382,53 @@ def test_removing_a_lecture_card_leaves_the_others_alone() -> None:
     session.project.cards.append(dict(session.project.cards[0], start_time=9.0, end_time=9.5))
     session.remove_card(1)
     assert session.project.cards[0]["end_time"] == 8.0
+
+
+def _real_shaped_recitation(tmp_path):
+    """A project as matching writes it: card windows a hair off the words they hold.
+
+    Detection rounds a card's window on its own, so a real project opens with
+    ``start_time`` 0.11 over a first word at 0.109 (and an end a little before
+    the last word's). Any timing edit re-derives the windows from the words.
+    """
+    cards = [
+        {
+            "surah_num": 25,
+            "from_ayah": 7,
+            "to_ayah": 11,
+            "full_text": "a b c",
+            "confidence": 0.96,
+            "start_time": 0.11,
+            "end_time": 2.57,
+            "word_timings": [_w("a", 0.109, 1.37), _w("b", 1.37, 1.9), _w("c", 1.95, 2.573)],
+        }
+    ]
+    project = Project(audio=tmp_path / "a.mp3", mode="recitation", cards=cards)
+    save_project(project, tmp_path / "job.qalun.json")
+    return load_project(tmp_path / "job.qalun.json")
+
+
+def test_a_drag_out_and_back_on_a_real_shaped_project_is_no_edit(tmp_path) -> None:
+    session = ReviewSession(_real_shaped_recitation(tmp_path))
+    before = copy.deepcopy(session.project.cards)
+    ref = WordRef(CARD, 0, 1)
+    session.begin_gesture()
+    session.drag_retime(ref, end=1.8)
+    assert session.dirty
+    session.drag_retime(ref, end=1.9)
+    session.end_gesture()
+    assert not session.dirty
+    assert not session.can_undo
+    assert session.project.cards == before
+
+
+def test_a_drag_that_moved_something_is_still_an_edit(tmp_path) -> None:
+    session = ReviewSession(_real_shaped_recitation(tmp_path))
+    ref = WordRef(CARD, 0, 1)
+    session.begin_gesture()
+    session.drag_retime(ref, end=1.8)
+    session.end_gesture()
+    assert session.dirty and session.can_undo
+    assert session.word(ref).end == 1.8
+    session.undo()
+    assert not session.dirty

@@ -82,6 +82,43 @@ def _normalized_caption(cue: CaptionCue) -> dict[str, Any]:
     return data
 
 
+def _unflagged(words: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """*words* on the grid and without ``edited``: what an edit could have changed."""
+    return [
+        {key: value for key, value in word.items() if key != "edited"}
+        for word in _normalized_words(words)
+    ]
+
+
+def _settled(cards: list, captions: list[CaptionCue], review: dict) -> tuple:
+    """A state as a timing edit would leave it, for telling "no edit" from an edit.
+
+    Every timing edit re-derives the card windows from their words (and snaps
+    to the millisecond grid), and a loaded project's windows are often a hair
+    off: detection rounds a card's window on its own, so a card can open at
+    0.11 over a first word at 0.109. Comparing raw states would then read a
+    drag that ended where it began as a change. Settling both sides first —
+    windows derived, times on the grid, ``edited`` flags dropped — compares
+    what the person could see. The flags go because a word whose times are
+    where they were was not retimed, whatever an edit on the way marked it.
+    Cards without word timings pass through ``derive_card_windows`` untouched,
+    and only a timing edit re-derives a timed card's window
+    (``set_card_times`` refuses them), so this holds in either mode.
+    """
+    settled_cards = []
+    for card in derive_card_windows(cards):
+        if card.get("word_timings"):
+            card = {**card, "word_timings": _unflagged(card["word_timings"])}
+        settled_cards.append(card)
+    settled_captions = []
+    for cue in captions:
+        data = cue.to_dict()
+        if data.get("words"):
+            data["words"] = _unflagged(data["words"])
+        settled_captions.append(data)
+    return settled_cards, settled_captions, review
+
+
 class ReviewSession:
     """The project being reviewed, with undo and a record of unsaved changes."""
 
@@ -465,18 +502,37 @@ class ReviewSession:
         self._in_gesture = True
 
     def end_gesture(self) -> None:
+        """Close the gesture; one that ends where it began is no edit at all.
+
+        "Where it began" is judged on the settled states (see ``_settled``),
+        and then the gesture-start snapshot is put back exactly — windows,
+        flags and all — and its undo entry dropped, so the project is not
+        dirty and there is nothing to undo.
+        """
         if not self._in_gesture:
             return
         self._in_gesture = False
-        if self._undo and self._undo[-1] is self._gesture_start:
-            cards, captions, review = self._gesture_start
-            if (
-                cards == self.project.cards
-                and [c.to_dict() for c in captions] == [c.to_dict() for c in self.project.captions]
-                and review == self.project.review
-            ):
-                self._undo.pop()
-        self._gesture_start = None
+        start, self._gesture_start = self._gesture_start, None
+        if start is None or not self._settles_to(start):
+            return
+        if self._undo and self._undo[-1] is start:
+            self._undo.pop()
+        if not self._is_exactly(start):
+            self._restore(start)
+            self._changed()
+
+    def _settles_to(self, snapshot: tuple) -> bool:
+        """Whether the current state is *snapshot* once both are settled."""
+        current = (self.project.cards, self.project.captions, self.project.review)
+        return _settled(*current) == _settled(*snapshot)
+
+    def _is_exactly(self, snapshot: tuple) -> bool:
+        cards, captions, review = snapshot
+        return (
+            cards == self.project.cards
+            and captions == self.project.captions
+            and review == self.project.review
+        )
 
     def undo(self) -> bool:
         if not self._undo:
