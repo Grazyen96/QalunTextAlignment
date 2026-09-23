@@ -541,3 +541,32 @@ def test_jobs_that_end_at_once_are_let_go_safely(qt_app) -> None:
             QTest.qWait(5)
     QTest.qWait(20)
     assert jobs.active == 0 and sink.failures == 80
+
+
+def test_threads_still_lingering_at_exit_are_joined_within_a_bound(qt_app, monkeypatch) -> None:
+    """What ``gui/app.py`` waits for after the event loop ends, and for how long at most."""
+    import threading
+
+    from PySide6.QtCore import QThread
+
+    from qurantext.gui.review import background
+
+    release = threading.Event()
+
+    class _Slow(QThread):
+        def run(self) -> None:
+            release.wait(10)
+
+    monkeypatch.setattr(background, "_LINGERING", [])
+    thread = _Slow()
+    thread.start()
+    background._LINGERING.append((thread, None))
+
+    started = time.monotonic()
+    assert not background.join_lingering(100), "still running: the bound gives up"
+    assert time.monotonic() - started < 2
+    assert background._LINGERING, "an unfinished thread stays parked"
+
+    release.set()
+    assert background.join_lingering(5000)
+    assert background._LINGERING == []

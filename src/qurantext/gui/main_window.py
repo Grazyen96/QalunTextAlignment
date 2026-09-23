@@ -18,7 +18,14 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent
-from PySide6.QtWidgets import QMainWindow, QMessageBox, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QMessageBox,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
+)
 
 from qurantext.config.paths import DEFAULT_QURAN_PATH, QURAN_INPUT_DIR
 from qurantext.gui.files import show_in_folder
@@ -74,9 +81,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(t("app.title"))
 
         self._cancel: CancelToken | None = None
-        #: Runs the matching/render job off the UI thread; also cancels and
-        #: waits for it, bounded, when the window closes while one is running.
+        #: Runs the matching/render job off the UI thread.
         self._jobs = BackgroundJobs(self)
+        #: Set once the window was closed while a job ran: the window is hidden,
+        #: the job cancelled, and the app quits when the job's thread ends.
+        self._closing = False
         #: The job running now, and how it ended (said once the form stops running).
         self._running_spec: JobSpec | None = None
         self._ending = ""
@@ -159,6 +168,8 @@ class MainWindow(QMainWindow):
             self.job_list.set_running(Path(self._running_spec.audio).name, text)
 
     def _on_finished(self, finished: _Finished) -> None:
+        if self._closing:
+            return  # no review, and no list, under a window that is going away
         spec = self._running_spec
         if spec is not None and spec.output_dir:
             # A job saved somewhere unusual must still be listed next time.
@@ -176,13 +187,24 @@ class MainWindow(QMainWindow):
         self._ending = problem or t("home.finished.matched", count=len(project.cards))
 
     def _on_failed(self, message: str) -> None:
+        if self._closing:
+            return  # the person closed the window; a dialog now would bring it back
         self._ending = t("home.failed", details=message)
         QMessageBox.warning(self, t("home.failed.title"), message)
 
     def _on_cancelled(self) -> None:
+        if self._closing:
+            return
         self._ending = t("home.cancelled")
 
     def _on_done(self) -> None:
+        if self._closing:
+            # The job's thread has quit (or is about to): join it, then leave.
+            self._cancel = None
+            self._running_spec = None
+            self._jobs.stop()
+            QApplication.quit()
+            return
         self._cancel = None
         self._running_spec = None
         self.job_list.set_running("", None)
@@ -252,14 +274,23 @@ class MainWindow(QMainWindow):
         A review window that refuses to close (the person cancelled its
         unsaved-changes prompt) must not lose that work to the main window
         closing around it. Once every review has agreed, a job still matching
-        or rendering is cancelled and given a bounded wait: leaving its
-        ``QThread`` to be garbage-collected mid-run crashes Qt, and this
-        window has no unsaved state of its own worth blocking the close for.
+        or rendering is cancelled and the window hides, but the close itself
+        waits for the job: a model call can run for minutes without looking
+        at its token, and quitting under it destroys a ``QThread`` that is
+        still running, which aborts the process. ``_on_done`` quits the app
+        once the thread has ended. This window has no unsaved state of its own
+        worth keeping it open for.
         """
         for window in list(self._reviews.values()):
             if not window.close():
                 event.ignore()
                 return
+        if self._cancel is not None:
+            self._cancel.cancel()
+            self._closing = True
+            self.hide()
+            event.ignore()
+            return
         self._jobs.stop()
         super().closeEvent(event)
 

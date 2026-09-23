@@ -1024,37 +1024,117 @@ def test_a_review_window_that_refuses_to_close_keeps_the_main_window_open(
     assert window.isVisible()
 
 
-def test_closing_the_window_while_a_job_runs_cancels_it_without_crashing(
+def _blocked_until(release, seen: list | None = None, *, finish=None):
+    """A matching job that waits for *release*, then stops on its cancel token.
+
+    With *finish* given it ignores the token and returns *finish(spec)* instead,
+    like a model call that never looks at it.
+    """
+
+    def blocked(spec, *, progress=None, cancel=None):
+        assert release.wait(timeout=10), "the test forgot to release the job"
+        if seen is not None:
+            seen.append(cancel.cancelled)
+        if finish is not None:
+            return finish(spec)
+        cancel.raise_if_cancelled("detect")
+        pytest.fail("the job should have been cancelled, not left to finish")
+
+    return blocked
+
+
+def _record_quits(monkeypatch) -> list:
+    from qurantext.gui import main_window as module
+
+    quits: list = []
+    monkeypatch.setattr(module.QApplication, "quit", staticmethod(lambda: quits.append(True)))
+    return quits
+
+
+def test_closing_the_window_while_a_job_runs_hides_it_and_quits_once_the_job_ends(
     qt_app, home, tmp_path, monkeypatch
 ) -> None:
-    """A job stuck at a checkpoint when the window closes must be cancelled
-    cleanly, not left running under a window that is gone, and not treated
-    as a failure once it finally notices."""
+    """The job is cancelled and the window goes, but the app waits for the thread.
+
+    Quitting at once would destroy a ``QThread`` still running a model call
+    that never checks its token, which aborts the process on exit.
+    """
+    import threading
+
+    from qurantext.gui import main_window as module
+
+    release = threading.Event()
+    seen: list = []
+    monkeypatch.setattr(module, "run_matching", _blocked_until(release, seen))
+    monkeypatch.setattr(module.QMessageBox, "warning", lambda *a: pytest.fail("no dialog"))
+    quits = _record_quits(monkeypatch)
+
+    home.show()
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    _spin_until(qt_app, lambda: home._cancel is not None)
+
+    assert not home.close(), "the close waits for the job"
+    assert not home.isVisible()
+    qt_app.processEvents()
+    assert quits == [], "not while the job still runs"
+
+    release.set()
+    _spin_until(qt_app, lambda: quits)
+    assert seen == [True], "the job was told to stop"
+    assert home._jobs.active == 0, "its thread was joined before quitting"
+
+
+def test_a_job_that_finishes_during_the_close_opens_no_review(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    import threading
+
+    from qurantext.gui import main_window as module
+    from qurantext.jobs.project import load_project
+
+    release = threading.Event()
+    finish = _blocked_until(
+        release,
+        finish=lambda spec: module._Finished(
+            load_project(_saved_job(Path(spec.output_dir), Path(spec.audio).stem))
+        ),
+    )
+    monkeypatch.setattr(module, "_match_then_render", finish)
+    monkeypatch.setattr(module.QMessageBox, "warning", lambda *a: pytest.fail("no dialog"))
+    quits = _record_quits(monkeypatch)
+
+    home.show()
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    _spin_until(qt_app, lambda: home._cancel is not None)
+    home.close()
+    release.set()
+    _spin_until(qt_app, lambda: quits)
+
+    assert reviews == [], "no review opens under a window that is closing"
+
+
+def test_a_job_that_fails_during_the_close_shows_no_dialog(
+    qt_app, home, tmp_path, monkeypatch
+) -> None:
     import threading
 
     from qurantext.gui import main_window as module
 
     release = threading.Event()
 
-    def blocked_match(spec, *, progress=None, cancel=None):
-        assert release.wait(timeout=5), "the test forgot to release the job"
-        cancel.raise_if_cancelled("detect")
-        pytest.fail("the job should have been cancelled, not left to finish")
+    def fail(spec):
+        raise RuntimeError("finished late")
 
-    monkeypatch.setattr(module, "run_matching", blocked_match)
+    monkeypatch.setattr(module, "run_matching", _blocked_until(release, finish=fail))
     monkeypatch.setattr(module.QMessageBox, "warning", lambda *a: pytest.fail("no dialog"))
+    quits = _record_quits(monkeypatch)
 
     home.show()
     home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
     _spin_until(qt_app, lambda: home._cancel is not None)
-
-    assert home.close()
-    assert not home.isVisible()
-
+    home.close()
     release.set()
-    _spin_until(qt_app, lambda: home._cancel is None)
-
-    assert home.new_job.status_label.text() == module.t("home.cancelled")
+    _spin_until(qt_app, lambda: quits)
 
 
 @pytest.fixture()
