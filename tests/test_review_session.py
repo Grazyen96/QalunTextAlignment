@@ -258,6 +258,28 @@ def test_word_at_is_fast_on_a_long_lecture() -> None:
     assert elapsed_ms < 1.0, f"word_at averaged {elapsed_ms:.3f} ms/call over {calls} calls"
 
 
+def test_words_in_returns_the_visible_slice() -> None:
+    session = ReviewSession(_long_lecture())
+    words = session.words()
+    assert len(words) == 5000
+
+    def brute_force(t0: float, t1: float):
+        return [tw.ref for tw in words if tw.end >= t0 and tw.start <= t1]
+
+    for t0, t1 in [(0.0, 1.0), (10.0, 12.5), (250.0, 260.0), (499.5, 500.0), (500.0, 500.0)]:
+        got = [tw.ref for tw in session.words_in(t0, t1)]
+        assert got == brute_force(t0, t1), f"window ({t0}, {t1})"
+
+    # A word that starts before t0 but still ends inside the window must be
+    # found even though its start is outside [t0, t1].
+    straddling = words[400]
+    t0 = straddling.start + 0.05
+    t1 = straddling.end + 0.2
+    got = [tw.ref for tw in session.words_in(t0, t1)]
+    assert straddling.ref in got
+    assert got == brute_force(t0, t1)
+
+
 def test_a_snap_only_noop_is_not_dirty() -> None:
     noisy = 1.0000000000000002
     project = _lecture()

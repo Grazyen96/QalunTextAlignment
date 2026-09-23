@@ -14,11 +14,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QMouseEvent, QPainter, QPaintEvent, QPen
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import (
+    QColor,
+    QFocusEvent,
+    QFontMetrics,
+    QHideEvent,
+    QMouseEvent,
+    QPainter,
+    QPaintEvent,
+    QPen,
+)
 from PySide6.QtWidgets import QWidget
 
-from qurantext.gui.review.session import ReviewSession, WordRef
+from qurantext.gui.review.session import ReviewSession, TimelineWord, WordRef
 from qurantext.gui.review.viewport import Viewport
 
 __all__ = ["WordStrip"]
@@ -90,8 +99,23 @@ class WordStrip(QWidget):
         self.update()
 
     def refresh(self) -> None:
-        """Repaint from ``session.words()``; call after the session's revision changes."""
+        """Repaint from ``session.words()``; call after the session's revision changes.
+
+        A selection whose ref is no longer among the session's words — its
+        card or caption was removed, or the undo/redo it came from was
+        reverted — can't stay selected, so this drops it first.
+        """
+        if self._selected is not None:
+            try:
+                self._session.word(self._selected)
+            except IndexError:
+                self._selected = None
+                self.selection_changed.emit(None)
         self.update()
+
+    def _visible_words(self) -> list[TimelineWord]:
+        start = self._viewport.start
+        return self._session.words_in(start, start + self._viewport.span)
 
     # -- hit testing --------------------------------------------------------------
 
@@ -99,7 +123,7 @@ class WordStrip(QWidget):
         width = self.width()
         return [
             (tw, self._viewport.x_for(tw.start, width), self._viewport.x_for(tw.end, width))
-            for tw in self._session.words()
+            for tw in self._visible_words()
         ]
 
     def _hit_test(self, x: float) -> tuple[str, WordRef] | None:
@@ -182,12 +206,41 @@ class WordStrip(QWidget):
         if event.button() != Qt.MouseButton.LeftButton or self._drag is None:
             super().mouseReleaseEvent(event)
             return
+        self._finish_drag()
+
+    def _finish_drag(self) -> None:
+        """Close an open gesture, however it ends.
+
+        A mouse grab can be lost mid-drag — the window is deactivated, a
+        modal dialog opens, the strip is hidden — with no
+        ``mouseReleaseEvent`` ever arriving. Left open, the session's gesture
+        stays started forever and every later edit merges into that one undo
+        step. Every path that can lose the grab funnels through here instead
+        of duplicating the release logic.
+        """
+        if self._drag is None:
+            return
         changed = self._session.revision != self._drag.revision_before
         self._session.end_gesture()
         self._drag = None
         self.unsetCursor()
         if changed:
             self.edited.emit()
+
+    def focusOutEvent(self, event: QFocusEvent) -> None:  # noqa: N802 - Qt override
+        self._finish_drag()
+        super().focusOutEvent(event)
+
+    def hideEvent(self, event: QHideEvent) -> None:  # noqa: N802 - Qt override
+        self._finish_drag()
+        super().hideEvent(event)
+
+    def changeEvent(self, event: QEvent) -> None:  # noqa: N802 - Qt override
+        super().changeEvent(event)
+        # Not leaveEvent: during a grab the pointer may legitimately leave
+        # the widget and come back, and that must not end the gesture.
+        if event.type() == QEvent.Type.ActivationChange and not self.isActiveWindow():
+            self._finish_drag()
 
     # -- painting ---------------------------------------------------------------
 
@@ -200,7 +253,7 @@ class WordStrip(QWidget):
             height = self.height()
             metrics = QFontMetrics(painter.font())
             playhead_ref = self._session.word_at(self._playhead)
-            for tw in self._session.words():
+            for tw in self._visible_words():
                 x0 = self._viewport.x_for(tw.start, width)
                 x1 = self._viewport.x_for(tw.end, width)
                 if x1 < 0 or x0 > width:

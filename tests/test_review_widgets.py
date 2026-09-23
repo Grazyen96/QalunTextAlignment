@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import numpy as np
 import pytest
 
@@ -152,3 +154,85 @@ def test_shift_dragging_ripples_the_rest(qt_app) -> None:
         strip, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ShiftModifier, QPoint(300, 17)
     )
     assert [w.start for w in session.words()] == pytest.approx([1.0, 2.5, 3.5], abs=0.02)
+
+
+def test_losing_focus_mid_drag_closes_the_gesture(qt_app) -> None:
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QFocusEvent
+    from PySide6.QtWidgets import QApplication
+
+    from qurantext.gui.review.session import CARD, WordRef
+
+    session, strip = _strip(qt_app)
+    QTest.mousePress(strip, Qt.MouseButton.LeftButton, pos=QPoint(200, 17))
+    QTest.mouseMove(strip, QPoint(210, 17))
+    assert session.can_undo  # the edge drag already opened a gesture
+
+    QApplication.sendEvent(strip, QFocusEvent(QEvent.Type.FocusOut))
+
+    # A retime from outside the strip, after the gesture was force-closed,
+    # must open an undo entry of its own rather than merging into the drag.
+    session.retime(WordRef(CARD, 0, 2), end=4.5)
+    assert session.words()[2].end == pytest.approx(4.5)
+
+    assert session.undo()
+    assert session.words()[2].end == pytest.approx(4.0)
+    assert session.undo()
+    assert session.words()[1].start == pytest.approx(2.0)
+    assert not session.can_undo
+
+
+def test_a_selection_that_no_longer_exists_is_dropped(qt_app) -> None:
+    session, strip = _strip(qt_app)
+    strip.select(session.words()[2].ref)
+    changes = []
+    strip.selection_changed.connect(changes.append)
+
+    session.remove_card(0)
+    strip.refresh()
+
+    assert strip.selected is None
+    assert changes == [None]
+
+
+def _long_lecture_session(total_words: int = 5000, total_seconds: float = 3000.0):
+    from qurantext.gui.review.session import ReviewSession
+    from qurantext.jobs.project import CaptionCue, Project
+
+    words_per_cue = 5
+    cues = total_words // words_per_cue
+    word_len = total_seconds / total_words
+    captions = []
+    t = 0.0
+    for i in range(cues):
+        words = []
+        for j in range(words_per_cue):
+            words.append({"word": f"w{i}_{j}", "start": t, "end": t + word_len})
+            t += word_len
+        text = " ".join(w["word"] for w in words)
+        captions.append(CaptionCue(words[0]["start"], words[-1]["end"], text, words=words))
+    project = Project(
+        audio=__import__("pathlib").Path("dars.mp3"), mode="lecture", cards=[], captions=captions
+    )
+    return ReviewSession(project)
+
+
+def test_strip_paints_a_long_lecture_quickly(qt_app) -> None:
+    from qurantext.gui.review.word_strip import WordStrip
+
+    session = _long_lecture_session()
+    assert len(session.words()) == 5000
+
+    vp = Viewport()
+    vp.set_duration(3000.0)
+    vp.set_window(1500.0, 60.0)
+    strip = WordStrip(vp, session)
+    strip.resize(1000, 34)
+
+    strip.grab()  # warm up: font metrics, palette lookups, etc.
+    calls = 20
+    started = time.perf_counter()
+    for _ in range(calls):
+        strip.grab()
+    elapsed_ms = (time.perf_counter() - started) * 1000 / calls
+    assert elapsed_ms < 8.0, f"grab() averaged {elapsed_ms:.3f} ms over {calls} calls"

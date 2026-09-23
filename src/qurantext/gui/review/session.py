@@ -97,6 +97,7 @@ class ReviewSession:
         self._words_by_kind: dict[str, list[TimelineWord]] = {}
         self._starts_by_kind: dict[str, list[float]] = {}
         self._position_by_kind: dict[str, dict[WordRef, int]] = {}
+        self._max_len_by_kind: dict[str, float] = {}
 
     # -- state ------------------------------------------------------------------
 
@@ -189,6 +190,35 @@ class ReviewSession:
             self._words_by_kind = {}
             self._starts_by_kind = {}
             self._position_by_kind = {}
+            self._max_len_by_kind = {}
+
+    def words_in(self, t0: float, t1: float, kind: str | None = None) -> list[TimelineWord]:
+        """Words of *kind* overlapping ``[t0, t1]``: ``end >= t0`` and ``start <= t1``.
+
+        A widget painting or hit-testing a visible window need not walk every
+        word to find the handful in view. This bisects the cached,
+        start-sorted list to the range that could possibly overlap — backing
+        the lower bound up by the kind's longest word (also cached, so a
+        single outlier doesn't cost anything after the first call) to catch a
+        word that starts before *t0* but still ends inside the window — then
+        filters only that slice.
+        """
+        resolved = kind or self.primary_kind
+        words = self.words(resolved)
+        if not words:
+            return []
+        starts = self._starts_by_kind[resolved]
+        lo = bisect.bisect_left(starts, t0 - self._max_len(resolved))
+        hi = bisect.bisect_right(starts, t1)
+        return [tw for tw in words[lo:hi] if tw.end >= t0]
+
+    def _max_len(self, kind: str) -> float:
+        self._refresh_words_cache()
+        cached = self._max_len_by_kind.get(kind)
+        if cached is None:
+            cached = max((tw.end - tw.start for tw in self.words(kind)), default=0.0)
+            self._max_len_by_kind[kind] = cached
+        return cached
 
     def _build_words(self, kind: str) -> list[TimelineWord]:
         out: list[TimelineWord] = []
