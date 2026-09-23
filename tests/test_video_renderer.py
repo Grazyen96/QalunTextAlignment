@@ -605,3 +605,96 @@ def test_a_missing_binary_says_where_it_looked(monkeypatch) -> None:
     monkeypatch.setattr(video_common.shutil, "which", lambda _name: None)
     with pytest.raises(RuntimeError, match="in PATH"):
         video_common.require_binary("definitely-not-a-real-binary", "Install it.")
+
+
+def test_active_caption_index_is_the_latest_started_cue_if_it_still_covers_t() -> None:
+    from qurantext.core.frame_renderer import active_caption_index
+
+    # Out of order on purpose: the rule is by start time, the index is the input's.
+    captions = [
+        {"text": "second", "start": 2.0, "end": 4.0},
+        {"text": "first", "start": 0.0, "end": 3.0},
+        {"text": "late", "start": 6.0, "end": 6.5},
+    ]
+    assert active_caption_index(captions, 1.0) == 1
+    assert active_caption_index(captions, 2.5) == 0
+    assert active_caption_index(captions, 5.0) is None
+    assert active_caption_index(captions, -1.0) is None
+    assert active_caption_index([], 1.0) is None
+
+
+@pytest.mark.skipif(not _BUNDLED_FONT.exists(), reason="bundled font not present")
+def test_overlapping_captions_the_renderer_the_preview_and_the_review_agree(
+    tmp_path, monkeypatch
+) -> None:
+    import io
+
+    import numpy as np
+
+    from qurantext.gui.review.session import ReviewSession
+    from qurantext.jobs import preview as preview_module
+    from qurantext.jobs.project import CaptionCue, Project
+
+    captions = [
+        {"text": "first", "start": 0.0, "end": 3.0, "word_timings": []},
+        {"text": "second", "start": 2.0, "end": 4.0, "word_timings": []},
+    ]
+    at = 2.5
+    drawn: list[tuple[float, str]] = []
+
+    def fake_frame(t, match, width, height, font_file, **kwargs):
+        drawn.append((t, kwargs.get("caption_text", "")))
+        return np.zeros((height, width, 3), np.uint8)
+
+    class _Encoder:
+        stdin = io.BytesIO()
+        returncode = 0
+
+        def wait(self):
+            return 0
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(frame_renderer, "render_frame_pillow", fake_frame)
+    monkeypatch.setattr(frame_renderer, "_start_frame_encoder", lambda *a, **k: _Encoder())
+    frame_renderer.write_frame_video(
+        [],
+        5.0,
+        tmp_path / "a.m4a",
+        tmp_path / "o.mp4",
+        32,
+        24,
+        10,
+        _BUNDLED_FONT,
+        captions=captions,
+        log_path=tmp_path / "enc.log",
+    )
+    rendered = [text for t, text in drawn if t <= at][-1]
+
+    drawn.clear()
+    matches = tmp_path / "m.json"
+    matches.write_text(json.dumps({"matches": [], "meta": {"mode": "lecture"}}), encoding="utf-8")
+    monkeypatch.setattr(preview_module, "load_caption_segments", lambda _path: captions)
+    preview_module.render_preview(
+        preview_module.PreviewRequest(
+            matches=matches,
+            output=tmp_path / "p.png",
+            at=at,
+            width=32,
+            height=24,
+            font_file=_BUNDLED_FONT,
+        )
+    )
+    previewed = drawn[-1][1]
+
+    session = ReviewSession(
+        Project(
+            audio=tmp_path / "a.m4a",
+            mode="lecture",
+            captions=[CaptionCue(c["start"], c["end"], c["text"]) for c in captions],
+        )
+    )
+    reviewed = session.project.captions[session.caption_at(at)].text
+
+    assert rendered == previewed == reviewed == "second"

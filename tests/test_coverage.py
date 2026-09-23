@@ -16,7 +16,7 @@ import subprocess
 
 import pytest
 
-from qurantext.core.coverage import find_uncovered_speech, speech_levels
+from qurantext.core.coverage import find_uncovered_speech, speech_levels, uncovered_from_levels
 
 _FFMPEG = shutil.which("ffmpeg")
 pytestmark = pytest.mark.skipif(not _FFMPEG, reason="needs ffmpeg")
@@ -132,3 +132,14 @@ def test_no_words_at_all_reports_every_loud_stretch(tmp_path) -> None:
     gaps = find_uncovered_speech(audio, [])
     assert len(gaps) == 2
     assert sum(g.duration for g in gaps) == pytest.approx(8.0, abs=1.0)
+
+
+def test_levels_read_once_give_the_same_answer_as_reading_them_again(tmp_path) -> None:
+    """The review window decodes once and re-checks from the levels after every edit."""
+    audio = _tone_then_silence_then_tone(tmp_path)
+    words = [{"word": "one", "start": 0.0, "end": 4.0}]
+    times, levels, floor = speech_levels(audio)
+
+    assert uncovered_from_levels(times, levels, floor, words) == find_uncovered_speech(audio, words)
+    assert uncovered_from_levels(times, levels, floor, [{"start": 0.0, "end": 12.5}]) == []
+    assert uncovered_from_levels([], [], floor, words) == []

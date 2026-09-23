@@ -20,6 +20,9 @@ dependencies = [
 # The window. Optional so the command line installs without a ~150 MB Qt.
 gui = [
   "PySide6-Essentials>=6.6,<7",
+  # Carries Qt Multimedia, which the review window's playback uses. Optional:
+  # the app still runs without it, just with playback disabled and a reason shown.
+  "PySide6-Addons>=6.6,<7",
 ]
 dev = [
   "pytest>=8,<10",

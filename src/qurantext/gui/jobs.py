@@ -103,8 +103,15 @@ def _set_aside(path: Path) -> Path | None:
     return backup
 
 
-def _keep_earlier(destination: Path, derived: Project) -> Path | None:
+_UNCHANGED = "unchanged"
+
+
+def _keep_earlier(destination: Path, derived: Project) -> Path | str | None:
     """Back up the project at *destination* unless re-matching reproduced it exactly.
+
+    Returns the backup path, ``"unchanged"`` when the existing project already
+    holds exactly what re-matching derived (it is then left alone, review state,
+    render record and all), or None when there was nothing there.
 
     A re-match that yields the same cards and captions has nothing to lose, and a
     backup per run would bury the one that matters. A file that cannot be read
@@ -116,7 +123,9 @@ def _keep_earlier(destination: Path, derived: Project) -> Path | None:
         unchanged = load_project(destination).content_hash() == derived.content_hash()
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         unchanged = False
-    return None if unchanged else _set_aside(destination)
+    if unchanged:
+        return _UNCHANGED
+    return _set_aside(destination)
 
 
 def run_matching(
@@ -179,7 +188,10 @@ def _match(
 
     project = Project.from_match_file(match_path, audio, mode=spec.mode)
     destination = project_path_for(match_path)
-    backup = _keep_earlier(destination, project)
+    kept = _keep_earlier(destination, project)
+    if kept == _UNCHANGED:
+        return load_project(destination), None
+    backup = kept if isinstance(kept, Path) else None
     if backup is not None:
         report(progress, "detect", f"Kept your earlier corrections in {backup.name}")
     save_project(project, destination)

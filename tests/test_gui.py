@@ -401,3 +401,270 @@ def test_set_aside_returns_the_backup_path(tmp_path) -> None:
     backup = jobs_module._set_aside(project_path)
     assert backup is not None and backup.read_text(encoding="utf-8") == "x"
     assert not project_path.exists()
+
+
+def test_an_identical_rematch_leaves_the_project_file_untouched(tmp_path, monkeypatch) -> None:
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.jobs.project import Project, load_project, project_path_for, save_project
+
+    match_path = tmp_path / "clip_recitation.json"
+    match_path.write_text(
+        json.dumps({"matches": [], "meta": {"mode": "recitation"}}), encoding="utf-8"
+    )
+    audio = tmp_path / "clip.m4a"
+    audio.write_bytes(b"")
+    existing = Project.from_match_file(match_path, audio, mode="recitation")
+    existing.mark_reviewed()
+    existing.style = {"theme": "night"}
+    destination = save_project(existing, project_path_for(match_path))
+    before = destination.read_bytes()
+
+    monkeypatch.setattr(jobs_module, "run_recitation_range", lambda **kwargs: {"matches": []})
+    spec = JobSpec(
+        audio=audio, quran=QURAN_FILE, surah_num=1, from_ayah=1, to_ayah=7, output_dir=tmp_path
+    )
+    project = jobs_module.run_matching(spec)
+
+    assert destination.read_bytes() == before
+    assert project.review["state"] == "reviewed" and project.style == {"theme": "night"}
+    assert not list(tmp_path.glob("*.qalun-backup.json"))
+    assert load_project(destination).review["state"] == "reviewed"
+
+
+# --- opening the review ---------------------------------------------------
+
+
+def test_review_opens_the_jobs_project(qt_app, tmp_path, monkeypatch) -> None:
+    from qurantext.gui import main_window as module
+    from qurantext.gui.jobs import JobOutcome
+    from qurantext.jobs.project import Project, save_project
+
+    matches = tmp_path / "clip_recitation.json"
+    matches.write_text(
+        json.dumps({"matches": [], "meta": {"mode": "recitation"}}), encoding="utf-8"
+    )
+    project_path = save_project(
+        Project(audio=tmp_path / "clip.mp3", matches=matches),
+        tmp_path / "clip_recitation.qalun.json",
+    )
+    opened = []
+    monkeypatch.setattr(
+        module,
+        "ReviewWindow",
+        lambda project, **kw: (
+            opened.append(project)
+            or type(
+                "W",
+                (),
+                {
+                    "show": lambda self: None,
+                    "saved": type("S", (), {"connect": lambda self, f: None})(),
+                    "closed": type("S", (), {"connect": lambda self, f: None})(),
+                },
+            )()
+        ),
+    )
+    window = module.MainWindow()
+    window._outcome = JobOutcome(
+        matches=matches, video=None, cards=0, mode="recitation", project=project_path
+    )
+    window._open_editor()
+    assert opened and opened[0].path == project_path
+
+
+def test_reopening_the_same_project_raises_the_existing_window(
+    qt_app, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui import main_window as module
+    from qurantext.gui.jobs import JobOutcome
+    from qurantext.jobs.project import Project, save_project
+
+    matches = tmp_path / "clip_recitation.json"
+    matches.write_text(
+        json.dumps({"matches": [], "meta": {"mode": "recitation"}}), encoding="utf-8"
+    )
+    project_path = save_project(
+        Project(audio=tmp_path / "clip.mp3", matches=matches),
+        tmp_path / "clip_recitation.qalun.json",
+    )
+    created = []
+
+    class FakeReview:
+        def __init__(self, project, **kw):
+            created.append(self)
+            self.project = project
+            self.saved = type("S", (), {"connect": lambda self, f: None})()
+            self.closed = type("S", (), {"connect": lambda self, f: None})()
+            self.shown = 0
+            self.raised = 0
+            self.activated = 0
+
+        def show(self):
+            self.shown += 1
+
+        def raise_(self):
+            self.raised += 1
+
+        def activateWindow(self):
+            self.activated += 1
+
+    monkeypatch.setattr(module, "ReviewWindow", FakeReview)
+    window = module.MainWindow()
+    window._outcome = JobOutcome(
+        matches=matches, video=None, cards=0, mode="recitation", project=project_path
+    )
+    window._open_editor()
+    window._open_editor()
+
+    assert len(created) == 1
+    # Opened once, then re-shown, raised and activated on the second call.
+    assert created[0].shown == 2
+    assert created[0].raised == 1
+    assert created[0].activated == 1
+
+
+def test_a_review_window_that_refuses_to_close_keeps_the_main_window_open(
+    qt_app, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui import main_window as module
+    from qurantext.gui.jobs import JobOutcome
+    from qurantext.jobs.project import Project, save_project
+
+    matches = tmp_path / "clip_recitation.json"
+    matches.write_text(
+        json.dumps({"matches": [], "meta": {"mode": "recitation"}}), encoding="utf-8"
+    )
+    project_path = save_project(
+        Project(audio=tmp_path / "clip.mp3", matches=matches),
+        tmp_path / "clip_recitation.qalun.json",
+    )
+
+    class RefusingReview:
+        def __init__(self, project, **kw):
+            self.saved = type("S", (), {"connect": lambda self, f: None})()
+            self.closed = type("S", (), {"connect": lambda self, f: None})()
+
+        def show(self):
+            pass
+
+        def close(self):
+            return False
+
+    monkeypatch.setattr(module, "ReviewWindow", RefusingReview)
+    window = module.MainWindow()
+    window._outcome = JobOutcome(
+        matches=matches, video=None, cards=0, mode="recitation", project=project_path
+    )
+    window._open_editor()
+    window.show()
+
+    window.close()
+
+    assert window.isVisible()
+
+
+def _review_job(tmp_path):
+    from qurantext.gui.jobs import JobOutcome
+    from qurantext.jobs.project import Project, save_project
+
+    cards = [
+        {
+            "surah_num": 25,
+            "from_ayah": 7,
+            "to_ayah": 7,
+            "full_text": "a b",
+            "confidence": 1.0,
+            "start_time": 0.0,
+            "end_time": 10.0,
+            "word_timings": [
+                {"word": "a", "start": 1.0, "end": 2.0},
+                {"word": "b", "start": 2.0, "end": 3.0},
+            ],
+        }
+    ]
+    matches = tmp_path / "clip_recitation.json"
+    matches.write_text(
+        json.dumps({"matches": cards, "meta": {"mode": "recitation"}}), encoding="utf-8"
+    )
+    project_path = save_project(
+        Project(audio=tmp_path / "clip.mp3", cards=cards, matches=matches),
+        tmp_path / "clip_recitation.qalun.json",
+    )
+    outcome = JobOutcome(
+        matches=matches, video=None, cards=1, mode="recitation", project=project_path
+    )
+    return outcome, project_path
+
+
+@pytest.fixture()
+def real_reviews(qt_app, monkeypatch):
+    """The main window's real review window, with a fake player; closed after the test."""
+    from PySide6.QtCore import QEvent
+
+    from qurantext.gui import main_window as module
+    from qurantext.gui.review.player import FakePlayer
+
+    real = module.ReviewWindow
+    monkeypatch.setattr(
+        module, "ReviewWindow", lambda project: real(project, player=FakePlayer(duration=10.0))
+    )
+    main = module.MainWindow()
+    yield main
+    for window in list(main._reviews.values()):
+        window._confirm_discard = lambda: "discard"
+        window.close()
+    main.deleteLater()
+    qt_app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+def _edit_first_word(review) -> None:
+    from qurantext.gui.review.session import CARD, WordRef
+
+    review.session.retime(WordRef(CARD, 0, 0), end=2.5)
+    review._after_edit()
+
+
+def test_discard_then_reopen_shows_the_saved_state(qt_app, tmp_path, real_reviews) -> None:
+    from PySide6.QtCore import QEvent
+
+    outcome, project_path = _review_job(tmp_path)
+    real_reviews._outcome = outcome
+    real_reviews._open_editor()
+    first = real_reviews._reviews[project_path]
+    _edit_first_word(first)
+    first._confirm_discard = lambda: "discard"
+    assert first.close()
+    assert project_path not in real_reviews._reviews
+    qt_app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+    real_reviews._open_editor()
+    second = real_reviews._reviews[project_path]
+    assert not second.session.dirty
+    assert not second.windowTitle().endswith("*")
+    assert second.session.words()[0].end == 2.0
+
+
+def test_a_change_on_disk_between_close_and_reopen_is_shown(qt_app, tmp_path, real_reviews) -> None:
+    from qurantext.jobs.project import load_project, save_project
+
+    outcome, project_path = _review_job(tmp_path)
+    real_reviews._outcome = outcome
+    real_reviews._open_editor()
+    assert real_reviews._reviews[project_path].close()
+
+    on_disk = load_project(project_path)
+    on_disk.review = {"state": "reviewed", "reviewed_at": "2026-09-23T00:00:00"}
+    save_project(on_disk, project_path)
+
+    real_reviews._open_editor()
+    assert real_reviews._reviews[project_path].session.project.review["state"] == "reviewed"
+
+
+def test_opening_twice_while_open_keeps_one_window(qt_app, tmp_path, real_reviews) -> None:
+    outcome, project_path = _review_job(tmp_path)
+    real_reviews._outcome = outcome
+    real_reviews._open_editor()
+    first = real_reviews._reviews[project_path]
+    real_reviews._open_editor()
+    assert real_reviews._reviews[project_path] is first
+    assert len(real_reviews._reviews) == 1

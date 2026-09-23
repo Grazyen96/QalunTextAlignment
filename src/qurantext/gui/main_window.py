@@ -8,12 +8,11 @@ with their flags.
 
 from __future__ import annotations
 
-import subprocess
-import sys
+from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QDragEnterEvent, QDropEvent, QPixmap
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -34,11 +33,13 @@ from PySide6.QtWidgets import (
 from qurantext.config.paths import DEFAULT_QURAN_PATH, QURAN_DB_PATH, QURAN_INPUT_DIR
 from qurantext.config.settings import VIDEO_PRESETS
 from qurantext.data.quran_db import ensure_quran_db, list_surahs
-from qurantext.gui.editor import SubtitleEditor
+from qurantext.gui.files import show_in_folder
+from qurantext.gui.i18n import t
 from qurantext.gui.jobs import JobOutcome, JobSpec, run_job
+from qurantext.gui.review import ReviewWindow
 from qurantext.gui.worker import run_in_thread
 from qurantext.jobs.preview import PreviewRequest, render_preview
-from qurantext.jobs.project import Project, load_project, save_project
+from qurantext.jobs.project import load_project, project_path_for
 from qurantext.utils.progress import CancelToken, ProgressEvent
 
 __all__ = ["MainWindow"]
@@ -61,7 +62,10 @@ class MainWindow(QMainWindow):
         self._thread = None
         self._worker = None
         self._outcome: JobOutcome | None = None
-        self._editor = None
+        #: One review window per open project, keyed by its file: reopening the
+        #: same project raises what is already there instead of a second window.
+        #: A window leaves this once it closes, so the next review reads the file afresh.
+        self._reviews: dict[Path, ReviewWindow] = {}
 
         self._build()
         self._refresh_enabled()
@@ -153,7 +157,7 @@ class MainWindow(QMainWindow):
         self.preview_button = QPushButton("Preview a frame")
         self.preview_button.setEnabled(False)
         self.preview_button.clicked.connect(self._preview)
-        self.check_button = QPushButton("Check the subtitles")
+        self.check_button = QPushButton(t("main.review"))
         self.check_button.setEnabled(False)
         self.check_button.clicked.connect(self._open_editor)
         self.reveal_button = QPushButton("Show the video")
@@ -396,40 +400,61 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _open_editor(self) -> None:
-        """Open the finished job's subtitles for correction.
+        """Open the finished job's project for review.
 
-        The project is derived from the match result once, here, and written
-        beside it. After that the project owns the cues: a correction made in
-        the editor survives the next render, which is the whole reason the
-        project file exists.
+        The project path is the one ``run_job`` already wrote (or, for an
+        older outcome, wherever it would have put it beside the match file).
+        Reopening the same project raises the window already open on it
+        rather than making a second one, so a correction is only ever made
+        in one place at a time. A closed window is not kept: the next review
+        loads the project from disk again, so it shows what was saved (never
+        edits that were discarded) and anything that changed the file since.
         """
         if self._outcome is None:
             return
-        project_path = self._outcome.matches.with_suffix(".qalun.json")
+        project_path = self._outcome.project or project_path_for(self._outcome.matches)
+        existing = self._reviews.get(project_path)
+        if existing is not None:
+            existing.show()
+            existing.raise_()
+            existing.activateWindow()
+            return
         try:
-            if project_path.exists():
-                project = load_project(project_path)
-            else:
-                project = Project.from_match_file(
-                    self._outcome.matches, self._audio or Path(), mode=self._outcome.mode
-                )
-                save_project(project, project_path)
+            project = load_project(project_path)
         except (OSError, ValueError) as error:
-            QMessageBox.warning(self, "Could not open the subtitles", str(error))
+            QMessageBox.warning(self, "Could not open the review", str(error))
             return
 
-        editor = SubtitleEditor(project)
-        editor.setWindowFlag(Qt.WindowType.Window, True)
-        editor.resize(760, 520)
-        editor.saved.connect(lambda _p: self.status.setText(f"Corrections saved to {project_path}"))
-        editor.show()
+        window = ReviewWindow(project)
+        window.saved.connect(lambda path: self.status.setText(t("main.saved", path=path)))
+        window.closed.connect(partial(self._forget_review, project_path, window))
+        window.show()
         # Keep a reference: a window without one is collected and vanishes.
-        self._editor = editor
+        self._reviews[project_path] = window
+
+    def _forget_review(self, project_path: Path, window: ReviewWindow) -> None:
+        """Let a closed review window go, unless another has taken its place."""
+        if self._reviews.get(project_path) is window:
+            del self._reviews[project_path]
+        window.deleteLater()
 
     def _reveal(self) -> None:
         if self._outcome is None or self._outcome.video is None:
             return
-        _show_in_folder(self._outcome.video)
+        show_in_folder(self._outcome.video)
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt override
+        """Close every open review window first; a refusal keeps this window open too.
+
+        A review window that refuses to close (the person cancelled its
+        unsaved-changes prompt) must not lose that work to the main window
+        closing around it.
+        """
+        for window in list(self._reviews.values()):
+            if not window.close():
+                event.ignore()
+                return
+        super().closeEvent(event)
 
 
 def _minutes(seconds: float) -> str:
@@ -459,17 +484,3 @@ def _default_quran_file() -> Path | None:
         if candidates:
             return candidates[0]
     return DEFAULT_QURAN_PATH if DEFAULT_QURAN_PATH.is_file() else None
-
-
-def _show_in_folder(path: Path) -> None:
-    """Reveal the file in the platform's file manager, selected where possible."""
-    try:
-        if sys.platform == "win32":
-            subprocess.run(["explorer", "/select,", str(path)], check=False)
-            return
-        if sys.platform == "darwin":
-            subprocess.run(["open", "-R", str(path)], check=False)
-            return
-    except OSError:
-        pass
-    QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))

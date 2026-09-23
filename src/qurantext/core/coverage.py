@@ -22,7 +22,7 @@ from typing import Any
 
 from qurantext.core.video_common import require_binary
 
-__all__ = ["UncoveredSpeech", "find_uncovered_speech", "speech_levels"]
+__all__ = ["UncoveredSpeech", "find_uncovered_speech", "speech_levels", "uncovered_from_levels"]
 
 #: Analysis frame length. Long enough to be stable, short enough to place a gap.
 FRAME_SECONDS = 0.25
@@ -118,6 +118,34 @@ def find_uncovered_speech(
     numbers are ignored rather than treated as covering everything.
     """
     times, levels, floor = speech_levels(audio_path, frame_seconds=frame_seconds)
+    return uncovered_from_levels(
+        times,
+        levels,
+        floor,
+        word_timings,
+        min_seconds=min_seconds,
+        margin_db=margin_db,
+        frame_seconds=frame_seconds,
+    )
+
+
+def uncovered_from_levels(
+    times: list[float],
+    levels: list[float],
+    floor: float,
+    word_timings: list[dict[str, Any]],
+    *,
+    min_seconds: float = DEFAULT_MIN_SECONDS,
+    margin_db: float = DEFAULT_MARGIN_DB,
+    frame_seconds: float = FRAME_SECONDS,
+) -> list[UncoveredSpeech]:
+    """:func:`find_uncovered_speech` on levels already read by :func:`speech_levels`.
+
+    Decoding is the slow half: seconds and hundreds of megabytes for an hour
+    of audio. The review window decodes once and re-checks coverage from the
+    same levels after every edit, which takes milliseconds. *frame_seconds*
+    must be the value the levels were read with.
+    """
     if not times:
         return []
 

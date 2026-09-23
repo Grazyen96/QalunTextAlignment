@@ -130,3 +130,47 @@ def test_ass_export_uses_the_recorded_render_size(tmp_path, store) -> None:
     (path,) = export_project_subtitles(project, tmp_path / "c", ("ass",), db_path=store)
     text = path.read_text(encoding="utf-8-sig")
     assert "PlayResX: 720" in text and "PlayResY: 404" in text
+
+
+def _first_cue(srt_text: str) -> str:
+    """The first cue block of an SRT (index, times, text), without its trailing blank line."""
+    return srt_text.strip().split("\n\n")[0]
+
+
+def test_export_on_the_video_timeline_matches_a_render_with_a_real_basmala(
+    tmp_path, store, monkeypatch
+) -> None:
+    """Spec §6: exported subtitles line up with the video that was actually rendered.
+
+    The earlier test above feeds a made-up offset; this one renders with the
+    real basmala splice and compares against the sidecar that render wrote.
+    """
+    from qurantext.config.paths import BASMALA_AUDIO_PATH
+    from qurantext.config.settings import get_settings
+
+    if not BASMALA_AUDIO_PATH.is_file():
+        pytest.skip(f"needs the user's basmala recording at {BASMALA_AUDIO_PATH}")
+    monkeypatch.setenv("QURANTEXT_VIDEO_PREPEND_BASMALA", "true")
+    get_settings.cache_clear()
+    try:
+        project = _project(tmp_path)
+        result = render_project(
+            project,
+            tmp_path / "v.mp4",
+            subtitles="sidecar",
+            formats=("srt",),
+            width=160,
+            height=120,
+            fps=8,
+            font_file=DEFAULT_FONT_PATH,
+            db_path=store,
+        )
+    finally:
+        get_settings.cache_clear()
+    assert float(project.render["basmala_offset_s"]) > 0, "the basmala was spliced in"
+    sidecar = result.subtitles[0].read_text(encoding="utf-8-sig")
+
+    (exported,) = export_project_subtitles(
+        project, tmp_path / "out" / "clip", ("srt",), timeline="video", db_path=store
+    )
+    assert _first_cue(exported.read_text(encoding="utf-8-sig")) == _first_cue(sidecar)
