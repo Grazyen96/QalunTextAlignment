@@ -8,12 +8,10 @@ with their flags.
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QDragEnterEvent, QDropEvent, QPixmap
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QDragEnterEvent, QDropEvent, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -35,6 +33,7 @@ from qurantext.config.paths import DEFAULT_QURAN_PATH, QURAN_DB_PATH, QURAN_INPU
 from qurantext.config.settings import VIDEO_PRESETS
 from qurantext.data.quran_db import ensure_quran_db, list_surahs
 from qurantext.gui.editor import SubtitleEditor
+from qurantext.gui.files import show_in_folder
 from qurantext.gui.jobs import JobOutcome, JobSpec, run_job
 from qurantext.gui.worker import run_in_thread
 from qurantext.jobs.preview import PreviewRequest, render_preview
@@ -429,7 +428,7 @@ class MainWindow(QMainWindow):
     def _reveal(self) -> None:
         if self._outcome is None or self._outcome.video is None:
             return
-        _show_in_folder(self._outcome.video)
+        show_in_folder(self._outcome.video)
 
 
 def _minutes(seconds: float) -> str:
@@ -459,17 +458,3 @@ def _default_quran_file() -> Path | None:
         if candidates:
             return candidates[0]
     return DEFAULT_QURAN_PATH if DEFAULT_QURAN_PATH.is_file() else None
-
-
-def _show_in_folder(path: Path) -> None:
-    """Reveal the file in the platform's file manager, selected where possible."""
-    try:
-        if sys.platform == "win32":
-            subprocess.run(["explorer", "/select,", str(path)], check=False)
-            return
-        if sys.platform == "darwin":
-            subprocess.run(["open", "-R", str(path)], check=False)
-            return
-    except OSError:
-        pass
-    QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))

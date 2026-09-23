@@ -22,7 +22,7 @@ from typing import Any
 from PySide6.QtCore import QObject, QThread
 
 from qurantext.gui.worker import JobWorker, run_in_thread
-from qurantext.utils.progress import CancelToken
+from qurantext.utils.progress import CancelToken, ProgressEvent
 
 __all__ = ["BackgroundJobs"]
 
@@ -51,6 +51,8 @@ class BackgroundJobs(QObject):
         *,
         on_finished: Callable[[Any], None],
         on_failed: Callable[[str], None],
+        on_progress: Callable[[ProgressEvent], None] | None = None,
+        on_cancelled: Callable[[], None] | None = None,
         on_done: Callable[[], None] | None = None,
     ) -> CancelToken:
         """Start *job* (called with ``progress=`` and ``cancel=``); returns its token.
@@ -60,7 +62,13 @@ class BackgroundJobs(QObject):
         self._prune()
         cancel = CancelToken()
         thread, worker = run_in_thread(
-            job, cancel, on_finished=on_finished, on_failed=on_failed, on_done=on_done
+            job,
+            cancel,
+            on_progress=on_progress,
+            on_finished=on_finished,
+            on_failed=on_failed,
+            on_cancelled=on_cancelled,
+            on_done=on_done,
         )
         self._running.append((thread, worker, cancel))
         return cancel

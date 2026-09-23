@@ -28,6 +28,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "review.mark_reviewed": "Mark as reviewed",
         "review.export": "Export subtitles…",
         "review.render": "Render with corrections",
+        "review.remove": "Remove selected",
+        "review.remove_none": "Select a row to remove.",
         "review.play": "Play",
         "review.pause": "Pause",
         "review.rate": "{rate:g}×",
@@ -48,6 +50,23 @@ STRINGS: dict[str, dict[str, str]] = {
             "Space plays · ←/→ step words · [ and ] set start/end at the playhead · "
             ", and . nudge · Ctrl+Z undoes"
         ),
+        "export.title": "Export subtitles",
+        "export.formats": "Formats",
+        "export.folder": "Folder",
+        "export.choose": "Choose…",
+        "export.name": "File name",
+        "export.match_video": "Match the rendered video (includes the basmala at the start)",
+        "export.match_audio": "Match the original recording",
+        "export.go": "Export",
+        "export.done": "Wrote {count} file(s):",
+        "export.show": "Show in folder",
+        "export.none_chosen": "Choose at least one format.",
+        "render.running": "Rendering — {percent}%",
+        "render.done": "The video is ready: {path}",
+        "render.show": "Show the video",
+        "render.failed": "The render did not finish: {details}",
+        "render.cancelled": "Rendering stopped.",
+        "render.cancel": "Cancel",
     },
 }
 LANGUAGES = tuple(STRINGS)

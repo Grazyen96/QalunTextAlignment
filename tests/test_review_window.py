@@ -306,3 +306,117 @@ def test_a_later_measured_length_keeps_the_chosen_zoom(qt_app, tmp_path) -> None
     window._set_duration(12.5)
     assert window.viewport.duration == pytest.approx(12.5)
     assert window.viewport.span == pytest.approx(1.0)
+
+
+def test_remove_selected_deletes_the_row_and_undo_restores_it(qt_app, tmp_path) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    assert len(window.session.project.cards) == 1
+    window.segment_list.selectRow(0)
+    window.remove_button.click()
+    assert len(window.session.project.cards) == 0
+    QTest.keyClick(window, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+    assert len(window.session.project.cards) == 1
+
+
+def test_remove_with_nothing_selected_says_so_without_a_modal(qt_app, tmp_path) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    window.segment_list.clearSelection()
+    window.remove_button.click()
+    from qurantext.gui.i18n import t
+
+    assert window.statusBar().currentMessage() == t("review.remove_none")
+    assert len(window.session.project.cards) == 1
+
+
+@pytest.mark.skipif(not MEDIA_AVAILABLE, reason=MEDIA_REASON)
+def test_export_writes_the_chosen_formats_and_saves_first(qt_app, tmp_path, store) -> None:
+    from qurantext.gui.review.export_dialog import ExportDialog
+    from qurantext.gui.review.session import CARD, ReviewSession, WordRef
+
+    audio, matches = build_job(tmp_path)
+    project = Project.from_match_file(matches, audio)
+    save_project(project, tmp_path / "job.qalun.json")
+    session = ReviewSession(project)
+    session.retime(WordRef(CARD, 0, 1), start=0.45)
+    dialog = ExportDialog(session, db_path=store)
+    dialog.set_formats(("srt", "vtt"))
+    dialog.set_destination(tmp_path / "out", "clip")
+    written = dialog.export()
+    assert sorted(p.suffix for p in written) == [".srt", ".vtt"]
+    assert not session.dirty, "unsaved edits are saved before exporting"
+
+
+def test_export_on_the_video_timeline_is_offered_only_after_a_render(qt_app, tmp_path) -> None:
+    from qurantext.gui.review.export_dialog import ExportDialog
+    from qurantext.gui.review.session import ReviewSession
+
+    project = _project(tmp_path)
+    assert not ExportDialog(ReviewSession(project)).video_timeline_available()
+    project.record_render(tmp_path / "v.mp4", preset="social", basmala_offset_s=1.0)
+    dialog = ExportDialog(ReviewSession(project))
+    assert dialog.video_timeline_available() and dialog.timeline() == "video"
+
+
+def test_render_with_corrections_saves_then_renders_the_project(
+    qt_app, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.gui.jobs import JobOutcome
+
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Period)
+    seen = {}
+
+    def fake_render(project, **kwargs):
+        seen["end"] = project.cards[0]["word_timings"][0]["end"]
+        seen["saved"] = load_project(project.path).cards[0]["word_timings"][0]["end"]
+        return JobOutcome(
+            matches=project.matches, video=tmp_path / "v.mp4", cards=1, mode="recitation"
+        )
+
+    monkeypatch.setattr(jobs_module, "run_render", fake_render)
+    monkeypatch.setattr(
+        window, "_announce_render", lambda outcome: seen.setdefault("done", outcome)
+    )
+    window.render_requested.emit()
+    # PySide6's QTest has no qWaitFor; _wait_for above (in this file) is its replacement.
+    assert _wait_for(lambda: "done" in seen, 5000)
+    assert seen["end"] == 2.05 and seen["saved"] == 2.05
+
+
+def test_render_disables_editing_actions_until_done(qt_app, tmp_path, monkeypatch) -> None:
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.gui.jobs import JobOutcome
+
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Period)
+    seen = {}
+
+    def fake_render(project, **kwargs):
+        return JobOutcome(
+            matches=project.matches, video=tmp_path / "v.mp4", cards=1, mode="recitation"
+        )
+
+    monkeypatch.setattr(jobs_module, "run_render", fake_render)
+    monkeypatch.setattr(
+        window, "_announce_render", lambda outcome: seen.setdefault("done", outcome)
+    )
+    assert window.session.can_undo
+    window.render_requested.emit()
+    assert not window.render_button.isEnabled()
+    assert not window.undo_button.isEnabled()
+    assert not window.remove_button.isEnabled()
+    # "done" (set by _announce_render) and the button re-enabling (set by the
+    # worker's separate `done` signal) are two different queued callbacks, so
+    # wait for the one this test actually checks rather than the other.
+    assert _wait_for(lambda: not window._rendering, 5000)
+    assert "done" in seen
+    assert window.render_button.isEnabled()
+    assert window.undo_button.isEnabled()
+    assert window.remove_button.isEnabled()

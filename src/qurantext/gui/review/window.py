@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QSplitter,
     QVBoxLayout,
@@ -42,8 +43,12 @@ from PySide6.QtWidgets import (
 from qurantext.config.settings import VIDEO_PRESETS
 from qurantext.core.coverage import speech_levels, uncovered_from_levels
 from qurantext.core.waveform import Peaks, load_or_compute_peaks, peaks_path_for
+from qurantext.gui import jobs as jobs_module
+from qurantext.gui.files import show_in_folder
 from qurantext.gui.i18n import t
+from qurantext.gui.jobs import JobOutcome
 from qurantext.gui.review.background import BackgroundJobs
+from qurantext.gui.review.export_dialog import ExportDialog
 from qurantext.gui.review.frame_view import FrameView
 from qurantext.gui.review.player import RATES, Player, create_player
 from qurantext.gui.review.segment_list import SegmentList
@@ -55,6 +60,7 @@ from qurantext.gui.review.waveform_view import WaveformView
 from qurantext.gui.review.word_strip import WordStrip
 from qurantext.gui.review.zoom_slider import ZoomSlider
 from qurantext.jobs.project import Project
+from qurantext.utils.progress import CancelToken, ProgressEvent
 
 __all__ = ["ReviewWindow"]
 
@@ -122,6 +128,9 @@ class ReviewWindow(QMainWindow):
         self._closed = False
         #: The session revision the views last caught up with (see ``_after_caption_edit``).
         self._seen_revision = self.session.revision
+        #: Whether a render job is running: gates the editing actions while it is.
+        self._rendering = False
+        self._render_cancel: CancelToken | None = None
 
         self._build()
         self._wire()
@@ -159,13 +168,29 @@ class ReviewWindow(QMainWindow):
         self.undo_button = QPushButton(t("review.undo"))
         self.redo_button = QPushButton(t("review.redo"))
         self.reviewed_button = QPushButton(t("review.mark_reviewed"))
+        self.remove_button = QPushButton(t("review.remove"))
         self.export_button = QPushButton(t("review.export"))
         self.render_button = QPushButton(t("review.render"))
-        for button in (self.save_button, self.undo_button, self.redo_button, self.reviewed_button):
+        self.render_progress = QProgressBar()
+        self.render_progress.setRange(0, 100)
+        self.render_progress.setFixedWidth(140)
+        self.render_progress.setVisible(False)
+        self.render_cancel_button = QPushButton(t("render.cancel"))
+        self.render_cancel_button.setVisible(False)
+        buttons = (
+            self.save_button,
+            self.undo_button,
+            self.redo_button,
+            self.reviewed_button,
+            self.remove_button,
+        )
+        for button in buttons:
             toolbar.addWidget(button)
         toolbar.addStretch(1)
         toolbar.addWidget(self.export_button)
         toolbar.addWidget(self.render_button)
+        toolbar.addWidget(self.render_progress)
+        toolbar.addWidget(self.render_cancel_button)
         column.addLayout(toolbar)
 
         self.warnings = WarningsStrip()
@@ -223,8 +248,12 @@ class ReviewWindow(QMainWindow):
         self.undo_button.clicked.connect(self.undo)
         self.redo_button.clicked.connect(self.redo)
         self.reviewed_button.clicked.connect(self._mark_reviewed)
+        self.remove_button.clicked.connect(self._remove_selected)
         self.export_button.clicked.connect(self.export_requested)
         self.render_button.clicked.connect(self.render_requested)
+        self.render_cancel_button.clicked.connect(self._cancel_render)
+        self.export_requested.connect(self._open_export_dialog)
+        self.render_requested.connect(self._start_render)
         self.warnings.jump_requested.connect(self.seek)
         self.waveform.seek_requested.connect(self.seek)
         self.strip.seek_requested.connect(self.seek)
@@ -402,6 +431,19 @@ class ReviewWindow(QMainWindow):
         self.session.mark_reviewed()
         self._after_edit()
 
+    def _remove_selected(self) -> None:
+        """Remove the selected row(s); says so in the status bar if none is selected."""
+        if not self.segment_list.remove_selected():
+            self.statusBar().showMessage(t("review.remove_none"), 4000)
+            return
+        # The list already rebuilt itself; bring the rest of the window in line.
+        self.strip.refresh()
+        self._highlighted = None
+        self._sync_state()
+        self.frame_view.show_at(self.player.position(), force=True)
+        if self._levels is not None:
+            self._coverage_timer.start()
+
     def undo(self) -> None:
         if self.session.undo():
             self._after_edit()
@@ -429,9 +471,12 @@ class ReviewWindow(QMainWindow):
     def _sync_state(self) -> None:
         session = self.session
         self._seen_revision = session.revision
-        self.save_button.setEnabled(session.dirty)
-        self.undo_button.setEnabled(session.can_undo)
-        self.redo_button.setEnabled(session.can_redo)
+        # A render reads the project's current content: nothing may edit it meanwhile.
+        editable = not self._rendering
+        self.save_button.setEnabled(session.dirty and editable)
+        self.undo_button.setEnabled(session.can_undo and editable)
+        self.redo_button.setEnabled(session.can_redo and editable)
+        self.remove_button.setEnabled(editable)
         self.reviewed_button.setEnabled(session.project.review.get("state") != "reviewed")
         title = t("review.title", name=self._audio.stem)
         self.setWindowTitle(f"{title} *" if session.dirty else title)
@@ -439,6 +484,83 @@ class ReviewWindow(QMainWindow):
 
     def _show_selection(self, ref: WordRef | None) -> None:
         self.selection_bar.show_word(self.session.word(ref) if ref is not None else None)
+
+    # -- export and render ------------------------------------------------------
+
+    def _open_export_dialog(self) -> None:
+        ExportDialog(self.session, self).exec()
+        # The dialog may have saved the session on our behalf; catch up either way.
+        self._sync_state()
+
+    def _start_render(self) -> None:
+        """Save, then render the project's current cards and captions in a worker."""
+        if self.session.dirty and not self.save():
+            return
+        project = self.session.project
+        preset = (project.render or {}).get("preset") or "social"
+        subtitles = project.export.get("subtitles", "burn")
+        self._set_render_running(True)
+        self._render_cancel = self._jobs.start(
+            lambda progress, cancel: jobs_module.run_render(
+                project, preset=preset, subtitles=subtitles, progress=progress, cancel=cancel
+            ),
+            on_progress=self._on_render_progress,
+            on_finished=self._on_render_finished,
+            on_failed=self._on_render_failed,
+            on_cancelled=self._on_render_cancelled,
+            on_done=self._on_render_done,
+        )
+
+    def _on_render_finished(self, outcome: JobOutcome) -> None:
+        """Bound so Qt queues it to the UI thread; looks up ``_announce_render`` by
+        name each call, which is what lets a test replace it after connecting."""
+        self._announce_render(outcome)
+
+    def _on_render_done(self) -> None:
+        self._set_render_running(False)
+
+    def _cancel_render(self) -> None:
+        if self._render_cancel is not None:
+            self._render_cancel.cancel()
+            self.render_cancel_button.setEnabled(False)
+
+    def _set_render_running(self, running: bool) -> None:
+        self._rendering = running
+        self.render_button.setEnabled(not running)
+        self.render_progress.setVisible(running)
+        self.render_cancel_button.setVisible(running)
+        self.render_cancel_button.setEnabled(running)
+        if running:
+            self.render_progress.setValue(0)
+            self.render_progress.setFormat(t("render.running", percent=0))
+        else:
+            self._render_cancel = None
+        self._sync_state()
+
+    def _on_render_progress(self, event: ProgressEvent) -> None:
+        if event.fraction is None:
+            return
+        percent = int(max(0.0, min(1.0, event.fraction)) * 100)
+        self.render_progress.setValue(percent)
+        self.render_progress.setFormat(t("render.running", percent=percent))
+
+    def _announce_render(self, outcome: JobOutcome) -> None:
+        """Say the render is ready, with a button to reveal it (the tests replace this)."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setWindowTitle(t("review.render"))
+        box.setText(t("render.done", path=outcome.video))
+        show_button = box.addButton(t("render.show"), QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Ok)
+        box.exec()
+        if box.clickedButton() is show_button and outcome.video is not None:
+            show_in_folder(outcome.video)
+
+    def _on_render_failed(self, message: str) -> None:
+        QMessageBox.warning(self, t("review.render"), t("render.failed", details=message))
+
+    def _on_render_cancelled(self) -> None:
+        QMessageBox.information(self, t("review.render"), t("render.cancelled"))
 
     # -- saving and closing ---------------------------------------------------
 
