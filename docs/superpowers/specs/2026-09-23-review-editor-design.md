@@ -60,8 +60,10 @@ New fields:
 ```
 
 - `review.state` ∈ `needs_review` | `reviewed`. Any timing or text edit after a
-  render keeps `reviewed` but marks the render stale (`render` older than the
-  last save), which the job list shows as "changed since render".
+  render keeps `reviewed` but marks the render stale, which the job list shows
+  as "changed since render". Staleness is a content hash of `cards` + `captions`
+  recorded in `render.content_hash`, not a timestamp: saving the project right
+  after a render must not make that render look stale.
 - `render` is written by the app after a successful render. Its
   `basmala_offset_s` is what the Export dialog uses to put subtitles on the
   rendered video's timeline.
@@ -88,7 +90,8 @@ themselves. Operates on one list of `{word, start, end}` at a time (a card's
   latched tiling `assign_recitation_word_timings` already produces, kept true
   after edits. Cards without word timings (lecture) keep directly editable
   start/end.
-- `edit_caption_text(cue, text)` — replaces `CaptionCue.edited`: if the new
+- `CaptionCue.edited(text)` (stays in `jobs/project.py`, since `core` must not
+  import `jobs`) changes behaviour: if the new
   text has the same word count, word timings are kept and relabelled
   positionally; otherwise they are dropped as today. Fixing a misheard word
   therefore no longer throws away its karaoke timing.
