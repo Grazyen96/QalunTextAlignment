@@ -350,3 +350,34 @@ def test_drag_edits_need_a_gesture() -> None:
         session.drag_retime(WordRef(CARD, 0, 0), end=1.5)
     with pytest.raises(RuntimeError):
         session.drag_ripple(WordRef(CARD, 0, 0), 0.5)
+
+
+def test_removing_a_card_lets_the_previous_card_close_the_hole() -> None:
+    project = _recitation()
+    project.cards.append(
+        {
+            "surah_num": 25,
+            "from_ayah": 9,
+            "to_ayah": 9,
+            "full_text": "e",
+            "confidence": 1.0,
+            "start_time": 5.0,
+            "end_time": 10.0,
+            "word_timings": [_w("e", 5.0, 6.0)],
+        }
+    )
+    project.cards[1]["end_time"] = 5.0
+    session = ReviewSession(project)
+    before = [dict(card) for card in session.project.cards]
+    session.remove_card(1)
+    assert [card["from_ayah"] for card in session.project.cards] == [7, 9]
+    assert session.project.cards[0]["end_time"] == 5.0
+    session.undo()
+    assert session.project.cards == before
+
+
+def test_removing_a_lecture_card_leaves_the_others_alone() -> None:
+    session = ReviewSession(_lecture())
+    session.project.cards.append(dict(session.project.cards[0], start_time=9.0, end_time=9.5))
+    session.remove_card(1)
+    assert session.project.cards[0]["end_time"] == 8.0

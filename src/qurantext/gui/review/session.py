@@ -25,6 +25,7 @@ from qurantext.core.frame_renderer import CaptionTrack
 from qurantext.core.timing_edit import (
     count_edited,
     cue_bounds,
+    derive_card_windows,
     retime,
     retime_in_cards,
     ripple,
@@ -423,8 +424,17 @@ class ReviewSession:
         self._changed()
 
     def remove_card(self, index: int) -> None:
+        """Remove card *index*; in a recitation the card before it then holds until the next.
+
+        Recitation cards tile the recording (each holds until the next one's
+        first word), so a removed card must not leave a hole where no ayah
+        shows. Lecture cards are quotes with their own windows and stay as
+        they are.
+        """
         self._before_change()
         del self.project.cards[index]
+        if self.project.mode == "recitation":
+            self.project.cards = derive_card_windows(self.project.cards)
         self._changed()
 
     def remove_caption(self, index: int) -> None:
