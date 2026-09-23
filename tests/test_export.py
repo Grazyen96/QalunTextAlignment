@@ -7,102 +7,25 @@ files actually line up with the video they accompany.
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 
 import pytest
 
-from qurantext.config.paths import DEFAULT_FONT_PATH, DEFAULT_QURAN_PATH
-from qurantext.data.quran_db import build_quran_db
+from qurantext.config.paths import DEFAULT_FONT_PATH
 from qurantext.jobs.export import SUBTITLE_MODES, ExportRequest, build_cues, export_job
-
-QURAN_FILE = DEFAULT_QURAN_PATH
-_FFMPEG = shutil.which("ffmpeg")
-_FFPROBE = shutil.which("ffprobe")
-
-pytestmark = pytest.mark.skipif(
-    not (_FFMPEG and _FFPROBE and QURAN_FILE.exists() and DEFAULT_FONT_PATH.exists()),
-    reason="needs ffmpeg, ffprobe, the shipped Quran file and the bundled font",
+from tests.media_helpers import (
+    FFPROBE,
+    MEDIA_AVAILABLE,
+    MEDIA_REASON,
+    QURAN_FILE,
+    build_job,
 )
 
-
-@pytest.fixture()
-def no_basmala(monkeypatch):
-    from qurantext.config.settings import get_settings
-
-    monkeypatch.setenv("QURANTEXT_VIDEO_PREPEND_BASMALA", "false")
-    get_settings.cache_clear()
-    yield
-    get_settings.cache_clear()
-
-
-@pytest.fixture(scope="module")
-def store(tmp_path_factory):
-    path = tmp_path_factory.mktemp("store") / "quran.sqlite"
-    build_quran_db(QURAN_FILE, path)
-    return path
-
-
-def _job(tmp_path, seconds=6.0):
-    """A two-ayah recitation whose words are timed one every half second."""
-    from qurantext.core.quran_parser import parse_ayat
-
-    chosen = [a for a in parse_ayat(QURAN_FILE) if a["surah_num"] == 25 and 7 <= a["ayah_num"] <= 8]
-    timings, t = [], 0.0
-    for ayah in chosen:
-        for token in str(ayah["text_raw"]).split():
-            if not all("٠" <= c <= "٩" for c in token.strip()):
-                timings.append({"word": token, "start": round(t, 3), "end": round(t + 0.3, 3)})
-                t += 0.4
-
-    matches = tmp_path / "m.json"
-    matches.write_text(
-        json.dumps(
-            {
-                "matches": [
-                    {
-                        "surah_num": 25,
-                        "surah_name": "سُورَةُ الفُرقَانِ",
-                        "from_ayah": 7,
-                        "to_ayah": 8,
-                        "full_text": "\n".join(a["text_raw"] for a in chosen),
-                        "confidence": 1.0,
-                        "start_time": 0.0,
-                        "end_time": round(t, 3),
-                        "word_timings": timings,
-                    }
-                ],
-                "meta": {"mode": "recitation"},
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-
-    audio = tmp_path / "a.m4a"
-    subprocess.run(
-        [
-            _FFMPEG,
-            "-v",
-            "error",
-            "-y",
-            "-f",
-            "lavfi",
-            "-i",
-            "anullsrc=r=44100:cl=mono",
-            "-t",
-            str(max(seconds, t)),
-            "-c:a",
-            "aac",
-            str(audio),
-        ],
-        check=True,
-    )
-    return audio, matches
+pytestmark = pytest.mark.skipif(not MEDIA_AVAILABLE, reason=MEDIA_REASON)
 
 
 def test_burn_writes_only_a_video(tmp_path, store, no_basmala) -> None:
-    audio, matches = _job(tmp_path)
+    audio, matches = build_job(tmp_path)
     result = export_job(
         ExportRequest(
             audio=audio,
@@ -122,7 +45,7 @@ def test_burn_writes_only_a_video(tmp_path, store, no_basmala) -> None:
 
 
 def test_both_writes_a_video_and_the_requested_formats(tmp_path, store, no_basmala) -> None:
-    audio, matches = _job(tmp_path)
+    audio, matches = build_job(tmp_path)
     result = export_job(
         ExportRequest(
             audio=audio,
@@ -148,7 +71,7 @@ def test_the_sidecar_carries_canonical_text_not_the_recogniser_version(
     """The Quran in a subtitle file must come from the store."""
     from qurantext.core.quran_parser import parse_ayat
 
-    audio, matches = _job(tmp_path)
+    audio, matches = build_job(tmp_path)
     export_job(
         ExportRequest(
             audio=audio,
@@ -181,7 +104,7 @@ def test_cues_end_with_the_video_when_a_basmala_is_spliced(tmp_path, store, monk
     """
     from qurantext.jobs import export as export_module
 
-    audio, matches = _job(tmp_path)
+    audio, matches = build_job(tmp_path)
     offset = 4.0
     real_render = export_module.render_video
 
@@ -222,7 +145,7 @@ def test_cues_end_with_the_video_when_a_basmala_is_spliced(tmp_path, store, monk
     duration = float(
         subprocess.run(
             [
-                _FFPROBE,
+                FFPROBE,
                 "-v",
                 "error",
                 "-show_entries",
@@ -255,7 +178,7 @@ def test_cues_end_with_the_video_when_a_basmala_is_spliced(tmp_path, store, monk
 
 @pytest.mark.parametrize("mode", SUBTITLE_MODES)
 def test_every_mode_is_accepted(tmp_path, store, no_basmala, mode) -> None:
-    audio, matches = _job(tmp_path)
+    audio, matches = build_job(tmp_path)
     result = export_job(
         ExportRequest(
             audio=audio,
@@ -284,7 +207,7 @@ def test_an_unknown_mode_is_refused_at_construction(tmp_path) -> None:
 
 
 def test_cues_tile_with_no_gaps(tmp_path, store) -> None:
-    audio, matches = _job(tmp_path)
+    audio, matches = build_job(tmp_path)
     cues = build_cues(matches, duration=20.0, mode="recitation", db_path=store)
     assert len(cues) == 2
     assert cues[0].end == cues[1].start, "a gap would blank the subtitle mid-card"
@@ -298,7 +221,7 @@ def test_a_missing_store_is_built_from_the_bundled_text(tmp_path, no_basmala) ->
     Found by running the packaged app on a machine that had never built a store:
     it produced the video and then gave up on the subtitles.
     """
-    audio, matches = _job(tmp_path)
+    audio, matches = build_job(tmp_path)
     store = tmp_path / "fresh.sqlite"
     assert not store.exists()
 
@@ -321,6 +244,54 @@ def test_a_missing_store_is_built_from_the_bundled_text(tmp_path, no_basmala) ->
     assert result.cues == 2
 
 
+def test_build_cues_uses_the_cards_it_is_given(tmp_path, store) -> None:
+    _, matches = build_job(tmp_path)
+    card = json.loads(matches.read_text(encoding="utf-8"))["matches"][0]
+    moved = dict(card, start_time=1.5)
+
+    from_file = build_cues(matches, 20.0, mode="recitation", db_path=store)
+    from_project = build_cues(matches, 20.0, mode="recitation", db_path=store, cards=(moved,))
+    assert from_file[0].start == pytest.approx(0.0)
+    assert from_project[0].start == pytest.approx(1.5)
+
+
+def test_render_uses_the_cards_it_is_given(tmp_path, store, no_basmala, monkeypatch) -> None:
+    from qurantext.jobs import render as render_module
+    from qurantext.jobs.render import RenderRequest, render_video
+
+    audio, matches = build_job(tmp_path)
+    seen = {}
+
+    def capture(audio_path, matches_list, output_path, *args, **kwargs):
+        seen["cards"] = matches_list
+        output_path.write_bytes(b"")
+        return 1.0
+
+    monkeypatch.setattr(render_module, "render_frame_video", capture)
+    replacement = {
+        "surah_num": 25,
+        "from_ayah": 9,
+        "to_ayah": 9,
+        "start_time": 2.0,
+        "end_time": 3.0,
+        "full_text": "x",
+        "confidence": 1.0,
+    }
+    render_video(
+        RenderRequest(
+            audio=audio,
+            matches=matches,
+            output=tmp_path / "v.mp4",
+            width=160,
+            height=120,
+            fps=8,
+            font_file=DEFAULT_FONT_PATH,
+            cards=(replacement,),
+        )
+    )
+    assert [c["from_ayah"] for c in seen["cards"]] == [9]
+
+
 def test_a_store_that_cannot_be_built_costs_the_subtitles_not_the_video(
     tmp_path, no_basmala, monkeypatch
 ) -> None:
@@ -331,7 +302,7 @@ def test_a_store_that_cannot_be_built_costs_the_subtitles_not_the_video(
         raise OSError("read-only file system")
 
     monkeypatch.setattr(quran_db, "ensure_quran_db", refuse)
-    audio, matches = _job(tmp_path)
+    audio, matches = build_job(tmp_path)
     result = export_job(
         ExportRequest(
             audio=audio,

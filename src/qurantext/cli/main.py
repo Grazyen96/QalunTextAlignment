@@ -24,7 +24,8 @@ from qurantext.data.quran_db import build_quran_db, ensure_quran_db, list_surahs
 from qurantext.io.readers import load_json
 from qurantext.jobs.export import SUBTITLE_MODES, ExportRequest, export_job
 from qurantext.jobs.preview import PreviewRequest, render_preview
-from qurantext.jobs.project import Project, load_project, save_project
+from qurantext.jobs.project import Project, load_project, project_path_for, save_project
+from qurantext.jobs.project_render import render_project
 from qurantext.pipelines.detection import run_detection, run_recitation_range
 from qurantext.pipelines.recitation import build_recitation_output_paths, run_word_alignment
 from qurantext.pipelines.video import run_video_generation
@@ -251,7 +252,7 @@ def _run_preview(args: argparse.Namespace) -> int:
 
 def _run_project_init(args: argparse.Namespace) -> int:
     project = Project.from_match_file(args.matches, args.audio, mode=getattr(args, "mode", None))
-    output = args.output or str(Path(args.audio).with_suffix(".qalun.json"))
+    output = args.output or project_path_for(args.matches)
     path = save_project(project, output)
     print(f"Project saved to: {path}")
     print(f"  mode={project.mode}  cards={len(project.cards)}  captions={len(project.captions)}")
@@ -267,6 +268,7 @@ def _run_generate_video(args: argparse.Namespace) -> int:
         # caption cues win over anything re-derived from the match file.
         args.audio = args.audio or str(project.audio)
         args.mode = project.mode
+        args.matches = args.matches or (str(project.matches) if project.matches else None)
     if not args.audio or not args.matches:
         raise SystemExit("generate-video needs --audio and --matches, or a --project.")
 
@@ -298,23 +300,39 @@ def _run_generate_video(args: argparse.Namespace) -> int:
             progress=ConsoleProgress(),
         )
     else:
-        result = export_job(
-            ExportRequest(
-                audio=Path(args.audio),
-                matches=Path(args.matches),
-                output=Path(output_path),
+        if project is not None:
+            if args.matches and project.matches is None:
+                project.matches = Path(args.matches)
+            result = render_project(
+                project,
+                Path(output_path),
+                preset=getattr(args, "preset", None),
                 subtitles=subtitles,
                 formats=tuple(args.subtitle_format),
-                preset=getattr(args, "preset", None),
                 width=args.width,
                 height=args.height,
                 fps=args.fps,
                 font_file=Path(args.font_file) if args.font_file else None,
                 title=getattr(args, "title", None),
-                captions=tuple(project.caption_segments()) if project is not None else None,
-            ),
-            progress=ConsoleProgress(),
-        )
+                progress=ConsoleProgress(),
+            )
+        else:
+            result = export_job(
+                ExportRequest(
+                    audio=Path(args.audio),
+                    matches=Path(args.matches),
+                    output=Path(output_path),
+                    subtitles=subtitles,
+                    formats=tuple(args.subtitle_format),
+                    preset=getattr(args, "preset", None),
+                    width=args.width,
+                    height=args.height,
+                    fps=args.fps,
+                    font_file=Path(args.font_file) if args.font_file else None,
+                    title=getattr(args, "title", None),
+                ),
+                progress=ConsoleProgress(),
+            )
         for path in result.subtitles:
             print(f"Subtitles saved to: {path}")
     return 0
@@ -702,7 +720,10 @@ def build_parser() -> argparse.ArgumentParser:
     project_init.add_argument(
         "--output",
         default=None,
-        help="Path for the project file. Defaults to <audio>.qalun.json.",
+        help=(
+            "Path for the project file. Defaults to the match file's name with "
+            ".qalun.json, beside it, which is where the app looks for jobs."
+        ),
     )
     project_init.set_defaults(handler=_run_project_init)
     project_parser.set_defaults(

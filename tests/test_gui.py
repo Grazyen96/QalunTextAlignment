@@ -251,3 +251,153 @@ def test_run_job_matches_then_renders(tmp_path, monkeypatch) -> None:
     assert outcome.cards >= 1
     # The user watches both stages, not just the slow one.
     assert {e.stage for e in events} >= {"detect", "render"}
+    assert outcome.project is not None and outcome.project.exists()
+    from qurantext.jobs.project import load_project
+
+    saved = load_project(outcome.project)
+    assert saved.render is not None and saved.render["video"] == outcome.video
+
+
+def test_rematching_keeps_the_earlier_project_as_a_backup(tmp_path, monkeypatch) -> None:
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.jobs.project import Project
+
+    match_path = tmp_path / "clip_recitation.json"
+    match_path.write_text(
+        json.dumps({"matches": [], "meta": {"mode": "recitation"}}), encoding="utf-8"
+    )
+    old = jobs_module.project_path_for(match_path)
+    old.write_text(
+        '{"project_version": "2", "audio": "a.mp3", "cards": [{"start_time": 1.5}]}',
+        encoding="utf-8",
+    )
+
+    def fake_range(**kwargs):
+        return {"matches": []}
+
+    monkeypatch.setattr(jobs_module, "run_recitation_range", fake_range)
+    audio = tmp_path / "clip.m4a"
+    audio.write_bytes(b"")
+    spec = JobSpec(
+        audio=audio, quran=QURAN_FILE, surah_num=1, from_ayah=1, to_ayah=7, output_dir=tmp_path
+    )
+    project = jobs_module.run_matching(spec)
+
+    assert isinstance(project, Project) and project.path == old
+    backups = list(tmp_path.glob("clip_recitation.*.qalun-backup.json"))
+    assert len(backups) == 1
+    assert '"audio": "a.mp3"' in backups[0].read_text(encoding="utf-8")
+
+
+def test_two_rematches_in_the_same_second_keep_both_backups(tmp_path, monkeypatch) -> None:
+    """Two backups computed in the same second must not overwrite each other."""
+    import datetime as datetime_module
+
+    from qurantext.gui import jobs as jobs_module
+
+    class _FrozenDatetime(datetime_module.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 9, 23, 12, 0, 0)
+
+    monkeypatch.setattr(jobs_module, "datetime", _FrozenDatetime)
+
+    project_path = tmp_path / "clip_recitation.qalun.json"
+    project_path.write_text("first", encoding="utf-8")
+    jobs_module._set_aside(project_path)
+
+    project_path.write_text("second", encoding="utf-8")
+    jobs_module._set_aside(project_path)
+
+    backups = sorted(tmp_path.glob("clip_recitation.*.qalun-backup.json"))
+    assert len(backups) == 2
+    contents = {p.read_text(encoding="utf-8") for p in backups}
+    assert contents == {"first", "second"}
+    assert all(p.name.endswith(".qalun-backup.json") for p in backups)
+
+
+def _rematch_setup(tmp_path, monkeypatch):
+    from qurantext.gui import jobs as jobs_module
+
+    match_path = tmp_path / "clip_recitation.json"
+    match_path.write_text(
+        json.dumps(
+            {
+                "matches": [
+                    {
+                        "surah_num": 1,
+                        "from_ayah": 1,
+                        "to_ayah": 7,
+                        "full_text": "x",
+                        "start_time": 0.0,
+                        "end_time": 2.0,
+                    }
+                ],
+                "meta": {"mode": "recitation"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(jobs_module, "run_recitation_range", lambda **kwargs: {"matches": []})
+    audio = tmp_path / "clip.m4a"
+    audio.write_bytes(b"")
+    spec = JobSpec(
+        audio=audio,
+        quran=QURAN_FILE,
+        surah_num=1,
+        from_ayah=1,
+        to_ayah=7,
+        output_dir=tmp_path,
+        render=False,
+    )
+    return jobs_module, spec
+
+
+def test_an_identical_rematch_makes_no_backup(tmp_path, monkeypatch) -> None:
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    jobs_module.run_matching(spec)
+    events: list[ProgressEvent] = []
+    outcome = run_job(spec, progress=events.append)
+
+    assert outcome.backup is None
+    assert not list(tmp_path.glob("*.qalun-backup.json"))
+    assert not any("Kept your earlier corrections" in e.message for e in events)
+
+
+def test_a_changed_rematch_keeps_a_backup_and_says_so(tmp_path, monkeypatch) -> None:
+    from qurantext.jobs.project import load_project, save_project
+
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    first = jobs_module.run_matching(spec)
+    corrected = load_project(first.path)
+    corrected.cards[0]["start_time"] = 0.25
+    save_project(corrected, first.path)
+
+    events: list[ProgressEvent] = []
+    outcome = run_job(spec, progress=events.append)
+
+    (backup,) = tmp_path.glob("clip_recitation.*.qalun-backup.json")
+    assert outcome.backup == backup
+    assert load_project(backup).cards[0]["start_time"] == 0.25
+    assert any(
+        e.stage == "detect" and e.message == f"Kept your earlier corrections in {backup.name}"
+        for e in events
+    )
+
+
+def test_an_unreadable_earlier_project_is_always_kept(tmp_path, monkeypatch) -> None:
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    jobs_module.project_path_for(tmp_path / "clip_recitation.json").write_text("{not json")
+    outcome = run_job(spec)
+    assert outcome.backup is not None and outcome.backup.read_text() == "{not json"
+
+
+def test_set_aside_returns_the_backup_path(tmp_path) -> None:
+    from qurantext.gui import jobs as jobs_module
+
+    project_path = tmp_path / "clip_recitation.qalun.json"
+    assert jobs_module._set_aside(project_path) is None
+    project_path.write_text("x", encoding="utf-8")
+    backup = jobs_module._set_aside(project_path)
+    assert backup is not None and backup.read_text(encoding="utf-8") == "x"
+    assert not project_path.exists()

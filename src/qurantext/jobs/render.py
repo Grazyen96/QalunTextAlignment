@@ -67,6 +67,11 @@ class RenderRequest:
     #: given, the renderer uses these verbatim instead of re-deriving cues from
     #: the raw recognition output, which is what lets a correction survive.
     captions: tuple[dict, ...] | None = None
+    #: Ayah cards supplied by the caller, usually from a project file. When
+    #: given, they are rendered instead of the match file's, which is what lets
+    #: a timing correction reach the video. The match file is still read for
+    #: its metadata (the basmala splice needs it).
+    cards: tuple[dict, ...] | None = None
 
     def resolved_format(self) -> tuple[int, int, int]:
         """Return ``(width, height, fps)`` with preset and defaults applied."""
@@ -124,7 +129,11 @@ def render_video(
     if cancel is not None:
         cancel.raise_if_cancelled(STAGE)
 
-    matches = load_matches(matches_path)
+    matches = (
+        [dict(card) for card in request.cards]
+        if request.cards is not None
+        else load_matches(matches_path)
+    )
     if not matches:
         warn(
             "No matches were found in the match JSON. Rendering a dark video with the "

@@ -1,0 +1,150 @@
+"""Waveform peaks: enough to draw an hour of audio without holding it in memory."""
+
+from __future__ import annotations
+
+import shutil
+import subprocess
+
+import numpy as np
+import pytest
+
+from qurantext.core import waveform
+from qurantext.core.waveform import compute_peaks, load_or_compute_peaks
+
+_FFMPEG = shutil.which("ffmpeg")
+pytestmark = pytest.mark.skipif(not _FFMPEG, reason="needs ffmpeg")
+
+
+def _tone(path, seconds=3.0, source="sine=frequency=440:sample_rate=16000"):
+    subprocess.run(
+        [_FFMPEG, "-v", "error", "-y", "-f", "lavfi", "-i", source, "-t", str(seconds), str(path)],
+        check=True,
+    )
+    return path
+
+
+def test_a_tone_gives_one_bin_per_hundredth_with_its_amplitude(tmp_path) -> None:
+    peaks = compute_peaks(_tone(tmp_path / "t.wav"))
+    assert peaks.rate == 100
+    assert len(peaks.maxs) == len(peaks.mins) == 300
+    assert peaks.duration == pytest.approx(3.0, abs=0.02)
+    assert float(np.median(peaks.maxs)) == pytest.approx(0.125, abs=0.01)
+    assert float(np.median(peaks.mins)) == pytest.approx(-0.125, abs=0.01)
+
+
+def test_silence_is_flat(tmp_path) -> None:
+    peaks = compute_peaks(_tone(tmp_path / "s.wav", source="anullsrc=r=16000:cl=mono"))
+    assert float(np.abs(peaks.maxs).max()) == 0.0
+
+
+def test_chunk_size_does_not_change_the_result(tmp_path) -> None:
+    audio = _tone(tmp_path / "t.wav", seconds=1.0)
+    whole = compute_peaks(audio)
+    ragged = compute_peaks(audio, chunk_seconds=0.013)
+    np.testing.assert_array_equal(whole.maxs, ragged.maxs)
+    np.testing.assert_array_equal(whole.mins, ragged.mins)
+
+
+def test_the_cache_is_reused_until_the_audio_changes(tmp_path, monkeypatch) -> None:
+    audio = _tone(tmp_path / "t.wav", seconds=1.0)
+    cache = tmp_path / "t.peaks.npz"
+    first = load_or_compute_peaks(audio, cache)
+    assert cache.exists()
+
+    calls = []
+    real = waveform.compute_peaks
+    monkeypatch.setattr(waveform, "compute_peaks", lambda *a, **k: calls.append(1) or real(*a, **k))
+    again = load_or_compute_peaks(audio, cache)
+    assert calls == []
+    np.testing.assert_array_equal(first.maxs, again.maxs)
+
+    _tone(audio, seconds=2.0)
+    changed = load_or_compute_peaks(audio, cache)
+    assert calls == [1] and len(changed.maxs) == 200
+
+
+def test_unreadable_audio_says_so(tmp_path) -> None:
+    bad = tmp_path / "bad.wav"
+    bad.write_bytes(b"not audio")
+    with pytest.raises(RuntimeError, match="FFmpeg"):
+        compute_peaks(bad)
+
+
+@pytest.mark.parametrize("damage", ["truncated", "empty"])
+def test_a_corrupt_cache_is_recomputed(tmp_path, damage) -> None:
+    audio = _tone(tmp_path / "t.wav", seconds=1.0)
+    cache = tmp_path / "t.peaks.npz"
+    load_or_compute_peaks(audio, cache)
+
+    if damage == "truncated":
+        data = cache.read_bytes()
+        cache.write_bytes(data[: len(data) // 2])
+    else:
+        cache.write_bytes(b"")
+
+    recomputed = load_or_compute_peaks(audio, cache)
+    expected = compute_peaks(audio)
+    np.testing.assert_array_equal(recomputed.maxs, expected.maxs)
+    np.testing.assert_array_equal(recomputed.mins, expected.mins)
+
+    # The damaged cache was replaced with a readable one.
+    reloaded = load_or_compute_peaks(audio, cache)
+    np.testing.assert_array_equal(reloaded.maxs, expected.maxs)
+
+
+def test_ffmpeg_is_reaped_when_reading_fails(tmp_path, monkeypatch) -> None:
+    audio = _tone(tmp_path / "t.wav", seconds=1.0)
+    processes = []
+    real_popen = subprocess.Popen
+
+    def spying_popen(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(waveform.subprocess, "Popen", spying_popen)
+
+    def broken_frombuffer(*args, **kwargs):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(waveform.np, "frombuffer", broken_frombuffer)
+
+    with pytest.raises(ValueError, match="boom"):
+        compute_peaks(audio)
+
+    assert len(processes) == 1
+    assert processes[0].returncode is not None
+
+
+def test_a_cancelled_token_stops_the_decode_and_reaps_ffmpeg(tmp_path, monkeypatch) -> None:
+    from qurantext.utils.progress import CancelToken, JobCancelled
+
+    audio = _tone(tmp_path / "t.wav", seconds=1.0)
+    processes = []
+    real_popen = subprocess.Popen
+
+    def spying_popen(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(waveform.subprocess, "Popen", spying_popen)
+    token = CancelToken()
+    token.cancel()
+    with pytest.raises(JobCancelled):
+        compute_peaks(audio, cancel=token)
+    assert len(processes) == 1 and processes[0].returncode is not None
+
+    cache = tmp_path / "t.peaks.npz"
+    with pytest.raises(JobCancelled):
+        load_or_compute_peaks(audio, cache, cancel=token)
+    assert not cache.exists(), "a cancelled decode must not be cached"
+
+
+def test_peaks_live_beside_the_project() -> None:
+    from pathlib import Path
+
+    from qurantext.core.waveform import peaks_path_for
+
+    project = Path("/jobs/clip_recitation.qalun.json")
+    assert peaks_path_for(project) == Path("/jobs/clip_recitation.peaks.npz")

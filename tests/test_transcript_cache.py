@@ -146,3 +146,17 @@ def test_use_cache_false_forces_a_fresh_call(tmp_path, audio, monkeypatch) -> No
     get_settings.cache_clear()
 
     assert reached["n"] == 1, "use_cache=False must bypass the hit"
+
+
+def test_audio_digest_is_one_shared_function(tmp_path) -> None:
+    """The waveform cache and the transcript cache must key on the same digest."""
+    import hashlib
+
+    from qurantext.core import waveform
+    from qurantext.utils.hashing import audio_digest
+
+    clip = tmp_path / "a.bin"
+    clip.write_bytes(b"\x00\x01" * 1_000_000)
+    assert audio_digest(clip) == hashlib.sha256(clip.read_bytes()).hexdigest()
+    assert tc.audio_digest is audio_digest
+    assert waveform.audio_digest is audio_digest

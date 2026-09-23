@@ -296,7 +296,8 @@ comes from More options on the home window and is stored in `project.export`.
 ## 7. Order of work
 
 1. Foundations: project v2, `timing_edit`, render/export from project,
-   job flow split, catalog, peaks. Fixes both defects above on its own.
+   job flow split, catalog, peaks. Fixes both defects at the API and CLI level;
+   the window renders corrections once Phase 3 wires `run_render` into it.
 2. Review editor (player, waveform, word strip, frame, list, undo, export
    dialog, render with corrections).
 3. Home window.

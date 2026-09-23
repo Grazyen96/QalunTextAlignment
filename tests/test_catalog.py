@@ -1,0 +1,157 @@
+"""The job list: every project the app has made, and what state it is in."""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path as PathlibPath
+from unittest.mock import patch
+
+from qurantext.jobs.catalog import (
+    CHANGED_SINCE_RENDER,
+    DAMAGED,
+    NEEDS_REVIEW,
+    RENDERED,
+    REVIEWED,
+    ayah_range,
+    list_jobs,
+)
+from qurantext.jobs.project import Project, save_project
+
+
+def _card(surah, a, b, kind=None):
+    card = {"surah_num": surah, "from_ayah": a, "to_ayah": b, "start_time": 0.0, "end_time": 1.0}
+    if kind:
+        card["kind"] = kind
+    return card
+
+
+def _save(tmp_path, name, **changes):
+    project = Project(audio=tmp_path / f"{name}.mp3", mode="recitation", cards=[_card(25, 7, 11)])
+    for key, value in changes.items():
+        setattr(project, key, value)
+    return save_project(project, tmp_path / f"{name}_recitation.qalun.json")
+
+
+def test_statuses(tmp_path) -> None:
+    _save(tmp_path, "fresh")
+    reviewed = Project(audio=tmp_path / "r.mp3", cards=[_card(1, 1, 7)])
+    reviewed.mark_reviewed()
+    save_project(reviewed, tmp_path / "r_recitation.qalun.json")
+    rendered = Project(audio=tmp_path / "v.mp3", cards=[_card(1, 1, 7)])
+    rendered.record_render(tmp_path / "v.mp4", preset="social", basmala_offset_s=0.0)
+    save_project(rendered, tmp_path / "v_recitation.qalun.json")
+    changed = Project(audio=tmp_path / "c.mp3", cards=[_card(1, 1, 7)])
+    changed.record_render(tmp_path / "c.mp4", preset="social", basmala_offset_s=0.0)
+    changed.cards[0]["start_time"] = 0.5
+    save_project(changed, tmp_path / "c_recitation.qalun.json")
+
+    by_name = {entry.name: entry.status for entry in list_jobs([tmp_path])}
+    assert by_name == {
+        "fresh": NEEDS_REVIEW,
+        "r": REVIEWED,
+        "v": RENDERED,
+        "c": CHANGED_SINCE_RENDER,
+    }
+
+
+def test_newest_first_and_backups_are_not_jobs(tmp_path) -> None:
+    older = _save(tmp_path, "older")
+    newer = _save(tmp_path, "newer")
+    os.utime(older, (1_000_000, 1_000_000))
+    (tmp_path / "newer_recitation.20260923T101200.qalun-backup.json").write_text("{}")
+    assert [entry.name for entry in list_jobs([tmp_path])] == ["newer", "older"]
+    assert newer.exists()
+
+
+def test_a_damaged_file_is_listed_not_skipped(tmp_path) -> None:
+    (tmp_path / "broken.qalun.json").write_text("{not json", encoding="utf-8")
+    (entry,) = list_jobs([tmp_path])
+    assert entry.status == DAMAGED and entry.error
+
+
+def test_missing_folders_are_fine(tmp_path) -> None:
+    assert list_jobs([tmp_path / "nope"]) == []
+
+
+def test_ayah_range() -> None:
+    assert ayah_range([_card(25, 7, 8), _card(25, 9, 11)]) == "25:7–11"
+    assert ayah_range([_card(25, 77, 77), _card(26, 1, 3)]) == "25:77–26:3"
+    assert ayah_range([_card(None, None, None, kind="preamble"), _card(1, 1, 7)]) == "1:1–7"
+    assert ayah_range([]) is None
+
+
+def test_a_malformed_card_marks_only_that_job_damaged(tmp_path) -> None:
+    _save(tmp_path, "good")
+    bad_path = tmp_path / "bad_recitation.qalun.json"
+    bad_project = {
+        "audio": str(tmp_path / "bad.mp3"),
+        "mode": "recitation",
+        "cards": [
+            {"surah_num": 5, "from_ayah": None, "to_ayah": None, "start_time": 0.0, "end_time": 1.0}
+        ],
+        "review": {},
+    }
+    bad_path.write_text(json.dumps(bad_project), encoding="utf-8")
+
+    entries = list_jobs([tmp_path])
+    by_name = {entry.name: entry.status for entry in entries}
+    assert by_name == {"good": NEEDS_REVIEW, "bad": DAMAGED}
+    assert next(e for e in entries if e.name == "bad").error
+
+
+def test_a_file_that_vanishes_mid_scan_is_skipped(tmp_path) -> None:
+    _save(tmp_path, "good")
+    vanishing = _save(tmp_path, "vanishing")
+
+    original_stat = PathlibPath.stat
+    vanishing_str = str(vanishing)
+
+    def stat_wrapper(self):
+        if isinstance(self, PathlibPath) and str(self) == vanishing_str:
+            raise FileNotFoundError(f"{self} disappeared")
+        return original_stat(self)
+
+    with patch.object(PathlibPath, "stat", stat_wrapper):
+        entries = list_jobs([tmp_path])
+
+    names = [entry.name for entry in entries]
+    assert "good" in names
+    assert "vanishing" not in names
+
+
+def test_a_malformed_cards_shape_marks_the_job_damaged(tmp_path) -> None:
+    _save(tmp_path, "good")
+    for name, cards in (("dict", {"0": _card(25, 7, 8)}), ("mixed", [_card(25, 7, 8), 3])):
+        (tmp_path / f"{name}_recitation.qalun.json").write_text(
+            json.dumps({"audio": str(tmp_path / f"{name}.mp3"), "cards": cards}), encoding="utf-8"
+        )
+    by_name = {entry.name: entry.status for entry in list_jobs([tmp_path])}
+    assert by_name == {
+        "good": NEEDS_REVIEW,
+        "dict_recitation": DAMAGED,
+        "mixed_recitation": DAMAGED,
+    }
+
+
+def test_a_derive_stage_attribute_error_marks_the_job_damaged(tmp_path) -> None:
+    _save(tmp_path, "odd")
+    with patch("qurantext.jobs.catalog.ayah_range", side_effect=AttributeError("no get")):
+        (entry,) = list_jobs([tmp_path])
+    assert entry.status == DAMAGED and "no get" in entry.error
+
+
+def test_an_unreadable_file_is_listed_as_damaged(tmp_path) -> None:
+    locked = _save(tmp_path, "locked")
+    original_stat = PathlibPath.stat
+
+    def stat_wrapper(self, *args, **kwargs):
+        if str(self) == str(locked):
+            raise PermissionError(f"{self}: permission denied")
+        return original_stat(self, *args, **kwargs)
+
+    with patch.object(PathlibPath, "stat", stat_wrapper):
+        (entry,) = list_jobs([tmp_path])
+    assert entry.status == DAMAGED
+    assert entry.mode == "" and entry.modified == 0.0
+    assert "permission denied" in entry.error
