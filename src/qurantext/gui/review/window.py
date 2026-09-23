@@ -83,7 +83,16 @@ def _clock(seconds: float) -> str:
 
 
 def _is_portrait(project: Project) -> bool:
-    """Whether the job's video is taller than wide: its last render, else the job's preset."""
+    """Whether the job's video is taller than wide: the job's preset, else its last render.
+
+    The preset is what the next render makes, so it wins over the size of a
+    render made before the job was re-run with another one. A project that
+    never recorded a preset falls back to the size it was last rendered at.
+    """
+    chosen = project.export.get("preset")
+    if isinstance(chosen, str) and chosen in VIDEO_PRESETS:
+        width, height = VIDEO_PRESETS[chosen][:2]
+        return height >= width
     render = project.render or {}
     width, height = render.get("width"), render.get("height")
     if not (isinstance(width, int) and isinstance(height, int)):

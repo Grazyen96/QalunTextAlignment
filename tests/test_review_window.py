@@ -961,3 +961,26 @@ def test_the_export_dialog_closes_and_says_when_the_render_is_stale(qt_app, tmp_
     dialog.show()
     dialog.close_button.click()
     assert not dialog.isVisible()
+
+
+def test_the_frame_shape_follows_the_jobs_preset_over_an_older_render(tmp_path) -> None:
+    """A job re-run as landscape must not keep showing the portrait of its last render."""
+    from pathlib import Path
+
+    from qurantext.gui.review.window import _is_portrait
+    from qurantext.jobs.project import JobSettings, set_job_settings
+
+    project = Project(audio=Path("a.mp3"), cards=[])
+    assert _is_portrait(project), "the default preset is portrait"
+
+    project.record_render(
+        tmp_path / "a.mp4", preset="social", basmala_offset_s=0.0, width=1080, height=1920
+    )
+    set_job_settings(project, JobSettings(preset="high"))
+    assert not _is_portrait(project)
+
+    unrecorded = Project(audio=Path("a.mp3"), cards=[])
+    unrecorded.record_render(
+        tmp_path / "a.mp4", preset=None, basmala_offset_s=0.0, width=1920, height=1080
+    )
+    assert not _is_portrait(unrecorded), "no choice recorded: the render's own size"
