@@ -7,17 +7,19 @@ import pytest
 from qurantext.config.paths import DEFAULT_FONT_PATH
 from qurantext.jobs.project import Project, load_project, save_project
 from qurantext.jobs.project_render import export_project_subtitles, render_project
-from tests.test_export import _job, no_basmala, pytestmark, store  # noqa: F401,F811
+from tests.media_helpers import MEDIA_AVAILABLE, MEDIA_REASON, build_job
+
+pytestmark = pytest.mark.skipif(not MEDIA_AVAILABLE, reason=MEDIA_REASON)
 
 
 def _project(tmp_path):
-    audio, matches = _job(tmp_path)
+    audio, matches = build_job(tmp_path)
     project = Project.from_match_file(matches, audio)
     save_project(project, tmp_path / "job.qalun.json")
     return project
 
 
-def test_render_project_records_the_render_and_saves(tmp_path, store, no_basmala) -> None:  # noqa: F811
+def test_render_project_records_the_render_and_saves(tmp_path, store, no_basmala) -> None:
     project = _project(tmp_path)
     result = render_project(
         project,
@@ -34,7 +36,7 @@ def test_render_project_records_the_render_and_saves(tmp_path, store, no_basmala
     assert reloaded.render_is_stale is False
 
 
-def test_render_project_follows_the_projects_cards(tmp_path, store, no_basmala) -> None:  # noqa: F811
+def test_render_project_follows_the_projects_cards(tmp_path, store, no_basmala) -> None:
     project = _project(tmp_path)
     project.cards[0]["start_time"] = 1.0
     result = render_project(
@@ -52,7 +54,7 @@ def test_render_project_follows_the_projects_cards(tmp_path, store, no_basmala) 
     assert "00:00:01,000 -->" in srt
 
 
-def test_export_writes_the_chosen_formats_without_rendering(tmp_path, store) -> None:  # noqa: F811
+def test_export_writes_the_chosen_formats_without_rendering(tmp_path, store) -> None:
     project = _project(tmp_path)
     written = export_project_subtitles(
         project, tmp_path / "out" / "clip", ("srt", "vtt", "ass"), db_path=store
@@ -61,7 +63,7 @@ def test_export_writes_the_chosen_formats_without_rendering(tmp_path, store) -> 
     assert not list(tmp_path.glob("**/*.mp4"))
 
 
-def test_export_on_the_video_timeline_applies_the_basmala_offset(tmp_path, store) -> None:  # noqa: F811
+def test_export_on_the_video_timeline_applies_the_basmala_offset(tmp_path, store) -> None:
     project = _project(tmp_path)
     with pytest.raises(ValueError, match="rendered"):
         export_project_subtitles(project, tmp_path / "a", ("srt",), timeline="video", db_path=store)
@@ -120,7 +122,7 @@ def test_the_render_records_the_content_it_started_from(tmp_path, monkeypatch) -
     assert project.render["preset"] == "social"
 
 
-def test_ass_export_uses_the_recorded_render_size(tmp_path, store) -> None:  # noqa: F811
+def test_ass_export_uses_the_recorded_render_size(tmp_path, store) -> None:
     project = _project(tmp_path)
     project.record_render(
         tmp_path / "v.mp4", preset="social", basmala_offset_s=0.0, width=720, height=404, fps=25

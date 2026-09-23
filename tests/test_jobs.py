@@ -29,22 +29,6 @@ _FFMPEG = shutil.which("ffmpeg")
 _FFPROBE = shutil.which("ffprobe")
 
 
-@pytest.fixture()
-def no_basmala(monkeypatch):
-    """Render without the basmala splice.
-
-    input/basmala/basmala.mp3 is the user's own media and is not in the
-    repository, so a test that depends on it passes locally and fails on a
-    fresh clone. Pinning the setting makes these deterministic either way.
-    """
-    from qurantext.config.settings import get_settings
-
-    monkeypatch.setenv("QURANTEXT_VIDEO_PREPEND_BASMALA", "false")
-    get_settings.cache_clear()
-    yield
-    get_settings.cache_clear()
-
-
 _SAMPLE_MATCH = {
     "surah_num": 25,
     "surah_name": "سُورَةُ الفُرقَانِ",
