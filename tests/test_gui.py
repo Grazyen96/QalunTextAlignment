@@ -68,12 +68,21 @@ def test_a_complete_recitation_spec_is_ready_to_run(tmp_path) -> None:
         ({"quran": Path("/nope/missing.txt")}, "job.need_quran"),
         ({"surah_num": None}, "job.need_range"),
         ({"from_ayah": 11, "to_ayah": 7}, "job.bad_range"),
+        ({"subtitles": "sidecar", "formats": ()}, "job.need_format"),
+        ({"subtitles": "both", "formats": ()}, "job.need_format"),
     ],
 )
 def test_an_incomplete_spec_says_what_is_missing(tmp_path, overrides, key) -> None:
     """The panel shows ``t(problem)`` under the Start button, so this is an i18n key."""
     problem = _spec(tmp_path, **overrides).validate()
     assert problem == key
+
+
+def test_subtitles_in_the_picture_need_no_file_format(tmp_path) -> None:
+    from qurantext.gui.i18n import t
+
+    assert _spec(tmp_path, subtitles="burn", formats=()).validate() is None
+    assert t("job.need_format") == "Choose at least one subtitle format."
 
 
 def test_a_lecture_needs_no_range(tmp_path) -> None:

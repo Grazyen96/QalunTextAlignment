@@ -67,6 +67,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "job.need_quran": "Choose the Quran text file.",
         "job.need_range": "Choose the surah and the ayah range.",
         "job.bad_range": "The last ayah cannot come before the first.",
+        "job.need_format": "Choose at least one subtitle format.",
         "job.progress.aligning": "Aligning against the ayat you chose…",
         "job.progress.detecting": "Looking for Quran in the audio…",
         "job.progress.kept": "Kept your earlier corrections in {name}",

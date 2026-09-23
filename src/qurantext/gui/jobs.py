@@ -94,6 +94,9 @@ class JobSpec:
             return "job.need_range"
         if self.has_stated_range and self.to_ayah < self.from_ayah:  # type: ignore[operator]
             return "job.bad_range"
+        if self.subtitles in ("sidecar", "both") and not self.formats:
+            # Files beside the video, in no format, would write nothing.
+            return "job.need_format"
         return None
 
 
