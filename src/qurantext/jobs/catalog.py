@@ -37,7 +37,11 @@ DAMAGED = "damaged"
 
 @dataclass(frozen=True, slots=True)
 class JobEntry:
-    """One row of the job list."""
+    """One row of the job list.
+
+    A damaged entry whose file could not be read carries ``mode=""``, since the
+    mode is only known from the file's contents.
+    """
 
     project: Path
     name: str
@@ -101,7 +105,7 @@ def _entry_for(path: Path) -> JobEntry | None:
     try:
         status = job_status(project)
         range_str = ayah_range(project.cards)
-    except (KeyError, TypeError, ValueError) as error:
+    except (AttributeError, KeyError, TypeError, ValueError) as error:
         return JobEntry(
             project=path,
             name=Path(project.audio).stem,

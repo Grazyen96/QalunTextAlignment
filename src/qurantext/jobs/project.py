@@ -229,11 +229,13 @@ class Project:
         else:
             render = None
         review = data.get("review")
+        cards = _list_of_dicts(data, "cards")
+        captions = _list_of_dicts(data, "captions")
         return cls(
             audio=_resolve_path(str(data["audio"]), base_dir),
             mode=str(data.get("mode") or "recitation"),
-            cards=list(data.get("cards") or []),
-            captions=[CaptionCue.from_dict(cue) for cue in (data.get("captions") or [])],
+            cards=cards,
+            captions=[CaptionCue.from_dict(cue) for cue in captions],
             style=dict(data.get("style") or {}),
             export=dict(data.get("export") or {}),
             matches=_resolve_path(str(data["matches"]), base_dir) if data.get("matches") else None,
@@ -322,6 +324,16 @@ def load_project(source: str | PathLike[str]) -> Project:
     project = Project.from_dict(data, base_dir=path.parent)
     project.path = path
     return project
+
+
+def _list_of_dicts(data: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    """Refuse a hand-edited or truncated shape here, by name, not later with an AttributeError."""
+    value = data.get(key)
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+        raise ValueError(f"Project field '{key}' must be a list of objects.")
+    return list(value)
 
 
 def _store_path(value: Path, relative_to: Path | None) -> str:

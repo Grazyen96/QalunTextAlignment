@@ -222,3 +222,20 @@ def test_mark_reviewed_records_state_and_time(tmp_path) -> None:
     project = _project(tmp_path)
     project.mark_reviewed(datetime(2026, 9, 23, 10, 0, 0))
     assert project.review == {"state": "reviewed", "reviewed_at": "2026-09-23T10:00:00"}
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("cards", {"0": {"surah_num": 25}}),
+        ("cards", {}),
+        ("cards", [{"surah_num": 25}, "not a card"]),
+        ("captions", {"start": 0.0}),
+        ("captions", ["not a cue"]),
+    ],
+)
+def test_a_malformed_cards_or_captions_shape_is_refused_by_name(tmp_path, field, value) -> None:
+    path = tmp_path / "p.qalun.json"
+    path.write_text(json.dumps({"audio": "a.mp3", field: value}), encoding="utf-8")
+    with pytest.raises(ValueError, match=field):
+        load_project(path)

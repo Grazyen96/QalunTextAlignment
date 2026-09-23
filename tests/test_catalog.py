@@ -118,3 +118,40 @@ def test_a_file_that_vanishes_mid_scan_is_skipped(tmp_path) -> None:
     names = [entry.name for entry in entries]
     assert "good" in names
     assert "vanishing" not in names
+
+
+def test_a_malformed_cards_shape_marks_the_job_damaged(tmp_path) -> None:
+    _save(tmp_path, "good")
+    for name, cards in (("dict", {"0": _card(25, 7, 8)}), ("mixed", [_card(25, 7, 8), 3])):
+        (tmp_path / f"{name}_recitation.qalun.json").write_text(
+            json.dumps({"audio": str(tmp_path / f"{name}.mp3"), "cards": cards}), encoding="utf-8"
+        )
+    by_name = {entry.name: entry.status for entry in list_jobs([tmp_path])}
+    assert by_name == {
+        "good": NEEDS_REVIEW,
+        "dict_recitation": DAMAGED,
+        "mixed_recitation": DAMAGED,
+    }
+
+
+def test_a_derive_stage_attribute_error_marks_the_job_damaged(tmp_path) -> None:
+    _save(tmp_path, "odd")
+    with patch("qurantext.jobs.catalog.ayah_range", side_effect=AttributeError("no get")):
+        (entry,) = list_jobs([tmp_path])
+    assert entry.status == DAMAGED and "no get" in entry.error
+
+
+def test_an_unreadable_file_is_listed_as_damaged(tmp_path) -> None:
+    locked = _save(tmp_path, "locked")
+    original_stat = PathlibPath.stat
+
+    def stat_wrapper(self, *args, **kwargs):
+        if str(self) == str(locked):
+            raise PermissionError(f"{self}: permission denied")
+        return original_stat(self, *args, **kwargs)
+
+    with patch.object(PathlibPath, "stat", stat_wrapper):
+        (entry,) = list_jobs([tmp_path])
+    assert entry.status == DAMAGED
+    assert entry.mode == "" and entry.modified == 0.0
+    assert "permission denied" in entry.error
