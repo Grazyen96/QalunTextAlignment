@@ -14,6 +14,8 @@ from qurantext.jobs.catalog import (
     RENDERED,
     REVIEWED,
     ayah_range,
+    default_job_dirs,
+    job_dirs_for,
     list_jobs,
 )
 from qurantext.jobs.project import Project, save_project
@@ -139,6 +141,33 @@ def test_a_derive_stage_attribute_error_marks_the_job_damaged(tmp_path) -> None:
     with patch("qurantext.jobs.catalog.ayah_range", side_effect=AttributeError("no get")):
         (entry,) = list_jobs([tmp_path])
     assert entry.status == DAMAGED and "no get" in entry.error
+
+
+def test_a_duplicate_folder_lists_its_jobs_once(tmp_path) -> None:
+    _save(tmp_path, "a")
+    symlinked = tmp_path / "alias"
+    symlinked.symlink_to(tmp_path, target_is_directory=True)
+    assert [entry.name for entry in list_jobs([tmp_path, tmp_path, symlinked])] == ["a"]
+
+
+def test_a_hidden_project_is_skipped(tmp_path) -> None:
+    kept = _save(tmp_path, "kept")
+    hidden = _save(tmp_path, "hidden")
+    entries = list_jobs([tmp_path], hidden=frozenset({hidden.resolve()}))
+    assert [entry.name for entry in entries] == ["kept"]
+    assert kept.exists() and hidden.exists(), "hiding never touches the file"
+
+
+def test_job_dirs_for_adds_new_folders_after_the_defaults(tmp_path) -> None:
+    extra = tmp_path / "custom"
+    assert job_dirs_for([extra]) == [*default_job_dirs(), extra]
+
+
+def test_job_dirs_for_dedupes_against_the_defaults_and_itself(tmp_path) -> None:
+    defaults = default_job_dirs()
+    extra = tmp_path / "custom"
+    result = job_dirs_for([defaults[0], extra, extra])
+    assert result == [*defaults, extra]
 
 
 def test_an_unreadable_file_is_listed_as_damaged(tmp_path) -> None:

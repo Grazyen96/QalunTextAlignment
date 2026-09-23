@@ -105,3 +105,26 @@ def test_the_choices_are_not_part_of_the_content_hash() -> None:
     before = project.content_hash()
     set_job_settings(project, JobSettings(preset="fast"))
     assert project.content_hash() == before
+
+
+def test_no_export_preset_falls_back_to_the_last_render(tmp_path) -> None:
+    """A project made before this choice was remembered re-renders at its old size."""
+    project = Project(audio=Path("a.mp3"))
+    project.record_render(tmp_path / "a.mp4", preset="high", basmala_offset_s=0.0)
+    assert job_settings(project).preset == "high"
+
+
+def test_an_export_preset_wins_over_the_render_preset(tmp_path) -> None:
+    project = Project(audio=Path("a.mp3"), export={"preset": "fast"})
+    project.record_render(tmp_path / "a.mp4", preset="high", basmala_offset_s=0.0)
+    assert job_settings(project).preset == "fast"
+
+
+def test_an_invalid_render_preset_falls_back_to_the_default() -> None:
+    project = Project(audio=Path("a.mp3"), render={"preset": "cinema"})
+    assert job_settings(project).preset == "social"
+
+
+def test_a_render_with_no_preset_falls_back_to_the_default() -> None:
+    project = Project(audio=Path("a.mp3"), render={"preset": None})
+    assert job_settings(project).preset == "social"

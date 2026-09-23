@@ -24,6 +24,7 @@ __all__ = [
     "JobEntry",
     "ayah_range",
     "default_job_dirs",
+    "job_dirs_for",
     "job_status",
     "list_jobs",
 ]
@@ -72,6 +73,24 @@ def ayah_range(cards: list[dict[str, Any]]) -> str | None:
 
 def default_job_dirs() -> list[Path]:
     return [RECITATION_MATCHING_OUTPUT_DIR, LECTURE_MATCHING_OUTPUT_DIR]
+
+
+def job_dirs_for(extra: Iterable[Path]) -> list[Path]:
+    """``default_job_dirs()`` plus *extra*, deduped by resolved path, order kept.
+
+    The job list scans the default matching folders plus every output folder
+    the person has chosen (``Prefs.job_dirs``), so a job rendered somewhere
+    unusual is still found without adding that folder twice.
+    """
+    dirs = default_job_dirs()
+    seen = {folder.resolve() for folder in dirs}
+    for folder in extra:
+        folder = Path(folder)
+        resolved = folder.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            dirs.append(folder)
+    return dirs
 
 
 def _entry_for(path: Path) -> JobEntry | None:
@@ -126,14 +145,28 @@ def _entry_for(path: Path) -> JobEntry | None:
     )
 
 
-def list_jobs(dirs: Iterable[Path] | None = None) -> list[JobEntry]:
-    """Projects under *dirs*, newest first."""
+def list_jobs(
+    dirs: Iterable[Path] | None = None, *, hidden: frozenset[Path] = frozenset()
+) -> list[JobEntry]:
+    """Projects under *dirs*, newest first.
+
+    Folders are deduped by resolved path, so the same folder listed twice
+    (the default matching folder chosen again as an output folder, say) lists
+    its jobs once. A project whose resolved path is in *hidden* is skipped —
+    "Remove from list" adds it there without touching the file.
+    """
     entries: list[JobEntry] = []
+    seen: set[Path] = set()
     for folder in dirs if dirs is not None else default_job_dirs():
-        folder = Path(folder)
-        if not folder.is_dir():
+        resolved = Path(folder).resolve()
+        if resolved in seen:
             continue
-        for path in folder.glob("*.qalun.json"):
+        seen.add(resolved)
+        if not resolved.is_dir():
+            continue
+        for path in resolved.glob("*.qalun.json"):
+            if path.resolve() in hidden:
+                continue
             entry = _entry_for(path)
             if entry is not None:
                 entries.append(entry)

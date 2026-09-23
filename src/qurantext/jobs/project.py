@@ -351,12 +351,24 @@ class JobSettings:
 def job_settings(project: Project) -> JobSettings:
     """The job's choices from ``project.export``, with defaults for anything unset.
 
+    When ``export`` has no valid preset but the project has been rendered
+    before, the last render's own preset is used instead of the default:
+    a project made before this choice was remembered re-renders at the size
+    it was last rendered, rather than jumping to whatever the default is now.
+
     The file can be hand-edited or written by a newer build, so anything this
     build does not recognise reads as the default rather than failing a render.
     """
     export = project.export
     default = JobSettings()
     preset = export.get("preset")
+    if not (isinstance(preset, str) and preset in VIDEO_PRESETS):
+        render_preset = (project.render or {}).get("preset")
+        preset = (
+            render_preset
+            if isinstance(render_preset, str) and render_preset in VIDEO_PRESETS
+            else default.preset
+        )
     subtitles = export.get("subtitles")
     formats = export.get("formats")
     output_dir = export.get("output_dir")
@@ -364,7 +376,7 @@ def job_settings(project: Project) -> JobSettings:
     if isinstance(formats, list):
         chosen = tuple(dict.fromkeys(f for f in formats if f in SUBTITLE_FORMATS))
     return JobSettings(
-        preset=preset if isinstance(preset, str) and preset in VIDEO_PRESETS else default.preset,
+        preset=preset,
         subtitles=subtitles if subtitles in SUBTITLE_CHOICES else default.subtitles,
         formats=chosen or default.formats,
         output_dir=Path(output_dir) if isinstance(output_dir, str) and output_dir else None,
