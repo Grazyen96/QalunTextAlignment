@@ -1304,3 +1304,17 @@ def test_a_render_right_away_that_does_not_finish_still_lists_the_matched_job(
     ]
     assert listed == [custom / "a_recitation.qalun.json"]
     assert custom.resolve() in prefs.job_dirs
+
+
+def test_the_app_names_itself_before_any_settings_are_read(qt_app) -> None:
+    """``Prefs()`` uses a default ``QSettings``, whose file is named after these."""
+    from qurantext.gui import app as app_module
+
+    before = (QCoreApplication.organizationName(), QCoreApplication.applicationName())
+    try:
+        app_module._name_the_app()
+        assert QCoreApplication.organizationName() == "Qalun"
+        assert QCoreApplication.applicationName() == "Qalun"
+    finally:
+        QCoreApplication.setOrganizationName(before[0])
+        QCoreApplication.setApplicationName(before[1])

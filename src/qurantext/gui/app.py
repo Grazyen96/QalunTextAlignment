@@ -12,6 +12,23 @@ __all__ = ["main"]
 _EXIT_WAIT_MS = 30_000
 
 
+#: The name settings are filed under; see :func:`_name_the_app`.
+_APP_NAME = "Qalun"
+
+
+def _name_the_app() -> None:
+    """Name the organisation and the app before anything reads a default ``QSettings``.
+
+    ``Prefs()`` opens ``QSettings()``, which files the settings under these two
+    names; without an organisation name it lands somewhere that depends on how
+    the app was launched, and the window forgets its choices between runs.
+    """
+    from PySide6.QtCore import QCoreApplication
+
+    QCoreApplication.setOrganizationName(_APP_NAME)
+    QCoreApplication.setApplicationName(_APP_NAME)
+
+
 def main(argv: list[str] | None = None) -> int:
     try:
         from PySide6.QtWidgets import QApplication
@@ -24,9 +41,9 @@ def main(argv: list[str] | None = None) -> int:
 
     from qurantext.gui.main_window import MainWindow
 
+    _name_the_app()
     app = QApplication(list(argv) if argv is not None else sys.argv)
-    app.setApplicationName("Qalun")
-    app.setApplicationDisplayName("Qalun")
+    app.setApplicationDisplayName(_APP_NAME)
 
     window = MainWindow()
     window.show()
