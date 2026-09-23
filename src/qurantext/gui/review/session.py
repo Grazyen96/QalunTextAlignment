@@ -386,15 +386,23 @@ class ReviewSession:
     # -- editing ----------------------------------------------------------------
 
     def retime(self, ref: WordRef, *, start: float | None = None, end: float | None = None) -> None:
+        """Move *ref*'s edge; one it shared with the neighbour takes the neighbour's along.
+
+        ``keep_joined`` is what makes a nudge reversible: ``.`` pushes the next
+        word's start, and ``,`` brings it back instead of leaving a gap. An edit
+        that puts everything back where it was last saved is settled back to
+        exactly that state (see :meth:`_settle`), so it does not read as unsaved.
+        """
         self._before_change()
         if ref.kind == CARD:
             self.project.cards = retime_in_cards(
-                self.project.cards, ref.segment, ref.word, start=start, end=end
+                self.project.cards, ref.segment, ref.word, start=start, end=end, keep_joined=True
             )
         else:
             cue = self.project.captions[ref.segment]
-            words = retime(cue.words, ref.word, start=start, end=end)
+            words = retime(cue.words, ref.word, start=start, end=end, keep_joined=True)
             self._set_cue_words(ref.segment, words)
+        self._settle(ref)
         self._changed()
 
     def ripple(self, ref: WordRef, delta: float) -> None:
@@ -407,6 +415,7 @@ class ReviewSession:
             cue = self.project.captions[ref.segment]
             words = ripple(cue.words, ref.word, delta, duration=self.duration)
             self._set_cue_words(ref.segment, words)
+        self._settle(ref)
         self._changed()
 
     def drag_retime(
@@ -418,7 +427,9 @@ class ReviewSession:
         on the way did to a neighbour: drag an end past the next word and
         back, and the next word stays trimmed. Starting each move from the
         state the drag began in makes the result depend only on where the
-        pointer is, so dragging back puts everything back.
+        pointer is, so dragging back puts everything back. Like a nudge, it
+        goes through :meth:`retime`, so an edge the neighbour shared stays
+        shared while it is dragged (``keep_joined``).
         """
         self._restore_gesture_start()
         self.retime(ref, start=start, end=end)
@@ -513,7 +524,12 @@ class ReviewSession:
             return
         self._in_gesture = False
         start, self._gesture_start = self._gesture_start, None
-        if start is None or not self._settles_to(start):
+        if start is None:
+            return
+        if not self._settles_to(start):
+            # A real edit; but one that undid the edits before it is the saved state.
+            if self._settle():
+                self._changed()
             return
         if self._undo and self._undo[-1] is start:
             self._undo.pop()
@@ -521,10 +537,54 @@ class ReviewSession:
             self._restore(start)
             self._changed()
 
+    def _settle(self, ref: WordRef | None = None) -> bool:
+        """Outside a gesture, an edit that lands back on the saved state *is* the saved state.
+
+        A nudge and its opposite (or a ripple and its opposite) put every
+        time back, but each marked the words it moved as ``edited`` and
+        re-derived the card windows, so the project would read as unsaved
+        with nothing to save. When the settled states match (see
+        ``_settled``), the saved snapshot is put back exactly. Undo keeps its
+        entries: stepping back through the nudges is still possible. Returns
+        whether anything was put back.
+
+        *ref*, the word just edited, makes the usual case cheap: while that
+        word is away from its saved times the states cannot match, and the
+        whole-project comparison (a few milliseconds per thousand words) is
+        skipped.
+        """
+        if self._in_gesture:
+            return False
+        if ref is not None and not self._at_saved_times(ref):
+            return False
+        if not self._settles_to(self._saved_snapshot):
+            return False
+        if self._is_exactly(self._saved_snapshot):
+            return False
+        self._restore(self._saved_snapshot)
+        return True
+
     def _settles_to(self, snapshot: tuple) -> bool:
         """Whether the current state is *snapshot* once both are settled."""
         current = (self.project.cards, self.project.captions, self.project.review)
         return _settled(*current) == _settled(*snapshot)
+
+    def _at_saved_times(self, ref: WordRef) -> bool:
+        """Whether *ref* sits where the saved state has the word at its position.
+
+        False also when the saved state has no word there: then the two states
+        differ in shape and cannot settle to each other anyway.
+        """
+        cards, captions, _review = self._saved_snapshot
+        if ref.kind == CARD:
+            segments = [card.get("word_timings") or [] for card in cards]
+        else:
+            segments = [cue.words for cue in captions]
+        if ref.segment >= len(segments) or ref.word >= len(segments[ref.segment]):
+            return False
+        saved = segments[ref.segment][ref.word]
+        now = self._raw_words(ref)[ref.word]
+        return all(round(float(saved[k]), 3) == round(float(now[k]), 3) for k in ("start", "end"))
 
     def _is_exactly(self, snapshot: tuple) -> bool:
         cards, captions, review = snapshot

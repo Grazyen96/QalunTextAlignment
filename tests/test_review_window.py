@@ -118,6 +118,19 @@ def test_nudge_moves_the_end_by_fifty_milliseconds(qt_app, tmp_path) -> None:
     assert window.session.words()[0].end == pytest.approx(2.05)
 
 
+def test_a_nudge_and_its_opposite_leave_nothing_to_save(qt_app, tmp_path) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    before = json.loads(json.dumps(window.session.project.cards))
+    window.show()
+    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Period)
+    assert window.session.words()[1].start == pytest.approx(2.05)
+    QTest.keyClick(window, Qt.Key.Key_Comma)
+    assert window.session.project.cards == before
+    assert not window.session.dirty
+    assert not window.windowTitle().endswith("*")
+
+
 def test_ctrl_s_saves_and_the_title_loses_its_marker(qt_app, tmp_path) -> None:
     window, _, _ = _window(qt_app, tmp_path)
     window.show()

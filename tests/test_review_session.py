@@ -432,3 +432,55 @@ def test_a_drag_that_moved_something_is_still_an_edit(tmp_path) -> None:
     assert session.word(ref).end == 1.8
     session.undo()
     assert not session.dirty
+
+
+def test_a_nudge_and_back_on_a_shared_edge_is_the_start_state(tmp_path) -> None:
+    """``.`` then ``,``: the end touched the next start, so the next start comes back too."""
+    session = ReviewSession(load_project(_recitation(tmp_path).path))
+    before = copy.deepcopy(session.project.cards)
+    a, b = WordRef(CARD, 0, 0), WordRef(CARD, 0, 1)
+    session.retime(a, end=session.word(a).end + 0.05)
+    assert (session.word(a).end, session.word(b).start) == (1.05, 1.05)
+    assert session.dirty
+    session.retime(a, end=session.word(a).end - 0.05)
+    assert (session.word(b).start, session.word(b).end) == (1.0, 2.0)
+    assert not session.dirty
+    assert session.project.cards == before
+
+
+def test_a_nudge_back_across_cards_puts_the_next_card_back() -> None:
+    session = ReviewSession(_recitation())
+    before = copy.deepcopy(session.project.cards)
+    last_of_first = WordRef(CARD, 0, 1)
+    session.retime(last_of_first, end=2.05)
+    assert session.project.cards[1]["start_time"] == 2.05
+    session.retime(last_of_first, end=2.0)
+    assert session.project.cards == before and not session.dirty
+
+
+def test_nudging_back_part_of_the_way_is_still_an_edit() -> None:
+    session = ReviewSession(_recitation())
+    a, b = WordRef(CARD, 0, 0), WordRef(CARD, 0, 1)
+    session.retime(a, end=1.05)
+    session.retime(a, end=1.01)
+    assert session.dirty
+    assert (session.word(a).end, session.word(b).start) == (1.01, 1.01)
+    assert session.word(a).edited and session.word(b).edited
+
+
+def test_a_drag_of_a_shared_edge_pulls_the_neighbour_along() -> None:
+    session = ReviewSession(_recitation())
+    a, b = WordRef(CARD, 0, 0), WordRef(CARD, 0, 1)
+    session.begin_gesture()
+    session.drag_retime(a, end=0.8)
+    session.end_gesture()
+    assert (session.word(a).end, session.word(b).start) == (0.8, 0.8)
+
+
+def test_a_caption_nudge_and_back_is_the_start_state() -> None:
+    session = ReviewSession(_lecture())
+    before = copy.deepcopy(session.project.captions)
+    one = WordRef(CAPTION, 0, 0)
+    session.retime(one, end=1.05)
+    session.retime(one, end=1.0)
+    assert session.project.captions == before and not session.dirty
