@@ -728,7 +728,11 @@ def _running_rows(window) -> list[str]:
     from PySide6.QtCore import Qt
 
     items = [window.job_list.list.item(i) for i in range(window.job_list.list.count())]
-    return [i.text() for i in items if i.data(Qt.ItemDataRole.UserRole) is None]
+    return [
+        window.job_list.list.itemWidget(i).label.text()
+        for i in items
+        if i.data(Qt.ItemDataRole.UserRole) is None
+    ]
 
 
 def test_the_home_window_is_the_job_list_beside_the_new_job_form(qt_app, home) -> None:

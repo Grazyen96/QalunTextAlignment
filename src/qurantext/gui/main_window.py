@@ -173,7 +173,7 @@ class MainWindow(QMainWindow):
         text = _progress_text(event)
         self.new_job.set_progress(event.fraction, text)
         if self._running_spec is not None:
-            self.job_list.set_running(Path(self._running_spec.audio).name, text)
+            self.job_list.set_running(Path(self._running_spec.audio).name, text, event.fraction)
 
     def _on_finished(self, finished: _Finished) -> None:
         if self._closing:

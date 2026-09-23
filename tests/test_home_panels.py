@@ -33,6 +33,11 @@ def _card(surah=25, a=7, b=8):
     return {"surah_num": surah, "from_ayah": a, "to_ayah": b, "start_time": 0.0, "end_time": 5.0}
 
 
+def _running_text(panel):
+    """The transient running row's words (row 0), drawn by its row widget."""
+    return panel.list.itemWidget(panel.list.item(0)).label.text()
+
+
 def _save(jobs_dir, name, **changes):
     project = Project(audio=jobs_dir / f"{name}.m4a", mode="recitation", cards=[_card()])
     for key, value in changes.items():
@@ -111,15 +116,48 @@ def test_set_running_adds_and_removes_transient_row(qt_app, prefs) -> None:
 
     panel.set_running("recitation.m4a", "Aligning… 40%")
     assert panel.list.count() == 1
-    assert "recitation.m4a" in panel.list.item(0).text()
-    assert "40%" in panel.list.item(0).text()
+    assert "recitation.m4a" in _running_text(panel)
+    assert "40%" in _running_text(panel)
 
     panel.set_running("recitation.m4a", "Aligning… 80%")
     assert panel.list.count() == 1
-    assert "80%" in panel.list.item(0).text()
+    assert "80%" in _running_text(panel)
 
     panel.set_running("recitation.m4a", None)
     assert panel.list.count() == 0
+
+
+def test_the_running_row_shows_how_far_the_job_is(qt_app, prefs) -> None:
+    panel = JobListPanel(prefs)
+
+    panel.set_running("a.m4a", "Starting…")
+    bar = panel.list.itemWidget(panel.list.item(0)).progress_bar
+    assert (bar.minimum(), bar.maximum()) == (0, 0), "no fraction yet: a busy indicator"
+
+    panel.set_running("a.m4a", "Matching — 40%", 0.4)
+    bar = panel.list.itemWidget(panel.list.item(0)).progress_bar
+    assert (bar.maximum(), bar.value()) == (100, 40)
+    assert "40%" in _running_text(panel)
+
+    panel.refresh()
+    bar = panel.list.itemWidget(panel.list.item(0)).progress_bar
+    assert bar.value() == 40, "a refresh mid-job keeps the bar where it was"
+
+
+def test_rows_name_their_folder_so_two_jobs_of_one_name_differ(qt_app, prefs, tmp_path) -> None:
+    first = prefs.job_dirs[0]
+    second = tmp_path / "other"
+    second.mkdir()
+    prefs.job_dirs = [first, second]
+    _save(first, "same")
+    _save(second, "same")
+
+    panel = JobListPanel(prefs)
+
+    tips = sorted(panel.list.item(i).toolTip() for i in range(panel.list.count()))
+    assert tips == sorted([str(first.resolve()), str(second.resolve())])
+    row = panel.list.itemWidget(panel.list.item(0))
+    assert row.toolTip() == panel.list.item(0).toolTip()
 
 
 def test_damaged_file_is_listed_and_does_not_open(qt_app, prefs) -> None:
@@ -192,11 +230,11 @@ def test_refresh_keeps_the_running_row(qt_app, prefs) -> None:
     panel.refresh()
 
     assert panel.list.count() == 2
-    assert "40%" in panel.list.item(0).text()
+    assert "40%" in _running_text(panel)
     assert panel.list.item(0).data(Qt.ItemDataRole.UserRole) is None
 
     panel.set_running("recitation.m4a", "Aligning… 60%")
-    assert panel.list.count() == 2 and "60%" in panel.list.item(0).text()
+    assert panel.list.count() == 2 and "60%" in _running_text(panel)
 
     panel.set_running("recitation.m4a", None)
     panel.refresh()

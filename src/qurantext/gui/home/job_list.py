@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMenu,
+    QProgressBar,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -78,9 +79,11 @@ class JobListPanel(QWidget):
     def __init__(self, prefs: Prefs, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._prefs = prefs
-        #: The running job's row label, or None. Kept apart from the row itself
-        #: so :meth:`refresh` can put the row back after rebuilding the list.
+        #: The running job's row label, or None, and how far it is (None: not
+        #: known). Kept apart from the row itself so :meth:`refresh` can put
+        #: the row back after rebuilding the list.
         self._running_label: str | None = None
+        self._running_fraction: float | None = None
         #: The transient "matching…" row set_running adds, or None.
         self._running_item: QListWidgetItem | None = None
 
@@ -132,20 +135,27 @@ class JobListPanel(QWidget):
     def _add_entry(self, entry: JobEntry) -> None:
         item = QListWidgetItem()
         item.setData(Qt.ItemDataRole.UserRole, entry)
+        # Two jobs can share a name (the same recording matched into two
+        # folders); the folder tells them apart.
+        folder = str(entry.project.parent)
+        item.setToolTip(folder)
         if entry.status == DAMAGED and entry.error:
             item.setStatusTip(entry.error)
         row = _JobRow(entry)
+        row.setToolTip(folder)
         item.setSizeHint(row.sizeHint())
         self.list.addItem(item)
         self.list.setItemWidget(item, row)
 
-    def set_running(self, name: str, text: str | None) -> None:
+    def set_running(self, name: str, text: str | None, fraction: float | None = None) -> None:
         """Show (*text* given) or clear (*text* is None) the transient top row.
 
         Used while a job is being matched, before it has a project file of its
-        own to show up from disk, e.g. ``set_running("recitation.m4a", "Aligning… 40%")``.
+        own to show up from disk, e.g. ``set_running("recitation.m4a", "Aligning… 40%", 0.4)``.
+        The row's progress bar shows *fraction*, or a busy indicator while it is None.
         """
         self._running_label = None if text is None else f"{name} — {text}"
+        self._running_fraction = fraction
         self._show_running_row()
 
     def _show_running_row(self) -> None:
@@ -156,12 +166,19 @@ class JobListPanel(QWidget):
                 if row >= 0:
                     self.list.takeItem(row)
                 self._running_item = None
-        elif self._running_item is None:
-            self._running_item = QListWidgetItem(self._running_label)
-            self._running_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
-            self.list.insertItem(0, self._running_item)
         else:
-            self._running_item.setText(self._running_label)
+            if self._running_item is None:
+                # No display text of its own: the row widget draws the words
+                # and the bar, and text under it would show through.
+                self._running_item = QListWidgetItem()
+                self._running_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                self.list.insertItem(0, self._running_item)
+                row = _RunningRow()
+                self.list.setItemWidget(self._running_item, row)
+            row = self.list.itemWidget(self._running_item)
+            row.show_state(self._running_label, self._running_fraction)
+            self._running_item.setData(Qt.ItemDataRole.AccessibleTextRole, self._running_label)
+            self._running_item.setSizeHint(row.sizeHint())
         self._update_empty_state()
 
     def _update_empty_state(self) -> None:
@@ -234,6 +251,30 @@ class _JobRow(QWidget):
             attention_font.setBold(True)
             self.detail_label.setFont(attention_font)
         layout.addWidget(self.detail_label)
+
+
+class _RunningRow(QWidget):
+    """The running job's row: what it is doing, over a thin progress bar (spec §3)."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(3)
+        self.label = QLabel()
+        layout.addWidget(self.label)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setFixedHeight(6)
+        layout.addWidget(self.progress_bar)
+
+    def show_state(self, text: str, fraction: float | None) -> None:
+        self.label.setText(text)
+        if fraction is None:
+            self.progress_bar.setRange(0, 0)  # busy: a stage that does not say how far
+        else:
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(int(max(0.0, min(1.0, fraction)) * 100))
 
 
 def _detail_text(entry: JobEntry) -> str:
