@@ -239,3 +239,13 @@ def test_a_malformed_cards_or_captions_shape_is_refused_by_name(tmp_path, field,
     path.write_text(json.dumps({"audio": "a.mp3", field: value}), encoding="utf-8")
     with pytest.raises(ValueError, match=field):
         load_project(path)
+
+
+def test_record_render_takes_a_given_content_hash_verbatim(tmp_path) -> None:
+    project = Project(audio=tmp_path / "a.mp3")
+    project.record_render(
+        tmp_path / "v.mp4", preset=None, basmala_offset_s=0.0, content_hash="abc", width=10
+    )
+    assert project.render["content_hash"] == "abc"
+    assert project.render_is_stale is True
+    assert project.render["width"] == 10

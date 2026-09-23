@@ -261,14 +261,28 @@ class Project:
         preset: str | None,
         basmala_offset_s: float,
         when: datetime | None = None,
+        content_hash: str | None = None,
+        width: int | None = None,
+        height: int | None = None,
+        fps: int | None = None,
     ) -> None:
-        """Remember a successful render and the content it was made from."""
+        """Remember a successful render and the content it was made from.
+
+        Pass *content_hash* when the render was made from a snapshot taken
+        before it started: an edit made while it ran must leave it stale, which
+        hashing the project as it is now would hide. *width*, *height* and
+        *fps* are the geometry actually rendered, which the subtitle export
+        reuses so an ASS file matches the video.
+        """
         self.render = {
             "video": Path(video).expanduser().resolve(),
             "preset": preset,
+            "width": width,
+            "height": height,
+            "fps": fps,
             "basmala_offset_s": round(float(basmala_offset_s), 3),
             "rendered_at": (when or datetime.now()).isoformat(timespec="seconds"),
-            "content_hash": self.content_hash(),
+            "content_hash": content_hash if content_hash is not None else self.content_hash(),
         }
 
     @property

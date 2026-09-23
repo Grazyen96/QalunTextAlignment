@@ -13,6 +13,8 @@ actually exists.
 
 from __future__ import annotations
 
+import copy
+from dataclasses import replace
 from pathlib import Path
 
 from qurantext.config.paths import QURAN_DB_PATH
@@ -47,16 +49,28 @@ def render_project(
     progress: ProgressCallback | None = None,
     cancel: CancelToken | None = None,
 ) -> ExportResult:
-    """Render *project*, remember the render, and save the project if it has a file."""
+    """Render *project*, remember the render, and save the project if it has a file.
+
+    The cards and captions are copied before anything runs, and the render is
+    made and hashed from that copy. A render can take minutes in a worker while
+    the editor stays open; an edit made meanwhile is not in the video, so it
+    must leave the render looking stale rather than be silently credited to it.
+    """
     if project.matches is None:
         raise ValueError(
             "This project does not record its match file, so it cannot be rendered. "
             "Open it from the job it was made for, or re-run matching."
         )
+    snapshot = replace(
+        project,
+        cards=copy.deepcopy(project.cards),
+        captions=copy.deepcopy(project.captions),
+    )
+    rendered_hash = snapshot.content_hash()
     result = export_job(
         ExportRequest(
-            audio=Path(project.audio),
-            matches=Path(project.matches),
+            audio=Path(snapshot.audio),
+            matches=Path(snapshot.matches),
             output=Path(output),
             subtitles=subtitles,
             formats=tuple(formats),
@@ -67,14 +81,22 @@ def render_project(
             font_file=font_file,
             title=title,
             db_path=Path(db_path),
-            captions=tuple(project.caption_segments()),
-            cards=tuple(project.cards),
+            captions=tuple(snapshot.caption_segments()),
+            cards=tuple(snapshot.cards),
         ),
         progress=progress,
         cancel=cancel,
     )
-    offset = result.render.basmala_offset_seconds if result.render is not None else 0.0
-    project.record_render(result.video, preset=preset, basmala_offset_s=offset)
+    rendered = result.render
+    project.record_render(
+        result.video,
+        preset=preset,
+        basmala_offset_s=rendered.basmala_offset_seconds if rendered is not None else 0.0,
+        content_hash=rendered_hash,
+        width=rendered.width if rendered is not None else None,
+        height=rendered.height if rendered is not None else None,
+        fps=rendered.fps if rendered is not None else None,
+    )
     if project.path is not None:
         save_project(project, project.path)
     return result
@@ -116,8 +138,18 @@ def export_project_subtitles(
             Cue(start=c.start + offset, end=c.end + offset, text=c.text, ref=c.ref) for c in cues
         ]
 
-    preset = (project.render or {}).get("preset")
-    width, height = VIDEO_PRESETS[preset][:2] if preset in VIDEO_PRESETS else _DEFAULT_SIZE
+    width, height = _subtitle_size(project.render or {})
     stem = Path(stem)
     stem.parent.mkdir(parents=True, exist_ok=True)
     return write_subtitles(cues, stem, tuple(formats), width=width, height=height)
+
+
+def _subtitle_size(render: dict) -> tuple[int, int]:
+    """The rendered video's size when it was recorded, else its preset's, else portrait HD."""
+    if render.get("width") and render.get("height"):
+        return int(render["width"]), int(render["height"])
+    preset = render.get("preset")
+    if preset in VIDEO_PRESETS:
+        width, height = VIDEO_PRESETS[preset][:2]
+        return int(width), int(height)
+    return _DEFAULT_SIZE
