@@ -13,6 +13,19 @@ __all__ = ["LANGUAGES", "STRINGS", "current_language", "set_language", "t"]
 STRINGS: dict[str, dict[str, str]] = {
     "en": {
         # Tasks 3–9 add their keys here, grouped by widget.
+        "home.jobs": "Your jobs",
+        "home.refresh": "Refresh",
+        "home.mode.recitation": "Recitation",
+        "home.mode.lecture": "Lecture",
+        "home.cards": "{count} card(s)",
+        "home.status.needs_review": "Needs review",
+        "home.status.reviewed": "Reviewed",
+        "home.status.rendered": "Rendered",
+        "home.status.changed_since_render": "Changed since render",
+        "home.status.damaged": "Damaged",
+        "home.show_in_folder": "Show in folder",
+        "home.remove_from_list": "Remove from list",
+        "home.empty": "Your jobs appear here once you start one.",
         "main.review": "Review and correct",
         "main.saved": "Corrections saved to {path}",
         "player.unavailable": "Playback is off on this machine: {details}",

@@ -1,0 +1,225 @@
+"""The home window's list of every job it knows about.
+
+Each row is one project file: its name, what kind of job it is, how much of
+the Quran it covers, and where it stands (needs review, reviewed, rendered,
+changed since the last render, or damaged). "Remove from list" only hides a
+job — see ``jobs/catalog.py`` — it never touches the file, so a mistaken
+removal costs nothing to undo (re-add the folder, or edit the prefs file).
+
+A row that cannot be read (``DAMAGED``) is still listed, with its error kept
+on the row as a status tip; double-clicking it shows that error instead of
+trying to open a project that failed to load.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtGui import QColor, QPalette
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QMenu,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from qurantext.gui.i18n import t
+from qurantext.gui.prefs import Prefs
+from qurantext.jobs.catalog import (
+    CHANGED_SINCE_RENDER,
+    DAMAGED,
+    NEEDS_REVIEW,
+    RENDERED,
+    REVIEWED,
+    JobEntry,
+    job_dirs_for,
+    list_jobs,
+)
+
+__all__ = ["JobListPanel"]
+
+#: A fixed amber, not a palette role: it must read as "needs attention" against
+#: both a light and a dark window background, and it already does this job for
+#: gaps and edited words in the review window (see ``review/waveform_view.py``
+#: and ``review/word_strip.py``) — reusing it keeps the two windows consistent.
+_WARNING_COLOR = QColor(239, 159, 39)
+
+_STATUS_KEYS = {
+    NEEDS_REVIEW: "home.status.needs_review",
+    REVIEWED: "home.status.reviewed",
+    RENDERED: "home.status.rendered",
+    CHANGED_SINCE_RENDER: "home.status.changed_since_render",
+    DAMAGED: "home.status.damaged",
+}
+_WARNING_STATUSES = frozenset({NEEDS_REVIEW, CHANGED_SINCE_RENDER})
+
+
+class JobListPanel(QWidget):
+    """Every job under ``prefs.job_dirs`` (plus the default matching folders), newest first."""
+
+    #: A row was opened (double-click or Enter); carries the project's Path.
+    open_requested = Signal(object)
+    #: "Show in folder" was chosen; carries the project's Path. The panel does
+    #: not reveal it itself — ``MainWindow`` owns that call.
+    reveal_requested = Signal(object)
+
+    def __init__(self, prefs: Prefs, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._prefs = prefs
+        #: The transient "matching…" row set_running adds, or None.
+        self._running_item: QListWidgetItem | None = None
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        header = QHBoxLayout()
+        self.title_label = QLabel(t("home.jobs"))
+        bold = self.title_label.font()
+        bold.setBold(True)
+        self.title_label.setFont(bold)
+        header.addWidget(self.title_label)
+        header.addStretch(1)
+        self.refresh_button = QPushButton(t("home.refresh"))
+        self.refresh_button.clicked.connect(self.refresh)
+        header.addWidget(self.refresh_button)
+        layout.addLayout(header)
+
+        self.list = QListWidget()
+        self.list.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        self.list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.list.itemActivated.connect(self._on_activated)
+        self.list.customContextMenuRequested.connect(self._on_context_menu)
+        layout.addWidget(self.list)
+
+        self.empty_label = QLabel(t("home.empty"))
+        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_label.setWordWrap(True)
+        layout.addWidget(self.empty_label)
+
+        self.refresh()
+
+    # -- filling ----------------------------------------------------------------
+
+    def refresh(self) -> None:
+        """Rebuild the list from disk.
+
+        Drops any transient running row: the job it described either finished
+        (and now appears from disk, read back like any other project) or the
+        caller will call :meth:`set_running` again for its next update.
+        """
+        self.list.clear()
+        self._running_item = None
+        for entry in list_jobs(job_dirs_for(self._prefs.job_dirs), hidden=self._prefs.hidden_jobs):
+            self._add_entry(entry)
+        self._update_empty_state()
+
+    def _add_entry(self, entry: JobEntry) -> None:
+        item = QListWidgetItem()
+        item.setData(Qt.ItemDataRole.UserRole, entry)
+        if entry.status == DAMAGED and entry.error:
+            item.setStatusTip(entry.error)
+        row = _JobRow(entry)
+        item.setSizeHint(row.sizeHint())
+        self.list.addItem(item)
+        self.list.setItemWidget(item, row)
+
+    def set_running(self, name: str, text: str | None) -> None:
+        """Show (*text* given) or clear (*text* is None) the transient top row.
+
+        Used while a job is being matched, before it has a project file of its
+        own to show up from disk, e.g. ``set_running("recitation.m4a", "Aligning… 40%")``.
+        """
+        if text is None:
+            if self._running_item is not None:
+                row = self.list.row(self._running_item)
+                if row >= 0:
+                    self.list.takeItem(row)
+                self._running_item = None
+            self._update_empty_state()
+            return
+        label = f"{name} — {text}"
+        if self._running_item is None:
+            self._running_item = QListWidgetItem(label)
+            self._running_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            self.list.insertItem(0, self._running_item)
+        else:
+            self._running_item.setText(label)
+        self._update_empty_state()
+
+    def _update_empty_state(self) -> None:
+        has_rows = self.list.count() > 0
+        self.list.setVisible(has_rows)
+        self.empty_label.setVisible(not has_rows)
+
+    # -- actions ------------------------------------------------------------------
+
+    def _on_activated(self, item: QListWidgetItem) -> None:
+        entry = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(entry, JobEntry):
+            return  # the transient running row carries no entry
+        if entry.status == DAMAGED:
+            return  # the error is already on the row as its status tip
+        self.open_requested.emit(entry.project)
+
+    def _on_context_menu(self, pos: QPoint) -> None:
+        item = self.list.itemAt(pos)
+        if item is None:
+            return
+        entry = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(entry, JobEntry):
+            return
+        menu = QMenu(self)
+        reveal_action = menu.addAction(t("home.show_in_folder"))
+        remove_action = menu.addAction(t("home.remove_from_list"))
+        chosen = menu.exec(self.list.mapToGlobal(pos))
+        if chosen is reveal_action:
+            self.reveal(entry.project)
+        elif chosen is remove_action:
+            self.remove_from_list(entry.project)
+
+    def remove_from_list(self, path: Path) -> None:
+        """Hide *path* (through ``Prefs``) and rebuild the list without it."""
+        self._prefs.hide_job(path)
+        self.refresh()
+
+    def reveal(self, path: Path) -> None:
+        self.reveal_requested.emit(path)
+
+
+class _JobRow(QWidget):
+    """The two-line label shown for one job: bold name, then mode/scope/status."""
+
+    def __init__(self, entry: JobEntry, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(2)
+
+        self.name_label = QLabel(entry.name)
+        bold_font = self.name_label.font()
+        bold_font.setBold(True)
+        self.name_label.setFont(bold_font)
+        layout.addWidget(self.name_label)
+
+        self.detail_label = QLabel(_detail_text(entry))
+        if entry.status in _WARNING_STATUSES:
+            palette = self.detail_label.palette()
+            palette.setColor(QPalette.ColorRole.WindowText, _WARNING_COLOR)
+            self.detail_label.setPalette(palette)
+        layout.addWidget(self.detail_label)
+
+
+def _detail_text(entry: JobEntry) -> str:
+    if entry.status == DAMAGED:
+        return t(_STATUS_KEYS[DAMAGED])
+    mode_text = t("home.mode.recitation") if entry.mode == "recitation" else t("home.mode.lecture")
+    scope = entry.ayah_range or t("home.cards", count=entry.card_count)
+    status_text = t(_STATUS_KEYS[entry.status])
+    return f"{mode_text} · {scope} · {status_text}"
