@@ -103,6 +103,9 @@ class NewJobPanel(QWidget):
         self._audio: Path | None = None
         self._quran_override: Path | None = prefs.quran_override
         self._output_dir: Path | None = prefs.output_dir
+        #: True while the surah list is being filled and set back to the
+        #: remembered choice, so those steps are not remembered as new choices.
+        self._restoring_range = False
         self.setAcceptDrops(True)
 
         self.format_boxes: dict[str, QCheckBox] = {}
@@ -336,7 +339,35 @@ class NewJobPanel(QWidget):
         return self._usable_override() or self._quran_default
 
     def _load_surahs(self) -> None:
-        """Populate the picker from the store, so the user names the range."""
+        """Populate the picker from the store, then put back the last surah and range."""
+        self._restoring_range = True
+        try:
+            self._fill_surahs()
+            self._restore_range()
+        finally:
+            self._restoring_range = False
+        self._refresh()
+
+    def _restore_range(self) -> None:
+        """Select the remembered surah and range, clamped to that surah's ayat."""
+        surah_num = self._prefs.surah_num
+        if surah_num is None:
+            return
+        for index in range(self.surah_box.count()):
+            data = self.surah_box.itemData(index)
+            if data is not None and int(data["surah_num"]) == surah_num:
+                break
+        else:
+            return
+        self.surah_box.setCurrentIndex(index)
+        count = int(self.surah_box.itemData(index)["ayah_count"])
+        first = min(self._prefs.from_ayah or 1, count)
+        last = max(first, min(self._prefs.to_ayah or count, count))
+        self.from_spin.setValue(first)
+        self.to_spin.setValue(last)
+
+    def _fill_surahs(self) -> None:
+        """List every surah from the store, or say in the picker why there are none."""
         self.surah_box.clear()
         quran = self._effective_quran()
         if quran is None:
@@ -470,12 +501,24 @@ class NewJobPanel(QWidget):
             spin.setMaximum(count)
         self.from_spin.setValue(1)
         self.to_spin.setValue(count)
+        self._remember_range()
         self._refresh()
 
     def _range_changed(self) -> None:
         if self.to_spin.value() < self.from_spin.value():
             self.to_spin.setValue(self.from_spin.value())
+        self._remember_range()
         self._refresh()
+
+    def _remember_range(self) -> None:
+        if self._restoring_range:
+            return
+        surah = self.surah_box.currentData()
+        if not surah:
+            return  # no store to pick from: keep the last real choice
+        self._prefs.surah_num = int(surah["surah_num"])
+        self._prefs.from_ayah = self.from_spin.value()
+        self._prefs.to_ayah = self.to_spin.value()
 
     def _preset_changed(self) -> None:
         self._prefs.preset = str(self.preset_box.currentData())

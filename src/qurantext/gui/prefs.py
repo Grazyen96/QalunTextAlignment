@@ -26,6 +26,25 @@ __all__ = ["Prefs"]
 
 _MODES = ("recitation", "lecture")
 
+#: How many surahs there are: a remembered surah outside 1..114 is not one.
+_SURAH_COUNT = 114
+
+
+def _as_positive_int(value: object, highest: int | None = None) -> int | None:
+    """Normalise a stored count: an int, or the digits INI wrote; else None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        if not value.isdigit():
+            return None
+        value = int(value)
+    if not isinstance(value, int) or value < 1:
+        return None
+    if highest is not None and value > highest:
+        return None
+    return value
+
 
 def _as_str_list(value: object) -> list[str]:
     """Normalise a stored list: missing, a bare string, or a real list."""
@@ -162,6 +181,38 @@ class Prefs:
     @more_options_open.setter
     def more_options_open(self, value: bool) -> None:
         self._settings.setValue("more_options_open", bool(value))
+        self._settings.sync()
+
+    # -- the last surah and range --------------------------------------------
+    # Restored by the new-job panel once the surah list has loaded, clamped to
+    # that surah's ayah count, so a hand-edited range cannot run past its end.
+
+    @property
+    def surah_num(self) -> int | None:
+        return _as_positive_int(self._settings.value("surah_num"), _SURAH_COUNT)
+
+    @surah_num.setter
+    def surah_num(self, value: int | None) -> None:
+        self._write_optional_int("surah_num", value)
+
+    @property
+    def from_ayah(self) -> int | None:
+        return _as_positive_int(self._settings.value("from_ayah"))
+
+    @from_ayah.setter
+    def from_ayah(self, value: int | None) -> None:
+        self._write_optional_int("from_ayah", value)
+
+    @property
+    def to_ayah(self) -> int | None:
+        return _as_positive_int(self._settings.value("to_ayah"))
+
+    @to_ayah.setter
+    def to_ayah(self, value: int | None) -> None:
+        self._write_optional_int("to_ayah", value)
+
+    def _write_optional_int(self, key: str, value: int | None) -> None:
+        self._settings.setValue(key, "" if value is None else int(value))
         self._settings.sync()
 
     # -- hidden_jobs ----------------------------------------------------------

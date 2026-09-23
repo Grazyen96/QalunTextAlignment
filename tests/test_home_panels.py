@@ -556,3 +556,22 @@ def test_the_surah_picker_and_file_filters_read_from_the_string_table(
     assert filters[0].startswith(t("home.filter.audio") + " (")
     assert filters[1].startswith(t("home.filter.text") + " (")
     assert all(f.endswith(t("home.filter.all") + " (*)") for f in filters)
+
+
+def test_the_last_surah_and_range_come_back(qt_app, prefs, store, tmp_path) -> None:
+    panel = _panel(prefs, store)
+    _select_surah(panel, 25)
+    panel.from_spin.setValue(7)
+    panel.to_spin.setValue(11)
+
+    fresh = _panel(Prefs(QSettings(str(tmp_path / "prefs.ini"), QSettings.Format.IniFormat)), store)
+    spec = fresh.spec()
+    assert (spec.surah_num, spec.from_ayah, spec.to_ayah) == (25, 7, 11)
+
+
+def test_a_remembered_range_is_clamped_to_the_surah(qt_app, prefs, store) -> None:
+    prefs.surah_num, prefs.from_ayah, prefs.to_ayah = 1, 5, 99  # al-Fatiha has 7
+
+    spec = _panel(prefs, store).spec()
+
+    assert (spec.surah_num, spec.from_ayah, spec.to_ayah) == (1, 5, 7)

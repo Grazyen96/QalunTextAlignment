@@ -28,6 +28,7 @@ def test_defaults_on_an_empty_ini(settings) -> None:
     assert prefs.more_options_open is False
     assert prefs.hidden_jobs == set()
     assert prefs.job_dirs == []
+    assert (prefs.surah_num, prefs.from_ayah, prefs.to_ayah) == (None, None, None)
 
 
 def test_every_key_round_trips(tmp_path) -> None:
@@ -46,6 +47,7 @@ def test_every_key_round_trips(tmp_path) -> None:
     written.hide_job(tmp_path / "a.qalun.json")
     written.hide_job(tmp_path / "b.qalun.json")
     written.job_dirs = [tmp_path / "extra1", tmp_path / "extra2"]
+    written.surah_num, written.from_ayah, written.to_ayah = 25, 7, 11
 
     reread = Prefs(QSettings(path, QSettings.Format.IniFormat))
     assert reread.mode == "lecture"
@@ -63,6 +65,7 @@ def test_every_key_round_trips(tmp_path) -> None:
     # Setting job_dirs directly replaces the list — including what setting
     # output_dir added earlier — so only the two set last are there.
     assert reread.job_dirs == [(tmp_path / "extra1").resolve(), (tmp_path / "extra2").resolve()]
+    assert (reread.surah_num, reread.from_ayah, reread.to_ayah) == (25, 7, 11)
 
 
 @pytest.mark.parametrize(
@@ -75,6 +78,10 @@ def test_every_key_round_trips(tmp_path) -> None:
         ("render_right_away", "render_right_away=maybe\n", False),
         ("more_options_open", "more_options_open=maybe\n", False),
         ("output_dir", "output_dir=\n", None),
+        ("surah_num", "surah_num=abc\n", None),
+        ("surah_num", "surah_num=115\n", None),
+        ("from_ayah", "from_ayah=0\n", None),
+        ("to_ayah", "to_ayah=-3\n", None),
     ],
 )
 def test_invalid_stored_values_read_back_as_defaults(tmp_path, key, raw_ini, expected) -> None:
