@@ -23,19 +23,9 @@ from pathlib import Path
 from typing import Any
 
 from qurantext.config.paths import user_cache_dir
+from qurantext.utils.hashing import audio_digest
 
 __all__ = ["audio_digest", "cache_key", "cache_path", "load_cached", "store_cached"]
-
-_CHUNK = 1 << 20
-
-
-def audio_digest(audio_path: Path) -> str:
-    """SHA-256 of the audio file's bytes, read in chunks."""
-    digest = hashlib.sha256()
-    with audio_path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(_CHUNK), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def cache_key(audio_path: str | PathLike[str], settings: dict[str, Any]) -> str:

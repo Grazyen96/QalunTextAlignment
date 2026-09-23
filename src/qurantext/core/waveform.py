@@ -21,7 +21,7 @@ from pathlib import Path
 import numpy as np
 
 from qurantext.core.video_common import require_binary
-from qurantext.services.transcript_cache import audio_digest
+from qurantext.utils.hashing import audio_digest
 from qurantext.utils.progress import CancelToken
 
 __all__ = ["Peaks", "compute_peaks", "load_or_compute_peaks", "peaks_path_for"]
