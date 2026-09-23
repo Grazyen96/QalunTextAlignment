@@ -14,6 +14,7 @@ changed nothing.
 
 from __future__ import annotations
 
+import bisect
 import copy
 import json
 from dataclasses import dataclass, replace
@@ -29,7 +30,7 @@ from qurantext.core.timing_edit import (
     ripple_in_cards,
 )
 from qurantext.core.video_common import validated_matches
-from qurantext.jobs.project import Project, save_project
+from qurantext.jobs.project import CaptionCue, Project, save_project
 
 __all__ = ["CAPTION", "CARD", "ReviewSession", "TimelineWord", "WordRef"]
 
@@ -57,6 +58,28 @@ class TimelineWord:
     edited: bool
 
 
+def _normalized_words(words: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """*words* with every start/end rounded to the grid, for the dirty check only."""
+    return [
+        {**word, "start": round(float(word["start"]), 3), "end": round(float(word["end"]), 3)}
+        for word in words
+    ]
+
+
+def _normalized_card(card: dict[str, Any]) -> dict[str, Any]:
+    timings = card.get("word_timings")
+    if not timings:
+        return card
+    return {**card, "word_timings": _normalized_words(timings)}
+
+
+def _normalized_caption(cue: CaptionCue) -> dict[str, Any]:
+    data = cue.to_dict()
+    if data.get("words"):
+        data["words"] = _normalized_words(data["words"])
+    return data
+
+
 class ReviewSession:
     """The project being reviewed, with undo and a record of unsaved changes."""
 
@@ -70,6 +93,10 @@ class ReviewSession:
         self._revision = 0
         self._saved_key = self._key()
         self._validated: tuple[int, list[dict[str, Any]]] | None = None
+        self._words_revision: int | None = None
+        self._words_by_kind: dict[str, list[TimelineWord]] = {}
+        self._starts_by_kind: dict[str, list[float]] = {}
+        self._position_by_kind: dict[str, dict[WordRef, int]] = {}
 
     # -- state ------------------------------------------------------------------
 
@@ -94,10 +121,18 @@ class ReviewSession:
         return bool(self._redo)
 
     def _key(self) -> str:
+        """A snapshot for the dirty check, with every word edge on the millisecond grid.
+
+        ``timing_edit`` re-snaps a whole list's edges to 3 decimals on every
+        edit as a side effect (see its module docstring), even for words the
+        edit did not target. Comparing raw floats would then read that
+        snap-only cleanup as a change; rounding here first makes a
+        value-preserving snap invisible to ``dirty``.
+        """
         return json.dumps(
             {
-                "cards": self.project.cards,
-                "captions": [cue.to_dict() for cue in self.project.captions],
+                "cards": [_normalized_card(card) for card in self.project.cards],
+                "captions": [_normalized_caption(cue) for cue in self.project.captions],
                 "review": self.project.review,
             },
             sort_keys=True,
@@ -129,13 +164,39 @@ class ReviewSession:
     # -- reading ----------------------------------------------------------------
 
     def words(self, kind: str | None = None) -> list[TimelineWord]:
-        kinds = (kind or self.primary_kind,)
+        """Timed words of *kind* (default: the primary kind), oldest start first.
+
+        The window polls this at frame rate, so the sorted list is cached per
+        kind and kept until the next change (``revision`` moving invalidates
+        every kind's cache, like ``_validated``). The returned list is the
+        cached object itself, not a copy — its entries are frozen dataclasses,
+        but callers must still treat the *list* as read-only and never mutate
+        or reorder it in place; make a copy first if a caller needs to.
+        """
+        resolved = kind or self.primary_kind
+        self._refresh_words_cache()
+        cached = self._words_by_kind.get(resolved)
+        if cached is None:
+            cached = self._build_words(resolved)
+            self._words_by_kind[resolved] = cached
+            self._starts_by_kind[resolved] = [tw.start for tw in cached]
+            self._position_by_kind[resolved] = {tw.ref: i for i, tw in enumerate(cached)}
+        return cached
+
+    def _refresh_words_cache(self) -> None:
+        if self._words_revision != self._revision:
+            self._words_revision = self._revision
+            self._words_by_kind = {}
+            self._starts_by_kind = {}
+            self._position_by_kind = {}
+
+    def _build_words(self, kind: str) -> list[TimelineWord]:
         out: list[TimelineWord] = []
-        if CARD in kinds:
+        if kind == CARD:
             for s, card in enumerate(self.project.cards):
                 for w, word in enumerate(card.get("word_timings") or []):
                     out.append(self._timeline_word(CARD, s, w, word))
-        if CAPTION in kinds:
+        else:
             for s, cue in enumerate(self.project.captions):
                 for w, word in enumerate(cue.words):
                     out.append(self._timeline_word(CAPTION, s, w, word))
@@ -161,22 +222,26 @@ class ReviewSession:
         return self._timeline_word(ref.kind, ref.segment, ref.word, self._raw_words(ref)[ref.word])
 
     def step(self, ref: WordRef | None, direction: int) -> WordRef | None:
-        ordered = [tw.ref for tw in self.words(ref.kind if ref else None)]
+        resolved = ref.kind if ref else self.primary_kind
+        ordered = self.words(resolved)
         if not ordered:
             return None
         if ref is None:
-            return ordered[0] if direction > 0 else ordered[-1]
-        i = ordered.index(ref) + (1 if direction > 0 else -1)
-        return ordered[i] if 0 <= i < len(ordered) else None
+            return (ordered[0] if direction > 0 else ordered[-1]).ref
+        i = self._position_by_kind[resolved][ref] + (1 if direction > 0 else -1)
+        return ordered[i].ref if 0 <= i < len(ordered) else None
 
     def word_at(self, t: float) -> WordRef | None:
-        found = None
-        for tw in self.words():
-            if tw.start <= t:
-                found = tw.ref
-            else:
-                break
-        return found
+        """The primary-kind word that most recently started at or before *t*.
+
+        Bisects the cached, start-sorted list instead of scanning it, so this
+        stays cheap when the window polls it at frame rate against a long
+        lecture's thousands of caption words.
+        """
+        words = self.words()
+        starts = self._starts_by_kind[self.primary_kind]
+        i = bisect.bisect_right(starts, t)
+        return words[i - 1].ref if i > 0 else None
 
     def card_at(self, t: float) -> int | None:
         found = None
@@ -204,8 +269,23 @@ class ReviewSession:
             self._validated = (self._revision, cards)
         active = [card for card in self._validated[1] if float(card["_start_time"]) <= t]
         index = self.caption_at(t)
-        caption = self.project.caption_segments()[index] if index is not None else None
+        caption = self._caption_segment(index) if index is not None else None
         return (active[-1] if active else None), caption, bool(self.project.captions)
+
+    def _caption_segment(self, index: int) -> dict[str, Any]:
+        """One cue in the shape ``Project.caption_segments()`` produces, built for this cue alone.
+
+        The frame renderer only ever needs the one active cue; rebuilding the
+        whole track's segments (``Project.caption_segments()``) every frame
+        does needless work on a long lecture.
+        """
+        cue = self.project.captions[index]
+        return {
+            "text": cue.text,
+            "start": float(cue.start),
+            "end": float(cue.end),
+            "word_timings": list(cue.words),
+        }
 
     # -- editing ----------------------------------------------------------------
 

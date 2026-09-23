@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -63,6 +64,20 @@ def _lecture():
             CaptionCue(2.5, 4.0, "three", words=[_w("three", 2.5, 4.0)]),
         ],
     )
+
+
+def _long_lecture(cues=1000, words_per_cue=5, word_len=0.1):
+    """A lecture with 1,000 cues of 5 words each: 5,000 caption words, no gaps."""
+    captions = []
+    t = 0.0
+    for i in range(cues):
+        words = []
+        for j in range(words_per_cue):
+            words.append(_w(f"w{i}_{j}", t, t + word_len))
+            t += word_len
+        text = " ".join(w["word"] for w in words)
+        captions.append(CaptionCue(words[0]["start"], words[-1]["end"], text, words=words))
+    return Project(audio=Path("dars.mp3"), mode="lecture", cards=[], captions=captions)
 
 
 def test_words_are_the_primary_kind_in_time_order() -> None:
@@ -206,3 +221,49 @@ def test_revision_moves_on_every_change() -> None:
     session.undo()
     session.redo()
     assert session.revision == start + 3
+
+
+def test_words_are_cached_until_the_next_change() -> None:
+    session = ReviewSession(_recitation())
+    first = session.words()
+    assert session.words() is first
+    session.retime(WordRef(CARD, 0, 0), end=0.9)
+    assert session.words() is not first
+
+
+def test_word_at_is_fast_on_a_long_lecture() -> None:
+    session = ReviewSession(_long_lecture())
+    words = session.words()
+    assert len(words) == 5000
+
+    def brute_force(t: float):
+        found = None
+        for tw in words:
+            if tw.start <= t:
+                found = tw.ref
+            else:
+                break
+        return found
+
+    sample_times = [words[i].start + 0.05 for i in range(0, len(words), 100)]
+    assert len(sample_times) == 50
+    for t in sample_times:
+        assert session.word_at(t) == brute_force(t)
+
+    calls = 200
+    started = time.perf_counter()
+    for _ in range(calls):
+        session.word_at(sample_times[0])
+    elapsed_ms = (time.perf_counter() - started) * 1000 / calls
+    assert elapsed_ms < 1.0, f"word_at averaged {elapsed_ms:.3f} ms/call over {calls} calls"
+
+
+def test_a_snap_only_noop_is_not_dirty() -> None:
+    noisy = 1.0000000000000002
+    project = _lecture()
+    project.captions[0] = CaptionCue(
+        0.0, 2.0, "one two", words=[_w("one", 0.0, noisy), _w("two", noisy, 2.0)]
+    )
+    session = ReviewSession(project)
+    session.retime(WordRef(CAPTION, 0, 0), end=1.0)
+    assert not session.dirty
