@@ -484,3 +484,48 @@ def test_a_caption_nudge_and_back_is_the_start_state() -> None:
     session.retime(one, end=1.05)
     session.retime(one, end=1.0)
     assert session.project.captions == before and not session.dirty
+
+
+def test_a_gesture_that_changes_nothing_keeps_redo() -> None:
+    """A click on a word begins and ends a gesture; it must not throw away redo."""
+    session = ReviewSession(_recitation())
+    ref = WordRef(CARD, 0, 1)
+    session.retime(ref, end=1.5)
+    session.undo()
+    assert session.can_redo
+
+    session.begin_gesture()
+    session.end_gesture()
+    assert session.can_redo, "a click with no movement"
+
+    session.begin_gesture()
+    session.drag_retime(ref, end=1.6)
+    session.drag_retime(ref, end=2.0)
+    session.end_gesture()
+    assert session.can_redo, "a drag that came back where it began"
+
+    session.redo()
+    assert session.words()[1].end == 1.5
+
+    session.undo()
+    session.begin_gesture()
+    session.drag_retime(ref, end=1.7)
+    session.end_gesture()
+    assert not session.can_redo, "a real edit starts a new branch"
+    assert session.words()[1].end == 1.7
+
+
+def test_an_edge_dragged_without_keep_joined_opens_a_gap() -> None:
+    session = ReviewSession(_recitation())
+    session.begin_gesture()
+    session.drag_retime(WordRef(CARD, 0, 0), end=0.8, keep_joined=False)
+    session.end_gesture()
+    words = session.words()
+    assert (words[0].end, words[1].start) == (0.8, 1.0), "the neighbour stays put"
+
+    joined = ReviewSession(_recitation())
+    joined.begin_gesture()
+    joined.drag_retime(WordRef(CARD, 0, 0), end=0.8)
+    joined.end_gesture()
+    words = joined.words()
+    assert (words[0].end, words[1].start) == (0.8, 0.8), "by default a shared edge stays shared"

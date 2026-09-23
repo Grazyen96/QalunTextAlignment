@@ -5,7 +5,9 @@ boundary between two words grabs the earlier word's end (retiming a shared
 edge moves both words at once); a press near any other edge grabs that edge
 alone; a plain press inside a word selects it and asks to seek there; a
 shift-press inside a word starts a ripple drag that pushes every later word
-by the same amount the pointer travels. Every move of a drag is applied from
+by the same amount the pointer travels. An edge dragged with Alt held moves
+alone: a shared edge detaches from its neighbour, so a gap can be opened
+between two joined words. Every move of a drag is applied from
 the state the drag began in, so dragging back undoes what the way out did.
 The strip never writes a timing itself — every drag goes through
 :class:`ReviewSession`, which is the one place the rules about what an edit
@@ -50,6 +52,8 @@ class _EdgeDrag:
     ref: WordRef
     edge: str  # "start" | "end"
     revision_before: int
+    #: False for an Alt-drag: the edge leaves a neighbour it touched behind.
+    keep_joined: bool = True
 
 
 @dataclass(slots=True)
@@ -190,7 +194,8 @@ class WordStrip(QWidget):
             self._last_edge = kind
             revision_before = self._session.revision
             self._session.begin_gesture()
-            self._drag = _EdgeDrag(ref, kind, revision_before)
+            detach = bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
+            self._drag = _EdgeDrag(ref, kind, revision_before, keep_joined=not detach)
             self.setCursor(Qt.CursorShape.SizeHorCursor)
             return
         # kind == "body"
@@ -219,10 +224,11 @@ class WordStrip(QWidget):
         # restores it), so the result depends only on where the pointer is now.
         t = self._viewport.t_for(x, self.width())
         if isinstance(self._drag, _EdgeDrag):
+            keep_joined = self._drag.keep_joined
             if self._drag.edge == "start":
-                self._session.drag_retime(self._drag.ref, start=t)
+                self._session.drag_retime(self._drag.ref, start=t, keep_joined=keep_joined)
             else:
-                self._session.drag_retime(self._drag.ref, end=t)
+                self._session.drag_retime(self._drag.ref, end=t, keep_joined=keep_joined)
         else:
             self._session.drag_ripple(self._drag.ref, t - self._drag.t0)
         self.update()

@@ -28,6 +28,10 @@ input that already satisfies 1 and 2, as alignment delivers it:
    so a nudge and its opposite put both words back. The neighbour's shared
    edge is still bounded by its other edge and its minimum, exactly as
    above; an edge with a gap never moves its neighbour except to push it.
+   That round trip is exact except beside a word already shorter than
+   :data:`MIN_WORD_S`: the nudge out lifts that word to the minimum, the
+   nudge back holds it there, so the pair ends at the minimum rather than at
+   the length alignment delivered.
 4. A request that equals the current value changes nothing: no ``edited``
    flag, output identical up to millisecond rounding (every time is snapped
    to the millisecond grid on copy, and that snap is monotonic).

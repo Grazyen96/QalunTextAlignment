@@ -128,7 +128,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "review.discard_text": "This review has changes that are not saved.",
         "review.shortcuts": (
             "Space plays · ←/→ step words · [ and ] set start/end at the playhead · "
-            ", and . nudge · Ctrl+Z undoes"
+            ", and . nudge · Alt-drag an edge to part two words · Ctrl+Z undoes"
         ),
         "export.title": "Export subtitles",
         "export.formats": "Formats",

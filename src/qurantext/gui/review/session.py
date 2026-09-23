@@ -129,6 +129,9 @@ class ReviewSession:
         self._redo: list[tuple] = []
         self._in_gesture = False
         self._gesture_start: tuple | None = None
+        #: The redo history, set aside while a gesture runs: given back if the
+        #: gesture changes nothing (a click on a word), dropped if it edits.
+        self._gesture_redo: list[tuple] = []
         self._revision = 0
         self._saved_key = self._key()
         #: What :meth:`revert` puts back: the state as loaded, or as last saved.
@@ -385,22 +388,36 @@ class ReviewSession:
 
     # -- editing ----------------------------------------------------------------
 
-    def retime(self, ref: WordRef, *, start: float | None = None, end: float | None = None) -> None:
+    def retime(
+        self,
+        ref: WordRef,
+        *,
+        start: float | None = None,
+        end: float | None = None,
+        keep_joined: bool = True,
+    ) -> None:
         """Move *ref*'s edge; one it shared with the neighbour takes the neighbour's along.
 
         ``keep_joined`` is what makes a nudge reversible: ``.`` pushes the next
-        word's start, and ``,`` brings it back instead of leaving a gap. An edit
-        that puts everything back where it was last saved is settled back to
-        exactly that state (see :meth:`_settle`), so it does not read as unsaved.
+        word's start, and ``,`` brings it back instead of leaving a gap. Pass
+        False to move the edge alone (a neighbour is then only ever pushed), which
+        is how a gap is opened between two joined words. An edit that puts
+        everything back where it was last saved is settled back to exactly that
+        state (see :meth:`_settle`), so it does not read as unsaved.
         """
         self._before_change()
         if ref.kind == CARD:
             self.project.cards = retime_in_cards(
-                self.project.cards, ref.segment, ref.word, start=start, end=end, keep_joined=True
+                self.project.cards,
+                ref.segment,
+                ref.word,
+                start=start,
+                end=end,
+                keep_joined=keep_joined,
             )
         else:
             cue = self.project.captions[ref.segment]
-            words = retime(cue.words, ref.word, start=start, end=end, keep_joined=True)
+            words = retime(cue.words, ref.word, start=start, end=end, keep_joined=keep_joined)
             self._set_cue_words(ref.segment, words)
         self._settle(ref)
         self._changed()
@@ -419,7 +436,12 @@ class ReviewSession:
         self._changed()
 
     def drag_retime(
-        self, ref: WordRef, *, start: float | None = None, end: float | None = None
+        self,
+        ref: WordRef,
+        *,
+        start: float | None = None,
+        end: float | None = None,
+        keep_joined: bool = True,
     ) -> None:
         """Inside a gesture: *ref*'s edge where the pointer is now, applied to the gesture's start.
 
@@ -429,10 +451,11 @@ class ReviewSession:
         state the drag began in makes the result depend only on where the
         pointer is, so dragging back puts everything back. Like a nudge, it
         goes through :meth:`retime`, so an edge the neighbour shared stays
-        shared while it is dragged (``keep_joined``).
+        shared while it is dragged, unless *keep_joined* is False (an Alt-drag
+        in the word strip), which detaches it.
         """
         self._restore_gesture_start()
-        self.retime(ref, start=start, end=end)
+        self.retime(ref, start=start, end=end, keep_joined=keep_joined)
 
     def drag_ripple(self, ref: WordRef, total_delta: float) -> None:
         """Inside a gesture: ripple from *ref* by the pointer's whole travel since the press.
@@ -509,7 +532,9 @@ class ReviewSession:
             return
         self._gesture_start = self._snapshot()
         self._undo.append(self._gesture_start)
-        self._redo.clear()
+        # Set aside, not cleared: a press that never moves is no edit and must
+        # leave redo as it was (see end_gesture). Nothing can redo mid-gesture.
+        self._gesture_redo, self._redo = self._redo, []
         self._in_gesture = True
 
     def end_gesture(self) -> None:
@@ -518,12 +543,15 @@ class ReviewSession:
         "Where it began" is judged on the settled states (see ``_settled``),
         and then the gesture-start snapshot is put back exactly — windows,
         flags and all — and its undo entry dropped, so the project is not
-        dirty and there is nothing to undo.
+        dirty and there is nothing to undo; the redo history set aside when it
+        began comes back. A gesture that did edit starts a new branch, and the
+        redo history goes.
         """
         if not self._in_gesture:
             return
         self._in_gesture = False
         start, self._gesture_start = self._gesture_start, None
+        redo, self._gesture_redo = self._gesture_redo, []
         if start is None:
             return
         if not self._settles_to(start):
@@ -533,6 +561,7 @@ class ReviewSession:
             return
         if self._undo and self._undo[-1] is start:
             self._undo.pop()
+        self._redo = redo
         if not self._is_exactly(start):
             self._restore(start)
             self._changed()
@@ -629,6 +658,7 @@ class ReviewSession:
         """
         self._in_gesture = False
         self._gesture_start = None
+        self._gesture_redo = []
         self._undo.clear()
         self._redo.clear()
         self._restore(self._saved_snapshot)
