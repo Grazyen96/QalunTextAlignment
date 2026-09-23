@@ -70,6 +70,58 @@ def default_job_dirs() -> list[Path]:
     return [RECITATION_MATCHING_OUTPUT_DIR, LECTURE_MATCHING_OUTPUT_DIR]
 
 
+def _entry_for(path: Path) -> JobEntry | None:
+    """Build an entry for *path*, or None if the file vanished."""
+    try:
+        modified = path.stat().st_mtime
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        return JobEntry(
+            project=path,
+            name=path.name.removesuffix(".qalun.json"),
+            mode="",
+            status=DAMAGED,
+            modified=0.0,
+            error=str(error),
+        )
+
+    try:
+        project = load_project(path)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        return JobEntry(
+            project=path,
+            name=path.name.removesuffix(".qalun.json"),
+            mode="",
+            status=DAMAGED,
+            modified=modified,
+            error=str(error),
+        )
+
+    try:
+        status = job_status(project)
+        range_str = ayah_range(project.cards)
+    except (KeyError, TypeError, ValueError) as error:
+        return JobEntry(
+            project=path,
+            name=Path(project.audio).stem,
+            mode=project.mode,
+            status=DAMAGED,
+            modified=modified,
+            error=str(error),
+        )
+
+    return JobEntry(
+        project=path,
+        name=Path(project.audio).stem,
+        mode=project.mode,
+        status=status,
+        modified=modified,
+        card_count=len(project.cards),
+        ayah_range=range_str,
+    )
+
+
 def list_jobs(dirs: Iterable[Path] | None = None) -> list[JobEntry]:
     """Projects under *dirs*, newest first."""
     entries: list[JobEntry] = []
@@ -78,31 +130,8 @@ def list_jobs(dirs: Iterable[Path] | None = None) -> list[JobEntry]:
         if not folder.is_dir():
             continue
         for path in folder.glob("*.qalun.json"):
-            modified = path.stat().st_mtime
-            try:
-                project = load_project(path)
-            except (OSError, ValueError, KeyError, TypeError) as error:
-                entries.append(
-                    JobEntry(
-                        project=path,
-                        name=path.name.removesuffix(".qalun.json"),
-                        mode="",
-                        status=DAMAGED,
-                        modified=modified,
-                        error=str(error),
-                    )
-                )
-                continue
-            entries.append(
-                JobEntry(
-                    project=path,
-                    name=Path(project.audio).stem,
-                    mode=project.mode,
-                    status=job_status(project),
-                    modified=modified,
-                    card_count=len(project.cards),
-                    ayah_range=ayah_range(project.cards),
-                )
-            )
+            entry = _entry_for(path)
+            if entry is not None:
+                entries.append(entry)
     entries.sort(key=lambda entry: entry.modified, reverse=True)
     return entries

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path as PathlibPath
+from unittest.mock import patch
 
 from qurantext.jobs.catalog import (
     CHANGED_SINCE_RENDER,
@@ -76,3 +79,42 @@ def test_ayah_range() -> None:
     assert ayah_range([_card(25, 77, 77), _card(26, 1, 3)]) == "25:77–26:3"
     assert ayah_range([_card(None, None, None, kind="preamble"), _card(1, 1, 7)]) == "1:1–7"
     assert ayah_range([]) is None
+
+
+def test_a_malformed_card_marks_only_that_job_damaged(tmp_path) -> None:
+    _save(tmp_path, "good")
+    bad_path = tmp_path / "bad_recitation.qalun.json"
+    bad_project = {
+        "audio": str(tmp_path / "bad.mp3"),
+        "mode": "recitation",
+        "cards": [
+            {"surah_num": 5, "from_ayah": None, "to_ayah": None, "start_time": 0.0, "end_time": 1.0}
+        ],
+        "review": {},
+    }
+    bad_path.write_text(json.dumps(bad_project), encoding="utf-8")
+
+    entries = list_jobs([tmp_path])
+    by_name = {entry.name: entry.status for entry in entries}
+    assert by_name == {"good": NEEDS_REVIEW, "bad": DAMAGED}
+    assert next(e for e in entries if e.name == "bad").error
+
+
+def test_a_file_that_vanishes_mid_scan_is_skipped(tmp_path) -> None:
+    _save(tmp_path, "good")
+    vanishing = _save(tmp_path, "vanishing")
+
+    original_stat = PathlibPath.stat
+    vanishing_str = str(vanishing)
+
+    def stat_wrapper(self):
+        if isinstance(self, PathlibPath) and str(self) == vanishing_str:
+            raise FileNotFoundError(f"{self} disappeared")
+        return original_stat(self)
+
+    with patch.object(PathlibPath, "stat", stat_wrapper):
+        entries = list_jobs([tmp_path])
+
+    names = [entry.name for entry in entries]
+    assert "good" in names
+    assert "vanishing" not in names
