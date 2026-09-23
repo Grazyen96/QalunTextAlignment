@@ -14,6 +14,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "en": {
         # Tasks 3–9 add their keys here, grouped by widget.
         "player.unavailable": "Playback is off on this machine: {details}",
+        "waveform.reading": "Reading the recording…",
     },
 }
 LANGUAGES = tuple(STRINGS)
