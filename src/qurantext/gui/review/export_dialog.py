@@ -156,14 +156,23 @@ class ExportDialog(QDialog):
             self._folder_field.setText(chosen)
 
     def export(self) -> list[Path]:
-        """Save unsaved edits, then write the chosen formats; ``[]`` on a shown error."""
+        """Save unsaved edits, then write the chosen formats; ``[]`` on a shown error.
+
+        Saving is inside the same ``try`` as the write itself: a project with
+        no file yet (``session.save()`` raising ``ValueError``) or one an
+        unwritable folder (``OSError``) must be shown inline like any other
+        export failure, not escape the click.
+        """
         formats = self.formats()
         if not formats:
             self._show_error(t("export.none_chosen"))
             return []
-        if self._session.dirty:
-            self._session.save()
+        if not self._name_field.text().strip():
+            self._show_error(t("export.no_name"))
+            return []
         try:
+            if self._session.dirty:
+                self._session.save()
             written = export_project_subtitles(
                 self._session.project,
                 self.destination(),

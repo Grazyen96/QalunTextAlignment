@@ -19,6 +19,7 @@ press, so nothing runs twice.
 
 from __future__ import annotations
 
+import copy
 import math
 from collections.abc import Callable
 from functools import partial
@@ -131,6 +132,11 @@ class ReviewWindow(QMainWindow):
         #: Whether a render job is running: gates the editing actions while it is.
         self._rendering = False
         self._render_cancel: CancelToken | None = None
+        #: The deep copy handed to the render job; read back into the live
+        #: project's ``render`` once the job finishes (see ``_on_render_finished``).
+        self._render_project_copy: Project | None = None
+        #: The segment list's edit triggers, saved while a render disables them.
+        self._segment_list_edit_triggers: QAbstractItemView.EditTrigger | None = None
 
         self._build()
         self._wire()
@@ -391,12 +397,16 @@ class ReviewWindow(QMainWindow):
         self.seek(self.session.word(ref).start)
 
     def _set_start_at_playhead(self) -> None:
+        if self._rendering:
+            return
         ref = self.strip.selected
         if ref is not None:
             self.session.retime(ref, start=self.player.position())
             self._after_edit()
 
     def _set_end_at_playhead(self) -> None:
+        if self._rendering:
+            return
         ref = self.strip.selected
         if ref is not None:
             self.session.retime(ref, end=self.player.position())
@@ -404,6 +414,8 @@ class ReviewWindow(QMainWindow):
 
     def _nudge(self, delta: float) -> None:
         """Move the selected word's last-grabbed edge (its end, by default) by *delta* seconds."""
+        if self._rendering:
+            return
         ref = self.strip.selected
         if ref is None:
             return
@@ -416,6 +428,8 @@ class ReviewWindow(QMainWindow):
 
     def _snap_to_playhead(self) -> None:
         """Move whichever edge of the selected word is nearer the playhead onto it."""
+        if self._rendering:
+            return
         ref = self.strip.selected
         if ref is None:
             return
@@ -428,11 +442,15 @@ class ReviewWindow(QMainWindow):
         self._after_edit()
 
     def _mark_reviewed(self) -> None:
+        if self._rendering:
+            return
         self.session.mark_reviewed()
         self._after_edit()
 
     def _remove_selected(self) -> None:
         """Remove the selected row(s); says so in the status bar if none is selected."""
+        if self._rendering:
+            return
         if not self.segment_list.remove_selected():
             self.statusBar().showMessage(t("review.remove_none"), 4000)
             return
@@ -445,10 +463,14 @@ class ReviewWindow(QMainWindow):
             self._coverage_timer.start()
 
     def undo(self) -> None:
+        if self._rendering:
+            return
         if self.session.undo():
             self._after_edit()
 
     def redo(self) -> None:
+        if self._rendering:
+            return
         if self.session.redo():
             self._after_edit()
 
@@ -488,21 +510,34 @@ class ReviewWindow(QMainWindow):
     # -- export and render ------------------------------------------------------
 
     def _open_export_dialog(self) -> None:
+        if self._rendering:
+            return
         ExportDialog(self.session, self).exec()
         # The dialog may have saved the session on our behalf; catch up either way.
         self._sync_state()
 
     def _start_render(self) -> None:
-        """Save, then render the project's current cards and captions in a worker."""
+        """Save, then render a snapshot of the project's cards and captions in a worker.
+
+        The job never sees the live ``Project``: it gets a deep copy, so a
+        render running for minutes cannot be mutated by (or itself mutate) a
+        project the person is still, in principle, looking at. Editing is
+        disabled for the duration anyway (see ``_set_render_running``), so the
+        copy and the live project can only ever differ in ``render`` — which
+        ``_on_render_finished`` copies back once the job is done.
+        """
+        if self._rendering:
+            return
         if self.session.dirty and not self.save():
             return
-        project = self.session.project
-        preset = (project.render or {}).get("preset") or "social"
-        subtitles = project.export.get("subtitles", "burn")
+        snapshot = copy.deepcopy(self.session.project)
+        preset = (snapshot.render or {}).get("preset") or "social"
+        subtitles = snapshot.export.get("subtitles", "burn")
+        self._render_project_copy = snapshot
         self._set_render_running(True)
         self._render_cancel = self._jobs.start(
             lambda progress, cancel: jobs_module.run_render(
-                project, preset=preset, subtitles=subtitles, progress=progress, cancel=cancel
+                snapshot, preset=preset, subtitles=subtitles, progress=progress, cancel=cancel
             ),
             on_progress=self._on_render_progress,
             on_finished=self._on_render_finished,
@@ -513,10 +548,22 @@ class ReviewWindow(QMainWindow):
 
     def _on_render_finished(self, outcome: JobOutcome) -> None:
         """Bound so Qt queues it to the UI thread; looks up ``_announce_render`` by
-        name each call, which is what lets a test replace it after connecting."""
+        name each call, which is what lets a test replace it after connecting.
+
+        Says nothing once the window has closed: the queued signal can still
+        arrive after that (a render outlives a short close-time cancel wait).
+        """
+        if self._closed:
+            return
+        if self._render_project_copy is not None:
+            # ``render`` is the only field that may have changed underneath the
+            # live project (editing was disabled): copy it back rather than the
+            # whole snapshot, so it never overwrites an editing that snuck in.
+            self.session.project.render = copy.deepcopy(self._render_project_copy.render)
         self._announce_render(outcome)
 
     def _on_render_done(self) -> None:
+        # Runs even after close, so the flags are right if the window reopens.
         self._set_render_running(False)
 
     def _cancel_render(self) -> None:
@@ -527,6 +574,14 @@ class ReviewWindow(QMainWindow):
     def _set_render_running(self, running: bool) -> None:
         self._rendering = running
         self.render_button.setEnabled(not running)
+        self.export_button.setEnabled(not running)
+        self.strip.setEnabled(not running)
+        self.selection_bar.setEnabled(not running)
+        if running:
+            self._segment_list_edit_triggers = self.segment_list.editTriggers()
+            self.segment_list.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        elif self._segment_list_edit_triggers is not None:
+            self.segment_list.setEditTriggers(self._segment_list_edit_triggers)
         self.render_progress.setVisible(running)
         self.render_cancel_button.setVisible(running)
         self.render_cancel_button.setEnabled(running)
@@ -535,6 +590,7 @@ class ReviewWindow(QMainWindow):
             self.render_progress.setFormat(t("render.running", percent=0))
         else:
             self._render_cancel = None
+            self._render_project_copy = None
         self._sync_state()
 
     def _on_render_progress(self, event: ProgressEvent) -> None:
@@ -556,16 +612,31 @@ class ReviewWindow(QMainWindow):
         if box.clickedButton() is show_button and outcome.video is not None:
             show_in_folder(outcome.video)
 
+    def _say_render(self, kind: str, text: str) -> None:
+        """Say something about a render that did not simply finish (tests replace this)."""
+        icon = QMessageBox.Icon.Warning if kind == "failed" else QMessageBox.Icon.Information
+        box = QMessageBox(self)
+        box.setIcon(icon)
+        box.setWindowTitle(t("review.render"))
+        box.setText(text)
+        box.exec()
+
     def _on_render_failed(self, message: str) -> None:
-        QMessageBox.warning(self, t("review.render"), t("render.failed", details=message))
+        if self._closed:
+            return
+        self._say_render("failed", t("render.failed", details=message))
 
     def _on_render_cancelled(self) -> None:
-        QMessageBox.information(self, t("review.render"), t("render.cancelled"))
+        if self._closed:
+            return
+        self._say_render("cancelled", t("render.cancelled"))
 
     # -- saving and closing ---------------------------------------------------
 
     def save(self) -> bool:
         """Write the corrections to the project file; ``False`` (after saying why) if it failed."""
+        if self._rendering:
+            return False
         try:
             path = self.session.save()
         except (OSError, ValueError) as error:

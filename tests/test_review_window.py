@@ -353,10 +353,56 @@ def test_export_on_the_video_timeline_is_offered_only_after_a_render(qt_app, tmp
     from qurantext.gui.review.session import ReviewSession
 
     project = _project(tmp_path)
-    assert not ExportDialog(ReviewSession(project)).video_timeline_available()
+    dialog = ExportDialog(ReviewSession(project))
+    assert not dialog.video_timeline_available()
+    assert not dialog._video_radio.isEnabled()
+    assert dialog.timeline() == "audio"
     project.record_render(tmp_path / "v.mp4", preset="social", basmala_offset_s=1.0)
     dialog = ExportDialog(ReviewSession(project))
     assert dialog.video_timeline_available() and dialog.timeline() == "video"
+
+
+def test_export_rejects_a_blank_file_name_inline(qt_app, tmp_path) -> None:
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.export_dialog import ExportDialog
+    from qurantext.gui.review.session import ReviewSession
+
+    project = _project(tmp_path)
+    dialog = ExportDialog(ReviewSession(project))
+    dialog.set_destination(tmp_path / "out", "  ")
+    assert dialog.export() == []
+    assert dialog._result_label.text() == t("export.no_name")
+
+
+def test_export_shows_a_save_failure_inline_instead_of_raising(qt_app, tmp_path) -> None:
+    from qurantext.gui.review.export_dialog import ExportDialog
+    from qurantext.gui.review.session import CARD, ReviewSession, WordRef
+
+    cards = [
+        {
+            "surah_num": 25,
+            "from_ayah": 7,
+            "to_ayah": 7,
+            "full_text": "a b",
+            "confidence": 1.0,
+            "start_time": 0.0,
+            "end_time": 10.0,
+            "word_timings": [
+                {"word": "a", "start": 1.0, "end": 2.0},
+                {"word": "b", "start": 2.0, "end": 3.0},
+            ],
+        }
+    ]
+    # No path: never saved, so ReviewSession.save() must raise ValueError.
+    project = Project(audio=tmp_path / "missing.mp3", cards=cards)
+    session = ReviewSession(project)
+    session.retime(WordRef(CARD, 0, 1), start=0.45)
+    assert session.dirty
+    dialog = ExportDialog(session)
+    dialog.set_destination(tmp_path / "out", "clip")
+    written = dialog.export()
+    assert written == []
+    assert "no file to write back to" in dialog._result_label.text()
 
 
 def test_render_with_corrections_saves_then_renders_the_project(
@@ -420,3 +466,172 @@ def test_render_disables_editing_actions_until_done(qt_app, tmp_path, monkeypatc
     assert window.render_button.isEnabled()
     assert window.undo_button.isEnabled()
     assert window.remove_button.isEnabled()
+
+
+def test_editing_is_blocked_everywhere_while_a_render_runs(qt_app, tmp_path, monkeypatch) -> None:
+    import threading
+
+    from PySide6.QtWidgets import QAbstractItemView
+
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.gui.jobs import JobOutcome
+    from qurantext.gui.review.player import FakePlayer
+    from qurantext.gui.review.window import ReviewWindow
+    from qurantext.jobs.project import CaptionCue
+
+    cards = [
+        {
+            "surah_num": 25,
+            "from_ayah": 7,
+            "to_ayah": 7,
+            "full_text": "a b",
+            "confidence": 1.0,
+            "start_time": 0.0,
+            "end_time": 10.0,
+            "word_timings": [
+                {"word": "a", "start": 1.0, "end": 2.0},
+                {"word": "b", "start": 2.0, "end": 3.0},
+            ],
+        }
+    ]
+    matches = tmp_path / "m.json"
+    matches.write_text(
+        json.dumps({"matches": cards, "meta": {"mode": "lecture"}}), encoding="utf-8"
+    )
+    captions = [
+        CaptionCue(
+            4.0,
+            5.0,
+            "hello world",
+            words=[
+                {"word": "hello", "start": 4.0, "end": 4.5},
+                {"word": "world", "start": 4.5, "end": 5.0},
+            ],
+        )
+    ]
+    project = Project(
+        audio=tmp_path / "missing.mp3",
+        mode="lecture",
+        cards=cards,
+        captions=captions,
+        matches=matches,
+    )
+    save_project(project, tmp_path / "m.qalun.json")
+
+    player = FakePlayer(duration=10.0, now=_Now())
+    window = ReviewWindow(project, player=player)
+    window.show()
+
+    # An edit before the render starts, so Ctrl+Z during the block has
+    # something real to (not) undo.
+    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Period)
+    edited_end = window.session.words()[0].end
+    caption_text_before = window.session.project.captions[0].text
+
+    release = threading.Event()
+
+    def fake_render(rendered_project, **kwargs):
+        release.wait(timeout=5)
+        rendered_project.record_render(tmp_path / "v.mp4", preset="social", basmala_offset_s=0.0)
+        return JobOutcome(
+            matches=rendered_project.matches, video=tmp_path / "v.mp4", cards=1, mode="lecture"
+        )
+
+    monkeypatch.setattr(jobs_module, "run_render", fake_render)
+    monkeypatch.setattr(window, "_announce_render", lambda outcome: None)
+    window.render_requested.emit()
+    assert window._rendering
+
+    # Shortcuts do nothing while blocked.
+    QTest.keyClick(window, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+    QTest.keyClick(window, Qt.Key.Key_Period)
+    assert window.session.words()[0].end == pytest.approx(edited_end)
+
+    # A genuine double-click cannot open the caption cell for editing either.
+    row = window.segment_list._row_by_segment[("caption", 0)]
+    rect = window.segment_list.visualItemRect(window.segment_list.item(row, 2))
+    QTest.mouseDClick(
+        window.segment_list.viewport(),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        rect.center(),
+    )
+    assert window.segment_list.state() != QAbstractItemView.State.EditingState
+    assert window.session.project.captions[0].text == caption_text_before
+
+    release.set()
+    assert _wait_for(lambda: not window._rendering, 5000)
+    assert window.session.project.render is not None
+    assert not window.session.dirty
+
+
+def test_no_render_announcement_after_the_window_is_closed(qt_app, tmp_path, monkeypatch) -> None:
+    import threading
+
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.gui.jobs import JobOutcome
+
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    release = threading.Event()
+    seen: dict[str, object] = {}
+
+    def fake_render(project, **kwargs):
+        release.wait(timeout=5)
+        return JobOutcome(
+            matches=project.matches, video=tmp_path / "v.mp4", cards=1, mode="recitation"
+        )
+
+    monkeypatch.setattr(jobs_module, "run_render", fake_render)
+    monkeypatch.setattr(
+        window, "_announce_render", lambda outcome: seen.setdefault("announced", True)
+    )
+    monkeypatch.setattr(
+        window, "_say_render", lambda kind, text: seen.setdefault("said", (kind, text))
+    )
+
+    window.render_requested.emit()
+    assert window._rendering
+    window.close()
+    assert window._closed
+
+    release.set()
+    assert _wait_for(lambda: not window._rendering, 5000)
+    assert "announced" not in seen
+    assert "said" not in seen
+
+
+def test_cancelling_a_render_brings_the_buttons_back(qt_app, tmp_path, monkeypatch) -> None:
+    import threading
+
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.gui.i18n import t
+    from qurantext.gui.jobs import JobOutcome
+
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    release = threading.Event()
+
+    def fake_render(project, *, cancel, **kwargs):
+        release.wait(timeout=5)
+        cancel.raise_if_cancelled("render")
+        return JobOutcome(
+            matches=project.matches, video=tmp_path / "v.mp4", cards=1, mode="recitation"
+        )
+
+    monkeypatch.setattr(jobs_module, "run_render", fake_render)
+    seen = {}
+    monkeypatch.setattr(window, "_say_render", lambda kind, text: seen.setdefault(kind, text))
+
+    window.render_requested.emit()
+    assert window._rendering
+    token = window._render_cancel
+    assert token is not None
+    window._cancel_render()
+    assert token.cancelled
+
+    release.set()
+    assert _wait_for(lambda: not window._rendering, 5000)
+    assert seen.get("cancelled") == t("render.cancelled")
+    assert window.render_button.isEnabled()

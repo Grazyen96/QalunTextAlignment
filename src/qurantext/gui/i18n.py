@@ -61,6 +61,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "export.done": "Wrote {count} file(s):",
         "export.show": "Show in folder",
         "export.none_chosen": "Choose at least one format.",
+        "export.no_name": "Enter a file name.",
         "render.running": "Rendering — {percent}%",
         "render.done": "The video is ready: {path}",
         "render.show": "Show the video",
