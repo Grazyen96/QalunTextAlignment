@@ -21,6 +21,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from qurantext.core.frame_renderer import CaptionTrack
 from qurantext.core.timing_edit import (
     count_edited,
     cue_bounds,
@@ -95,6 +96,7 @@ class ReviewSession:
         #: What :meth:`revert` puts back: the state as loaded, or as last saved.
         self._saved_snapshot = self._snapshot()
         self._validated: tuple[int, list[dict[str, Any]]] | None = None
+        self._caption_track: tuple[int, CaptionTrack] | None = None
         self._words_revision: int | None = None
         self._words_by_kind: dict[str, list[TimelineWord]] = {}
         self._starts_by_kind: dict[str, list[float]] = {}
@@ -283,10 +285,16 @@ class ReviewSession:
         return found
 
     def caption_at(self, t: float) -> int | None:
-        for i, cue in enumerate(self.project.captions):
-            if cue.start <= t <= cue.end:
-                return i
-        return None
+        """The caption the rendered video shows at *t*, by the renderer's own rule.
+
+        Where cues overlap that is the latest-started one, not the first in
+        list order; see ``core.frame_renderer.CaptionTrack``. Cached per
+        revision, since the window asks at frame rate.
+        """
+        if self._caption_track is None or self._caption_track[0] != self._revision:
+            spans = [(cue.start, cue.end) for cue in self.project.captions]
+            self._caption_track = (self._revision, CaptionTrack(spans))
+        return self._caption_track[1].index_at(t)
 
     def retimed_count(self, kind: str, segment: int) -> int:
         return count_edited(self._raw_words(WordRef(kind, segment, 0)))

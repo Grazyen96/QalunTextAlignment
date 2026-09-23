@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import bisect
 import math
 import subprocess
 import tempfile
 import time
+from collections.abc import Iterable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -473,6 +475,48 @@ def active_word_timing_index(word_timings: list[dict[str, Any]], t: float) -> in
         if start <= t <= end:
             return i
     return last_started
+
+
+class CaptionTrack:
+    """Which caption the video shows at a moment, for many lookups against one list.
+
+    The rule is the renderer's: of the cues that have started by *t*, the one
+    that started last is shown if it still covers *t*; otherwise none is (an
+    earlier, longer cue does not come back). Captions are not latched the way
+    ayah cards are — they roll with the speech and clear in the gaps. Ties on
+    start go to the later cue in list order. The review window and the
+    single-frame preview use this too, so neither can show a different
+    caption than the render where cues overlap.
+    """
+
+    __slots__ = ("_ends", "_order", "_starts")
+
+    def __init__(self, spans: Iterable[tuple[float, float]]) -> None:
+        pairs = [(float(start), float(end)) for start, end in spans]
+        self._order = sorted(range(len(pairs)), key=lambda i: pairs[i][0])
+        self._starts = [pairs[i][0] for i in self._order]
+        self._ends = [pairs[i][1] for i in self._order]
+
+    def index_at(self, t: float) -> int | None:
+        """The shown cue's index in the spans given, or ``None`` when none is shown."""
+        latest = bisect.bisect_right(self._starts, t) - 1
+        if latest < 0 or t > self._ends[latest]:
+            return None
+        return self._order[latest]
+
+
+def caption_spans(captions: Sequence[Mapping[str, Any]]) -> list[tuple[float, float]]:
+    """``(start, end)`` of each caption segment; a segment with no start never shows."""
+    spans = []
+    for caption in captions:
+        start = float(caption.get("start", math.inf))
+        spans.append((start, float(caption.get("end", start))))
+    return spans
+
+
+def active_caption_index(captions: Sequence[Mapping[str, Any]], t: float) -> int | None:
+    """Index into *captions* of the segment the video shows at *t* (see :class:`CaptionTrack`)."""
+    return CaptionTrack(caption_spans(captions)).index_at(t)
 
 
 def draw_rtl_line_with_highlight(
@@ -1284,8 +1328,7 @@ def write_frame_video(
     events: list[tuple[int, dict[str, Any] | None, dict[str, Any] | None]] = []
     last_key: tuple[int | None, int, int | None, int, int | None] = (-2, -1, None, -2, None)
     card_ptr = -1  # index of the latched match, -1 while showing the placeholder
-    cap_scan = 0  # monotonically advancing cursor into caption_list
-    n_caps = len(caption_list)
+    caption_track = CaptionTrack(caption_spans(caption_list))
 
     for fi in range(total_frames):
         t = fi / fps
@@ -1295,14 +1338,8 @@ def write_frame_video(
         match = sorted_matches[card_ptr] if card_ptr >= 0 else None
 
         # Captions are not latched — they roll with the speech and clear in gaps.
-        while cap_scan + 1 < n_caps and float(caption_list[cap_scan + 1]["start"]) <= t:
-            cap_scan += 1
-        cap_active = (
-            cap_scan
-            if n_caps
-            and float(caption_list[cap_scan]["start"]) <= t <= float(caption_list[cap_scan]["end"])
-            else -1
-        )
+        cap_index = caption_track.index_at(t)
+        cap_active = -1 if cap_index is None else cap_index
         caption_seg = caption_list[cap_active] if cap_active >= 0 else None
         # Re-render on each spoken caption word so the karaoke highlight advances.
         _cap_wt = caption_seg.get("word_timings") if caption_seg else None

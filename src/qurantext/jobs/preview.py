@@ -69,6 +69,7 @@ def render_preview(request: PreviewRequest) -> PreviewResult:
     from qurantext.core.frame_renderer import (
         DEFAULT_PLACEHOLDER_TITLE,
         _frame_dependencies,
+        active_caption_index,
         placeholder_lines,
         render_frame_pillow,
     )
@@ -103,7 +104,9 @@ def render_preview(request: PreviewRequest) -> PreviewResult:
     active = [c for c in cards if float(c["_start_time"]) <= at]
     card = active[-1] if active else None
 
-    caption = next((c for c in captions if float(c["start"]) <= at <= float(c["end"])), None)
+    # The renderer's rule, so overlapping cues preview as they will render.
+    caption_index = active_caption_index(captions, at)
+    caption = captions[caption_index] if caption_index is not None else None
     reserve_band = bool(captions)
     title, placeholder_subtitle = placeholder_lines(
         cards, reserve_caption_band=reserve_band, title=request.title or DEFAULT_PLACEHOLDER_TITLE
