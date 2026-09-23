@@ -22,8 +22,9 @@ import numpy as np
 
 from qurantext.core.video_common import require_binary
 from qurantext.services.transcript_cache import audio_digest
+from qurantext.utils.progress import CancelToken
 
-__all__ = ["Peaks", "compute_peaks", "load_or_compute_peaks"]
+__all__ = ["Peaks", "compute_peaks", "load_or_compute_peaks", "peaks_path_for"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,8 +43,13 @@ def compute_peaks(
     per_second: int = 100,
     sample_rate: int = 16000,
     chunk_seconds: float = 10.0,
+    cancel: CancelToken | None = None,
 ) -> Peaks:
-    """Stream *audio* through FFmpeg and keep only min/max per bin."""
+    """Stream *audio* through FFmpeg and keep only min/max per bin.
+
+    *cancel* is checked once per chunk, so closing the editor on an hour-long
+    recording stops the decode within a chunk; FFmpeg is reaped either way.
+    """
     ffmpeg = require_binary("ffmpeg", "Install FFmpeg and try again.")
     hop = sample_rate // per_second
     chunk_bytes = max(4, int(sample_rate * chunk_seconds) * 4)
@@ -74,6 +80,8 @@ def compute_peaks(
         try:
             assert process.stdout is not None
             while True:
+                if cancel is not None:
+                    cancel.raise_if_cancelled("waveform")
                 block = process.stdout.read(chunk_bytes)
                 if not block:
                     break
@@ -113,7 +121,19 @@ def compute_peaks(
     )
 
 
-def load_or_compute_peaks(audio: Path, cache_file: Path, *, per_second: int = 100) -> Peaks:
+def peaks_path_for(project_path: Path) -> Path:
+    """Where a job's peaks cache lives: beside its project, named after it."""
+    project_path = Path(project_path)
+    return project_path.with_name(f"{project_path.name.removesuffix('.qalun.json')}.peaks.npz")
+
+
+def load_or_compute_peaks(
+    audio: Path,
+    cache_file: Path,
+    *,
+    per_second: int = 100,
+    cancel: CancelToken | None = None,
+) -> Peaks:
     """Peaks for *audio*, from *cache_file* when it was made from the same bytes."""
     digest = audio_digest(Path(audio))
     try:
@@ -128,7 +148,7 @@ def load_or_compute_peaks(audio: Path, cache_file: Path, *, per_second: int = 10
     except (OSError, KeyError, ValueError, zipfile.BadZipFile, EOFError):
         pass
 
-    peaks = compute_peaks(Path(audio), per_second=per_second)
+    peaks = compute_peaks(Path(audio), per_second=per_second, cancel=cancel)
     try:
         Path(cache_file).parent.mkdir(parents=True, exist_ok=True)
         with Path(cache_file).open("wb") as handle:

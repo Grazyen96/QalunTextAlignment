@@ -114,3 +114,37 @@ def test_ffmpeg_is_reaped_when_reading_fails(tmp_path, monkeypatch) -> None:
 
     assert len(processes) == 1
     assert processes[0].returncode is not None
+
+
+def test_a_cancelled_token_stops_the_decode_and_reaps_ffmpeg(tmp_path, monkeypatch) -> None:
+    from qurantext.utils.progress import CancelToken, JobCancelled
+
+    audio = _tone(tmp_path / "t.wav", seconds=1.0)
+    processes = []
+    real_popen = subprocess.Popen
+
+    def spying_popen(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(waveform.subprocess, "Popen", spying_popen)
+    token = CancelToken()
+    token.cancel()
+    with pytest.raises(JobCancelled):
+        compute_peaks(audio, cancel=token)
+    assert len(processes) == 1 and processes[0].returncode is not None
+
+    cache = tmp_path / "t.peaks.npz"
+    with pytest.raises(JobCancelled):
+        load_or_compute_peaks(audio, cache, cancel=token)
+    assert not cache.exists(), "a cancelled decode must not be cached"
+
+
+def test_peaks_live_beside_the_project() -> None:
+    from pathlib import Path
+
+    from qurantext.core.waveform import peaks_path_for
+
+    project = Path("/jobs/clip_recitation.qalun.json")
+    assert peaks_path_for(project) == Path("/jobs/clip_recitation.peaks.npz")
