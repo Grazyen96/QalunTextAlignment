@@ -141,8 +141,9 @@ def test_the_25_7_gap_can_be_closed_by_retiming(tmp_path) -> None:
     from qurantext.core.coverage import find_uncovered_speech
     from qurantext.jobs.project import Project
 
-    audio = Path("input/recitations/furquanTra7-11.mp3")
-    matches = Path("output/recitation_matching/furquanTra7-11_recitation.json")
+    root = Path(__file__).resolve().parents[1]
+    audio = root / "input/recitations/furquanTra7-11.mp3"
+    matches = root / "output/recitation_matching/furquanTra7-11_recitation.json"
     if not (audio.is_file() and matches.is_file() and shutil.which("ffmpeg")):
         pytest.skip("needs the local furquanTra7-11 recording and its match file")
 
