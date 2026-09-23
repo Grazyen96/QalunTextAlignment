@@ -467,9 +467,7 @@ def test_render_with_corrections_saves_then_renders_the_project(
     def fake_render(project, **kwargs):
         seen["end"] = project.cards[0]["word_timings"][0]["end"]
         seen["saved"] = load_project(project.path).cards[0]["word_timings"][0]["end"]
-        return JobOutcome(
-            matches=project.matches, video=tmp_path / "v.mp4", cards=1, mode="recitation"
-        )
+        return JobOutcome(matches=project.matches, video=tmp_path / "v.mp4", cards=1)
 
     monkeypatch.setattr(jobs_module, "run_render", fake_render)
     monkeypatch.setattr(
@@ -493,9 +491,7 @@ def test_render_with_corrections_uses_the_jobs_own_choices(qt_app, tmp_path, mon
 
     def fake_render(project, **kwargs):
         seen["kwargs"] = kwargs
-        return JobOutcome(
-            matches=project.matches, video=tmp_path / "v.mp4", cards=1, mode="recitation"
-        )
+        return JobOutcome(matches=project.matches, video=tmp_path / "v.mp4", cards=1)
 
     monkeypatch.setattr(jobs_module, "run_render", fake_render)
     monkeypatch.setattr(
@@ -572,9 +568,7 @@ def test_render_disables_editing_actions_until_done(qt_app, tmp_path, monkeypatc
     seen = {}
 
     def fake_render(project, **kwargs):
-        return JobOutcome(
-            matches=project.matches, video=tmp_path / "v.mp4", cards=1, mode="recitation"
-        )
+        return JobOutcome(matches=project.matches, video=tmp_path / "v.mp4", cards=1)
 
     monkeypatch.setattr(jobs_module, "run_render", fake_render)
     monkeypatch.setattr(
@@ -661,9 +655,7 @@ def test_editing_is_blocked_everywhere_while_a_render_runs(qt_app, tmp_path, mon
     def fake_render(rendered_project, **kwargs):
         release.wait(timeout=5)
         rendered_project.record_render(tmp_path / "v.mp4", preset="social", basmala_offset_s=0.0)
-        return JobOutcome(
-            matches=rendered_project.matches, video=tmp_path / "v.mp4", cards=1, mode="lecture"
-        )
+        return JobOutcome(matches=rendered_project.matches, video=tmp_path / "v.mp4", cards=1)
 
     monkeypatch.setattr(jobs_module, "run_render", fake_render)
     monkeypatch.setattr(window, "_announce_render", lambda outcome: None)
@@ -706,9 +698,7 @@ def test_no_render_announcement_after_the_window_is_closed(qt_app, tmp_path, mon
 
     def fake_render(project, **kwargs):
         release.wait(timeout=5)
-        return JobOutcome(
-            matches=project.matches, video=tmp_path / "v.mp4", cards=1, mode="recitation"
-        )
+        return JobOutcome(matches=project.matches, video=tmp_path / "v.mp4", cards=1)
 
     monkeypatch.setattr(jobs_module, "run_render", fake_render)
     monkeypatch.setattr(
@@ -746,9 +736,7 @@ def test_the_live_project_is_updated_even_though_the_render_finishes_after_close
     def fake_render(project, **kwargs):
         release.wait(timeout=5)
         project.record_render(tmp_path / "v.mp4", preset="social", basmala_offset_s=0.0)
-        return JobOutcome(
-            matches=project.matches, video=tmp_path / "v.mp4", cards=1, mode="recitation"
-        )
+        return JobOutcome(matches=project.matches, video=tmp_path / "v.mp4", cards=1)
 
     monkeypatch.setattr(jobs_module, "run_render", fake_render)
     monkeypatch.setattr(window, "_announce_render", lambda outcome: None)
@@ -778,9 +766,7 @@ def test_cancelling_a_render_brings_the_buttons_back(qt_app, tmp_path, monkeypat
     def fake_render(project, *, cancel, **kwargs):
         release.wait(timeout=5)
         cancel.raise_if_cancelled("render")
-        return JobOutcome(
-            matches=project.matches, video=tmp_path / "v.mp4", cards=1, mode="recitation"
-        )
+        return JobOutcome(matches=project.matches, video=tmp_path / "v.mp4", cards=1)
 
     monkeypatch.setattr(jobs_module, "run_render", fake_render)
     seen = {}
@@ -947,9 +933,7 @@ def test_a_finished_render_is_announced_as_a_save(qt_app, tmp_path, monkeypatch)
     window.saved.connect(saved.append)
 
     def fake_render(project, **kwargs):
-        return JobOutcome(
-            matches=project.matches, video=tmp_path / "v.mp4", cards=1, mode="recitation"
-        )
+        return JobOutcome(matches=project.matches, video=tmp_path / "v.mp4", cards=1)
 
     monkeypatch.setattr(jobs_module, "run_render", fake_render)
     monkeypatch.setattr(window, "_announce_render", lambda outcome: None)

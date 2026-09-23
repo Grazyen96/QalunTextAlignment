@@ -678,8 +678,7 @@ def home(qt_app, prefs):
 
     window = MainWindow(prefs=prefs)
     yield window
-    if window._thread is not None:
-        window._thread.wait(5000)
+    window._jobs.stop()  # cancel and join anything a test left running
     window.deleteLater()
     qt_app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
@@ -699,7 +698,7 @@ def _run_start(qt_app, window, spec: JobSpec) -> None:
     """Press Start with *spec* and wait until the job has fully ended."""
     window.new_job.start_requested.emit(spec)
     _spin_until(qt_app, lambda: window._cancel is None)
-    window._thread.wait(5000)
+    _spin_until(qt_app, lambda: window._jobs.active == 0)
     qt_app.processEvents()
 
 
@@ -795,7 +794,7 @@ def test_render_right_away_also_renders_and_skips_the_review(
     def fake_render(project, *, progress=None, cancel=None):
         rendered.append(project.path)
         video = tmp_path / "a.mp4"
-        return JobOutcome(matches=project.matches, video=video, cards=1, mode="recitation")
+        return JobOutcome(matches=project.matches, video=video, cards=1)
 
     monkeypatch.setattr(module, "run_render", fake_render)
 
@@ -849,7 +848,7 @@ def test_the_running_row_shows_during_the_job_and_goes_after(
 
     release.set()
     _spin_until(qt_app, lambda: home._cancel is None)
-    home._thread.wait(5000)
+    _spin_until(qt_app, lambda: home._jobs.active == 0)
     assert _running_rows(home) == []
     assert home.job_list.list.count() == 2, "the earlier job, and the new one from disk"
 
@@ -874,7 +873,7 @@ def test_cancel_says_so_in_the_status_line_without_a_dialog(
 
     home.new_job.cancel_requested.emit()
     _spin_until(qt_app, lambda: home._cancel is None)
-    home._thread.wait(5000)
+    _spin_until(qt_app, lambda: home._jobs.active == 0)
 
     assert home.new_job.status_label.text() == module.t("home.cancelled")
     assert not home.new_job.start_button.isHidden() and home.new_job.cancel_button.isHidden()
@@ -897,17 +896,31 @@ def test_a_failure_says_what_went_wrong(qt_app, home, reviews, tmp_path, monkeyp
     assert warned and reviews == [] and _running_rows(home) == []
 
 
+class _NoOpThread:
+    """Stands in for the ``QThread`` a real job would return, so the fixture's
+    teardown (``BackgroundJobs.stop()``) has something harmless to join."""
+
+    def quit(self) -> None:
+        pass
+
+    def wait(self, _ms: int = 0) -> bool:
+        return True
+
+    def isFinished(self) -> bool:
+        return True
+
+
 def test_every_worker_callback_is_a_method_of_the_window(qt_app, home, monkeypatch) -> None:
     """A bare lambda connected to a worker signal would run on the worker thread."""
     import inspect
 
-    from qurantext.gui import main_window as module
+    from qurantext.gui.review import background as background_module
 
     seen: dict = {}
     monkeypatch.setattr(
-        module,
+        background_module,
         "run_in_thread",
-        lambda job, cancel, **callbacks: seen.update(callbacks) or (None, None),
+        lambda job, cancel, **callbacks: seen.update(callbacks) or (_NoOpThread(), None),
     )
     home._start(JobSpec(audio=Path(__file__), quran=QURAN_FILE, mode="lecture"))
 
@@ -1012,6 +1025,39 @@ def test_a_review_window_that_refuses_to_close_keeps_the_main_window_open(
     window.close()
 
     assert window.isVisible()
+
+
+def test_closing_the_window_while_a_job_runs_cancels_it_without_crashing(
+    qt_app, home, tmp_path, monkeypatch
+) -> None:
+    """A job stuck at a checkpoint when the window closes must be cancelled
+    cleanly, not left running under a window that is gone, and not treated
+    as a failure once it finally notices."""
+    import threading
+
+    from qurantext.gui import main_window as module
+
+    release = threading.Event()
+
+    def blocked_match(spec, *, progress=None, cancel=None):
+        assert release.wait(timeout=5), "the test forgot to release the job"
+        cancel.raise_if_cancelled("detect")
+        pytest.fail("the job should have been cancelled, not left to finish")
+
+    monkeypatch.setattr(module, "run_matching", blocked_match)
+    monkeypatch.setattr(module.QMessageBox, "warning", lambda *a: pytest.fail("no dialog"))
+
+    home.show()
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    _spin_until(qt_app, lambda: home._cancel is not None)
+
+    assert home.close()
+    assert not home.isVisible()
+
+    release.set()
+    _spin_until(qt_app, lambda: home._cancel is None)
+
+    assert home.new_job.status_label.text() == module.t("home.cancelled")
 
 
 @pytest.fixture()

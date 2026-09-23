@@ -28,7 +28,7 @@ from qurantext.gui.i18n import t
 from qurantext.gui.jobs import JobOutcome, JobSpec, run_matching, run_render
 from qurantext.gui.prefs import Prefs
 from qurantext.gui.review import ReviewWindow
-from qurantext.gui.worker import run_in_thread
+from qurantext.gui.review.background import BackgroundJobs
 from qurantext.jobs.project import Project, load_project, project_path_for
 from qurantext.utils.progress import CancelToken, ProgressCallback, ProgressEvent
 
@@ -74,10 +74,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(t("app.title"))
 
         self._cancel: CancelToken | None = None
-        # Kept for the whole run and until the next Start replaces them: a
-        # QThread collected while it is still winding down crashes Qt.
-        self._thread = None
-        self._worker = None
+        #: Runs the matching/render job off the UI thread; also cancels and
+        #: waits for it, bounded, when the window closes while one is running.
+        self._jobs = BackgroundJobs(self)
         #: The job running now, and how it ended (said once the form stops running).
         self._running_spec: JobSpec | None = None
         self._ending = ""
@@ -128,7 +127,6 @@ class MainWindow(QMainWindow):
 
         self._running_spec = spec
         self._ending = ""
-        self._cancel = CancelToken()
         starting = t("home.progress.starting")
         self.new_job.set_running(True)
         self.new_job.set_progress(None, starting)
@@ -136,9 +134,8 @@ class MainWindow(QMainWindow):
 
         # The job may be a closure; every callback is a bound method, so it
         # runs on this (the UI) thread rather than the worker's.
-        self._thread, self._worker = run_in_thread(
+        self._cancel = self._jobs.start(
             partial(_match_then_render, spec),
-            self._cancel,
             on_progress=self._on_progress,
             on_finished=self._on_finished,
             on_failed=self._on_failed,
@@ -254,12 +251,16 @@ class MainWindow(QMainWindow):
 
         A review window that refuses to close (the person cancelled its
         unsaved-changes prompt) must not lose that work to the main window
-        closing around it.
+        closing around it. Once every review has agreed, a job still matching
+        or rendering is cancelled and given a bounded wait: leaving its
+        ``QThread`` to be garbage-collected mid-run crashes Qt, and this
+        window has no unsaved state of its own worth blocking the close for.
         """
         for window in list(self._reviews.values()):
             if not window.close():
                 event.ignore()
                 return
+        self._jobs.stop()
         super().closeEvent(event)
 
 

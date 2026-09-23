@@ -73,9 +73,41 @@ python3 -m pip install -e '.[gui]'
 qalun
 ```
 
-Drop an audio file, say whether it is a recitation or a lecture, pick the surah
-and the ayat if you know them, press Start. Progress and remaining time show as
-it runs, Cancel stops it, and a cancelled job leaves nothing behind.
+The window opens on every job it already knows about, listed on the left, with
+a form for starting a new one on the right.
+
+**The job list.** Each row is one project: its name, whether it is a
+recitation or a lecture, how much of the Quran it covers, and where it stands
+— needs review, reviewed, rendered, changed since the last render, or damaged
+(with the error on the row, shown on double-click). Double-clicking a row
+opens it for review; right-click for "Show in folder" or "Remove from list",
+which only hides a job (nothing on disk is touched, so it costs nothing to
+undo).
+
+**Starting a job.** Drop an audio file, say whether it is a recitation or a
+lecture, pick the surah and the ayat if you know them, choose a video size,
+and press Start. Progress and remaining time show as it runs, Cancel stops it,
+and a cancelled job leaves nothing behind. Matching done, the review opens
+automatically so corrections happen before anything is rendered.
+
+**The review, in brief.** Play the recording, step word by word, and nudge a
+word's start or end at the playhead; Save (Ctrl+S) writes the correction, Undo
+and Redo step back and forth through them, and a gap the recording covers but
+no word does is flagged so it does not go unnoticed. Render makes the video
+once the timing looks right; Export writes the corrected subtitles on their
+own.
+
+**More options**, folded away since most jobs don't need them: a Quran text
+other than the certified one that ships with the app, subtitles burned into
+the picture, written as files beside it, or both (and in which formats), an
+output folder other than the default, and rendering right away instead of
+stopping for review — for jobs you already trust.
+
+**Where files go.** Matching results land in `output/recitation_matching/` or
+`output/lecture_matching/`, and a rendered video in `output/videos/`, unless
+More options points the job at a folder of its own — then its match, project
+and video files all go there together, and that folder is remembered so the
+job list keeps finding it.
 
 Qt is an optional dependency, so the command line installs without it. Running
 `qalun` without it prints one line telling you what to install.

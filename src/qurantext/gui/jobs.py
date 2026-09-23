@@ -102,9 +102,7 @@ class JobOutcome:
     matches: Path
     video: Path | None
     cards: int
-    mode: str
     project: Path | None = None
-    subtitles: tuple[Path, ...] = ()
 
 
 def _set_aside(path: Path) -> Path | None:
@@ -247,7 +245,5 @@ def run_render(
         matches=Path(project.matches),
         video=result.video,
         cards=len(project.cards),
-        mode=project.mode,
         project=project.path,
-        subtitles=tuple(result.subtitles),
     )
