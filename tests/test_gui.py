@@ -61,18 +61,18 @@ def test_a_complete_recitation_spec_is_ready_to_run(tmp_path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("overrides", "message"),
+    ("overrides", "key"),
     [
-        ({"audio": Path("/nope/missing.mp3")}, "Choose an audio file"),
-        ({"quran": Path("/nope/missing.txt")}, "Choose the Quran text file"),
-        ({"surah_num": None}, "Choose the surah"),
-        ({"from_ayah": 11, "to_ayah": 7}, "cannot come before"),
+        ({"audio": Path("/nope/missing.mp3")}, "job.need_audio"),
+        ({"quran": Path("/nope/missing.txt")}, "job.need_quran"),
+        ({"surah_num": None}, "job.need_range"),
+        ({"from_ayah": 11, "to_ayah": 7}, "job.bad_range"),
     ],
 )
-def test_an_incomplete_spec_says_what_is_missing(tmp_path, overrides, message) -> None:
-    """The Start button's tooltip is this text, so it has to read as a sentence."""
+def test_an_incomplete_spec_says_what_is_missing(tmp_path, overrides, key) -> None:
+    """The panel shows ``t(problem)`` under the Start button, so this is an i18n key."""
     problem = _spec(tmp_path, **overrides).validate()
-    assert problem is not None and message in problem
+    assert problem == key
 
 
 def test_a_lecture_needs_no_range(tmp_path) -> None:

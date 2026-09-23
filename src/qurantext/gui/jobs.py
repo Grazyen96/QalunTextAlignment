@@ -80,15 +80,19 @@ class JobSpec:
         )
 
     def validate(self) -> str | None:
-        """Return a message to show the user, or None when the job can run."""
+        """Return an i18n key describing what is missing, or None when the job can run.
+
+        A key rather than English text, so the window can show it translated
+        (``qurantext.gui.i18n.t``) instead of baking one language into the model.
+        """
         if not self.audio or not Path(self.audio).is_file():
-            return "Choose an audio file."
+            return "job.need_audio"
         if not self.quran or not Path(self.quran).is_file():
-            return "Choose the Quran text file."
+            return "job.need_quran"
         if self.mode == "recitation" and not self.has_stated_range:
-            return "Choose the surah and the ayah range."
+            return "job.need_range"
         if self.has_stated_range and self.to_ayah < self.from_ayah:  # type: ignore[operator]
-            return "The last ayah cannot come before the first."
+            return "job.bad_range"
         return None
 
 

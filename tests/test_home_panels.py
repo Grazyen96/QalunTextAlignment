@@ -5,13 +5,17 @@ from __future__ import annotations
 import os
 
 import pytest
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import QMimeData, QPointF, QSettings, Qt, QUrl
+from PySide6.QtGui import QDropEvent
 
 from qurantext.gui.home.job_list import JobListPanel
+from qurantext.gui.home.new_job import NewJobPanel
 from qurantext.gui.i18n import t
+from qurantext.gui.jobs import JobSpec
 from qurantext.gui.prefs import Prefs
 from qurantext.jobs.catalog import DAMAGED
 from qurantext.jobs.project import Project, save_project
+from tests.media_helpers import QURAN_FILE
 
 
 @pytest.fixture()
@@ -132,3 +136,223 @@ def test_damaged_file_is_listed_and_does_not_open(qt_app, prefs) -> None:
 
     panel.list.itemActivated.emit(panel.list.item(0))
     assert received == []
+
+
+# -- NewJobPanel ----------------------------------------------------------------------
+
+
+def _panel(prefs, store, quran_default=QURAN_FILE):
+    return NewJobPanel(prefs, quran_default=quran_default, db_path=store)
+
+
+def _select_surah(panel, surah_num):
+    for i in range(panel.surah_box.count()):
+        data = panel.surah_box.itemData(i)
+        if data is not None and data["surah_num"] == surah_num:
+            panel.surah_box.setCurrentIndex(i)
+            return
+    raise AssertionError(f"surah {surah_num} not in the picker")
+
+
+def _drop(panel, path):
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(path))])
+    event = QDropEvent(
+        QPointF(0, 0),
+        Qt.DropAction.CopyAction,
+        mime,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    panel.dropEvent(event)
+    return event
+
+
+def test_toggling_mode_hides_the_range_and_persists(qt_app, prefs, store) -> None:
+    panel = _panel(prefs, store)
+    panel.show()
+    assert panel.range_widget.isVisible()
+
+    panel.lecture_button.setChecked(True)
+    assert not panel.range_widget.isVisible()
+    assert prefs.mode == "lecture"
+
+    fresh = _panel(prefs, store)
+    fresh.show()
+    assert fresh.lecture_button.isChecked()
+    assert not fresh.range_widget.isVisible()
+
+
+def test_preset_combo_shows_readable_names_and_persists(qt_app, prefs, store) -> None:
+    panel = _panel(prefs, store)
+    names = [panel.preset_box.itemText(i) for i in range(panel.preset_box.count())]
+    assert names == [
+        t("preset.social"),
+        t("preset.high"),
+        t("preset.standard"),
+        t("preset.fast"),
+    ]
+
+    panel.preset_box.setCurrentIndex(panel.preset_box.findData("high"))
+    assert prefs.preset == "high"
+
+    fresh = _panel(prefs, store)
+    assert fresh.preset_box.currentData() == "high"
+
+
+def test_more_options_open_and_closed_persists(qt_app, prefs, store) -> None:
+    panel = _panel(prefs, store)
+    panel.show()
+    assert not panel.more_group.isVisible()
+
+    panel.more_button.setChecked(True)
+    assert panel.more_group.isVisible()
+    assert prefs.more_options_open is True
+
+    fresh = _panel(prefs, store)
+    fresh.show()
+    assert fresh.more_button.isChecked()
+    assert fresh.more_group.isVisible()
+
+    fresh.more_button.setChecked(False)
+    assert not fresh.more_group.isVisible()
+    assert prefs.more_options_open is False
+
+
+def test_spec_reflects_every_control(qt_app, prefs, tmp_path, store) -> None:
+    panel = _panel(prefs, store)
+    audio = tmp_path / "a.mp3"
+    audio.touch()
+    panel.set_audio(audio)
+    _select_surah(panel, 25)
+    panel.from_spin.setValue(7)
+    panel.to_spin.setValue(8)
+    panel.preset_box.setCurrentIndex(panel.preset_box.findData("high"))
+
+    panel.more_button.setChecked(True)
+    panel.subtitle_buttons["sidecar"].setChecked(True)
+    panel.format_boxes["srt"].setChecked(False)
+    panel.format_boxes["vtt"].setChecked(True)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    panel.set_output_dir(out_dir)
+    panel.render_right_away_box.setChecked(True)
+
+    spec = panel.spec()
+    assert spec.audio == audio
+    assert spec.quran == QURAN_FILE
+    assert spec.mode == "recitation"
+    assert spec.surah_num == 25
+    assert spec.from_ayah == 7
+    assert spec.to_ayah == 8
+    assert spec.preset == "high"
+    assert spec.subtitles == "sidecar"
+    assert spec.formats == ("vtt",)
+    assert spec.render_right_away is True
+    assert spec.output_dir == out_dir
+
+
+def test_problem_gives_the_right_key_for_each_missing_input(qt_app, prefs, tmp_path, store) -> None:
+    panel = _panel(prefs, store)
+    assert panel.problem() == "job.need_audio"
+    assert panel.problem_label.text() == t("job.need_audio")
+
+    audio = tmp_path / "a.mp3"
+    audio.touch()
+    panel.set_audio(audio)
+    # The picker defaults to its first surah once the store loads (as main_window's
+    # does today), so reaching "no range chosen" needs an explicit empty selection.
+    panel.surah_box.setCurrentIndex(-1)
+    assert panel.problem() == "job.need_range"
+    assert panel.problem_label.text() == t("job.need_range")
+
+    _select_surah(panel, 25)
+    panel.from_spin.setValue(8)
+    # The spin boxes nudge each other so "to" can never fall below "from" through
+    # ordinary use (see _range_changed); block the signal to hold an invalid pair
+    # anyway, so validate()'s own defence against it is exercised end to end.
+    panel.to_spin.blockSignals(True)
+    panel.to_spin.setValue(7)
+    panel.to_spin.blockSignals(False)
+    assert panel.problem() == "job.bad_range"
+    panel._refresh()  # the blocked signal skipped the label's own update
+    assert panel.problem_label.text() == t("job.bad_range")
+
+    panel.from_spin.setValue(7)
+    panel.to_spin.setValue(8)
+    assert panel.problem() is None
+    assert panel.problem_label.text() == ""
+
+
+def test_problem_reports_a_missing_quran_text(qt_app, prefs, tmp_path, store) -> None:
+    panel = _panel(prefs, store, quran_default=None)
+    audio = tmp_path / "a.mp3"
+    audio.touch()
+    panel.set_audio(audio)
+
+    assert panel.problem() == "job.need_quran"
+    assert panel.problem_label.text() == t("job.need_quran")
+
+
+def test_dropping_an_audio_file_sets_it(qt_app, prefs, tmp_path, store) -> None:
+    panel = _panel(prefs, store)
+    audio = tmp_path / "a.mp3"
+    audio.touch()
+
+    _drop(panel, audio)
+
+    assert panel.spec().audio == audio
+
+
+def test_dropping_a_non_audio_file_is_refused(qt_app, prefs, tmp_path, store) -> None:
+    panel = _panel(prefs, store)
+    bad = tmp_path / "notes.txt"
+    bad.write_text("hello", encoding="utf-8")
+
+    _drop(panel, bad)
+
+    assert panel.problem() == "job.need_audio"
+
+
+def test_start_requested_carries_the_spec(qt_app, prefs, tmp_path, store) -> None:
+    panel = _panel(prefs, store)
+    audio = tmp_path / "a.mp3"
+    audio.touch()
+    panel.set_audio(audio)
+    _select_surah(panel, 25)
+    assert panel.problem() is None
+
+    received = []
+    panel.start_requested.connect(received.append)
+    panel.start_button.click()
+
+    assert len(received) == 1
+    assert isinstance(received[0], JobSpec)
+    assert received[0].audio == audio
+    assert received[0].surah_num == 25
+
+
+def test_set_running_true_disables_inputs(qt_app, prefs, store) -> None:
+    panel = _panel(prefs, store)
+    panel.show()
+
+    panel.set_running(True)
+
+    assert not panel.choose_button.isEnabled()
+    assert not panel.recitation_button.isEnabled()
+    assert not panel.surah_box.isEnabled()
+    assert not panel.preset_box.isEnabled()
+    assert not panel.start_button.isVisible()
+    assert panel.cancel_button.isVisible()
+    assert panel.progress_bar.isVisible()
+
+    received = []
+    panel.cancel_requested.connect(lambda: received.append(True))
+    panel.cancel_button.click()
+    assert received == [True]
+
+    panel.set_running(False)
+    assert panel.choose_button.isEnabled()
+    assert panel.start_button.isVisible()
+    assert not panel.cancel_button.isVisible()
+    assert not panel.progress_bar.isVisible()

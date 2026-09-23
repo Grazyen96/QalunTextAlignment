@@ -34,6 +34,7 @@ from qurantext.config.paths import DEFAULT_QURAN_PATH, QURAN_DB_PATH, QURAN_INPU
 from qurantext.config.settings import VIDEO_PRESETS
 from qurantext.data.quran_db import ensure_quran_db, list_surahs
 from qurantext.gui.files import show_in_folder
+from qurantext.gui.home.new_job import _first_audio
 from qurantext.gui.i18n import t
 from qurantext.gui.jobs import JobOutcome, JobSpec, run_job
 from qurantext.gui.review import ReviewWindow
@@ -43,8 +44,6 @@ from qurantext.jobs.project import load_project, project_path_for
 from qurantext.utils.progress import CancelToken, ProgressEvent
 
 __all__ = ["MainWindow"]
-
-AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".mp4", ".mkv"}
 
 
 class MainWindow(QMainWindow):
@@ -294,7 +293,7 @@ class MainWindow(QMainWindow):
         running = self._cancel is not None
         problem = self.current_spec().validate()
         self.start_button.setEnabled(not running and problem is None)
-        self.start_button.setToolTip(problem or "")
+        self.start_button.setToolTip(t(problem) if problem else "")
         for widget in (
             self.choose_button,
             self.quran_button,
@@ -312,7 +311,7 @@ class MainWindow(QMainWindow):
         spec = self.current_spec()
         problem = spec.validate()
         if problem is not None:
-            QMessageBox.information(self, "Not ready yet", problem)
+            QMessageBox.information(self, "Not ready yet", t(problem))
             return
 
         self._outcome = None
@@ -464,16 +463,6 @@ def _minutes(seconds: float) -> str:
     if seconds < 60:
         return f"{int(seconds)}s"
     return f"{int(seconds // 60)}m {int(seconds % 60):02d}s"
-
-
-def _first_audio(urls) -> Path | None:
-    for url in urls:
-        if not url.isLocalFile():
-            continue
-        path = Path(url.toLocalFile())
-        if path.suffix.lower() in AUDIO_SUFFIXES:
-            return path
-    return None
 
 
 def _default_quran_file() -> Path | None:
