@@ -2,12 +2,14 @@
 
 Kept apart from the widgets so it can be tested without a screen: this module
 decides the stages, the filenames and the order, and the window only collects
-the inputs and draws what comes back.
+the inputs and draws what comes back. Matching and rendering are separate
+calls, so the window can put review between them.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from qurantext.config.paths import (
@@ -15,11 +17,19 @@ from qurantext.config.paths import (
     RECITATION_MATCHING_OUTPUT_DIR,
     VIDEOS_OUTPUT_DIR,
 )
-from qurantext.jobs.render import RenderRequest, render_video
+from qurantext.jobs.project import Project, save_project
+from qurantext.jobs.project_render import render_project
 from qurantext.pipelines.detection import run_detection, run_recitation_range
 from qurantext.utils.progress import CancelToken, ProgressCallback, report
 
-__all__ = ["JobSpec", "JobOutcome", "run_job"]
+__all__ = [
+    "JobSpec",
+    "JobOutcome",
+    "project_path_for",
+    "run_matching",
+    "run_render",
+    "run_job",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +45,8 @@ class JobSpec:
     to_ayah: int | None = None
     preset: str = "social"
     render: bool = True
+    #: Render as soon as matching finishes, skipping review. For jobs you trust.
+    render_right_away: bool = False
     output_dir: Path | None = None
 
     @property
@@ -67,15 +79,31 @@ class JobOutcome:
     video: Path | None
     cards: int
     mode: str
+    project: Path | None = None
+    subtitles: tuple[Path, ...] = ()
 
 
-def run_job(
+def project_path_for(match_path: Path) -> Path:
+    """Where a job's project lives: beside its match file."""
+    return Path(match_path).with_suffix(".qalun.json")
+
+
+def _set_aside(path: Path) -> None:
+    """Keep an earlier project instead of overwriting its corrections."""
+    if path.exists():
+        stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+        path.rename(
+            path.with_name(f"{path.name.removesuffix('.qalun.json')}.{stamp}.qalun-backup.json")
+        )
+
+
+def run_matching(
     spec: JobSpec,
     *,
     progress: ProgressCallback | None = None,
     cancel: CancelToken | None = None,
-) -> JobOutcome:
-    """Match, then render. Both stages report progress and honour Cancel."""
+) -> Project:
+    """Find or align the ayat, then write the project the review opens."""
     audio = Path(spec.audio)
     match_dir = Path(
         spec.output_dir
@@ -89,7 +117,7 @@ def run_job(
 
     if spec.has_stated_range:
         report(progress, "detect", "Aligning against the ayat you chose...")
-        result = run_recitation_range(
+        run_recitation_range(
             quran=spec.quran,
             output=match_path,
             surah_num=spec.surah_num,  # type: ignore[arg-type]
@@ -102,7 +130,7 @@ def run_job(
         )
     else:
         report(progress, "detect", "Looking for Quran in the audio...")
-        result = run_detection(
+        run_detection(
             quran=spec.quran,
             output=match_path,
             mode=spec.mode,
@@ -112,23 +140,62 @@ def run_job(
             cancel=cancel,
         )
 
-    cards = len(result.get("matches") or [])
-    if not spec.render:
-        return JobOutcome(matches=match_path, video=None, cards=cards, mode=spec.mode)
+    project = Project.from_match_file(match_path, audio, mode=spec.mode)
+    destination = project_path_for(match_path)
+    _set_aside(destination)
+    save_project(project, destination)
+    return project
 
-    if cancel is not None:
-        cancel.raise_if_cancelled("render")
 
-    video_dir = Path(spec.output_dir or VIDEOS_OUTPUT_DIR)
-    video_path = video_dir / f"{audio.stem}.mp4"
-    render_result = render_video(
-        RenderRequest(
-            audio=audio,
-            matches=match_path,
-            output=video_path,
-            preset=spec.preset,
-        ),
+def run_render(
+    project: Project,
+    *,
+    preset: str = "social",
+    subtitles: str = "burn",
+    formats: tuple[str, ...] = ("srt",),
+    output_dir: Path | None = None,
+    progress: ProgressCallback | None = None,
+    cancel: CancelToken | None = None,
+) -> JobOutcome:
+    """Render the project — with whatever corrections it now holds."""
+    video_dir = Path(output_dir or VIDEOS_OUTPUT_DIR)
+    result = render_project(
+        project,
+        video_dir / f"{Path(project.audio).stem}.mp4",
+        preset=preset,
+        subtitles=subtitles,
+        formats=formats,
         progress=progress,
         cancel=cancel,
     )
-    return JobOutcome(matches=match_path, video=render_result.output, cards=cards, mode=spec.mode)
+    return JobOutcome(
+        matches=Path(project.matches),
+        video=result.video,
+        cards=len(project.cards),
+        mode=project.mode,
+        project=project.path,
+        subtitles=tuple(result.subtitles),
+    )
+
+
+def run_job(
+    spec: JobSpec,
+    *,
+    progress: ProgressCallback | None = None,
+    cancel: CancelToken | None = None,
+) -> JobOutcome:
+    """Match, then render. Both stages report progress and honour Cancel."""
+    project = run_matching(spec, progress=progress, cancel=cancel)
+    if not spec.render:
+        return JobOutcome(
+            matches=Path(project.matches),
+            video=None,
+            cards=len(project.cards),
+            mode=spec.mode,
+            project=project.path,
+        )
+    if cancel is not None:
+        cancel.raise_if_cancelled("render")
+    return run_render(
+        project, preset=spec.preset, output_dir=spec.output_dir, progress=progress, cancel=cancel
+    )
