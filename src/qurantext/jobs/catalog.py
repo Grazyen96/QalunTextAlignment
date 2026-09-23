@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from qurantext.config.paths import LECTURE_MATCHING_OUTPUT_DIR, RECITATION_MATCHING_OUTPUT_DIR
-from qurantext.jobs.project import Project, load_project
+from qurantext.jobs.project import Project, job_settings, load_project
 
 __all__ = [
     "CHANGED_SINCE_RENDER",
@@ -56,8 +56,25 @@ class JobEntry:
 
 def job_status(project: Project) -> str:
     if project.render is not None:
-        return CHANGED_SINCE_RENDER if project.render_is_stale else RENDERED
+        if project.render_is_stale or _choices_changed_since_render(project):
+            return CHANGED_SINCE_RENDER
+        return RENDERED
     return REVIEWED if project.review.get("state") == "reviewed" else NEEDS_REVIEW
+
+
+def _choices_changed_since_render(project: Project) -> bool:
+    """Whether the job now asks for another size or subtitle choice than its video has.
+
+    A job re-run as "landscape" or "files beside the video" keeps its old
+    render record, and that video is no longer what rendering would make. A
+    choice the record does not hold (an older render) is not second-guessed.
+    """
+    render = project.render or {}
+    settings = job_settings(project)
+    preset, subtitles = render.get("preset"), render.get("subtitles")
+    if isinstance(preset, str) and preset != settings.preset:
+        return True
+    return isinstance(subtitles, str) and subtitles != settings.subtitles
 
 
 def ayah_range(cards: list[dict[str, Any]]) -> str | None:

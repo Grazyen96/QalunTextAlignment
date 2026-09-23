@@ -184,3 +184,32 @@ def test_an_unreadable_file_is_listed_as_damaged(tmp_path) -> None:
     assert entry.status == DAMAGED
     assert entry.mode == "" and entry.modified == 0.0
     assert "permission denied" in entry.error
+
+
+def test_a_job_whose_choices_changed_since_its_render_reads_changed(tmp_path) -> None:
+    """Re-run as another size or subtitle choice, the video on disk is not what the job makes."""
+    from qurantext.jobs.project import JobSettings, set_job_settings
+
+    def rendered(name, **settings):
+        project = Project(audio=tmp_path / f"{name}.mp3", cards=[_card(1, 1, 7)])
+        project.record_render(
+            tmp_path / f"{name}.mp4", preset="social", basmala_offset_s=0.0, subtitles="burn"
+        )
+        set_job_settings(project, JobSettings(**settings))
+        save_project(project, tmp_path / f"{name}_recitation.qalun.json")
+
+    rendered("same", preset="social", subtitles="burn")
+    rendered("resized", preset="high", subtitles="burn")
+    rendered("resubbed", preset="social", subtitles="sidecar")
+    old = Project(audio=tmp_path / "old.mp3", cards=[_card(1, 1, 7)])
+    old.record_render(tmp_path / "old.mp4", preset="social", basmala_offset_s=0.0)
+    set_job_settings(old, JobSettings(subtitles="both"))
+    save_project(old, tmp_path / "old_recitation.qalun.json")
+
+    by_name = {entry.name: entry.status for entry in list_jobs([tmp_path])}
+    assert by_name == {
+        "same": RENDERED,
+        "resized": CHANGED_SINCE_RENDER,
+        "resubbed": CHANGED_SINCE_RENDER,
+        "old": RENDERED,  # a render that did not record its subtitles is not second-guessed
+    }

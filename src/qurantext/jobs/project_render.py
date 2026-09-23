@@ -96,6 +96,7 @@ def render_project(
         width=rendered.width if rendered is not None else None,
         height=rendered.height if rendered is not None else None,
         fps=rendered.fps if rendered is not None else None,
+        subtitles=subtitles,
     )
     if project.path is not None:
         save_project(project, project.path)

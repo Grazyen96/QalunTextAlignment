@@ -284,6 +284,7 @@ class Project:
         width: int | None = None,
         height: int | None = None,
         fps: int | None = None,
+        subtitles: str | None = None,
     ) -> None:
         """Remember a successful render and the content it was made from.
 
@@ -291,7 +292,9 @@ class Project:
         before it started: an edit made while it ran must leave it stale, which
         hashing the project as it is now would hide. *width*, *height* and
         *fps* are the geometry actually rendered, which the subtitle export
-        reuses so an ASS file matches the video.
+        reuses so an ASS file matches the video. *subtitles* is the choice it
+        was made with, so the job list can tell when the job's choice has
+        moved on since (None: not recorded).
         """
         self.render = {
             "video": Path(video).expanduser().resolve(),
@@ -299,6 +302,7 @@ class Project:
             "width": width,
             "height": height,
             "fps": fps,
+            "subtitles": subtitles,
             "basmala_offset_s": round(float(basmala_offset_s), 3),
             "rendered_at": (when or datetime.now()).isoformat(timespec="seconds"),
             "content_hash": content_hash if content_hash is not None else self.content_hash(),
