@@ -315,3 +315,38 @@ def test_revert_without_a_save_restores_the_loaded_state() -> None:
     session.revert()
     assert not session.dirty
     assert [cue.text for cue in session.project.captions] == ["one two", "three"]
+
+
+def test_a_drag_past_the_next_word_and_back_leaves_it_untouched() -> None:
+    session = ReviewSession(_recitation())
+    a, b = WordRef(CARD, 0, 0), WordRef(CARD, 0, 1)
+    session.begin_gesture()
+    session.drag_retime(a, end=1.5)
+    assert session.word(b).start == 1.5
+    before = session.revision
+    session.drag_retime(a, end=1.0)
+    assert session.revision != before
+    session.end_gesture()
+    assert (session.word(b).start, session.word(b).end) == (1.0, 2.0)
+    assert session.word(a).end == 1.0
+    assert not session.can_undo, "a drag that ends where it began is no undo step"
+
+
+def test_a_ripple_past_the_clamp_and_back_ends_where_it_began() -> None:
+    session = ReviewSession(_recitation())
+    c = WordRef(CARD, 1, 0)
+    session.begin_gesture()
+    session.drag_ripple(c, -5.0)
+    assert session.word(c).start == pytest.approx(1.04)
+    session.drag_ripple(c, 0.0)
+    session.end_gesture()
+    assert session.word(c).start == 2.0
+    assert session.word(WordRef(CARD, 0, 1)).end == 2.0
+
+
+def test_drag_edits_need_a_gesture() -> None:
+    session = ReviewSession(_recitation())
+    with pytest.raises(RuntimeError):
+        session.drag_retime(WordRef(CARD, 0, 0), end=1.5)
+    with pytest.raises(RuntimeError):
+        session.drag_ripple(WordRef(CARD, 0, 0), 0.5)

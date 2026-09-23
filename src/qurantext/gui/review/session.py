@@ -356,6 +356,36 @@ class ReviewSession:
             self._set_cue_words(ref.segment, words)
         self._changed()
 
+    def drag_retime(
+        self, ref: WordRef, *, start: float | None = None, end: float | None = None
+    ) -> None:
+        """Inside a gesture: *ref*'s edge where the pointer is now, applied to the gesture's start.
+
+        Retiming the current state on every move would keep whatever a move
+        on the way did to a neighbour: drag an end past the next word and
+        back, and the next word stays trimmed. Starting each move from the
+        state the drag began in makes the result depend only on where the
+        pointer is, so dragging back puts everything back.
+        """
+        self._restore_gesture_start()
+        self.retime(ref, start=start, end=end)
+
+    def drag_ripple(self, ref: WordRef, total_delta: float) -> None:
+        """Inside a gesture: ripple from *ref* by the pointer's whole travel since the press.
+
+        A ripple clamps (it never passes the previous word's start), so
+        adding up the per-move deltas would count travel the clamp refused
+        and leave the run displaced once the pointer comes back. One ripple
+        of the total, from the gesture's start, cannot drift.
+        """
+        self._restore_gesture_start()
+        self.ripple(ref, total_delta)
+
+    def _restore_gesture_start(self) -> None:
+        if not self._in_gesture or self._gesture_start is None:
+            raise RuntimeError("A drag edit is only valid between begin_gesture and end_gesture.")
+        self._restore(self._gesture_start)
+
     def _set_cue_words(self, index: int, words: list[dict[str, Any]]) -> None:
         cue = self.project.captions[index]
         start, end = cue_bounds(cue.start, cue.end, words)

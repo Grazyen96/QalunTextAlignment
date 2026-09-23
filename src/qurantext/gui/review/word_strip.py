@@ -5,9 +5,11 @@ boundary between two words grabs the earlier word's end (retiming a shared
 edge moves both words at once); a press near any other edge grabs that edge
 alone; a plain press inside a word selects it and asks to seek there; a
 shift-press inside a word starts a ripple drag that pushes every later word
-by the same amount the pointer travels. The strip never writes a timing
-itself — every drag goes through :class:`ReviewSession`, which is the one
-place the rules about what an edit may do live.
+by the same amount the pointer travels. Every move of a drag is applied from
+the state the drag began in, so dragging back undoes what the way out did.
+The strip never writes a timing itself — every drag goes through
+:class:`ReviewSession`, which is the one place the rules about what an edit
+may do live.
 """
 
 from __future__ import annotations
@@ -52,11 +54,10 @@ class _EdgeDrag:
 
 @dataclass(slots=True)
 class _RippleDrag:
-    """An in-progress shift-drag: the pointer's travel becomes ripple delta."""
+    """An in-progress shift-drag: the pointer's travel since *t0* is the ripple delta."""
 
     ref: WordRef
     t0: float
-    applied: float
     revision_before: int
 
 
@@ -198,7 +199,7 @@ class WordStrip(QWidget):
             revision_before = self._session.revision
             self._session.begin_gesture()
             t0 = self._viewport.t_for(x, self.width())
-            self._drag = _RippleDrag(ref, t0, 0.0, revision_before)
+            self._drag = _RippleDrag(ref, t0, revision_before)
             return
         self.seek_requested.emit(self._session.word(ref).start)
 
@@ -214,16 +215,16 @@ class WordStrip(QWidget):
             else:
                 self.unsetCursor()
             return
+        # Each move is applied from the state the drag began in (the session
+        # restores it), so the result depends only on where the pointer is now.
         t = self._viewport.t_for(x, self.width())
         if isinstance(self._drag, _EdgeDrag):
             if self._drag.edge == "start":
-                self._session.retime(self._drag.ref, start=t)
+                self._session.drag_retime(self._drag.ref, start=t)
             else:
-                self._session.retime(self._drag.ref, end=t)
+                self._session.drag_retime(self._drag.ref, end=t)
         else:
-            delta = t - self._drag.t0
-            self._session.ripple(self._drag.ref, delta - self._drag.applied)
-            self._drag.applied = delta
+            self._session.drag_ripple(self._drag.ref, t - self._drag.t0)
         self.update()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt override

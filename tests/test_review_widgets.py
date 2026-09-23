@@ -428,3 +428,24 @@ def test_the_playhead_row_is_marked_without_being_selected(qt_app) -> None:
     assert table.currentRow() == -1
     assert table.item(1, 2).background().style() != Qt.BrushStyle.NoBrush
     assert table.item(0, 2).background().style() == Qt.BrushStyle.NoBrush
+
+
+def test_an_edge_dragged_past_its_neighbour_and_back_leaves_the_neighbour(qt_app) -> None:
+    session, strip = _strip(qt_app)
+    QTest.mousePress(strip, Qt.MouseButton.LeftButton, pos=QPoint(200, 17))
+    for x in (300, 350, 200):
+        QTest.mouseMove(strip, QPoint(x, 17))
+    QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, pos=QPoint(200, 17))
+    words = session.words()
+    assert (words[0].end, words[1].start, words[1].end) == (2.0, 2.0, 3.0)
+
+
+def test_a_ripple_dragged_past_the_clamp_and_back_ends_where_it_began(qt_app) -> None:
+    session, strip = _strip(qt_app)
+    shift = Qt.KeyboardModifier.ShiftModifier
+    QTest.mousePress(strip, Qt.MouseButton.LeftButton, shift, QPoint(350, 17))
+    for x in (100, 0, 350):
+        QTest.mouseMove(strip, QPoint(x, 17))
+    QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, shift, QPoint(350, 17))
+    words = session.words()
+    assert (words[1].end, words[2].start, words[2].end) == (3.0, 3.0, 4.0)
