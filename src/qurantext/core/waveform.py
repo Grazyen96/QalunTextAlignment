@@ -13,6 +13,8 @@ job does not decode the recording again.
 from __future__ import annotations
 
 import subprocess
+import tempfile
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -45,49 +47,59 @@ def compute_peaks(
     ffmpeg = require_binary("ffmpeg", "Install FFmpeg and try again.")
     hop = sample_rate // per_second
     chunk_bytes = max(4, int(sample_rate * chunk_seconds) * 4)
-    process = subprocess.Popen(
-        [
-            ffmpeg,
-            "-v",
-            "error",
-            "-i",
-            str(audio),
-            "-ac",
-            "1",
-            "-ar",
-            str(sample_rate),
-            "-f",
-            "f32le",
-            "-",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
     mins: list[np.ndarray] = []
     maxs: list[np.ndarray] = []
     pending = b""
     carry = np.empty(0, dtype=np.float32)
     total = 0
-    assert process.stdout is not None and process.stderr is not None
-    while True:
-        block = process.stdout.read(chunk_bytes)
-        if not block:
-            break
-        block = pending + block
-        usable = len(block) - len(block) % 4
-        pending = block[usable:]
-        samples = np.concatenate([carry, np.frombuffer(block[:usable], dtype=np.float32)])
-        total += usable // 4
-        whole = (len(samples) // hop) * hop
-        if whole:
-            frames = samples[:whole].reshape(-1, hop)
-            mins.append(frames.min(axis=1))
-            maxs.append(frames.max(axis=1))
-        carry = samples[whole:]
-    errors = process.stderr.read()
-    if process.wait() != 0:
-        details = errors.decode("utf-8", "replace").strip()
-        raise RuntimeError(f"FFmpeg could not read the audio for the waveform: {details}")
+    with tempfile.TemporaryFile() as errors_file:
+        process = subprocess.Popen(
+            [
+                ffmpeg,
+                "-v",
+                "error",
+                "-i",
+                str(audio),
+                "-ac",
+                "1",
+                "-ar",
+                str(sample_rate),
+                "-f",
+                "f32le",
+                "-",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=errors_file,
+        )
+        try:
+            assert process.stdout is not None
+            while True:
+                block = process.stdout.read(chunk_bytes)
+                if not block:
+                    break
+                block = pending + block
+                usable = len(block) - len(block) % 4
+                pending = block[usable:]
+                samples = np.concatenate([carry, np.frombuffer(block[:usable], dtype=np.float32)])
+                total += usable // 4
+                whole = (len(samples) // hop) * hop
+                if whole:
+                    frames = samples[:whole].reshape(-1, hop)
+                    mins.append(frames.min(axis=1))
+                    maxs.append(frames.max(axis=1))
+                carry = samples[whole:]
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+            if process.stdout is not None:
+                process.stdout.close()
+
+        if process.returncode != 0:
+            errors_file.seek(0)
+            details = errors_file.read().decode("utf-8", "replace").strip()
+            raise RuntimeError(f"FFmpeg could not read the audio for the waveform: {details}")
+
     if len(carry):
         mins.append(np.array([carry.min()], dtype=np.float32))
         maxs.append(np.array([carry.max()], dtype=np.float32))
@@ -113,7 +125,7 @@ def load_or_compute_peaks(audio: Path, cache_file: Path, *, per_second: int = 10
                     rate=float(cached["rate"]),
                     duration=float(cached["duration"]),
                 )
-    except (OSError, KeyError, ValueError):
+    except (OSError, KeyError, ValueError, zipfile.BadZipFile, EOFError):
         pass
 
     peaks = compute_peaks(Path(audio), per_second=per_second)

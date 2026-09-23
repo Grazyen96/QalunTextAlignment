@@ -68,3 +68,49 @@ def test_unreadable_audio_says_so(tmp_path) -> None:
     bad.write_bytes(b"not audio")
     with pytest.raises(RuntimeError, match="FFmpeg"):
         compute_peaks(bad)
+
+
+@pytest.mark.parametrize("damage", ["truncated", "empty"])
+def test_a_corrupt_cache_is_recomputed(tmp_path, damage) -> None:
+    audio = _tone(tmp_path / "t.wav", seconds=1.0)
+    cache = tmp_path / "t.peaks.npz"
+    load_or_compute_peaks(audio, cache)
+
+    if damage == "truncated":
+        data = cache.read_bytes()
+        cache.write_bytes(data[: len(data) // 2])
+    else:
+        cache.write_bytes(b"")
+
+    recomputed = load_or_compute_peaks(audio, cache)
+    expected = compute_peaks(audio)
+    np.testing.assert_array_equal(recomputed.maxs, expected.maxs)
+    np.testing.assert_array_equal(recomputed.mins, expected.mins)
+
+    # The damaged cache was replaced with a readable one.
+    reloaded = load_or_compute_peaks(audio, cache)
+    np.testing.assert_array_equal(reloaded.maxs, expected.maxs)
+
+
+def test_ffmpeg_is_reaped_when_reading_fails(tmp_path, monkeypatch) -> None:
+    audio = _tone(tmp_path / "t.wav", seconds=1.0)
+    processes = []
+    real_popen = subprocess.Popen
+
+    def spying_popen(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(waveform.subprocess, "Popen", spying_popen)
+
+    def broken_frombuffer(*args, **kwargs):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(waveform.np, "frombuffer", broken_frombuffer)
+
+    with pytest.raises(ValueError, match="boom"):
+        compute_peaks(audio)
+
+    assert len(processes) == 1
+    assert processes[0].returncode is not None
