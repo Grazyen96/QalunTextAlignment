@@ -330,3 +330,72 @@ def test_segment_list_edits_caption_text_through_the_session(qt_app) -> None:
     )
     table.item(row, 2).setText("corrected")
     assert session.project.captions[0].text == "corrected" and session.can_undo
+
+
+def test_frame_view_uses_the_lecture_intro_before_the_first_card(qt_app, monkeypatch) -> None:
+    from qurantext.core.frame_renderer import placeholder_lines
+    from qurantext.gui.review import frame_view as module
+    from qurantext.gui.review.session import ReviewSession
+    from qurantext.jobs.project import CaptionCue, Project
+
+    cards = [
+        {
+            "surah_num": 25,
+            "surah_name": "الفرقان",
+            "from_ayah": 7,
+            "to_ayah": 11,
+            "full_text": "a b c",
+            "confidence": 1.0,
+            "start_time": 5.0,
+            "end_time": 10.0,
+        }
+    ]
+    project = Project(
+        audio=__import__("pathlib").Path("d.mp3"),
+        mode="lecture",
+        cards=cards,
+        captions=[CaptionCue(0.0, 4.0, "intro speech", words=[])],
+    )
+    session = ReviewSession(project)
+    calls = []
+    monkeypatch.setattr(
+        module,
+        "render_frame_pillow",
+        lambda *a, **k: calls.append(k) or np.zeros((480, 270, 3), np.uint8),
+    )
+    view = module.FrameView(session)
+    view.show_at(1.0, force=True)
+
+    expected = placeholder_lines(session.validated_cards(), reserve_caption_band=True)
+    assert (calls[0]["title"], calls[0]["placeholder_subtitle"]) == expected
+
+
+def test_removing_a_row_clears_the_selection(qt_app) -> None:
+    from qurantext.gui.review.segment_list import SegmentList
+    from qurantext.gui.review.session import ReviewSession
+    from qurantext.jobs.project import CaptionCue, Project
+
+    cards = [
+        {
+            "surah_num": 25,
+            "from_ayah": 7,
+            "to_ayah": 7,
+            "full_text": "a b c",
+            "start_time": 0.0,
+            "end_time": 1.0,
+        }
+    ]
+    project = Project(
+        audio=__import__("pathlib").Path("d.mp3"),
+        mode="lecture",
+        cards=cards,
+        captions=[CaptionCue(1.0, 2.0, "spoken", words=[])],
+    )
+    session = ReviewSession(project)
+    table = SegmentList(session)
+    assert table.rowCount() == 2
+    table.selectRow(0)
+    assert table.selectedIndexes()
+    assert table.remove_selected()
+    assert table.rowCount() == 1
+    assert not table.selectedIndexes()

@@ -72,6 +72,31 @@ PLACEHOLDER_FONT_START_RATIO = 0.060
 PLACEHOLDER_FONT_MIN_RATIO = 0.030
 
 
+def placeholder_lines(
+    matches: list[dict[str, Any]],
+    *,
+    reserve_caption_band: bool,
+    title: str = DEFAULT_PLACEHOLDER_TITLE,
+) -> tuple[str, str]:
+    """The (title, subtitle) drawn before any ayah has started.
+
+    A lecture — one with a caption band to show, i.e. *reserve_caption_band* —
+    announces the surah and ayah range it ponders instead of the generic
+    *title*, via :func:`~qurantext.core.video_common.lecture_intro_lines`. A
+    recitation render, or a lecture whose matches carry no ayah numbering,
+    keeps the generic title with no subtitle. This is the one place that
+    choice is made: :func:`write_frame_video` and any single-frame preview of
+    the same moment (``jobs.preview.render_preview``, the desktop review
+    window's live frame) call this so the placeholder never disagrees between
+    what a person previews and what the exported video actually draws.
+    """
+    if reserve_caption_band:
+        intro = lecture_intro_lines(matches)
+        if intro is not None:
+            return intro
+    return title, ""
+
+
 @lru_cache(maxsize=1)
 def _frame_dependencies() -> tuple[Any, Any, Any, Any, Any]:
     try:
@@ -1226,12 +1251,9 @@ def write_frame_video(
     # Lecture intro: when live captions are present the opening placeholder
     # announces the surah and the range of ayat the lecture ponders instead of
     # the generic title. Recitation renders (no captions) keep the plain title.
-    placeholder_title = title
-    placeholder_subtitle = ""
-    if reserve_caption_band:
-        intro = lecture_intro_lines(sorted_matches)
-        if intro is not None:
-            placeholder_title, placeholder_subtitle = intro
+    placeholder_title, placeholder_subtitle = placeholder_lines(
+        sorted_matches, reserve_caption_band=reserve_caption_band, title=title
+    )
 
     # Pre-compute paginated body lines for every unique active match. Caching the
     # pages (not just the count) lets page boundaries be derived from the active

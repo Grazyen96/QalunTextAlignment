@@ -292,12 +292,23 @@ class ReviewSession:
     def coverage_words(self) -> list[dict[str, float]]:
         return [{"start": tw.start, "end": tw.end} for tw in self.words()]
 
-    def frame_inputs(self, t: float) -> tuple[dict | None, dict | None, bool]:
+    def validated_cards(self) -> list[dict[str, Any]]:
+        """The cards as the frame renderer sees them: enriched, sorted by start time.
+
+        Cached per revision — ``frame_inputs`` is built from this, and a
+        caller that also needs to mirror the renderer's own logic exactly
+        (``core.frame_renderer.placeholder_lines``, for the live-frame
+        preview's opening placeholder) can share the same cache instead of
+        re-running ``validated_matches`` itself.
+        """
         if self._validated is None or self._validated[0] != self._revision:
             cards = validated_matches(copy.deepcopy(self.project.cards), bridge_gaps=False)
             cards.sort(key=lambda card: float(card["_start_time"]))
             self._validated = (self._revision, cards)
-        active = [card for card in self._validated[1] if float(card["_start_time"]) <= t]
+        return self._validated[1]
+
+    def frame_inputs(self, t: float) -> tuple[dict | None, dict | None, bool]:
+        active = [card for card in self.validated_cards() if float(card["_start_time"]) <= t]
         index = self.caption_at(t)
         caption = self._caption_segment(index) if index is not None else None
         return (active[-1] if active else None), caption, bool(self.project.captions)

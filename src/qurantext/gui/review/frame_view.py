@@ -23,7 +23,11 @@ from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QLabel, QWidget
 
 from qurantext.config.paths import DEFAULT_FONT_PATH
-from qurantext.core.frame_renderer import DEFAULT_PLACEHOLDER_TITLE, render_frame_pillow
+from qurantext.core.frame_renderer import (
+    DEFAULT_PLACEHOLDER_TITLE,
+    placeholder_lines,
+    render_frame_pillow,
+)
 from qurantext.gui import i18n
 from qurantext.gui.review.session import ReviewSession
 
@@ -51,6 +55,8 @@ class FrameView(QLabel):
         self._session = session
         self._width, self._height = _PORTRAIT_SIZE if portrait else _LANDSCAPE_SIZE
         self._last_render_at: float | None = None
+        self._placeholder_revision: int | None = None
+        self._placeholder: tuple[str, str] = (DEFAULT_PLACEHOLDER_TITLE, "")
 
     def sizeHint(self) -> QSize:  # noqa: D102 - Qt override, documented by the class
         return QSize(self._width, self._height)
@@ -69,6 +75,7 @@ class FrameView(QLabel):
         card, caption, reserve_band = self._session.frame_inputs(t)
         caption_text = caption["text"] if caption else ""
         caption_word_timings = caption["word_timings"] if caption else None
+        title, subtitle = self._placeholder_lines(reserve_band)
         try:
             frame = render_frame_pillow(
                 t,
@@ -78,7 +85,8 @@ class FrameView(QLabel):
                 DEFAULT_FONT_PATH,
                 caption_text=caption_text,
                 caption_word_timings=caption_word_timings,
-                title=DEFAULT_PLACEHOLDER_TITLE,
+                title=title,
+                placeholder_subtitle=subtitle,
                 reserve_caption_band=reserve_band,
             )
         except Exception as error:  # noqa: BLE001 - shown to the person, not raised
@@ -90,3 +98,20 @@ class FrameView(QLabel):
         height, width, _channels = rgb.shape
         image = QImage(rgb.data, width, height, 3 * width, QImage.Format.Format_RGB888).copy()
         self.setPixmap(QPixmap.fromImage(image))
+
+    def _placeholder_lines(self, reserve_caption_band: bool) -> tuple[str, str]:
+        """The (title, subtitle) for the moment before any ayah has started.
+
+        Delegates to ``core.frame_renderer.placeholder_lines`` — the same
+        choice ``write_frame_video`` makes for the exported video — so the
+        preview never shows a generic title where the video would show the
+        lecture's opening card instead. Cached per session revision, since
+        this reruns ``validated_matches`` (via ``session.validated_cards``)
+        and the result cannot change between edits.
+        """
+        if self._placeholder_revision != self._session.revision:
+            self._placeholder_revision = self._session.revision
+            self._placeholder = placeholder_lines(
+                self._session.validated_cards(), reserve_caption_band=reserve_caption_band
+            )
+        return self._placeholder

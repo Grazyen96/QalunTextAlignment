@@ -69,6 +69,7 @@ def render_preview(request: PreviewRequest) -> PreviewResult:
     from qurantext.core.frame_renderer import (
         DEFAULT_PLACEHOLDER_TITLE,
         _frame_dependencies,
+        placeholder_lines,
         render_frame_pillow,
     )
     from qurantext.core.subtitles import card_ref
@@ -104,6 +105,9 @@ def render_preview(request: PreviewRequest) -> PreviewResult:
 
     caption = next((c for c in captions if float(c["start"]) <= at <= float(c["end"])), None)
     reserve_band = bool(captions)
+    title, placeholder_subtitle = placeholder_lines(
+        cards, reserve_caption_band=reserve_band, title=request.title or DEFAULT_PLACEHOLDER_TITLE
+    )
 
     frame = render_frame_pillow(
         at,
@@ -113,7 +117,8 @@ def render_preview(request: PreviewRequest) -> PreviewResult:
         font_file,
         caption_text=str(caption["text"]) if caption else "",
         caption_word_timings=caption.get("word_timings") if caption else None,
-        title=request.title or DEFAULT_PLACEHOLDER_TITLE,
+        title=title,
+        placeholder_subtitle=placeholder_subtitle,
         reserve_caption_band=reserve_band,
     )
 

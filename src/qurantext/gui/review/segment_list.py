@@ -57,7 +57,13 @@ class SegmentList(QTableWidget):
     # -- filling ------------------------------------------------------------------
 
     def refresh(self) -> None:
-        """Rebuild every row from the session, without writing anything back."""
+        """Rebuild every row from the session, without writing anything back.
+
+        Clears the selection rather than trying to keep it: a row's meaning
+        is its position in this rebuilt list, and after an edit that shifted
+        rows (a removal upstream, an undo) a kept selection would silently
+        point at a different segment than the one the person had selected.
+        """
         self._loading = True
         try:
             entries = self._entries()
@@ -68,6 +74,7 @@ class SegmentList(QTableWidget):
                 self._fill_row(row, kind, index)
         finally:
             self._loading = False
+        self.clearSelection()
 
     def _entries(self) -> list[tuple[str, int]]:
         project = self._session.project
