@@ -59,6 +59,9 @@ _STATUS_KEYS = {
     DAMAGED: "home.status.damaged",
 }
 _WARNING_STATUSES = frozenset({NEEDS_REVIEW, CHANGED_SINCE_RENDER})
+#: Statuses that ask the person to do something, drawn bold: a cue that does
+#: not depend on telling amber from the text colour.
+_ATTENTION_STATUSES = frozenset({NEEDS_REVIEW, CHANGED_SINCE_RENDER, DAMAGED})
 
 
 class JobListPanel(QWidget):
@@ -219,9 +222,17 @@ class _JobRow(QWidget):
 
         self.detail_label = QLabel(_detail_text(entry))
         if entry.status in _WARNING_STATUSES:
+            # Inside the list's viewport a label inherits its Base background
+            # and so paints with Text, not WindowText; pin the role so the
+            # colour set on it is the one drawn, wherever the row ends up.
+            self.detail_label.setForegroundRole(QPalette.ColorRole.Text)
             palette = self.detail_label.palette()
-            palette.setColor(QPalette.ColorRole.WindowText, _WARNING_COLOR)
+            palette.setColor(QPalette.ColorRole.Text, _WARNING_COLOR)
             self.detail_label.setPalette(palette)
+        if entry.status in _ATTENTION_STATUSES:
+            attention_font = self.detail_label.font()
+            attention_font.setBold(True)
+            self.detail_label.setFont(attention_font)
         layout.addWidget(self.detail_label)
 
 

@@ -152,6 +152,36 @@ def test_double_clicking_a_damaged_row_emits_its_error(qt_app, prefs) -> None:
     assert errors == [entry.error] and entry.error
 
 
+def test_a_row_that_needs_attention_is_amber_and_bold(qt_app, prefs) -> None:
+    """Colour alone is not enough (and was never shown): the status is bold too."""
+    from qurantext.gui.home import job_list as module
+
+    jobs_dir = prefs.job_dirs[0]
+    _save(jobs_dir, "pending")
+    reviewed = Project(audio=jobs_dir / "calm.m4a", mode="recitation", cards=[_card()])
+    reviewed.mark_reviewed()
+    save_project(reviewed, jobs_dir / "calm_recitation.qalun.json")
+    (jobs_dir / "broken.qalun.json").write_text("{not json", encoding="utf-8")
+
+    panel = JobListPanel(prefs)
+    panel.resize(300, 400)
+    panel.show()
+    rows = {}
+    for i in range(panel.list.count()):
+        row = panel.list.itemWidget(panel.list.item(i))
+        rows[row.name_label.text()] = row.detail_label
+
+    pending = rows["pending"]
+    assert pending.palette().color(pending.foregroundRole()) == module._WARNING_COLOR
+    assert pending.font().bold()
+    assert rows["broken"].font().bold()
+
+    calm = rows["calm"]
+    assert calm.palette().color(calm.foregroundRole()) != module._WARNING_COLOR
+    assert not calm.font().bold()
+    panel.close()
+
+
 def test_refresh_keeps_the_running_row(qt_app, prefs) -> None:
     """A job saved elsewhere (a review's Save) refreshes the list mid-job; the row stays."""
     jobs_dir = prefs.job_dirs[0]
