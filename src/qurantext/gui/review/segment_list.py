@@ -18,7 +18,13 @@ from typing import Any
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtGui import QBrush, QColor
-from PySide6.QtWidgets import QAbstractItemView, QTableWidget, QTableWidgetItem, QWidget
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QHeaderView,
+    QTableWidget,
+    QTableWidgetItem,
+    QWidget,
+)
 
 from qurantext.core.subtitles import card_ref
 from qurantext.gui.i18n import t
@@ -45,7 +51,12 @@ class SegmentList(QTableWidget):
         )
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.verticalHeader().setVisible(False)
-        self.horizontalHeader().setStretchLastSection(True)
+        # The text is what a person reads; the reference, time and count fit their contents.
+        header = self.horizontalHeader()
+        header.setStretchLastSection(False)
+        for column in (_COLUMN_REF, _COLUMN_TIME, _COLUMN_RETIMED):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(_COLUMN_TEXT, QHeaderView.ResizeMode.Stretch)
         self._session = session
         self._loading = False
         #: Row order, parallel to the table: (kind, segment index, start time).
@@ -101,7 +112,7 @@ class SegmentList(QTableWidget):
             text_editable = False
         else:
             cue = project.captions[index]
-            ref_text = ""
+            ref_text = t("segments.speech")
             start = float(cue.start)
             end = float(cue.end)
             text = cue.text

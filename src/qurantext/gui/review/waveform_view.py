@@ -18,7 +18,7 @@ from qurantext.core.waveform import Peaks
 from qurantext.gui.i18n import t
 from qurantext.gui.review.viewport import Viewport
 
-__all__ = ["WaveformView"]
+__all__ = ["WaveformView", "column_extremes"]
 
 _GAP_COLOR = QColor(239, 159, 39, 70)
 _PLAYHEAD_COLOR = QColor(226, 75, 74)
@@ -34,6 +34,8 @@ class WaveformView(QWidget):
         self.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         self._viewport = viewport
         self._peaks: Peaks | None = None
+        #: The recording cannot be read at all, so "Reading…" would never end.
+        self._missing = False
         self._gaps: list[tuple[float, float]] = []
         self._playhead = 0.0
         self._dragging = False
@@ -53,6 +55,15 @@ class WaveformView(QWidget):
         """Replace the drawn recording; ``None`` shows the "reading" placeholder."""
         self._peaks = peaks
         self.update()
+
+    def set_missing(self) -> None:
+        """Say the recording is not available, instead of waiting to read it."""
+        self._missing = True
+        self.update()
+
+    def placeholder(self) -> str:
+        """What the widget says while it has no waveform to draw."""
+        return t("waveform.missing") if self._missing else t("waveform.reading")
 
     def set_gaps(self, gaps: list[tuple[float, float]]) -> None:
         """Replace the uncovered-speech bands, as ``(start, end)`` seconds."""
@@ -97,7 +108,7 @@ class WaveformView(QWidget):
             peaks = self._peaks
             if peaks is None or len(peaks.mins) == 0:
                 painter.setPen(palette.windowText().color())
-                painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, t("waveform.reading"))
+                painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.placeholder())
             else:
                 self._paint_bars(painter, peaks, width, height, palette.windowText().color())
 
@@ -115,16 +126,9 @@ class WaveformView(QWidget):
     def _paint_bars(
         self, painter: QPainter, peaks: Peaks, width: int, height: int, color: QColor
     ) -> None:
-        n_bins = len(peaks.mins)
-        if width <= 0 or n_bins == 0:
+        if width <= 0 or len(peaks.mins) == 0:
             return
-        start = self._viewport.start
-        span = self._viewport.span
-        edges_t = start + (np.arange(width + 1, dtype=np.float64) / width) * span
-        edges_idx = np.clip((edges_t * peaks.rate).astype(np.int64), 0, n_bins)
-        column_starts = np.clip(edges_idx[:-1], 0, n_bins - 1)
-        col_min = np.minimum.reduceat(peaks.mins, column_starts)
-        col_max = np.maximum.reduceat(peaks.maxs, column_starts)
+        col_min, col_max = column_extremes(peaks, self._viewport.start, self._viewport.span, width)
 
         mid = height / 2.0
         half = height / 2.0
@@ -133,3 +137,24 @@ class WaveformView(QWidget):
             y_top = mid - float(col_max[x]) * half
             y_bottom = mid - float(col_min[x]) * half
             painter.drawLine(x, int(y_top), x, int(y_bottom))
+
+
+def column_extremes(
+    peaks: Peaks, start: float, span: float, width: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Each pixel column's min and max over the peak bins in its slice of ``[start, start+span]``.
+
+    ``reduceat`` reduces from each index to the next, and the last index to
+    the end of the array — so without cutting the arrays at the window's end
+    the rightmost column would fold in the whole rest of the recording, and a
+    loud passage far off-screen would show as a spike at the right edge.
+    """
+    n_bins = len(peaks.mins)
+    edges_t = start + (np.arange(width + 1, dtype=np.float64) / width) * span
+    edges_idx = np.clip((edges_t * peaks.rate).astype(np.int64), 0, n_bins)
+    column_starts = np.clip(edges_idx[:-1], 0, n_bins - 1)
+    # At least one bin past the last column's start, so its reduction is never empty.
+    stop = int(max(edges_idx[-1], column_starts[-1] + 1))
+    col_min = np.minimum.reduceat(peaks.mins[:stop], column_starts)
+    col_max = np.maximum.reduceat(peaks.maxs[:stop], column_starts)
+    return col_min, col_max

@@ -2,8 +2,9 @@
 
 Two kinds of thing end up here: notices (the recording is missing, playback is
 off, a background read failed) and the coverage check's result — the
-stretches of speech no word covers, each with a Jump link to it. The strip
-hides itself when there is nothing to say.
+stretches of speech no word covers, each with a Jump link to it (the first
+few; the rest are counted), or a line saying the check is still running. The
+strip hides itself when there is nothing to say.
 """
 
 from __future__ import annotations
@@ -17,6 +18,10 @@ from qurantext.core.coverage import UncoveredSpeech
 from qurantext.gui.i18n import t
 
 __all__ = ["WarningsStrip"]
+
+#: Gaps listed one per line before the rest are only counted; a long lecture
+#: can have dozens, and the strip must not push the editor off the screen.
+_MAX_GAP_LINES = 5
 
 
 class WarningsStrip(QLabel):
@@ -33,6 +38,8 @@ class WarningsStrip(QLabel):
         self._notices: list[str] = []
         #: ``None`` until a coverage check has reported; then its gaps (maybe none).
         self._gaps: list[UncoveredSpeech] | None = None
+        #: Whether the recording's levels are being read for a first coverage check.
+        self._checking = False
         self.linkActivated.connect(self._on_link)
 
     def add_notice(self, text: str) -> None:
@@ -44,6 +51,12 @@ class WarningsStrip(QLabel):
 
     def set_gaps(self, gaps: list[UncoveredSpeech]) -> None:
         self._gaps = list(gaps)
+        self._checking = False
+        self._render()
+
+    def set_checking(self, checking: bool) -> None:
+        """Say the recording is being checked, until the first result (or *checking* False)."""
+        self._checking = checking
         self._render()
 
     def _render(self) -> None:
@@ -51,13 +64,18 @@ class WarningsStrip(QLabel):
         if self._gaps:
             lines.append(html.escape(t("review.gaps", count=len(self._gaps))))
             jump = html.escape(t("review.jump"))
-            for gap in self._gaps:
+            for gap in self._gaps[:_MAX_GAP_LINES]:
                 text = t("review.gap", duration=gap.duration, start=gap.start, end=gap.end)
                 lines.append(
                     f'&nbsp;&nbsp;{html.escape(text)} <a href="{gap.start:.3f}">{jump}</a>'
                 )
+            hidden = len(self._gaps) - _MAX_GAP_LINES
+            if hidden > 0:
+                lines.append(f"&nbsp;&nbsp;{html.escape(t('review.more_gaps', count=hidden))}")
         elif self._gaps is not None:
             lines.append(html.escape(t("review.covered")))
+        elif self._checking:
+            lines.append(html.escape(t("review.checking")))
         self.setText("<br>".join(lines))
         self.setVisible(bool(lines))
 

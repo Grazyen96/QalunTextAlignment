@@ -451,6 +451,66 @@ def test_a_ripple_dragged_past_the_clamp_and_back_ends_where_it_began(qt_app) ->
     assert (words[1].end, words[2].start, words[2].end) == (3.0, 3.0, 4.0)
 
 
+def test_segment_list_stretches_the_text_and_names_the_speech_rows(qt_app) -> None:
+    from PySide6.QtWidgets import QHeaderView
+
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.segment_list import SegmentList
+
+    table = SegmentList(_three_cue_session())
+    header = table.horizontalHeader()
+    assert header.sectionResizeMode(2) == QHeaderView.ResizeMode.Stretch
+    for column in (0, 1, 3):
+        assert header.sectionResizeMode(column) == QHeaderView.ResizeMode.ResizeToContents
+    assert table.item(0, 0).text() == t("segments.speech") == "Speech"
+
+
+def test_the_waveform_says_when_the_recording_is_missing(qt_app) -> None:
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.waveform_view import WaveformView
+
+    view = WaveformView(Viewport())
+    assert view.placeholder() == t("waveform.reading")
+    view.set_missing()
+    assert view.placeholder() == t("waveform.missing") == "The recording is not available."
+
+
+def test_the_last_waveform_column_ends_at_the_window(qt_app) -> None:
+    from qurantext.gui.review.waveform_view import column_extremes
+
+    # 10 s at 10 bins/s: quiet for the first 5 s, loud after.
+    maxs = np.array([0.1] * 50 + [0.9] * 50, np.float32)
+    peaks = Peaks(mins=-maxs, maxs=maxs, rate=10.0, duration=10.0)
+    col_min, col_max = column_extremes(peaks, 0.0, 4.0, 4)
+    assert col_max.tolist() == pytest.approx([0.1] * 4)
+    assert col_min.tolist() == pytest.approx([-0.1] * 4)
+
+
+def test_the_warnings_strip_lists_five_gaps_then_counts_the_rest(qt_app) -> None:
+    from qurantext.core.coverage import UncoveredSpeech
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.warnings_strip import WarningsStrip
+
+    strip = WarningsStrip()
+    strip.set_gaps([UncoveredSpeech(float(i), i + 0.5, -20.0) for i in range(8)])
+    assert strip.text().count("Jump") == 5
+    assert t("review.more_gaps", count=3) in strip.text()
+    assert t("review.more_gaps", count=3) == "…and 3 more"
+
+
+def test_the_warnings_strip_says_it_is_checking_until_the_first_result(qt_app) -> None:
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.warnings_strip import WarningsStrip
+
+    strip = WarningsStrip()
+    strip.set_checking(True)
+    assert t("review.checking") in strip.text()
+    assert t("review.checking") == "Checking the recording for speech with no word…"
+    strip.set_gaps([])
+    assert t("review.checking") not in strip.text()
+    assert t("review.covered") in strip.text()
+
+
 def test_jobs_that_end_at_once_are_let_go_safely(qt_app) -> None:
     """Dropping a finished thread before its OS thread exits crashed the process."""
     from PySide6.QtCore import QObject

@@ -158,13 +158,15 @@ class ReviewWindow(QMainWindow):
 
         self._set_duration(_content_end(project), measured=False)
         if not self.player.available:
+            # One short line in the strip; the technical reason is on the button.
             self.play_button.setEnabled(False)
             self.play_button.setToolTip(self.player.reason)
-            self.warnings.add_notice(self.player.reason)
+            self.warnings.add_notice(t("player.unavailable_short"))
         if self._audio.is_file():
             self.player.load(self._audio)
             self._start_reads()
         else:
+            self.waveform.set_missing()
             self.warnings.add_notice(t("review.audio_missing", path=str(self._audio)))
         self._sync_state()
         self._show_time(self.player.position(), force=True)
@@ -526,7 +528,9 @@ class ReviewWindow(QMainWindow):
         self.undo_button.setEnabled(session.can_undo and editable)
         self.redo_button.setEnabled(session.can_redo and editable)
         self.remove_button.setEnabled(editable)
-        self.reviewed_button.setEnabled(session.project.review.get("state") != "reviewed")
+        self.reviewed_button.setEnabled(
+            session.project.review.get("state") != "reviewed" and editable
+        )
         title = t("review.title", name=self._audio.stem)
         self.setWindowTitle(f"{title} *" if session.dirty else title)
         self._show_selection(self.strip.selected)
@@ -539,9 +543,15 @@ class ReviewWindow(QMainWindow):
     def _open_export_dialog(self) -> None:
         if self._rendering:
             return
-        ExportDialog(self.session, self).exec()
+        self._make_export_dialog().exec()
         # The dialog may have saved the session on our behalf; catch up either way.
         self._sync_state()
+
+    def _make_export_dialog(self) -> ExportDialog:
+        """The Export dialog for this session; a save it makes is announced as ours."""
+        dialog = ExportDialog(self.session, self)
+        dialog.saved.connect(self.saved)
+        return dialog
 
     def _start_render(self) -> None:
         """Save, then render a snapshot of the project's cards and captions in a worker.
@@ -588,6 +598,9 @@ class ReviewWindow(QMainWindow):
             # live project (editing was disabled): copy it back rather than the
             # whole snapshot, so it never overwrites an editing that snuck in.
             self.session.project.render = copy.deepcopy(self._render_project_copy.render)
+        if self.session.project.path is not None:
+            # The render recorded itself in the project file (``render_project`` saves it).
+            self.saved.emit(self.session.project.path)
         if self._closed:
             return
         self._announce_render(outcome)
@@ -742,6 +755,7 @@ class ReviewWindow(QMainWindow):
             )
         if self._levels is None and not self._reading_levels:
             self._reading_levels = True
+            self.warnings.set_checking(True)
             self._jobs.start(
                 lambda progress, cancel: speech_levels(audio),
                 on_finished=self._on_levels,
@@ -763,6 +777,9 @@ class ReviewWindow(QMainWindow):
 
     def _on_levels_done(self) -> None:
         self._reading_levels = False
+        if self._levels is None:
+            # The read failed or was stopped: its notice (if any) says so instead.
+            self.warnings.set_checking(False)
 
     def _recheck_coverage(self) -> None:
         """Find uncovered speech from the cached levels, on the UI thread.

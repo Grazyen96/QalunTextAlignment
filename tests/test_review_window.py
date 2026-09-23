@@ -787,3 +787,100 @@ def test_removing_an_earlier_caption_drops_the_strip_selection(qt_app, tmp_path)
     QTest.keyClick(window, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
     assert len(window.session.project.captions) == 3
     assert window.strip.selected is None
+
+
+def test_without_playback_the_strip_says_so_briefly_and_the_button_has_the_details(
+    qt_app, tmp_path
+) -> None:
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.player import Player
+    from qurantext.gui.review.window import ReviewWindow
+
+    reason = t("player.unavailable", details="no audio backend")
+    window = ReviewWindow(_project(tmp_path), player=Player(reason=reason))
+    assert t("player.unavailable_short") in window.warnings.text()
+    assert t("player.unavailable_short") == (
+        "Playback is off: install PySide6-Addons to hear the recording."
+    )
+    assert "no audio backend" not in window.warnings.text()
+    assert "no audio backend" in window.play_button.toolTip()
+
+
+def test_a_missing_recording_is_shown_on_the_waveform(qt_app, tmp_path) -> None:
+    from qurantext.gui.i18n import t
+
+    window, _, _ = _window(qt_app, tmp_path)
+    assert window.waveform.placeholder() == t("waveform.missing")
+
+
+def test_the_strip_says_the_recording_is_being_checked_until_the_levels_arrive(
+    qt_app, tmp_path
+) -> None:
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.window import ReviewWindow
+
+    project = _project(tmp_path)
+    project.audio = tmp_path / "unreadable.mp3"
+    project.audio.write_bytes(b"")
+    window = ReviewWindow(project, player=FakePlayer(duration=10.0, now=_Now()))
+    assert t("review.checking") in window.warnings.text()
+    window._on_levels(_levels_with_speech_between(4.0, 6.0))
+    assert t("review.checking") not in window.warnings.text()
+    assert "2.0 s at 4.0–6.0 s" in window.warnings.text()
+    assert _wait_for(lambda: window._jobs.active == 0, 10000)
+
+
+def test_saves_made_by_the_export_dialog_are_announced(qt_app, tmp_path) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Period)
+    saved = []
+    window.saved.connect(saved.append)
+    dialog = window._make_export_dialog()
+    dialog.set_destination(tmp_path / "out", "clip")
+    dialog.export()
+    assert saved == [window.session.project.path]
+    assert not window.session.dirty
+
+
+def test_a_finished_render_is_announced_as_a_save(qt_app, tmp_path, monkeypatch) -> None:
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.gui.jobs import JobOutcome
+
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    saved = []
+    window.saved.connect(saved.append)
+
+    def fake_render(project, **kwargs):
+        return JobOutcome(
+            matches=project.matches, video=tmp_path / "v.mp4", cards=1, mode="recitation"
+        )
+
+    monkeypatch.setattr(jobs_module, "run_render", fake_render)
+    monkeypatch.setattr(window, "_announce_render", lambda outcome: None)
+    window.render_requested.emit()
+    assert not window.reviewed_button.isEnabled(), "no marking as reviewed mid-render"
+    assert _wait_for(lambda: not window._rendering, 5000)
+    assert saved == [window.session.project.path]
+    assert window.reviewed_button.isEnabled()
+
+
+def test_the_export_dialog_closes_and_says_when_the_render_is_stale(qt_app, tmp_path) -> None:
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.export_dialog import ExportDialog
+    from qurantext.gui.review.session import CARD, ReviewSession, WordRef
+
+    project = _project(tmp_path)
+    project.record_render(tmp_path / "v.mp4", preset="social", basmala_offset_s=1.0)
+    session = ReviewSession(project)
+    dialog = ExportDialog(session)
+    assert t("export.stale") not in dialog._video_radio.text()
+    session.retime(WordRef(CARD, 0, 0), end=2.5)
+    dialog = ExportDialog(session)
+    assert dialog._video_radio.text() == f"{t('export.match_video')} {t('export.stale')}"
+    assert t("export.stale") == "(rendered before your latest changes)"
+    dialog.show()
+    dialog.close_button.click()
+    assert not dialog.isVisible()

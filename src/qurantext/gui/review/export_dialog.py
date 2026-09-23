@@ -2,16 +2,18 @@
 
 Exporting never renders. Unsaved edits are saved first (through
 :meth:`ReviewSession.save`), so the files written here and the project file
-agree with each other. A bad destination or a project that cannot yield a
-cue (:func:`export_project_subtitles` raising ``ValueError``/``OSError``) is
-shown inline, in the dialog itself, rather than raised — the review window
-underneath must stay up either way.
+agree with each other. A bad destination, a recording ffprobe cannot read,
+or a project that cannot yield a cue (:func:`export_project_subtitles`
+raising ``ValueError``/``OSError``/``RuntimeError``) is shown inline, in
+the dialog itself, rather than raised — the review window underneath must
+stay up either way.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -41,6 +43,9 @@ _DEFAULT_FORMAT = "srt"
 
 class ExportDialog(QDialog):
     """Write the session's project as subtitle files, without rendering anything."""
+
+    #: The dialog saved the project before exporting; carries the file's path.
+    saved = Signal(object)
 
     def __init__(
         self,
@@ -105,6 +110,10 @@ class ExportDialog(QDialog):
         self._show_button.clicked.connect(self._show_written)
         layout.addWidget(self._show_button)
 
+        self.close_button = QPushButton(t("export.close"))
+        self.close_button.clicked.connect(self.accept)
+        layout.addWidget(self.close_button)
+
     def _set_defaults(self) -> None:
         self._format_boxes[_DEFAULT_FORMAT].setChecked(True)
 
@@ -116,6 +125,9 @@ class ExportDialog(QDialog):
         self._name_field.setText(Path(project.audio).stem)
 
         available = self.video_timeline_available()
+        if project.render_is_stale:
+            # Still the video's clock, but not the video's content: say so.
+            self._video_radio.setText(f"{t('export.match_video')} {t('export.stale')}")
         self._video_radio.setEnabled(available)
         self._video_radio.setChecked(available)
         self._audio_radio.setChecked(not available)
@@ -172,7 +184,7 @@ class ExportDialog(QDialog):
             return []
         try:
             if self._session.dirty:
-                self._session.save()
+                self.saved.emit(self._session.save())
             written = export_project_subtitles(
                 self._session.project,
                 self.destination(),
@@ -180,7 +192,8 @@ class ExportDialog(QDialog):
                 timeline=self.timeline(),
                 db_path=self._db_path,
             )
-        except (ValueError, OSError) as error:
+        except (ValueError, OSError, RuntimeError) as error:
+            # RuntimeError: ffprobe could not read the recording's length.
             self._show_error(str(error))
             return []
         self._written = written
