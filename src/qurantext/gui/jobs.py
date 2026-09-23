@@ -8,7 +8,7 @@ calls, so the window can put review between them.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -17,7 +17,7 @@ from qurantext.config.paths import (
     RECITATION_MATCHING_OUTPUT_DIR,
     VIDEOS_OUTPUT_DIR,
 )
-from qurantext.jobs.project import Project, save_project
+from qurantext.jobs.project import Project, load_project, save_project
 from qurantext.jobs.project_render import render_project
 from qurantext.pipelines.detection import run_detection, run_recitation_range
 from qurantext.utils.progress import CancelToken, ProgressCallback, report
@@ -81,6 +81,8 @@ class JobOutcome:
     mode: str
     project: Path | None = None
     subtitles: tuple[Path, ...] = ()
+    #: Where re-matching put an earlier project whose content differed, if it did.
+    backup: Path | None = None
 
 
 def project_path_for(match_path: Path) -> Path:
@@ -88,17 +90,38 @@ def project_path_for(match_path: Path) -> Path:
     return Path(match_path).with_suffix(".qalun.json")
 
 
-def _set_aside(path: Path) -> None:
-    """Keep an earlier project instead of overwriting its corrections."""
-    if path.exists():
-        stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
-        stem = path.name.removesuffix(".qalun.json")
-        backup = path.with_name(f"{stem}.{stamp}.qalun-backup.json")
-        count = 2
-        while backup.exists():
-            backup = path.with_name(f"{stem}.{stamp}-{count}.qalun-backup.json")
-            count += 1
-        path.rename(backup)
+def _set_aside(path: Path) -> Path | None:
+    """Keep an earlier project instead of overwriting its corrections.
+
+    Returns where it went, or None when there was nothing to keep.
+    """
+    if not path.exists():
+        return None
+    stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+    stem = path.name.removesuffix(".qalun.json")
+    backup = path.with_name(f"{stem}.{stamp}.qalun-backup.json")
+    count = 2
+    while backup.exists():
+        backup = path.with_name(f"{stem}.{stamp}-{count}.qalun-backup.json")
+        count += 1
+    path.rename(backup)
+    return backup
+
+
+def _keep_earlier(destination: Path, derived: Project) -> Path | None:
+    """Back up the project at *destination* unless re-matching reproduced it exactly.
+
+    A re-match that yields the same cards and captions has nothing to lose, and a
+    backup per run would bury the one that matters. A file that cannot be read
+    is always kept: what it held cannot be compared.
+    """
+    if not destination.exists():
+        return None
+    try:
+        unchanged = load_project(destination).content_hash() == derived.content_hash()
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        unchanged = False
+    return None if unchanged else _set_aside(destination)
 
 
 def run_matching(
@@ -107,7 +130,22 @@ def run_matching(
     progress: ProgressCallback | None = None,
     cancel: CancelToken | None = None,
 ) -> Project:
-    """Find or align the ayat, then write the project the review opens."""
+    """Find or align the ayat, then write the project the review opens.
+
+    An earlier project for the same match file is kept as a backup when its
+    content differs, and the backup is reported as progress.
+    """
+    project, _backup = _match(spec, progress=progress, cancel=cancel)
+    return project
+
+
+def _match(
+    spec: JobSpec,
+    *,
+    progress: ProgressCallback | None = None,
+    cancel: CancelToken | None = None,
+) -> tuple[Project, Path | None]:
+    """:func:`run_matching`, also returning the backup so :func:`run_job` can report it."""
     audio = Path(spec.audio)
     match_dir = Path(
         spec.output_dir
@@ -146,9 +184,11 @@ def run_matching(
 
     project = Project.from_match_file(match_path, audio, mode=spec.mode)
     destination = project_path_for(match_path)
-    _set_aside(destination)
+    backup = _keep_earlier(destination, project)
+    if backup is not None:
+        report(progress, "detect", f"Kept your earlier corrections in {backup.name}")
     save_project(project, destination)
-    return project
+    return project, backup
 
 
 def run_render(
@@ -189,7 +229,7 @@ def run_job(
     cancel: CancelToken | None = None,
 ) -> JobOutcome:
     """Match, then render. Both stages report progress and honour Cancel."""
-    project = run_matching(spec, progress=progress, cancel=cancel)
+    project, backup = _match(spec, progress=progress, cancel=cancel)
     if not spec.render:
         return JobOutcome(
             matches=Path(project.matches),
@@ -197,9 +237,11 @@ def run_job(
             cards=len(project.cards),
             mode=spec.mode,
             project=project.path,
+            backup=backup,
         )
     if cancel is not None:
         cancel.raise_if_cancelled("render")
-    return run_render(
+    outcome = run_render(
         project, preset=spec.preset, output_dir=spec.output_dir, progress=progress, cancel=cancel
     )
+    return replace(outcome, backup=backup)
