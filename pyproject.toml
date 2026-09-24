@@ -61,7 +61,9 @@ target-version = "py310"
 exclude = ["prototypes"]
 
 [tool.ruff.lint]
-select = ["B", "E", "F", "I", "UP"]
+# PLE2502: no literal direction marks in source; the Arabic table writes them as
+# \u escapes so a reviewer can see them (and cannot be misled by them).
+select = ["B", "E", "F", "I", "UP", "PLE2502"]
 ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]

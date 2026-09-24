@@ -25,7 +25,7 @@ from qurantext.gui.i18n import (
 )
 
 GUI_SOURCE = Path(__file__).resolve().parents[1] / "src" / "qurantext" / "gui"
-_FSI, _PDI, _LRI = "⁨", "⁩", "⁦"
+_FSI, _PDI, _LRI = "\u2068", "\u2069", "\u2066"
 _CALL = re.compile(r"""\btn?\(\s*["']([a-z0-9_.]+)["']""")
 
 #: The plural forms each language's table must give (CLDR cardinal categories).
