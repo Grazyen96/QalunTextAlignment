@@ -349,3 +349,77 @@ def test_the_running_row_isolates_the_file_name(qt_app, tmp_path, no_default_job
     text = panel.list.itemWidget(panel.list.item(0)).label.text()
     assert text == i18n.t("home.running_row", name="recitation.m4a", progress=starting)
     assert "\u2068recitation.m4a\u2069" in text
+
+
+# --- what the reader sees: the order Qt draws each part in ------------------------
+# Each line is laid out in the direction a label takes from its own text, so a
+# table edit that drops an isolate or the leading RLM changes the order and fails.
+
+
+def test_a_job_detail_line_reads_mode_scope_status_from_the_right(
+    qt_app, tmp_path, no_default_job_dirs
+) -> None:
+    from tests.bidi_helpers import left_to_right
+
+    prefs = _prefs(tmp_path)
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    prefs.job_dirs = [jobs_dir]
+    card = {"surah_num": 25, "from_ayah": 7, "to_ayah": 11, "start_time": 0.0, "end_time": 5.0}
+    project = Project(audio=jobs_dir / "one.m4a", mode="recitation", cards=[card])
+    save_project(project, jobs_dir / "one_recitation.qalun.json")
+
+    panel = JobListPanel(prefs)
+    line = panel.list.itemWidget(panel.list.item(0)).detail_label.text()
+    mode, status = i18n.t("home.mode.recitation"), i18n.t("home.status.needs_review")
+    # From the left: the status, then 25:7–11 left to right, then the mode at the right edge.
+    assert left_to_right(line, [mode, "25", "11", status]) == [status, "25", "11", mode]
+
+
+def test_the_selection_line_reads_word_then_times_in_order(qt_app) -> None:
+    from qurantext.gui.i18n import time_span
+    from tests.bidi_helpers import left_to_right
+
+    word = _AYAH_WORDS[0]
+    line = i18n.t("review.selected", word=word, span=time_span(2.81, 4.03, sep=" \u2192 "))
+    assert left_to_right(line, [word, "2.81", "4.03", "ث"]) == [
+        "ث",
+        "2.81",
+        "4.03",
+        word,
+    ]
+
+
+def test_a_gap_line_keeps_its_start_before_its_end(qt_app) -> None:
+    from qurantext.gui.i18n import time_span
+    from tests.bidi_helpers import left_to_right
+
+    line = i18n.t("review.gap", duration=0.5, span=time_span(16.8, 23.0, digits=1))
+    # Read from the right: 0.5 s at 16.8–23.0 s; the range itself runs left to right.
+    assert left_to_right(line, ["0.5", "عند", "16.8", "23.0"]) == [
+        "16.8",
+        "23.0",
+        "عند",
+        "0.5",
+    ]
+
+
+def test_a_preset_keeps_width_before_height(qt_app) -> None:
+    """A combo item is laid out in the combo's direction, right to left here."""
+    from tests.bidi_helpers import left_to_right
+
+    line = i18n.t("preset.social")
+    assert left_to_right(line, ["عمودي", "1080", "1920", "30", "إطارًا"], rtl=True) == [
+        "إطارًا",
+        "30",
+        "1080",
+        "1920",
+        "عمودي",
+    ]
+
+
+def test_the_rate_reads_number_then_times_sign(qt_app) -> None:
+    """A combo item too: without its isolate an RTL combo draws "×1.5"."""
+    from tests.bidi_helpers import left_to_right
+
+    assert left_to_right(i18n.t("review.rate", rate=1.5), ["×", "1.5"], rtl=True) == ["1.5", "×"]

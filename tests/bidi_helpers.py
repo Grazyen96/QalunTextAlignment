@@ -14,11 +14,13 @@ from collections.abc import Sequence
 __all__ = ["left_to_right"]
 
 
-def left_to_right(text: str, parts: Sequence[str], *, rtl: bool) -> list[str]:
+def left_to_right(text: str, parts: Sequence[str], *, rtl: bool | None = None) -> list[str]:
     """*parts* of *text* in the order they are drawn, from the left edge.
 
     Each part must occur exactly once in *text*. *rtl* is the paragraph
-    direction the widget lays the line out in. A part's place is its leftmost
+    direction; None (the default) takes it from the text's first strong letter
+    outside its isolates, as a label lays out plain text, so a line that
+    loses its leading RLM is caught. A part's place is its leftmost
     glyph, which is its left edge whichever way it runs itself.
     """
     from PySide6.QtCore import Qt
@@ -26,9 +28,12 @@ def left_to_right(text: str, parts: Sequence[str], *, rtl: bool) -> list[str]:
 
     layout = QTextLayout(text, QFont())
     option = QTextOption()
-    option.setTextDirection(
-        Qt.LayoutDirection.RightToLeft if rtl else Qt.LayoutDirection.LeftToRight
-    )
+    if rtl is None:
+        option.setTextDirection(Qt.LayoutDirection.LayoutDirectionAuto)
+    else:
+        option.setTextDirection(
+            Qt.LayoutDirection.RightToLeft if rtl else Qt.LayoutDirection.LeftToRight
+        )
     layout.setTextOption(option)
     layout.beginLayout()
     line = layout.createLine()
