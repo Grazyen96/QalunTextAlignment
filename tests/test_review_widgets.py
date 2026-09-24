@@ -551,9 +551,20 @@ def test_jobs_that_end_at_once_are_let_go_safely(qt_app) -> None:
         jobs.start(job, on_finished=sink.finished, on_failed=sink.failed)
         deadline = time.monotonic() + 5
         while jobs.active and time.monotonic() < deadline:
-            QTest.qWait(5)
-    QTest.qWait(20)
+            _spin_briefly(qt_app)
+    _spin_briefly(qt_app)
     assert jobs.active == 0 and sink.failures == 80
+
+
+def _spin_briefly(qt_app) -> None:
+    """Deliver what the workers sent, then sleep a moment, never holding the GIL.
+
+    Not ``QTest.qWait``: PySide6 keeps the GIL for the whole of that call, so a
+    worker needing it while holding a Qt lock the UI thread wants deadlocks the two.
+    """
+    qt_app.processEvents()
+    time.sleep(0.005)
+    qt_app.processEvents()
 
 
 def test_threads_still_lingering_at_exit_are_joined_within_a_bound(qt_app, monkeypatch) -> None:

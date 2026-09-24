@@ -46,14 +46,60 @@ class _Now:
         return self.t
 
 
+def _spin(ms: int) -> None:
+    """Run the event loop for about *ms*, never holding the GIL while it waits.
+
+    Not ``QTest.qWait``: PySide6 keeps the GIL for the whole of that call, so a
+    worker thread that needs it while holding a Qt lock the UI thread wants
+    deadlocks the two (the full suite hung that way). ``processEvents`` and
+    ``sendPostedEvents`` release it, and so does ``time.sleep``.
+    """
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    deadline = time.monotonic() + ms / 1000
+    while True:
+        QCoreApplication.processEvents()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return
+        time.sleep(min(0.005, left))
+
+
 def _wait_for(condition, timeout_ms):
     """Spin the event loop until *condition()* holds (PySide6's QTest has no qWaitFor)."""
     deadline = time.monotonic() + timeout_ms / 1000
     while not condition():
         if time.monotonic() > deadline:
             return False
-        QTest.qWait(20)
+        _spin(20)
     return True
+
+
+def test_waiting_lets_worker_threads_run_python(qt_app) -> None:
+    """``_wait_for`` must release the GIL while it spins the event loop.
+
+    ``QTest.qWait`` holds it throughout, so a worker thread needing it again
+    and again (every signal it emits, every Python line) crawls, and one that
+    needs it while holding a Qt lock the UI thread wants deadlocks — the full
+    suite hung that way inside ``_wait_for``. This worker takes the GIL back
+    50 times; while ``QTest.qWait`` spun, each took up to a whole wait slice.
+    """
+    import threading
+
+    done = threading.Event()
+
+    def worker() -> None:
+        for _ in range(50):
+            time.sleep(0.001)  # gives the GIL up, then needs it back
+        done.set()
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    try:
+        assert _wait_for(done.is_set, 500)
+    finally:
+        thread.join()
 
 
 def _project(tmp_path):
@@ -93,7 +139,7 @@ def _window(qt_app, tmp_path):
 
 def test_it_opens_on_a_missing_recording_and_says_so(qt_app, tmp_path) -> None:
     window, _, _ = _window(qt_app, tmp_path)
-    QTest.qWait(50)
+    _spin(50)
     assert "missing.mp3" in window.warnings.text()
 
 
