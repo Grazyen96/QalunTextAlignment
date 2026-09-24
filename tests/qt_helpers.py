@@ -7,9 +7,10 @@ wait is written once.
 
 from __future__ import annotations
 
+import threading
 import time
 
-__all__ = ["spin", "wait_for", "wait_until_listed"]
+__all__ = ["blocking_list_jobs", "spin", "wait_for", "wait_until_listed"]
 
 
 def spin(ms: int) -> None:
@@ -49,3 +50,26 @@ def wait_until_listed(panel, timeout_ms: int = 10_000) -> None:
     refreshed its rows are still the old ones.
     """
     assert wait_for(lambda: not panel.reading, timeout_ms), "the job list's read never landed"
+
+
+def blocking_list_jobs(monkeypatch):
+    """Make a ``JobListPanel``'s reads wait for ``release``; returns (release, started calls).
+
+    Each read lists the folders for real, then waits, so a test can look at
+    the panel while a read is still out.
+    """
+    from qurantext.gui.home import job_list as job_list_module
+    from qurantext.jobs import catalog
+
+    release = threading.Event()
+    calls: list[int] = []
+    real = catalog.list_jobs
+
+    def blocked(*args, **kwargs):
+        calls.append(threading.get_ident())
+        result = real(*args, **kwargs)
+        assert release.wait(10), "the test never released the read"
+        return result
+
+    monkeypatch.setattr(job_list_module, "list_jobs", blocked)
+    return release, calls

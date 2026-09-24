@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import gc
+import logging
 import os
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -21,8 +23,9 @@ from qurantext.gui.review.background import join_lingering
 from qurantext.jobs import catalog
 from qurantext.jobs.catalog import DAMAGED
 from qurantext.jobs.project import Project, save_project
+from qurantext.utils.progress import CancelToken, JobCancelled
 from tests.media_helpers import QURAN_FILE
-from tests.qt_helpers import spin, wait_for, wait_until_listed
+from tests.qt_helpers import blocking_list_jobs, spin, wait_for, wait_until_listed
 
 
 @pytest.fixture()
@@ -262,22 +265,6 @@ def test_refresh_keeps_the_running_row(qt_app, prefs) -> None:
 # -- reading off the UI thread -----------------------------------------------------------
 
 
-def _blocking_list_jobs(monkeypatch):
-    """Make the panel's reads wait for ``release``; returns (release, started calls)."""
-    release = threading.Event()
-    calls: list[int] = []
-    real = catalog.list_jobs
-
-    def blocked(*args, **kwargs):
-        calls.append(threading.get_ident())
-        result = real(*args, **kwargs)
-        assert release.wait(10), "the test never released the read"
-        return result
-
-    monkeypatch.setattr(job_list_module, "list_jobs", blocked)
-    return release, calls
-
-
 def test_refresh_reads_projects_off_the_ui_thread(qt_app, prefs, monkeypatch) -> None:
     seen = {}
     real = catalog.list_jobs
@@ -297,7 +284,7 @@ def test_refresh_returns_before_the_read_and_says_so_when_it_lands(
     qt_app, prefs, monkeypatch
 ) -> None:
     _save(prefs.job_dirs[0], "one")
-    release, _calls = _blocking_list_jobs(monkeypatch)
+    release, _calls = blocking_list_jobs(monkeypatch)
 
     panel = JobListPanel(prefs)  # would hang here if the read ran on this thread
     landed = []
@@ -312,7 +299,7 @@ def test_refresh_returns_before_the_read_and_says_so_when_it_lands(
 def test_the_first_read_does_not_claim_there_are_no_jobs(qt_app, prefs, monkeypatch) -> None:
     """Until the folders have been read, "your jobs appear here" would be a guess."""
     _save(prefs.job_dirs[0], "one")
-    release, _calls = _blocking_list_jobs(monkeypatch)
+    release, _calls = blocking_list_jobs(monkeypatch)
 
     panel = JobListPanel(prefs)
     assert panel.empty_label.text() == t("home.reading")
@@ -326,6 +313,85 @@ def test_the_first_read_does_not_claim_there_are_no_jobs(qt_app, prefs, monkeypa
     wait_until_listed(panel)
     assert panel.empty_label.text() == t("home.empty")
     assert not panel.empty_label.isHidden() and panel.list.isHidden()
+
+
+def test_a_cancelled_read_stops_instead_of_returning_an_empty_listing(prefs) -> None:
+    """Stopping the panel cancels its read; it must stop, not report that nothing was found."""
+    cancel = CancelToken()
+    cancel.cancel()
+    with pytest.raises(JobCancelled):
+        job_list_module._read_jobs(1, list(prefs.job_dirs), frozenset(), cancel=cancel)
+
+
+def test_stopping_a_slow_read_lets_its_thread_end_soon(qt_app, prefs, monkeypatch) -> None:
+    """A folder on an unresponsive drive held the exit up for as long as the read took
+    (up to the app's 30 s bound): the read ignored its cancel token."""
+    jobs_dir = prefs.job_dirs[0]
+    for index in range(100):
+        (jobs_dir / f"{index}.qalun.json").write_text("{}", encoding="utf-8")
+    opened = threading.Event()
+
+    def slow(path):
+        opened.set()
+        time.sleep(0.1)  # 100 files: 10 s uncancelled
+        return None
+
+    monkeypatch.setattr(catalog, "_entry_for", slow)
+    panel = JobListPanel(prefs)
+    try:
+        assert wait_for(opened.is_set)
+        panel.stop_reading()
+        started = time.monotonic()
+        assert join_lingering(3000), "the read went on after it was cancelled"
+        assert time.monotonic() - started < 3
+    finally:
+        assert join_lingering(15_000)
+
+
+def test_a_failed_read_is_logged_and_leaves_the_rows(prefs, monkeypatch, caplog) -> None:
+    def unreadable(*args, **kwargs):
+        raise OSError("the network drive went away")
+
+    monkeypatch.setattr(job_list_module, "list_jobs", unreadable)
+    with caplog.at_level(logging.WARNING, logger=job_list_module.__name__):
+        listing = job_list_module._read_jobs(7, [], frozenset())
+    assert listing.generation == 7 and listing.entries is None
+    assert "the network drive went away" in caplog.text
+
+
+def test_a_read_that_fails_lands_as_itself_not_as_the_newest(
+    qt_app, prefs, monkeypatch, caplog
+) -> None:
+    """An older read failing while a newer one is out must not end the wait for the newer."""
+    panel = _listed(prefs)
+    gates: dict[int, threading.Event] = {}
+    real = job_list_module._read_jobs
+
+    def reads(generation, extra, hidden, **kwargs):
+        assert gates.setdefault(generation, threading.Event()).wait(10)
+        if generation == older:
+            raise OSError("the network drive went away")
+        return real(generation, extra, hidden, **kwargs)
+
+    monkeypatch.setattr(job_list_module, "_read_jobs", reads)
+    landed = []
+    panel.refreshed.connect(lambda: landed.append(panel._shown_generation))
+    panel.refresh()
+    older = panel._generation
+    panel.refresh()
+    newer = panel._generation
+    gates.setdefault(older, threading.Event())
+    gates.setdefault(newer, threading.Event())
+
+    with caplog.at_level(logging.WARNING, logger=job_list_module.__name__):
+        gates[older].set()
+        assert wait_for(lambda: "the network drive went away" in caplog.text)
+        spin(50)
+        assert panel.reading and landed == [], "the newer read is still out"
+
+    gates[newer].set()
+    wait_until_listed(panel)
+    assert landed == [newer]
 
 
 def test_a_late_stale_read_never_overwrites_a_newer_one(qt_app, prefs, monkeypatch) -> None:
@@ -368,7 +434,7 @@ def test_a_panel_dropped_while_it_reads_does_not_take_the_process_down(
     qt_app, prefs, monkeypatch
 ) -> None:
     """Destroying a QThread that still runs aborts; the running read is parked instead."""
-    release, calls = _blocking_list_jobs(monkeypatch)
+    release, calls = blocking_list_jobs(monkeypatch)
     panel = JobListPanel(prefs)
     assert wait_for(lambda: calls)
     del panel
@@ -380,7 +446,7 @@ def test_a_panel_dropped_while_it_reads_does_not_take_the_process_down(
 def test_closing_the_home_window_while_it_reads_does_not_crash(qt_app, prefs, monkeypatch) -> None:
     from qurantext.gui.main_window import MainWindow
 
-    release, calls = _blocking_list_jobs(monkeypatch)
+    release, calls = blocking_list_jobs(monkeypatch)
     window = MainWindow(prefs=prefs)
     window.show()
     assert wait_for(lambda: calls)

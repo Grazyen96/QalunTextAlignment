@@ -19,6 +19,7 @@ from qurantext.jobs.catalog import (
     list_jobs,
 )
 from qurantext.jobs.project import Project, save_project
+from qurantext.utils.progress import CancelToken, JobCancelled
 
 
 def _card(surah, a, b, kind=None):
@@ -213,3 +214,35 @@ def test_a_job_whose_choices_changed_since_its_render_reads_changed(tmp_path) ->
         "resubbed": CHANGED_SINCE_RENDER,
         "old": RENDERED,  # a render that did not record its subtitles is not second-guessed
     }
+
+
+def test_a_cancelled_listing_stops_between_files(tmp_path, monkeypatch) -> None:
+    """A folder on a slow drive must not hold up whoever cancelled the read."""
+    import pytest
+
+    from qurantext.jobs import catalog
+
+    for name in ("a", "b", "c"):
+        _save(tmp_path, name)
+    cancel = CancelToken()
+    opened: list[PathlibPath] = []
+    real = catalog._entry_for
+
+    def entry_then_cancel(path):
+        opened.append(path)
+        cancel.cancel()
+        return real(path)
+
+    monkeypatch.setattr(catalog, "_entry_for", entry_then_cancel)
+    with pytest.raises(JobCancelled):
+        list_jobs([tmp_path], cancel=cancel)
+    assert len(opened) == 1
+
+
+def test_a_cancelled_listing_does_not_start(tmp_path) -> None:
+    import pytest
+
+    cancel = CancelToken()
+    cancel.cancel()
+    with pytest.raises(JobCancelled):
+        list_jobs([tmp_path], cancel=cancel)

@@ -18,11 +18,12 @@ otherwise freeze the whole window while every file is opened and parsed.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtCore import QObject, QPoint, Qt, Signal
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -50,8 +51,11 @@ from qurantext.jobs.catalog import (
     job_dirs_for,
     list_jobs,
 )
+from qurantext.utils.progress import CancelToken, JobCancelled
 
 __all__ = ["JobListPanel"]
+
+_log = logging.getLogger(__name__)
 
 #: A fixed amber, not a palette role: it must read as "needs attention" against
 #: both a light and a dark window background, and it already does this job for
@@ -102,6 +106,8 @@ class JobListPanel(QWidget):
         self._generation = 0
         #: The number of the read the rows show now; 0 until the first lands.
         self._shown_generation = 0
+        #: Each read still out, by number: what hears of it failing (see ``_Read``).
+        self._pending: dict[int, _Read] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -143,14 +149,16 @@ class JobListPanel(QWidget):
         on the worker.
         """
         self._generation += 1
+        read = self._pending[self._generation] = _Read(self, self._generation)
         self._reads.start(
             partial(
                 _read_jobs, self._generation, list(self._prefs.job_dirs), self._prefs.hidden_jobs
             ),
             on_finished=self._on_listed,
-            # _read_jobs catches everything, so this is only a backstop; a bound
-            # method all the same, so it runs on the UI thread.
-            on_failed=self._on_list_failed,
+            # _read_jobs catches what it can, so this is only a backstop; bound
+            # methods all the same, so they run on the UI thread.
+            on_failed=read.failed,
+            on_done=read.done,
         )
         self._update_empty_state()
 
@@ -163,7 +171,8 @@ class JobListPanel(QWidget):
         """Let go of any read still running; for whoever is about to drop this panel.
 
         A read has nothing to lose by being cut short, so this does not wait
-        for it: the thread is parked until it ends (see ``review/background.py``).
+        for it: it is cancelled, which it notices between files, and its thread
+        is parked until it ends (see ``review/background.py``).
         """
         self._reads.stop(wait_ms=0)
 
@@ -186,8 +195,13 @@ class JobListPanel(QWidget):
         self._show_running_row()
         self.refreshed.emit()
 
-    def _on_list_failed(self, _message: str) -> None:
-        self._on_listed(_Listing(self._generation, None))
+    def _on_list_failed(self, generation: int, message: str) -> None:
+        """Read number *generation* raised: land it as a read that found nothing new."""
+        _log.warning("Reading the job folders failed: %s", message)
+        self._on_listed(_Listing(generation, None))
+
+    def _on_read_done(self, generation: int) -> None:
+        self._pending.pop(generation, None)
 
     def _add_entry(self, entry: JobEntry) -> None:
         item = QListWidgetItem()
@@ -296,18 +310,56 @@ class _Listing:
     entries: tuple[JobEntry, ...] | None
 
 
+class _Read(QObject):
+    """One read's end, heard on the UI thread by a receiver that knows which read it was.
+
+    The worker's ``failed`` signal carries only a message; landing a failure
+    under the newest number instead would end the wait for a newer read still
+    out. Bound methods of a QObject child of the panel, so Qt queues them onto
+    the UI thread and drops them if the panel is gone. It reaches the panel
+    through ``parent()`` rather than holding it: a Python reference back would
+    put the panel in a cycle, and a cycle is freed by the cyclic collector on
+    whichever thread it happens to run.
+    """
+
+    def __init__(self, panel: JobListPanel, generation: int) -> None:
+        super().__init__(panel)
+        self._generation = generation
+
+    def _panel(self) -> JobListPanel | None:
+        panel = self.parent()
+        return panel if isinstance(panel, JobListPanel) else None
+
+    def failed(self, message: str) -> None:
+        if (panel := self._panel()) is not None:
+            panel._on_list_failed(self._generation, message)
+
+    def done(self) -> None:
+        if (panel := self._panel()) is not None:
+            panel._on_read_done(self._generation)
+        self.deleteLater()
+
+
 def _read_jobs(
-    generation: int, extra: list[Path], hidden: frozenset[Path], **_: object
+    generation: int,
+    extra: list[Path],
+    hidden: frozenset[Path],
+    *,
+    cancel: CancelToken | None = None,
+    **_: object,
 ) -> _Listing:
     """Read every project under the job folders; runs on a worker thread, so no widgets.
 
-    Takes (and ignores) the ``progress=``/``cancel=`` every background job is
-    called with: the read is short enough not to report, and a cancelled one
-    is dropped by generation rather than stopped.
+    Takes (and ignores) the ``progress=`` every background job is called with:
+    the read is short enough not to report. *cancel* (set by
+    :meth:`JobListPanel.stop_reading`) stops it between files.
     """
     try:
-        entries = list_jobs(job_dirs_for(extra), hidden=hidden)
-    except Exception:  # noqa: BLE001 - a folder that cannot be read must not empty the list
+        entries = list_jobs(job_dirs_for(extra), hidden=hidden, cancel=cancel)
+    except JobCancelled:
+        raise  # no one waits for this read any more; the worker reports it cancelled
+    except Exception as error:  # noqa: BLE001 - a folder that cannot be read must not empty the list
+        _log.warning("Could not read the job folders: %s", error, exc_info=True)
         return _Listing(generation, None)
     return _Listing(generation, tuple(entries))
 

@@ -14,6 +14,7 @@ from typing import Any
 
 from qurantext.config.paths import LECTURE_MATCHING_OUTPUT_DIR, RECITATION_MATCHING_OUTPUT_DIR
 from qurantext.jobs.project import Project, job_settings, load_project
+from qurantext.utils.progress import CancelToken
 
 __all__ = [
     "CHANGED_SINCE_RENDER",
@@ -163,7 +164,10 @@ def _entry_for(path: Path) -> JobEntry | None:
 
 
 def list_jobs(
-    dirs: Iterable[Path] | None = None, *, hidden: frozenset[Path] = frozenset()
+    dirs: Iterable[Path] | None = None,
+    *,
+    hidden: frozenset[Path] = frozenset(),
+    cancel: CancelToken | None = None,
 ) -> list[JobEntry]:
     """Projects under *dirs*, newest first.
 
@@ -171,10 +175,16 @@ def list_jobs(
     (the default matching folder chosen again as an output folder, say) lists
     its jobs once. A project whose resolved path is in *hidden* is skipped —
     "Remove from list" adds it there without touching the file.
+
+    *cancel* is checked before each folder and each file, raising
+    ``JobCancelled``: a folder on a slow drive must not hold up a window that
+    is closing for as long as the whole read would take.
     """
     entries: list[JobEntry] = []
     seen: set[Path] = set()
     for folder in dirs if dirs is not None else default_job_dirs():
+        if cancel is not None:
+            cancel.raise_if_cancelled("listing jobs")
         resolved = Path(folder).resolve()
         if resolved in seen:
             continue
@@ -182,6 +192,8 @@ def list_jobs(
         if not resolved.is_dir():
             continue
         for path in resolved.glob("*.qalun.json"):
+            if cancel is not None:
+                cancel.raise_if_cancelled("listing jobs")
             if path.resolve() in hidden:
                 continue
             entry = _entry_for(path)
