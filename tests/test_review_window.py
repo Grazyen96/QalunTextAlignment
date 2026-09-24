@@ -1037,3 +1037,101 @@ def test_the_frame_shape_follows_the_jobs_preset_over_an_older_render(tmp_path) 
         tmp_path / "a.mp4", preset=None, basmala_offset_s=0.0, width=1920, height=1080
     )
     assert not _is_portrait(unrecorded), "no choice recorded: the render's own size"
+
+
+#: What each punctuation key types on the Arabic (101) layout, and what the window should do.
+_ARABIC_LAYOUT_PRESSES = [
+    # (Latin key, Arabic letter it types, Shift, the edited word, its edge, the new value)
+    ("[", "ج", False, 1, "start", 2.4),  # ج
+    ("]", "د", False, 0, "end", 2.4),  # د
+    (",", "و", False, 0, "end", 1.95),  # و
+    (".", "ز", False, 0, "end", 2.05),  # ز
+    (",", "و", True, 0, "end", 1.99),
+    (".", "ز", True, 0, "end", 2.01),
+]
+
+
+def _layout_press(platform, latin, letter, modifiers=Qt.KeyboardModifier.NoModifier):
+    """A press of the physical *latin* key while an Arabic layout makes it type *letter*.
+
+    Qt reports the letter as the key and the text, and the physical key only as
+    the native code: the scan code, or on macOS the virtual key code.
+    """
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QKeyEvent
+
+    from qurantext.gui.review.window import SCANCODE_KEYS
+
+    qt_key = {"[": Qt.Key.Key_BracketLeft, "]": Qt.Key.Key_BracketRight}.get(latin)
+    qt_key = qt_key or {",": Qt.Key.Key_Comma, ".": Qt.Key.Key_Period}[latin]
+    (code,) = [c for c, k in SCANCODE_KEYS[platform].items() if k == qt_key]
+    scan, virtual = (0, code) if platform == "macos" else (code, 0)
+    return QKeyEvent(QEvent.Type.KeyPress, ord(letter), modifiers, scan, virtual, 0, letter)
+
+
+@pytest.mark.parametrize("platform", ["xkb", "windows", "macos"])
+@pytest.mark.parametrize(
+    ("latin", "letter", "shift", "word", "edge", "value"), _ARABIC_LAYOUT_PRESSES
+)
+def test_shortcuts_follow_the_physical_key_on_an_arabic_layout(
+    qt_app, tmp_path, monkeypatch, platform, latin, letter, shift, word, edge, value
+) -> None:
+    from PySide6.QtWidgets import QApplication
+
+    from qurantext.gui.review import window as window_module
+
+    monkeypatch.setattr(window_module, "_platform_family", lambda: platform)
+    window, player, _ = _window(qt_app, tmp_path)
+    window.show()
+    for _ in range(word + 1):
+        QTest.keyClick(window, Qt.Key.Key_Right)
+    player.seek(2.4)
+    modifiers = Qt.KeyboardModifier.ShiftModifier if shift else Qt.KeyboardModifier.NoModifier
+    event = _layout_press(platform, latin, letter, modifiers)
+    QApplication.sendEvent(window, event)
+    assert event.isAccepted()
+    assert getattr(window.session.words()[word], edge) == pytest.approx(value)
+
+
+def test_the_physical_key_table_is_read_for_this_platform(qt_app, tmp_path) -> None:
+    from PySide6.QtWidgets import QApplication
+
+    from qurantext.gui.review.window import _platform_family
+
+    window, player, _ = _window(qt_app, tmp_path)
+    window.show()
+    QTest.keyClick(window, Qt.Key.Key_Right)
+    QApplication.sendEvent(window, _layout_press(_platform_family(), ".", "ز"))
+    assert window.session.words()[0].end == pytest.approx(2.05)
+
+
+@pytest.mark.parametrize(
+    ("text", "modifiers"),
+    [
+        ("x", Qt.KeyboardModifier.NoModifier),  # a Latin layout's own key there: not a shortcut
+        ("", Qt.KeyboardModifier.NoModifier),  # a dead key
+        ("ز", Qt.KeyboardModifier.ControlModifier),  # Ctrl+ is Qt's own Latin fallback
+        ("ز", Qt.KeyboardModifier.AltModifier),
+    ],
+)
+def test_only_an_unmatched_non_latin_key_is_read_by_its_physical_place(
+    qt_app, tmp_path, text, modifiers
+) -> None:
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtWidgets import QApplication
+
+    from qurantext.gui.review.window import SCANCODE_KEYS, _platform_family
+
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    QTest.keyClick(window, Qt.Key.Key_Right)
+    platform = _platform_family()
+    (code,) = [c for c, k in SCANCODE_KEYS[platform].items() if k == Qt.Key.Key_Period]
+    scan, virtual = (0, code) if platform == "macos" else (code, 0)
+    key = ord(text) if text else int(Qt.Key.Key_unknown)
+    QApplication.sendEvent(
+        window, QKeyEvent(QEvent.Type.KeyPress, key, modifiers, scan, virtual, 0, text)
+    )
+    assert window.session.words()[0].end == 2.0
+    assert not window.session.dirty
