@@ -8,6 +8,7 @@ takes the application's direction when it is made); the autouse fixture in
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from collections.abc import Iterator
 
@@ -24,6 +25,7 @@ from PySide6.QtWidgets import (  # noqa: E402
     QGroupBox,
     QLabel,
     QLineEdit,
+    QListWidget,
     QTableWidget,
     QWidget,
 )
@@ -207,21 +209,95 @@ def test_more_options_points_the_way_arabic_reads(
     assert panel.more_button.arrowType() == Qt.ArrowType.LeftArrow
 
 
-def test_no_english_is_left_in_the_arabic_windows(
-    qt_app, tmp_path, no_default_job_dirs, review_window
-) -> None:
-    """Every word a person reads comes from the Arabic table (or is a name, a code, a number)."""
-    from qurantext.gui.main_window import MainWindow
+#: The Latin words the Arabic table itself keeps: the app's name, subtitle
+#: formats, a key name, the package to install, and "English" in the language menu.
+_LATIN_THE_TABLE_KEEPS = {"Qalun", "SRT", "VTT", "ASS", "Ctrl", "Z", "PySide6", "Addons", "English"}
+_LATIN_WORD = re.compile(r"[A-Za-z][A-Za-z0-9]*")
 
-    english = {
-        text
-        for key, text in i18n.STRINGS["en"].items()
-        if isinstance(text, str) and "{" not in text and text != i18n.STRINGS["ar"][key]
-    }
-    main = MainWindow(prefs=_prefs(tmp_path))
-    for root in (main, review_window, review_window._make_export_dialog()):
-        shown = set(_texts(root))
-        assert not (shown & english), (root, sorted(shown & english))
+
+def _latin_words_of_the_arabic_table() -> set[str]:
+    words: set[str] = set()
+    for value in i18n.STRINGS["ar"].values():
+        for variant in value.values() if isinstance(value, dict) else [value]:
+            words |= set(_LATIN_WORD.findall(re.sub(r"\{[^}]*\}", "", variant)))
+    return words
+
+
+def test_the_allowed_latin_words_are_what_the_table_really_keeps() -> None:
+    """The allow-list below may not grow past the table: each word must be in it."""
+    assert _latin_words_of_the_arabic_table() | {"English"} == _LATIN_THE_TABLE_KEEPS
+
+
+def _shown(root: QWidget) -> Iterator[str]:
+    """What _texts reads, plus list items and table cells."""
+    yield from _texts(root)
+    for widget in [root, *root.findChildren(QWidget)]:
+        if isinstance(widget, QListWidget):
+            yield from (widget.item(i).text() for i in range(widget.count()))
+        if isinstance(widget, QTableWidget):
+            for row in range(widget.rowCount()):
+                for column in range(widget.columnCount()):
+                    item = widget.item(row, column)
+                    if item is not None:
+                        yield item.text()
+
+
+def test_no_english_is_left_in_the_arabic_windows(
+    qt_app, tmp_path, store, no_default_job_dirs, review_window, lecture_review_window, monkeypatch
+) -> None:
+    """Every Latin word a person reads is one the table keeps, or the fixture's own names.
+
+    Not a comparison with the English table: a hard-coded literal or a message
+    from the pipeline would pass that. The windows are busy ones: a job row, a
+    running job, its progress, the job's context menu and a lecture review.
+    """
+    from qurantext.gui.home import job_list as job_list_module
+    from qurantext.gui.main_window import MainWindow
+    from qurantext.utils.progress import ProgressEvent
+
+    prefs = _prefs(tmp_path)
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    prefs.job_dirs = [jobs_dir]
+    card = {"surah_num": 25, "from_ayah": 7, "to_ayah": 11, "start_time": 0.0, "end_time": 5.0}
+    project = Project(audio=jobs_dir / "lesson.m4a", mode="recitation", cards=[card])
+    save_project(project, jobs_dir / "lesson_recitation.qalun.json")
+
+    main = MainWindow(prefs=prefs)
+    main.resize(1024, 680)
+    main.show()
+    qt_app.processEvents()
+    main.job_list.set_running("recitation.m4a", i18n.t("home.progress.starting"))
+    main.new_job.set_running(True)
+    main._on_progress(ProgressEvent("render", "Building ASS subtitles..."))
+    main._on_progress(ProgressEvent("render", "  Segments 4/10", fraction=0.4, eta_seconds=125))
+    main._on_progress(ProgressEvent("export", "Writing subtitle files..."))
+
+    menus: list[list[str]] = []
+
+    class RecordingMenu(job_list_module.QMenu):
+        def exec(self, *args):  # noqa: A003 - Qt's name
+            menus.append([action.text() for action in self.actions()])
+            return None
+
+    monkeypatch.setattr(job_list_module, "QMenu", RecordingMenu)
+    listing = main.job_list.list
+    job_row = next(
+        listing.item(i)
+        for i in range(listing.count())
+        if listing.item(i).data(Qt.ItemDataRole.UserRole) is not None
+    )
+    main.job_list._on_context_menu(listing.visualItemRect(job_row).center())
+    assert menus and len(menus[0]) == 2, "the job's context menu was not shown"
+
+    fixture_words = set(_LATIN_WORD.findall(str(tmp_path)))
+    fixture_words |= {"jobs", "lesson", "m4a", "recitation", "missing", "mp3", "m", "Hello"}
+    allowed = _LATIN_THE_TABLE_KEEPS | fixture_words
+    roots = (main, review_window, review_window._make_export_dialog(), lecture_review_window)
+    for root in roots:
+        shown = [*_shown(root), *(text for menu in menus for text in menu)]
+        latin = {word for text in shown for word in _LATIN_WORD.findall(text)} - allowed
+        assert not latin, (root, sorted(latin))
 
 
 @pytest.mark.parametrize(
