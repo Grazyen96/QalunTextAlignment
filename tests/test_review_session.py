@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import time
 from pathlib import Path
 
@@ -381,3 +382,150 @@ def test_removing_a_lecture_card_leaves_the_others_alone() -> None:
     session.project.cards.append(dict(session.project.cards[0], start_time=9.0, end_time=9.5))
     session.remove_card(1)
     assert session.project.cards[0]["end_time"] == 8.0
+
+
+def _real_shaped_recitation(tmp_path):
+    """A project as matching writes it: card windows a hair off the words they hold.
+
+    Detection rounds a card's window on its own, so a real project opens with
+    ``start_time`` 0.11 over a first word at 0.109 (and an end a little before
+    the last word's). Any timing edit re-derives the windows from the words.
+    """
+    cards = [
+        {
+            "surah_num": 25,
+            "from_ayah": 7,
+            "to_ayah": 11,
+            "full_text": "a b c",
+            "confidence": 0.96,
+            "start_time": 0.11,
+            "end_time": 2.57,
+            "word_timings": [_w("a", 0.109, 1.37), _w("b", 1.37, 1.9), _w("c", 1.95, 2.573)],
+        }
+    ]
+    project = Project(audio=tmp_path / "a.mp3", mode="recitation", cards=cards)
+    save_project(project, tmp_path / "job.qalun.json")
+    return load_project(tmp_path / "job.qalun.json")
+
+
+def test_a_drag_out_and_back_on_a_real_shaped_project_is_no_edit(tmp_path) -> None:
+    session = ReviewSession(_real_shaped_recitation(tmp_path))
+    before = copy.deepcopy(session.project.cards)
+    ref = WordRef(CARD, 0, 1)
+    session.begin_gesture()
+    session.drag_retime(ref, end=1.8)
+    assert session.dirty
+    session.drag_retime(ref, end=1.9)
+    session.end_gesture()
+    assert not session.dirty
+    assert not session.can_undo
+    assert session.project.cards == before
+
+
+def test_a_drag_that_moved_something_is_still_an_edit(tmp_path) -> None:
+    session = ReviewSession(_real_shaped_recitation(tmp_path))
+    ref = WordRef(CARD, 0, 1)
+    session.begin_gesture()
+    session.drag_retime(ref, end=1.8)
+    session.end_gesture()
+    assert session.dirty and session.can_undo
+    assert session.word(ref).end == 1.8
+    session.undo()
+    assert not session.dirty
+
+
+def test_a_nudge_and_back_on_a_shared_edge_is_the_start_state(tmp_path) -> None:
+    """``.`` then ``,``: the end touched the next start, so the next start comes back too."""
+    session = ReviewSession(load_project(_recitation(tmp_path).path))
+    before = copy.deepcopy(session.project.cards)
+    a, b = WordRef(CARD, 0, 0), WordRef(CARD, 0, 1)
+    session.retime(a, end=session.word(a).end + 0.05)
+    assert (session.word(a).end, session.word(b).start) == (1.05, 1.05)
+    assert session.dirty
+    session.retime(a, end=session.word(a).end - 0.05)
+    assert (session.word(b).start, session.word(b).end) == (1.0, 2.0)
+    assert not session.dirty
+    assert session.project.cards == before
+
+
+def test_a_nudge_back_across_cards_puts_the_next_card_back() -> None:
+    session = ReviewSession(_recitation())
+    before = copy.deepcopy(session.project.cards)
+    last_of_first = WordRef(CARD, 0, 1)
+    session.retime(last_of_first, end=2.05)
+    assert session.project.cards[1]["start_time"] == 2.05
+    session.retime(last_of_first, end=2.0)
+    assert session.project.cards == before and not session.dirty
+
+
+def test_nudging_back_part_of_the_way_is_still_an_edit() -> None:
+    session = ReviewSession(_recitation())
+    a, b = WordRef(CARD, 0, 0), WordRef(CARD, 0, 1)
+    session.retime(a, end=1.05)
+    session.retime(a, end=1.01)
+    assert session.dirty
+    assert (session.word(a).end, session.word(b).start) == (1.01, 1.01)
+    assert session.word(a).edited and session.word(b).edited
+
+
+def test_a_drag_of_a_shared_edge_pulls_the_neighbour_along() -> None:
+    session = ReviewSession(_recitation())
+    a, b = WordRef(CARD, 0, 0), WordRef(CARD, 0, 1)
+    session.begin_gesture()
+    session.drag_retime(a, end=0.8)
+    session.end_gesture()
+    assert (session.word(a).end, session.word(b).start) == (0.8, 0.8)
+
+
+def test_a_caption_nudge_and_back_is_the_start_state() -> None:
+    session = ReviewSession(_lecture())
+    before = copy.deepcopy(session.project.captions)
+    one = WordRef(CAPTION, 0, 0)
+    session.retime(one, end=1.05)
+    session.retime(one, end=1.0)
+    assert session.project.captions == before and not session.dirty
+
+
+def test_a_gesture_that_changes_nothing_keeps_redo() -> None:
+    """A click on a word begins and ends a gesture; it must not throw away redo."""
+    session = ReviewSession(_recitation())
+    ref = WordRef(CARD, 0, 1)
+    session.retime(ref, end=1.5)
+    session.undo()
+    assert session.can_redo
+
+    session.begin_gesture()
+    session.end_gesture()
+    assert session.can_redo, "a click with no movement"
+
+    session.begin_gesture()
+    session.drag_retime(ref, end=1.6)
+    session.drag_retime(ref, end=2.0)
+    session.end_gesture()
+    assert session.can_redo, "a drag that came back where it began"
+
+    session.redo()
+    assert session.words()[1].end == 1.5
+
+    session.undo()
+    session.begin_gesture()
+    session.drag_retime(ref, end=1.7)
+    session.end_gesture()
+    assert not session.can_redo, "a real edit starts a new branch"
+    assert session.words()[1].end == 1.7
+
+
+def test_an_edge_dragged_without_keep_joined_opens_a_gap() -> None:
+    session = ReviewSession(_recitation())
+    session.begin_gesture()
+    session.drag_retime(WordRef(CARD, 0, 0), end=0.8, keep_joined=False)
+    session.end_gesture()
+    words = session.words()
+    assert (words[0].end, words[1].start) == (0.8, 1.0), "the neighbour stays put"
+
+    joined = ReviewSession(_recitation())
+    joined.begin_gesture()
+    joined.drag_retime(WordRef(CARD, 0, 0), end=0.8)
+    joined.end_gesture()
+    words = joined.words()
+    assert (words[0].end, words[1].start) == (0.8, 0.8), "by default a shared edge stays shared"

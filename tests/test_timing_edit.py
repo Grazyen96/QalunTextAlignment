@@ -250,21 +250,98 @@ def test_edits_hold_the_rules_over_many_random_requests() -> None:
         for _ in range(10):
             i = rng.randrange(len(words))
             kind = rng.choice(["start", "end", "both", "ripple", "noop"])
+            joined = rng.choice([False, True])
             if kind == "start":
-                out = retime(words, i, start=rng.uniform(-1.0, t + 1.0))
+                out = retime(words, i, start=rng.uniform(-1.0, t + 1.0), keep_joined=joined)
             elif kind == "end":
-                out = retime(words, i, end=rng.uniform(-1.0, t + 1.0))
+                out = retime(words, i, end=rng.uniform(-1.0, t + 1.0), keep_joined=joined)
             elif kind == "both":
                 out = retime(
-                    words, i, start=rng.uniform(-1.0, t + 1.0), end=rng.uniform(-1.0, t + 1.0)
+                    words,
+                    i,
+                    start=rng.uniform(-1.0, t + 1.0),
+                    end=rng.uniform(-1.0, t + 1.0),
+                    keep_joined=joined,
                 )
             elif kind == "ripple":
                 out = ripple(words, i, rng.uniform(-3.0, 3.0), duration=t + rng.uniform(-1, 2))
             else:
-                out = retime(words, i, start=words[i]["start"], end=words[i]["end"])
+                out = retime(
+                    words, i, start=words[i]["start"], end=words[i]["end"], keep_joined=joined
+                )
                 assert out == words
             _assert_postconditions(out)
             words = out
+
+
+def _spans(words):
+    return [(w["start"], w["end"]) for w in words]
+
+
+def test_a_joined_end_nudged_out_and_back_puts_the_neighbour_back() -> None:
+    words = _words((0.0, 1.0), (1.0, 2.0), (2.0, 3.0))
+    out = retime(words, 0, end=1.05, keep_joined=True)
+    assert _spans(out)[:2] == [(0.0, 1.05), (1.05, 2.0)]
+    back = retime(out, 0, end=1.0, keep_joined=True)
+    assert _spans(back) == _spans(words)
+
+
+def test_a_joined_start_nudged_out_and_back_puts_the_neighbour_back() -> None:
+    words = _words((0.0, 1.0), (1.0, 2.0))
+    out = retime(words, 1, start=1.05, keep_joined=True)
+    assert _spans(out) == [(0.0, 1.05), (1.05, 2.0)], "the shared edge moves with it"
+    back = retime(out, 1, start=1.0, keep_joined=True)
+    assert _spans(back) == _spans(words)
+    earlier = retime(words, 1, start=0.95, keep_joined=True)
+    assert _spans(retime(earlier, 1, start=1.0, keep_joined=True)) == _spans(words)
+
+
+def test_without_keep_joined_a_shortened_word_leaves_a_gap() -> None:
+    words = _words((0.0, 1.0), (1.0, 2.0))
+    assert _spans(retime(words, 0, end=0.95)) == [(0.0, 0.95), (1.0, 2.0)]
+    assert _spans(retime(words, 1, start=1.05)) == [(0.0, 1.0), (1.05, 2.0)]
+
+
+def test_an_edge_with_a_gap_never_moves_the_neighbour() -> None:
+    words = _words((0.0, 1.0), (1.2, 2.0), (2.5, 3.0))
+    for request in (0.8, 0.95, 1.05, 1.15, 1.2):
+        out = retime(words, 0, end=request, keep_joined=True)
+        assert _spans(out)[1] == (1.2, 2.0), request
+    for request in (2.1, 2.3, 2.45):
+        out = retime(words, 2, start=request, keep_joined=True)
+        assert _spans(out)[1] == (1.2, 2.0), request
+
+
+def test_a_joined_edge_is_still_bounded_by_both_words() -> None:
+    words = _words((0.0, 1.0), (1.0, 2.0))
+    shortened = retime(words, 0, end=-5.0, keep_joined=True)
+    assert shortened[0]["end"] == pytest.approx(MIN_WORD_S)
+    assert shortened[1]["start"] == shortened[0]["end"]
+    lengthened = retime(words, 0, end=9.0, keep_joined=True)
+    assert lengthened[0]["end"] == pytest.approx(2.0 - MIN_WORD_S)
+    assert lengthened[1]["start"] == lengthened[0]["end"]
+    later = retime(words, 1, start=9.0, keep_joined=True)
+    assert later[1]["start"] == pytest.approx(2.0 - MIN_WORD_S)
+    assert later[0]["end"] == later[1]["start"]
+    _assert_postconditions(shortened)
+    _assert_postconditions(lengthened)
+    _assert_postconditions(later)
+
+
+def test_joined_is_judged_on_the_millisecond_grid() -> None:
+    words = _words((0.0, 1.0000000000000002), (1.0, 2.0))
+    out = retime(words, 0, end=0.95, keep_joined=True)
+    assert _spans(out) == [(0.0, 0.95), (0.95, 2.0)]
+
+
+def test_keep_joined_inside_a_collapsed_run_keeps_the_rules() -> None:
+    words = _collapsed()
+    for i in range(len(words)):
+        for request in (9.0, 9.5, 9.99, 10.0, 10.01, 10.5, 12.0):
+            _assert_postconditions(retime(words, i, start=request, keep_joined=True))
+            _assert_postconditions(retime(words, i, end=request, keep_joined=True))
+    assert retime(words, 2, end=10.5, keep_joined=True) == words
+    assert retime(words, 2, start=9.5, keep_joined=True) == words
 
 
 # -- editing across cards -----------------------------------------------------
@@ -296,6 +373,16 @@ def test_lengthening_a_cards_last_word_trims_the_next_cards_first_word() -> None
     assert out[2]["word_timings"][0]["edited"] is True
     assert out[0]["end_time"] == pytest.approx(3.0 - MIN_WORD_S), "window re-derived"
     assert out[2]["start_time"] == pytest.approx(3.0 - MIN_WORD_S)
+
+
+def test_a_joined_edge_across_cards_moves_back_with_keep_joined() -> None:
+    cards = _cards()
+    out = retime_in_cards(cards, 0, 1, end=2.05, keep_joined=True)
+    assert out[2]["word_timings"][0]["start"] == 2.05
+    back = retime_in_cards(out, 0, 1, end=2.0, keep_joined=True)
+    assert back[2]["word_timings"][0]["start"] == 2.0
+    assert back[2]["start_time"] == 2.0 and back[0]["end_time"] == 2.0
+    assert retime_in_cards(out, 0, 1, end=2.0)[2]["word_timings"][0]["start"] == 2.05
 
 
 def test_a_ripple_inside_one_card_carries_into_the_next() -> None:

@@ -29,17 +29,23 @@ from os import PathLike
 from pathlib import Path
 from typing import Any
 
+from qurantext.config.settings import VIDEO_PRESETS
+from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.core.video_common import load_caption_segments, load_matches
 
 __all__ = [
     "PROJECT_VERSION",
     "REVIEW_STATES",
+    "SUBTITLE_CHOICES",
     "SUPPORTED_VERSIONS",
     "CaptionCue",
+    "JobSettings",
     "Project",
+    "job_settings",
     "load_project",
     "project_path_for",
     "save_project",
+    "set_job_settings",
 ]
 
 #: Bumped when the on-disk shape changes incompatibly.
@@ -47,6 +53,8 @@ PROJECT_VERSION = "2"
 #: Versions this build reads. Version 1 is upgraded on the next save.
 SUPPORTED_VERSIONS = ("1", "2")
 REVIEW_STATES = ("needs_review", "reviewed")
+#: Where a job's subtitles go: in the picture, in files beside the video, or both.
+SUBTITLE_CHOICES = ("burn", "sidecar", "both")
 
 _KNOWN_KEYS = frozenset(
     {
@@ -202,6 +210,9 @@ class Project:
             render = dict(self.render)
             if render.get("video"):
                 render["video"] = _store_path(Path(render["video"]), relative_to)
+        export = dict(self.export)
+        if isinstance(export.get("output_dir"), str) and export["output_dir"]:
+            export["output_dir"] = _store_path(Path(export["output_dir"]), relative_to)
         data.update(
             {
                 "project_version": PROJECT_VERSION,
@@ -211,7 +222,7 @@ class Project:
                 "cards": self.cards,
                 "captions": [cue.to_dict() for cue in self.captions],
                 "style": self.style,
-                "export": self.export,
+                "export": export,
                 "review": self.review,
                 "render": render,
             }
@@ -233,6 +244,9 @@ class Project:
                 render["video"] = _resolve_path(str(render["video"]), base_dir)
         else:
             render = None
+        export = dict(data.get("export") or {})
+        if isinstance(export.get("output_dir"), str) and export["output_dir"]:
+            export["output_dir"] = _resolve_path(export["output_dir"], base_dir).as_posix()
         review = data.get("review")
         cards = _list_of_dicts(data, "cards")
         captions = _list_of_dicts(data, "captions")
@@ -242,7 +256,7 @@ class Project:
             cards=cards,
             captions=[CaptionCue.from_dict(cue) for cue in captions],
             style=dict(data.get("style") or {}),
-            export=dict(data.get("export") or {}),
+            export=export,
             matches=_resolve_path(str(data["matches"]), base_dir) if data.get("matches") else None,
             review=dict(review) if isinstance(review, dict) else _default_review(),
             render=render,
@@ -270,6 +284,7 @@ class Project:
         width: int | None = None,
         height: int | None = None,
         fps: int | None = None,
+        subtitles: str | None = None,
     ) -> None:
         """Remember a successful render and the content it was made from.
 
@@ -277,7 +292,9 @@ class Project:
         before it started: an edit made while it ran must leave it stale, which
         hashing the project as it is now would hide. *width*, *height* and
         *fps* are the geometry actually rendered, which the subtitle export
-        reuses so an ASS file matches the video.
+        reuses so an ASS file matches the video. *subtitles* is the choice it
+        was made with, so the job list can tell when the job's choice has
+        moved on since (None: not recorded).
         """
         self.render = {
             "video": Path(video).expanduser().resolve(),
@@ -285,6 +302,7 @@ class Project:
             "width": width,
             "height": height,
             "fps": fps,
+            "subtitles": subtitles,
             "basmala_offset_s": round(float(basmala_offset_s), 3),
             "rendered_at": (when or datetime.now()).isoformat(timespec="seconds"),
             "content_hash": content_hash if content_hash is not None else self.content_hash(),
@@ -313,6 +331,77 @@ class Project:
             }
             for cue in self.captions
         ]
+
+
+@dataclass(frozen=True, slots=True)
+class JobSettings:
+    """What the person chose for this job's output, kept with the job.
+
+    The new-job panel, a render straight after matching and a render from the
+    review all used to pick a preset and a subtitles choice on their own, so a
+    job started as "fast, files beside the video" could come back from the
+    review as a portrait video with burned-in captions. Stored in
+    ``Project.export``, the choice travels with the job and every render reads
+    the same one.
+    """
+
+    preset: str = "social"
+    subtitles: str = "burn"
+    formats: tuple[str, ...] = ("srt",)
+    #: Where the job's files go; None means the default videos folder.
+    output_dir: Path | None = None
+
+
+def job_settings(project: Project) -> JobSettings:
+    """The job's choices from ``project.export``, with defaults for anything unset.
+
+    When ``export`` has no valid preset but the project has been rendered
+    before, the last render's own preset is used instead of the default:
+    a project made before this choice was remembered re-renders at the size
+    it was last rendered, rather than jumping to whatever the default is now.
+
+    The file can be hand-edited or written by a newer build, so anything this
+    build does not recognise reads as the default rather than failing a render.
+    """
+    export = project.export
+    default = JobSettings()
+    preset = export.get("preset")
+    if not (isinstance(preset, str) and preset in VIDEO_PRESETS):
+        render_preset = (project.render or {}).get("preset")
+        preset = (
+            render_preset
+            if isinstance(render_preset, str) and render_preset in VIDEO_PRESETS
+            else default.preset
+        )
+    subtitles = export.get("subtitles")
+    formats = export.get("formats")
+    output_dir = export.get("output_dir")
+    chosen: tuple[str, ...] = ()
+    if isinstance(formats, list):
+        chosen = tuple(dict.fromkeys(f for f in formats if f in SUBTITLE_FORMATS))
+    return JobSettings(
+        preset=preset,
+        subtitles=subtitles if subtitles in SUBTITLE_CHOICES else default.subtitles,
+        formats=chosen or default.formats,
+        output_dir=Path(output_dir) if isinstance(output_dir, str) and output_dir else None,
+    )
+
+
+def set_job_settings(project: Project, settings: JobSettings) -> None:
+    """Write *settings* into ``project.export``, keeping any other keys it holds.
+
+    The folder is held absolute in memory and written relative to the project
+    file (see :meth:`Project.to_dict`), like the job's other paths.
+    """
+    export = dict(project.export)
+    export["preset"] = settings.preset
+    export["subtitles"] = settings.subtitles
+    export["formats"] = list(settings.formats)
+    if settings.output_dir is not None:
+        export["output_dir"] = Path(settings.output_dir).expanduser().resolve().as_posix()
+    else:
+        export.pop("output_dir", None)
+    project.export = export
 
 
 def project_path_for(match_path: str | PathLike[str]) -> Path:

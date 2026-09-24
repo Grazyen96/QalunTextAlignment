@@ -11,17 +11,19 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 pytest.importorskip("PySide6", reason="the window needs Qt: pip install 'qurantext[gui]'")
 
-from PySide6.QtCore import QCoreApplication  # noqa: E402
+from PySide6.QtCore import QCoreApplication, QSettings  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from qurantext.config.paths import DEFAULT_FONT_PATH, DEFAULT_QURAN_PATH  # noqa: E402
-from qurantext.gui.jobs import JobSpec, run_job  # noqa: E402
+from qurantext.gui.jobs import JobSpec, run_matching, run_render  # noqa: E402
+from qurantext.gui.prefs import Prefs  # noqa: E402
 from qurantext.gui.worker import JobWorker, run_in_thread  # noqa: E402
 from qurantext.utils.progress import CancelToken, JobCancelled, ProgressEvent  # noqa: E402
 
@@ -60,18 +62,27 @@ def test_a_complete_recitation_spec_is_ready_to_run(tmp_path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("overrides", "message"),
+    ("overrides", "key"),
     [
-        ({"audio": Path("/nope/missing.mp3")}, "Choose an audio file"),
-        ({"quran": Path("/nope/missing.txt")}, "Choose the Quran text file"),
-        ({"surah_num": None}, "Choose the surah"),
-        ({"from_ayah": 11, "to_ayah": 7}, "cannot come before"),
+        ({"audio": Path("/nope/missing.mp3")}, "job.need_audio"),
+        ({"quran": Path("/nope/missing.txt")}, "job.need_quran"),
+        ({"surah_num": None}, "job.need_range"),
+        ({"from_ayah": 11, "to_ayah": 7}, "job.bad_range"),
+        ({"subtitles": "sidecar", "formats": ()}, "job.need_format"),
+        ({"subtitles": "both", "formats": ()}, "job.need_format"),
     ],
 )
-def test_an_incomplete_spec_says_what_is_missing(tmp_path, overrides, message) -> None:
-    """The Start button's tooltip is this text, so it has to read as a sentence."""
+def test_an_incomplete_spec_says_what_is_missing(tmp_path, overrides, key) -> None:
+    """The panel shows ``t(problem)`` under the Start button, so this is an i18n key."""
     problem = _spec(tmp_path, **overrides).validate()
-    assert problem is not None and message in problem
+    assert problem == key
+
+
+def test_subtitles_in_the_picture_need_no_file_format(tmp_path) -> None:
+    from qurantext.gui.i18n import t
+
+    assert _spec(tmp_path, subtitles="burn", formats=()).validate() is None
+    assert t("job.need_format") == "Choose at least one subtitle format."
 
 
 def test_a_lecture_needs_no_range(tmp_path) -> None:
@@ -173,7 +184,7 @@ def test_run_in_thread_runs_off_the_calling_thread(qt_app) -> None:
     not (_FFMPEG and QURAN_FILE.exists() and DEFAULT_FONT_PATH.exists()),
     reason="needs ffmpeg, the shipped Quran file and the bundled font",
 )
-def test_run_job_matches_then_renders(tmp_path, monkeypatch) -> None:
+def test_matching_then_rendering_makes_the_video(tmp_path, monkeypatch) -> None:
     """Start to finished video, with transcription stubbed out.
 
     Recognition is the one stage that needs the network, so it is replaced here
@@ -231,7 +242,7 @@ def test_run_job_matches_then_renders(tmp_path, monkeypatch) -> None:
     )
 
     events: list[ProgressEvent] = []
-    outcome = run_job(
+    project = run_matching(
         JobSpec(
             audio=audio,
             quran=QURAN_FILE,
@@ -240,10 +251,12 @@ def test_run_job_matches_then_renders(tmp_path, monkeypatch) -> None:
             from_ayah=7,
             to_ayah=8,
             preset="fast",
+            render_right_away=True,
             output_dir=tmp_path / "out",
         ),
         progress=events.append,
     )
+    outcome = run_render(project, progress=events.append)
     get_settings.cache_clear()
 
     assert outcome.matches.exists()
@@ -348,7 +361,6 @@ def _rematch_setup(tmp_path, monkeypatch):
         from_ayah=1,
         to_ayah=7,
         output_dir=tmp_path,
-        render=False,
     )
     return jobs_module, spec
 
@@ -357,9 +369,8 @@ def test_an_identical_rematch_makes_no_backup(tmp_path, monkeypatch) -> None:
     jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
     jobs_module.run_matching(spec)
     events: list[ProgressEvent] = []
-    outcome = run_job(spec, progress=events.append)
+    run_matching(spec, progress=events.append)
 
-    assert outcome.backup is None
     assert not list(tmp_path.glob("*.qalun-backup.json"))
     assert not any("Kept your earlier corrections" in e.message for e in events)
 
@@ -374,22 +385,23 @@ def test_a_changed_rematch_keeps_a_backup_and_says_so(tmp_path, monkeypatch) -> 
     save_project(corrected, first.path)
 
     events: list[ProgressEvent] = []
-    outcome = run_job(spec, progress=events.append)
+    run_matching(spec, progress=events.append)
+
+    from qurantext.gui.i18n import t
 
     (backup,) = tmp_path.glob("clip_recitation.*.qalun-backup.json")
-    assert outcome.backup == backup
     assert load_project(backup).cards[0]["start_time"] == 0.25
-    assert any(
-        e.stage == "detect" and e.message == f"Kept your earlier corrections in {backup.name}"
-        for e in events
-    )
+    kept = t("job.progress.kept", name=backup.name)
+    assert kept == f"Kept your earlier corrections in {backup.name}"
+    assert any(e.stage == "detect" and e.message == kept for e in events)
 
 
 def test_an_unreadable_earlier_project_is_always_kept(tmp_path, monkeypatch) -> None:
     jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
     jobs_module.project_path_for(tmp_path / "clip_recitation.json").write_text("{not json")
-    outcome = run_job(spec)
-    assert outcome.backup is not None and outcome.backup.read_text() == "{not json"
+    run_matching(spec)
+    (backup,) = tmp_path.glob("clip_recitation.*.qalun-backup.json")
+    assert backup.read_text() == "{not json"
 
 
 def test_set_aside_returns_the_backup_path(tmp_path) -> None:
@@ -405,7 +417,14 @@ def test_set_aside_returns_the_backup_path(tmp_path) -> None:
 
 def test_an_identical_rematch_leaves_the_project_file_untouched(tmp_path, monkeypatch) -> None:
     from qurantext.gui import jobs as jobs_module
-    from qurantext.jobs.project import Project, load_project, project_path_for, save_project
+    from qurantext.jobs.project import (
+        JobSettings,
+        Project,
+        load_project,
+        project_path_for,
+        save_project,
+        set_job_settings,
+    )
 
     match_path = tmp_path / "clip_recitation.json"
     match_path.write_text(
@@ -416,6 +435,8 @@ def test_an_identical_rematch_leaves_the_project_file_untouched(tmp_path, monkey
     existing = Project.from_match_file(match_path, audio, mode="recitation")
     existing.mark_reviewed()
     existing.style = {"theme": "night"}
+    # The same choices the re-run makes, so only the content could differ.
+    set_job_settings(existing, JobSettings(output_dir=tmp_path))
     destination = save_project(existing, project_path_for(match_path))
     before = destination.read_bytes()
 
@@ -431,73 +452,202 @@ def test_an_identical_rematch_leaves_the_project_file_untouched(tmp_path, monkey
     assert load_project(destination).review["state"] == "reviewed"
 
 
-# --- opening the review ---------------------------------------------------
+# --- the job's choices, kept with the job -----------------------------------
 
 
-def test_review_opens_the_jobs_project(qt_app, tmp_path, monkeypatch) -> None:
-    from qurantext.gui import main_window as module
-    from qurantext.gui.jobs import JobOutcome
-    from qurantext.jobs.project import Project, save_project
+def test_matching_records_the_jobs_choices(tmp_path, monkeypatch) -> None:
+    from qurantext.jobs.project import JobSettings, job_settings, load_project
 
-    matches = tmp_path / "clip_recitation.json"
-    matches.write_text(
-        json.dumps({"matches": [], "meta": {"mode": "recitation"}}), encoding="utf-8"
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    spec = replace(spec, preset="fast", subtitles="both", formats=("srt", "vtt"))
+    project = jobs_module.run_matching(spec)
+
+    expected = JobSettings("fast", "both", ("srt", "vtt"), tmp_path.resolve())
+    assert job_settings(project) == expected
+    assert job_settings(load_project(project.path)) == expected
+
+
+def test_an_unchanged_rematch_with_new_choices_updates_only_the_choices(
+    tmp_path, monkeypatch
+) -> None:
+    from qurantext.jobs.project import job_settings, load_project, save_project
+
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    first = jobs_module.run_matching(spec)
+    reviewed = load_project(first.path)
+    reviewed.mark_reviewed()
+    reviewed.style = {"theme": "night"}
+    save_project(reviewed, first.path)
+    before = json.loads(first.path.read_text(encoding="utf-8"))
+
+    events: list[ProgressEvent] = []
+    run_matching(replace(spec, preset="high"), progress=events.append)
+
+    after = json.loads(first.path.read_text(encoding="utf-8"))
+    assert after["export"]["preset"] == "high"
+    assert {k: v for k, v in after.items() if k != "export"} == {
+        k: v for k, v in before.items() if k != "export"
+    }, "cards, captions, review and style are left as they were"
+    assert job_settings(load_project(first.path)).preset == "high"
+    assert not list(tmp_path.glob("*.qalun-backup.json"))
+
+
+def _capture_render_project(jobs_module, monkeypatch, tmp_path):
+    from qurantext.jobs.export import ExportResult
+
+    seen: dict = {}
+
+    def fake_render_project(project, output, **kwargs):
+        seen.update(kwargs, output=output)
+        return ExportResult(video=output, subtitles=[], cues=0, render=None)
+
+    monkeypatch.setattr(jobs_module, "render_project", fake_render_project)
+    return seen
+
+
+def test_render_uses_the_recorded_choices(tmp_path, monkeypatch) -> None:
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.jobs.project import JobSettings, Project, set_job_settings
+
+    seen = _capture_render_project(jobs_module, monkeypatch, tmp_path)
+    project = Project(audio=tmp_path / "clip.m4a", matches=tmp_path / "clip_recitation.json")
+    set_job_settings(
+        project,
+        JobSettings("fast", "sidecar", ("vtt",), tmp_path / "videos"),
     )
-    project_path = save_project(
-        Project(audio=tmp_path / "clip.mp3", matches=matches),
-        tmp_path / "clip_recitation.qalun.json",
-    )
-    opened = []
-    monkeypatch.setattr(
-        module,
-        "ReviewWindow",
-        lambda project, **kw: (
-            opened.append(project)
-            or type(
-                "W",
-                (),
-                {
-                    "show": lambda self: None,
-                    "saved": type("S", (), {"connect": lambda self, f: None})(),
-                    "closed": type("S", (), {"connect": lambda self, f: None})(),
-                },
-            )()
-        ),
-    )
-    window = module.MainWindow()
-    window._outcome = JobOutcome(
-        matches=matches, video=None, cards=0, mode="recitation", project=project_path
-    )
-    window._open_editor()
-    assert opened and opened[0].path == project_path
+    jobs_module.run_render(project)
+
+    assert seen["preset"] == "fast"
+    assert seen["subtitles"] == "sidecar"
+    assert seen["formats"] == ("vtt",)
+    assert seen["output"] == (tmp_path / "videos").resolve() / "clip.mp4"
 
 
-def test_reopening_the_same_project_raises_the_existing_window(
-    qt_app, tmp_path, monkeypatch
+def test_render_without_recorded_choices_uses_the_defaults(tmp_path, monkeypatch) -> None:
+    from qurantext.config.paths import VIDEOS_OUTPUT_DIR
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.jobs.project import Project
+
+    seen = _capture_render_project(jobs_module, monkeypatch, tmp_path)
+    project = Project(audio=tmp_path / "clip.m4a", matches=tmp_path / "clip_recitation.json")
+    jobs_module.run_render(project)
+
+    assert (seen["preset"], seen["subtitles"], seen["formats"]) == ("social", "burn", ("srt",))
+    assert seen["output"] == Path(VIDEOS_OUTPUT_DIR) / "clip.mp4"
+
+
+def test_render_overrides_win_over_the_recorded_choices(tmp_path, monkeypatch) -> None:
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.jobs.project import JobSettings, Project, set_job_settings
+
+    seen = _capture_render_project(jobs_module, monkeypatch, tmp_path)
+    project = Project(audio=tmp_path / "clip.m4a", matches=tmp_path / "clip_recitation.json")
+    set_job_settings(project, JobSettings("fast", "sidecar", ("vtt",), tmp_path / "videos"))
+    jobs_module.run_render(
+        project, preset="high", subtitles="both", formats=("ass",), output_dir=tmp_path / "x"
+    )
+
+    assert (seen["preset"], seen["subtitles"], seen["formats"]) == ("high", "both", ("ass",))
+    assert seen["output"] == tmp_path / "x" / "clip.mp4"
+
+
+def test_start_renders_only_when_asked_to_right_away(tmp_path, monkeypatch) -> None:
+    """The job Start runs: match, then render only when the job skips the review."""
+    from qurantext.gui.main_window import _match_then_render
+
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    seen = _capture_render_project(jobs_module, monkeypatch, tmp_path)
+
+    result = _match_then_render(spec, progress=None, cancel=CancelToken())
+    assert result.outcome is None and not seen
+    assert result.project.path == jobs_module.project_path_for(tmp_path / "clip_recitation.json")
+
+    result = _match_then_render(
+        replace(spec, preset="fast", render_right_away=True), progress=None, cancel=CancelToken()
+    )
+    assert seen["preset"] == "fast"
+    assert result.outcome is not None and result.outcome.video == tmp_path.resolve() / "clip.mp4"
+    assert not hasattr(spec, "render"), "render_right_away is the one switch"
+
+
+def test_a_cancel_between_matching_and_rendering_stops_before_the_render(
+    tmp_path, monkeypatch
 ) -> None:
     from qurantext.gui import main_window as module
-    from qurantext.gui.jobs import JobOutcome
+
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    seen = _capture_render_project(jobs_module, monkeypatch, tmp_path)
+    cancel = CancelToken()
+    real_matching = module.run_matching
+
+    def matching_then_cancel(spec, **kwargs):
+        project = real_matching(spec, **kwargs)
+        cancel.cancel()
+        return project
+
+    monkeypatch.setattr(module, "run_matching", matching_then_cancel)
+    with pytest.raises(JobCancelled):
+        module._match_then_render(
+            replace(spec, render_right_away=True), progress=None, cancel=cancel
+        )
+    assert not seen
+
+
+# --- the home window ---------------------------------------------------------
+
+
+def _card() -> dict:
+    return {
+        "surah_num": 25,
+        "from_ayah": 7,
+        "to_ayah": 7,
+        "full_text": "a b",
+        "confidence": 1.0,
+        "start_time": 0.0,
+        "end_time": 10.0,
+        "word_timings": [
+            {"word": "a", "start": 1.0, "end": 2.0},
+            {"word": "b", "start": 2.0, "end": 3.0},
+        ],
+    }
+
+
+def _saved_job(folder: Path, name: str = "clip") -> Path:
+    """A matched job on disk: its match file and the project beside it."""
     from qurantext.jobs.project import Project, save_project
 
-    matches = tmp_path / "clip_recitation.json"
+    folder.mkdir(parents=True, exist_ok=True)
+    matches = folder / f"{name}_recitation.json"
     matches.write_text(
-        json.dumps({"matches": [], "meta": {"mode": "recitation"}}), encoding="utf-8"
+        json.dumps({"matches": [_card()], "meta": {"mode": "recitation"}}), encoding="utf-8"
     )
-    project_path = save_project(
-        Project(audio=tmp_path / "clip.mp3", matches=matches),
-        tmp_path / "clip_recitation.qalun.json",
+    return save_project(
+        Project(audio=folder / f"{name}.mp3", cards=[_card()], matches=matches),
+        folder / f"{name}_recitation.qalun.json",
     )
-    created = []
 
-    class FakeReview:
+
+@pytest.fixture()
+def prefs(tmp_path, no_default_job_dirs):
+    """``Prefs`` on a throwaway INI; the job list sees only folders under tmp_path."""
+    result = Prefs(QSettings(str(tmp_path / "prefs.ini"), QSettings.Format.IniFormat))
+    result.job_dirs = [tmp_path / "jobs"]
+    return result
+
+
+def _fake_review_class(created: list, *, refuse_close: bool = False):
+    """A stand-in for ``ReviewWindow`` with its two signals, recording each one made."""
+    from PySide6.QtCore import QObject, Signal
+
+    class FakeReview(QObject):
+        saved = Signal(object)
+        closed = Signal()
+
         def __init__(self, project, **kw):
-            created.append(self)
+            super().__init__()
             self.project = project
-            self.saved = type("S", (), {"connect": lambda self, f: None})()
-            self.closed = type("S", (), {"connect": lambda self, f: None})()
-            self.shown = 0
-            self.raised = 0
-            self.activated = 0
+            self.shown = self.raised = self.activated = 0
+            created.append(self)
 
         def show(self):
             self.shown += 1
@@ -505,57 +655,382 @@ def test_reopening_the_same_project_raises_the_existing_window(
         def raise_(self):
             self.raised += 1
 
-        def activateWindow(self):
+        def activateWindow(self):  # noqa: N802 — Qt's name
             self.activated += 1
 
-    monkeypatch.setattr(module, "ReviewWindow", FakeReview)
-    window = module.MainWindow()
-    window._outcome = JobOutcome(
-        matches=matches, video=None, cards=0, mode="recitation", project=project_path
-    )
-    window._open_editor()
-    window._open_editor()
+        def close(self):
+            if refuse_close:
+                return False
+            self.closed.emit()
+            return True
 
-    assert len(created) == 1
-    # Opened once, then re-shown, raised and activated on the second call.
-    assert created[0].shown == 2
-    assert created[0].raised == 1
-    assert created[0].activated == 1
+    return FakeReview
 
 
-def test_a_review_window_that_refuses_to_close_keeps_the_main_window_open(
-    qt_app, tmp_path, monkeypatch
+@pytest.fixture()
+def reviews(monkeypatch):
+    """Every review window the main window opens, as fakes."""
+    from qurantext.gui import main_window as module
+
+    created: list = []
+    monkeypatch.setattr(module, "ReviewWindow", _fake_review_class(created))
+    return created
+
+
+@pytest.fixture()
+def home(qt_app, prefs):
+    from PySide6.QtCore import QEvent
+
+    from qurantext.gui.main_window import MainWindow
+
+    window = MainWindow(prefs=prefs)
+    yield window
+    window._jobs.stop()  # cancel and join anything a test left running
+    window.deleteLater()
+    qt_app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+def _spin_until(qt_app, condition, timeout: float = 10.0) -> None:
+    """Run the event loop until *condition* holds, so worker signals arrive."""
+    import time
+
+    deadline = time.monotonic() + timeout
+    while not condition():
+        assert time.monotonic() < deadline, "timed out waiting"
+        qt_app.processEvents()
+        time.sleep(0.005)
+
+
+def _run_start(qt_app, window, spec: JobSpec) -> None:
+    """Press Start with *spec* and wait until the job has fully ended."""
+    window.new_job.start_requested.emit(spec)
+    _spin_until(qt_app, lambda: window._cancel is None)
+    _spin_until(qt_app, lambda: window._jobs.active == 0)
+    qt_app.processEvents()
+
+
+def _fake_matching(monkeypatch, calls: list | None = None, *, before=None):
+    """Make ``run_matching`` write a project into the job's folder and return it."""
+    from qurantext.gui import main_window as module
+    from qurantext.jobs.project import load_project
+
+    def fake(spec, *, progress=None, cancel=None):
+        if calls is not None:
+            calls.append(spec)
+        if before is not None:
+            before(progress, cancel)
+        return load_project(_saved_job(Path(spec.output_dir), Path(spec.audio).stem))
+
+    monkeypatch.setattr(module, "run_matching", fake)
+
+
+def _running_rows(window) -> list[str]:
+    from PySide6.QtCore import Qt
+
+    items = [window.job_list.list.item(i) for i in range(window.job_list.list.count())]
+    return [
+        window.job_list.list.itemWidget(i).label.text()
+        for i in items
+        if i.data(Qt.ItemDataRole.UserRole) is None
+    ]
+
+
+def test_the_home_window_is_the_job_list_beside_the_new_job_form(qt_app, home) -> None:
+    from PySide6.QtWidgets import QSplitter
+
+    from qurantext.gui.home.job_list import JobListPanel
+    from qurantext.gui.home.new_job import NewJobPanel
+
+    assert home.windowTitle() == "Qalun"
+    splitter = home.centralWidget().findChild(QSplitter)
+    assert isinstance(splitter.widget(0), JobListPanel)
+    assert isinstance(splitter.widget(1), NewJobPanel)
+    assert splitter.widget(0) is home.job_list and splitter.widget(1) is home.new_job
+
+    # The fullest the form gets: every option open, and a job running.
+    home.new_job.more_button.setChecked(True)
+    home.new_job.subtitle_buttons["both"].setChecked(True)
+    home.new_job.set_running(True)
+    for size in (home.minimumSize(), home.minimumSizeHint()):
+        assert size.width() <= 1024 and size.height() <= 680
+    home.new_job.set_running(False)
+
+
+def test_start_runs_matching_and_opens_its_review(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui import main_window as module
+
+    calls: list = []
+    _fake_matching(monkeypatch, calls)
+    monkeypatch.setattr(module, "run_render", lambda *a, **k: pytest.fail("no render asked"))
+    spec = _spec(tmp_path, output_dir=tmp_path / "jobs")
+
+    _run_start(qt_app, home, spec)
+
+    assert calls == [spec]
+    assert [r.project.path for r in reviews] == [tmp_path / "jobs" / "a_recitation.qalun.json"]
+    assert home.new_job.status_label.text() == module.t("home.finished.matched", count=1)
+
+
+def test_a_finished_job_whose_review_cannot_open_says_why(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    """The reason must outlive the job's ending message, not be replaced by it."""
+    from qurantext.gui import main_window as module
+    from qurantext.jobs.project import Project
+
+    def gone(spec, *, progress=None, cancel=None):
+        project = Project(audio=Path(spec.audio), cards=[_card()])
+        project.path = tmp_path / "gone.qalun.json"
+        return project
+
+    monkeypatch.setattr(module, "run_matching", gone)
+
+    _run_start(qt_app, home, _spec(tmp_path, output_dir=tmp_path / "jobs"))
+
+    assert reviews == []
+    assert "gone.qalun.json" in home.new_job.status_label.text()
+
+
+def test_render_right_away_also_renders_and_skips_the_review(
+    qt_app, home, reviews, tmp_path, monkeypatch
 ) -> None:
     from qurantext.gui import main_window as module
     from qurantext.gui.jobs import JobOutcome
-    from qurantext.jobs.project import Project, save_project
 
-    matches = tmp_path / "clip_recitation.json"
-    matches.write_text(
-        json.dumps({"matches": [], "meta": {"mode": "recitation"}}), encoding="utf-8"
+    _fake_matching(monkeypatch)
+    rendered: list = []
+
+    def fake_render(project, *, progress=None, cancel=None):
+        rendered.append(project.path)
+        video = tmp_path / "a.mp4"
+        return JobOutcome(matches=project.matches, video=video, cards=1)
+
+    monkeypatch.setattr(module, "run_render", fake_render)
+
+    _run_start(qt_app, home, _spec(tmp_path, output_dir=tmp_path / "jobs", render_right_away=True))
+
+    assert rendered == [tmp_path / "jobs" / "a_recitation.qalun.json"]
+    assert reviews == [], "render right away skips the review"
+    assert home.new_job.status_label.text() == module.t(
+        "home.finished.rendered", path=str(tmp_path / "a.mp4")
     )
-    project_path = save_project(
-        Project(audio=tmp_path / "clip.mp3", matches=matches),
-        tmp_path / "clip_recitation.qalun.json",
+
+
+def test_a_custom_output_folder_is_remembered_and_its_job_listed(
+    qt_app, home, prefs, reviews, tmp_path, monkeypatch
+) -> None:
+    from PySide6.QtCore import Qt
+
+    _fake_matching(monkeypatch)
+    custom = tmp_path / "elsewhere"
+    assert custom.resolve() not in prefs.job_dirs
+
+    _run_start(qt_app, home, _spec(tmp_path, output_dir=custom))
+
+    assert custom.resolve() in prefs.job_dirs
+    listed = [
+        home.job_list.list.item(i).data(Qt.ItemDataRole.UserRole).project
+        for i in range(home.job_list.list.count())
+    ]
+    assert listed == [custom / "a_recitation.qalun.json"]
+
+
+def test_the_running_row_shows_during_the_job_and_goes_after(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    import threading
+
+    release = threading.Event()
+
+    def report_then_wait(progress, cancel):
+        progress(ProgressEvent("align", "Aligning", fraction=0.4))
+        assert release.wait(10)
+
+    _fake_matching(monkeypatch, before=report_then_wait)
+    _saved_job(tmp_path / "jobs", "earlier")
+    home.job_list.refresh()
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+
+    _spin_until(qt_app, lambda: any("40%" in text for text in _running_rows(home)))
+    assert _running_rows(home)[0].startswith("a.mp3")
+    assert "40%" in home.new_job.status_label.text()
+
+    release.set()
+    _spin_until(qt_app, lambda: home._cancel is None)
+    _spin_until(qt_app, lambda: home._jobs.active == 0)
+    assert _running_rows(home) == []
+    assert home.job_list.list.count() == 2, "the earlier job, and the new one from disk"
+
+
+def test_cancel_says_so_in_the_status_line_without_a_dialog(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui import main_window as module
+
+    started = []
+
+    def wait_for_cancel(progress, cancel):
+        started.append(True)
+        for _ in range(1000):
+            cancel.raise_if_cancelled("detect")
+            __import__("time").sleep(0.01)
+
+    _fake_matching(monkeypatch, before=wait_for_cancel)
+    monkeypatch.setattr(module.QMessageBox, "warning", lambda *a: pytest.fail("no dialog"))
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    _spin_until(qt_app, lambda: started)
+
+    home.new_job.cancel_requested.emit()
+    _spin_until(qt_app, lambda: home._cancel is None)
+    _spin_until(qt_app, lambda: home._jobs.active == 0)
+
+    assert home.new_job.status_label.text() == module.t("home.cancelled")
+    assert not home.new_job.start_button.isHidden() and home.new_job.cancel_button.isHidden()
+    assert reviews == [] and _running_rows(home) == []
+
+
+def test_a_failure_says_what_went_wrong(qt_app, home, reviews, tmp_path, monkeypatch) -> None:
+    from qurantext.gui import main_window as module
+
+    def fail(progress, cancel):
+        raise RuntimeError("the recogniser is unreachable")
+
+    _fake_matching(monkeypatch, before=fail)
+    warned: list = []
+    monkeypatch.setattr(module.QMessageBox, "warning", lambda *a: warned.append(a))
+
+    _run_start(qt_app, home, _spec(tmp_path, output_dir=tmp_path / "jobs"))
+
+    assert "the recogniser is unreachable" in home.new_job.status_label.text()
+    assert warned and reviews == [] and _running_rows(home) == []
+
+
+class _NoOpThread:
+    """Stands in for the ``QThread`` a real job would return, so the fixture's
+    teardown (``BackgroundJobs.stop()``) has something harmless to join."""
+
+    def quit(self) -> None:
+        pass
+
+    def wait(self, _ms: int = 0) -> bool:
+        return True
+
+    def isFinished(self) -> bool:
+        return True
+
+
+def test_every_worker_callback_is_a_method_of_the_window(qt_app, home, monkeypatch) -> None:
+    """A bare lambda connected to a worker signal would run on the worker thread."""
+    import inspect
+
+    from qurantext.gui.review import background as background_module
+
+    seen: dict = {}
+    monkeypatch.setattr(
+        background_module,
+        "run_in_thread",
+        lambda job, cancel, **callbacks: seen.update(callbacks) or (_NoOpThread(), None),
     )
+    home._start(JobSpec(audio=Path(__file__), quran=QURAN_FILE, mode="lecture"))
 
-    class RefusingReview:
-        def __init__(self, project, **kw):
-            self.saved = type("S", (), {"connect": lambda self, f: None})()
-            self.closed = type("S", (), {"connect": lambda self, f: None})()
+    assert set(seen) == {"on_progress", "on_finished", "on_failed", "on_cancelled", "on_done"}
+    for callback in seen.values():
+        assert inspect.ismethod(callback) and callback.__self__ is home
 
-        def show(self):
-            pass
 
-        def close(self):
-            return False
+def test_double_clicking_a_job_opens_its_review(qt_app, prefs, reviews, tmp_path) -> None:
+    from qurantext.gui.main_window import MainWindow
 
-    monkeypatch.setattr(module, "ReviewWindow", RefusingReview)
-    window = module.MainWindow()
-    window._outcome = JobOutcome(
-        matches=matches, video=None, cards=0, mode="recitation", project=project_path
-    )
-    window._open_editor()
+    project_path = _saved_job(tmp_path / "jobs")
+    window = MainWindow(prefs=prefs)
+
+    window.job_list.list.itemActivated.emit(window.job_list.list.item(0))
+
+    assert [r.project.path for r in reviews] == [project_path]
+
+
+def test_double_clicking_a_damaged_job_shows_its_error(qt_app, prefs, reviews, tmp_path) -> None:
+    from qurantext.gui.main_window import MainWindow
+
+    (tmp_path / "jobs").mkdir()
+    (tmp_path / "jobs" / "broken.qalun.json").write_text("{not json", encoding="utf-8")
+    window = MainWindow(prefs=prefs)
+    window.show()
+
+    item = window.job_list.list.item(0)
+    window.job_list.list.itemActivated.emit(item)
+
+    assert reviews == []
+    assert window.new_job.status_label.isVisible()
+    assert item.statusTip() in window.new_job.status_label.text()
+    window.close()
+
+
+def test_show_in_folder_reveals_the_project(qt_app, home, monkeypatch, tmp_path) -> None:
+    from qurantext.gui import main_window as module
+
+    revealed: list = []
+    monkeypatch.setattr(module, "show_in_folder", revealed.append)
+    home.job_list.reveal(tmp_path / "x.qalun.json")
+    assert revealed == [tmp_path / "x.qalun.json"]
+
+
+def test_a_review_that_saves_or_closes_refreshes_the_list(qt_app, home, reviews, tmp_path) -> None:
+    first = _saved_job(tmp_path / "jobs", "first")
+    home.job_list.refresh()
+    home._open_review(first)
+    assert home.job_list.list.count() == 1
+
+    _saved_job(tmp_path / "jobs", "second")
+    reviews[0].saved.emit(first)
+    assert home.job_list.list.count() == 2
+
+    _saved_job(tmp_path / "jobs", "third")
+    reviews[0].close()
+    assert home.job_list.list.count() == 3
+
+
+# --- the review windows the home window opens ------------------------------
+
+
+def test_review_opens_the_jobs_project(qt_app, home, reviews, tmp_path) -> None:
+    project_path = _saved_job(tmp_path / "jobs")
+    home._open_review(project_path)
+    assert [r.project.path for r in reviews] == [project_path]
+
+
+def test_reopening_the_same_project_raises_the_existing_window(
+    qt_app, home, reviews, tmp_path
+) -> None:
+    project_path = _saved_job(tmp_path / "jobs")
+    home._open_review(project_path)
+    home._open_review(project_path)
+
+    assert len(reviews) == 1
+    # Opened once, then re-shown, raised and activated on the second call.
+    assert reviews[0].shown == 2
+    assert reviews[0].raised == 1
+    assert reviews[0].activated == 1
+
+
+def test_a_project_that_cannot_be_read_says_so_without_a_review(
+    qt_app, home, reviews, tmp_path
+) -> None:
+    home._open_review(tmp_path / "gone.qalun.json")
+    assert reviews == []
+    assert "gone.qalun.json" in home.new_job.status_label.text()
+
+
+def test_a_review_window_that_refuses_to_close_keeps_the_main_window_open(
+    qt_app, prefs, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui import main_window as module
+
+    monkeypatch.setattr(module, "ReviewWindow", _fake_review_class([], refuse_close=True))
+    window = module.MainWindow(prefs=prefs)
+    window._open_review(_saved_job(tmp_path / "jobs"))
     window.show()
 
     window.close()
@@ -563,41 +1038,121 @@ def test_a_review_window_that_refuses_to_close_keeps_the_main_window_open(
     assert window.isVisible()
 
 
-def _review_job(tmp_path):
-    from qurantext.gui.jobs import JobOutcome
-    from qurantext.jobs.project import Project, save_project
+def _blocked_until(release, seen: list | None = None, *, finish=None):
+    """A matching job that waits for *release*, then stops on its cancel token.
 
-    cards = [
-        {
-            "surah_num": 25,
-            "from_ayah": 7,
-            "to_ayah": 7,
-            "full_text": "a b",
-            "confidence": 1.0,
-            "start_time": 0.0,
-            "end_time": 10.0,
-            "word_timings": [
-                {"word": "a", "start": 1.0, "end": 2.0},
-                {"word": "b", "start": 2.0, "end": 3.0},
-            ],
-        }
-    ]
-    matches = tmp_path / "clip_recitation.json"
-    matches.write_text(
-        json.dumps({"matches": cards, "meta": {"mode": "recitation"}}), encoding="utf-8"
+    With *finish* given it ignores the token and returns *finish(spec)* instead,
+    like a model call that never looks at it.
+    """
+
+    def blocked(spec, *, progress=None, cancel=None):
+        assert release.wait(timeout=10), "the test forgot to release the job"
+        if seen is not None:
+            seen.append(cancel.cancelled)
+        if finish is not None:
+            return finish(spec)
+        cancel.raise_if_cancelled("detect")
+        pytest.fail("the job should have been cancelled, not left to finish")
+
+    return blocked
+
+
+def _record_quits(monkeypatch) -> list:
+    from qurantext.gui import main_window as module
+
+    quits: list = []
+    monkeypatch.setattr(module.QApplication, "quit", staticmethod(lambda: quits.append(True)))
+    return quits
+
+
+def test_closing_the_window_while_a_job_runs_hides_it_and_quits_once_the_job_ends(
+    qt_app, home, tmp_path, monkeypatch
+) -> None:
+    """The job is cancelled and the window goes, but the app waits for the thread.
+
+    Quitting at once would destroy a ``QThread`` still running a model call
+    that never checks its token, which aborts the process on exit.
+    """
+    import threading
+
+    from qurantext.gui import main_window as module
+
+    release = threading.Event()
+    seen: list = []
+    monkeypatch.setattr(module, "run_matching", _blocked_until(release, seen))
+    monkeypatch.setattr(module.QMessageBox, "warning", lambda *a: pytest.fail("no dialog"))
+    quits = _record_quits(monkeypatch)
+
+    home.show()
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    _spin_until(qt_app, lambda: home._cancel is not None)
+
+    assert not home.close(), "the close waits for the job"
+    assert not home.isVisible()
+    qt_app.processEvents()
+    assert quits == [], "not while the job still runs"
+
+    release.set()
+    _spin_until(qt_app, lambda: quits)
+    assert seen == [True], "the job was told to stop"
+    assert home._jobs.active == 0, "its thread was joined before quitting"
+
+
+def test_a_job_that_finishes_during_the_close_opens_no_review(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    import threading
+
+    from qurantext.gui import main_window as module
+    from qurantext.jobs.project import load_project
+
+    release = threading.Event()
+    finish = _blocked_until(
+        release,
+        finish=lambda spec: module._Finished(
+            load_project(_saved_job(Path(spec.output_dir), Path(spec.audio).stem))
+        ),
     )
-    project_path = save_project(
-        Project(audio=tmp_path / "clip.mp3", cards=cards, matches=matches),
-        tmp_path / "clip_recitation.qalun.json",
-    )
-    outcome = JobOutcome(
-        matches=matches, video=None, cards=1, mode="recitation", project=project_path
-    )
-    return outcome, project_path
+    monkeypatch.setattr(module, "_match_then_render", finish)
+    monkeypatch.setattr(module.QMessageBox, "warning", lambda *a: pytest.fail("no dialog"))
+    quits = _record_quits(monkeypatch)
+
+    home.show()
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    _spin_until(qt_app, lambda: home._cancel is not None)
+    home.close()
+    release.set()
+    _spin_until(qt_app, lambda: quits)
+
+    assert reviews == [], "no review opens under a window that is closing"
+
+
+def test_a_job_that_fails_during_the_close_shows_no_dialog(
+    qt_app, home, tmp_path, monkeypatch
+) -> None:
+    import threading
+
+    from qurantext.gui import main_window as module
+
+    release = threading.Event()
+
+    def fail(spec):
+        raise RuntimeError("finished late")
+
+    monkeypatch.setattr(module, "run_matching", _blocked_until(release, finish=fail))
+    monkeypatch.setattr(module.QMessageBox, "warning", lambda *a: pytest.fail("no dialog"))
+    quits = _record_quits(monkeypatch)
+
+    home.show()
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    _spin_until(qt_app, lambda: home._cancel is not None)
+    home.close()
+    release.set()
+    _spin_until(qt_app, lambda: quits)
 
 
 @pytest.fixture()
-def real_reviews(qt_app, monkeypatch):
+def real_reviews(qt_app, prefs, monkeypatch):
     """The main window's real review window, with a fake player; closed after the test."""
     from PySide6.QtCore import QEvent
 
@@ -608,7 +1163,7 @@ def real_reviews(qt_app, monkeypatch):
     monkeypatch.setattr(
         module, "ReviewWindow", lambda project: real(project, player=FakePlayer(duration=10.0))
     )
-    main = module.MainWindow()
+    main = module.MainWindow(prefs=prefs)
     yield main
     for window in list(main._reviews.values()):
         window._confirm_discard = lambda: "discard"
@@ -627,9 +1182,8 @@ def _edit_first_word(review) -> None:
 def test_discard_then_reopen_shows_the_saved_state(qt_app, tmp_path, real_reviews) -> None:
     from PySide6.QtCore import QEvent
 
-    outcome, project_path = _review_job(tmp_path)
-    real_reviews._outcome = outcome
-    real_reviews._open_editor()
+    project_path = _saved_job(tmp_path / "jobs")
+    real_reviews._open_review(project_path)
     first = real_reviews._reviews[project_path]
     _edit_first_word(first)
     first._confirm_discard = lambda: "discard"
@@ -637,7 +1191,7 @@ def test_discard_then_reopen_shows_the_saved_state(qt_app, tmp_path, real_review
     assert project_path not in real_reviews._reviews
     qt_app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
-    real_reviews._open_editor()
+    real_reviews._open_review(project_path)
     second = real_reviews._reviews[project_path]
     assert not second.session.dirty
     assert not second.windowTitle().endswith("*")
@@ -647,24 +1201,120 @@ def test_discard_then_reopen_shows_the_saved_state(qt_app, tmp_path, real_review
 def test_a_change_on_disk_between_close_and_reopen_is_shown(qt_app, tmp_path, real_reviews) -> None:
     from qurantext.jobs.project import load_project, save_project
 
-    outcome, project_path = _review_job(tmp_path)
-    real_reviews._outcome = outcome
-    real_reviews._open_editor()
+    project_path = _saved_job(tmp_path / "jobs")
+    real_reviews._open_review(project_path)
     assert real_reviews._reviews[project_path].close()
 
     on_disk = load_project(project_path)
     on_disk.review = {"state": "reviewed", "reviewed_at": "2026-09-23T00:00:00"}
     save_project(on_disk, project_path)
 
-    real_reviews._open_editor()
+    real_reviews._open_review(project_path)
     assert real_reviews._reviews[project_path].session.project.review["state"] == "reviewed"
 
 
 def test_opening_twice_while_open_keeps_one_window(qt_app, tmp_path, real_reviews) -> None:
-    outcome, project_path = _review_job(tmp_path)
-    real_reviews._outcome = outcome
-    real_reviews._open_editor()
+    project_path = _saved_job(tmp_path / "jobs")
+    real_reviews._open_review(project_path)
     first = real_reviews._reviews[project_path]
-    real_reviews._open_editor()
+    real_reviews._open_review(project_path)
     assert real_reviews._reviews[project_path] is first
     assert len(real_reviews._reviews) == 1
+
+
+def test_the_project_path_a_spec_will_write_is_beside_its_match_file(tmp_path) -> None:
+    from qurantext.gui.jobs import match_path_for
+    from qurantext.jobs.project import project_path_for
+
+    spec = _spec(tmp_path, output_dir=tmp_path / "jobs")
+    assert match_path_for(spec) == tmp_path / "jobs" / "a_recitation.json"
+    assert project_path_for(match_path_for(spec)) == tmp_path / "jobs" / "a_recitation.qalun.json"
+
+
+def test_a_job_whose_review_is_open_is_not_run_again(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    """Re-matching would replace the project under unsaved corrections in its review."""
+    calls: list = []
+    _fake_matching(monkeypatch, calls)
+    project_path = _saved_job(tmp_path / "jobs", "a")
+    home._open_review(project_path)
+
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    qt_app.processEvents()
+
+    assert calls == [] and home._cancel is None
+    assert (
+        home.new_job.status_label.text() == "Close the review of this job before running it again."
+    )
+    assert reviews[0].raised == 1 and reviews[0].activated == 1
+
+    reviews[0].close()
+    _run_start(qt_app, home, _spec(tmp_path, output_dir=tmp_path / "jobs"))
+    assert len(calls) == 1, "once its review is closed, the job runs"
+
+
+def test_rerunning_a_removed_job_lists_it_again(
+    qt_app, home, prefs, reviews, tmp_path, monkeypatch
+) -> None:
+    from PySide6.QtCore import Qt
+
+    _fake_matching(monkeypatch)
+    project_path = _saved_job(tmp_path / "jobs", "a")
+    home.job_list.refresh()
+    home.job_list.remove_from_list(project_path)
+    assert home.job_list.list.count() == 0
+
+    _run_start(qt_app, home, _spec(tmp_path, output_dir=tmp_path / "jobs"))
+
+    listed = [
+        home.job_list.list.item(i).data(Qt.ItemDataRole.UserRole).project
+        for i in range(home.job_list.list.count())
+    ]
+    assert listed == [project_path]
+    assert project_path.resolve() not in prefs.hidden_jobs
+
+
+@pytest.mark.parametrize("ending", ["fails", "is cancelled"])
+def test_a_render_right_away_that_does_not_finish_still_lists_the_matched_job(
+    qt_app, home, prefs, reviews, tmp_path, monkeypatch, ending
+) -> None:
+    """Matching wrote the project before the render stopped; the list must show it."""
+    from PySide6.QtCore import Qt
+
+    from qurantext.gui import main_window as module
+    from qurantext.utils.progress import JobCancelled
+
+    _fake_matching(monkeypatch)
+
+    def render(project, *, progress=None, cancel=None):
+        if ending == "fails":
+            raise RuntimeError("the encoder gave up")
+        raise JobCancelled("render")
+
+    monkeypatch.setattr(module, "run_render", render)
+    monkeypatch.setattr(module.QMessageBox, "warning", lambda *a: None)
+    custom = tmp_path / "elsewhere"
+
+    _run_start(qt_app, home, _spec(tmp_path, output_dir=custom, render_right_away=True))
+
+    listed = [
+        home.job_list.list.item(i).data(Qt.ItemDataRole.UserRole).project
+        for i in range(home.job_list.list.count())
+    ]
+    assert listed == [custom / "a_recitation.qalun.json"]
+    assert custom.resolve() in prefs.job_dirs
+
+
+def test_the_app_names_itself_before_any_settings_are_read(qt_app) -> None:
+    """``Prefs()`` uses a default ``QSettings``, whose file is named after these."""
+    from qurantext.gui import app as app_module
+
+    before = (QCoreApplication.organizationName(), QCoreApplication.applicationName())
+    try:
+        app_module._name_the_app()
+        assert QCoreApplication.organizationName() == "Qalun"
+        assert QCoreApplication.applicationName() == "Qalun"
+    finally:
+        QCoreApplication.setOrganizationName(before[0])
+        QCoreApplication.setApplicationName(before[1])

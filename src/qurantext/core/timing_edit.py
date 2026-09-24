@@ -20,6 +20,19 @@ input that already satisfies 1 and 2, as alignment delivers it:
    overlapping it, but never past that neighbour's other edge. When a limit
    cannot be met the edit is clamped to what is feasible, which in the middle
    of a collapsed run can mean not moving at all.
+
+   By default an edge only ever *pushes* a neighbour: shortening a word
+   leaves a gap. With ``keep_joined=True`` (what the review editor passes)
+   an edge that touched its neighbour's shared edge before the edit
+   (compared on the millisecond grid) keeps touching it in both directions,
+   so a nudge and its opposite put both words back. The neighbour's shared
+   edge is still bounded by its other edge and its minimum, exactly as
+   above; an edge with a gap never moves its neighbour except to push it.
+   That round trip is exact except beside a word already shorter than
+   :data:`MIN_WORD_S`, where the neighbour's minimum can differ: a nudge that
+   lengthens that word lets it grow past its old length, and the nudge back
+   may only shrink it to the minimum, so it ends at :data:`MIN_WORD_S`
+   rather than at the length alignment delivered.
 4. A request that equals the current value changes nothing: no ``edited``
    flag, output identical up to millisecond rounding (every time is snapped
    to the millisecond grid on copy, and that snap is monotonic).
@@ -95,8 +108,13 @@ def retime(
     *,
     start: float | None = None,
     end: float | None = None,
+    keep_joined: bool = False,
 ) -> list[dict[str, Any]]:
     """Move one word's start and/or end, trimming a neighbour instead of overlapping it.
+
+    With *keep_joined*, an edge that shared its instant with the neighbour's
+    edge before the edit takes that edge along either way (rule 3 in the
+    module docstring), so shortening the word no longer opens a gap there.
 
     Operates on one list. Widgets call :func:`retime_in_cards`, which applies this
     across card boundaries.
@@ -106,6 +124,9 @@ def retime(
     word = out[index]
     prev = out[index - 1] if index > 0 else None
     nxt = out[index + 1] if index + 1 < len(out) else None
+    # Judged before anything moves, on the grid ``_copy`` just put every edge on.
+    joined_prev = keep_joined and prev is not None and prev["end"] == word["start"]
+    joined_next = keep_joined and nxt is not None and word["end"] == nxt["start"]
 
     if start is not None:
         start = _snap(start)
@@ -116,7 +137,7 @@ def retime(
         # even on input that does not meet the rules.
         _set(word, "start", _clamp(float(start), min(low, current), max(high, current)))
         new_start = float(word["start"])
-        if prev is not None and float(prev["end"]) > new_start:
+        if prev is not None and (joined_prev or float(prev["end"]) > new_start):
             _set(prev, "end", new_start)
 
     if end is not None:
@@ -126,7 +147,7 @@ def retime(
         high = float(nxt["end"]) - _keep(nxt) if nxt else math.inf
         _set(word, "end", _clamp(float(end), min(low, current), max(high, current)))
         new_end = float(word["end"])
-        if nxt is not None and float(nxt["start"]) < new_end:
+        if nxt is not None and (joined_next or float(nxt["start"]) < new_end):
             _set(nxt, "start", new_end)
 
     return out
@@ -205,6 +226,7 @@ def retime_in_cards(
     *,
     start: float | None = None,
     end: float | None = None,
+    keep_joined: bool = False,
 ) -> list[dict[str, Any]]:
     """:func:`retime` one word of a job's cards, and re-derive the card windows.
 
@@ -214,7 +236,8 @@ def retime_in_cards(
     without word timings pass through untouched; the input is never mutated.
     """
     flat, spans, target = _flatten(cards, card_index, word_index)
-    return _split(cards, retime(flat, target, start=start, end=end), spans)
+    edited = retime(flat, target, start=start, end=end, keep_joined=keep_joined)
+    return _split(cards, edited, spans)
 
 
 def ripple_in_cards(

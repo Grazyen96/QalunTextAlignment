@@ -109,7 +109,7 @@ def test_the_render_records_the_content_it_started_from(tmp_path, monkeypatch) -
         )
 
     monkeypatch.setattr(project_render, "export_job", fake_export_job)
-    render_project(project, tmp_path / "v.mp4", preset="social")
+    render_project(project, tmp_path / "v.mp4", preset="social", subtitles="both")
 
     assert seen["cards"][0]["start_time"] == 0.5, "rendered from the snapshot"
     assert seen["cards"][0]["word_timings"][0]["start"] == 0.5
@@ -120,6 +120,7 @@ def test_the_render_records_the_content_it_started_from(tmp_path, monkeypatch) -
         8,
     )
     assert project.render["preset"] == "social"
+    assert project.render["subtitles"] == "both"
 
 
 def test_ass_export_uses_the_recorded_render_size(tmp_path, store) -> None:

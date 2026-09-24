@@ -32,7 +32,7 @@ from qurantext.core.timing_edit import (
     ripple_in_cards,
 )
 from qurantext.core.video_common import validated_matches
-from qurantext.jobs.project import CaptionCue, Project, save_project
+from qurantext.jobs.project import CaptionCue, Project, job_settings, save_project
 
 __all__ = ["CAPTION", "CARD", "ReviewSession", "TimelineWord", "WordRef"]
 
@@ -82,6 +82,43 @@ def _normalized_caption(cue: CaptionCue) -> dict[str, Any]:
     return data
 
 
+def _unflagged(words: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """*words* on the grid and without ``edited``: what an edit could have changed."""
+    return [
+        {key: value for key, value in word.items() if key != "edited"}
+        for word in _normalized_words(words)
+    ]
+
+
+def _settled(cards: list, captions: list[CaptionCue], review: dict) -> tuple:
+    """A state as a timing edit would leave it, for telling "no edit" from an edit.
+
+    Every timing edit re-derives the card windows from their words (and snaps
+    to the millisecond grid), and a loaded project's windows are often a hair
+    off: detection rounds a card's window on its own, so a card can open at
+    0.11 over a first word at 0.109. Comparing raw states would then read a
+    drag that ended where it began as a change. Settling both sides first —
+    windows derived, times on the grid, ``edited`` flags dropped — compares
+    what the person could see. The flags go because a word whose times are
+    where they were was not retimed, whatever an edit on the way marked it.
+    Cards without word timings pass through ``derive_card_windows`` untouched,
+    and only a timing edit re-derives a timed card's window
+    (``set_card_times`` refuses them), so this holds in either mode.
+    """
+    settled_cards = []
+    for card in derive_card_windows(cards):
+        if card.get("word_timings"):
+            card = {**card, "word_timings": _unflagged(card["word_timings"])}
+        settled_cards.append(card)
+    settled_captions = []
+    for cue in captions:
+        data = cue.to_dict()
+        if data.get("words"):
+            data["words"] = _unflagged(data["words"])
+        settled_captions.append(data)
+    return settled_cards, settled_captions, review
+
+
 class ReviewSession:
     """The project being reviewed, with undo and a record of unsaved changes."""
 
@@ -92,6 +129,9 @@ class ReviewSession:
         self._redo: list[tuple] = []
         self._in_gesture = False
         self._gesture_start: tuple | None = None
+        #: The redo history, set aside while a gesture runs: given back if the
+        #: gesture changes nothing (a click on a word), dropped if it edits.
+        self._gesture_redo: list[tuple] = []
         self._revision = 0
         self._saved_key = self._key()
         #: What :meth:`revert` puts back: the state as loaded, or as last saved.
@@ -319,10 +359,17 @@ class ReviewSession:
         return self._validated[1]
 
     def frame_inputs(self, t: float) -> tuple[dict | None, dict | None, bool]:
+        """The active card, the active caption, and whether the frame keeps a caption band.
+
+        The band is kept only when the job burns its captions in: a
+        sidecar-only render drops it (``jobs.export``), and the preview should
+        look like the video the job will make.
+        """
         active = [card for card in self.validated_cards() if float(card["_start_time"]) <= t]
         index = self.caption_at(t)
         caption = self._caption_segment(index) if index is not None else None
-        return (active[-1] if active else None), caption, bool(self.project.captions)
+        band = bool(self.project.captions) and job_settings(self.project).subtitles != "sidecar"
+        return (active[-1] if active else None), caption, band
 
     def _caption_segment(self, index: int) -> dict[str, Any]:
         """One cue in the shape ``Project.caption_segments()`` produces, built for this cue alone.
@@ -341,16 +388,38 @@ class ReviewSession:
 
     # -- editing ----------------------------------------------------------------
 
-    def retime(self, ref: WordRef, *, start: float | None = None, end: float | None = None) -> None:
+    def retime(
+        self,
+        ref: WordRef,
+        *,
+        start: float | None = None,
+        end: float | None = None,
+        keep_joined: bool = True,
+    ) -> None:
+        """Move *ref*'s edge; one it shared with the neighbour takes the neighbour's along.
+
+        ``keep_joined`` is what makes a nudge reversible: ``.`` pushes the next
+        word's start, and ``,`` brings it back instead of leaving a gap. Pass
+        False to move the edge alone (a neighbour is then only ever pushed), which
+        is how a gap is opened between two joined words. An edit that puts
+        everything back where it was last saved is settled back to exactly that
+        state (see :meth:`_settle`), so it does not read as unsaved.
+        """
         self._before_change()
         if ref.kind == CARD:
             self.project.cards = retime_in_cards(
-                self.project.cards, ref.segment, ref.word, start=start, end=end
+                self.project.cards,
+                ref.segment,
+                ref.word,
+                start=start,
+                end=end,
+                keep_joined=keep_joined,
             )
         else:
             cue = self.project.captions[ref.segment]
-            words = retime(cue.words, ref.word, start=start, end=end)
+            words = retime(cue.words, ref.word, start=start, end=end, keep_joined=keep_joined)
             self._set_cue_words(ref.segment, words)
+        self._settle(ref)
         self._changed()
 
     def ripple(self, ref: WordRef, delta: float) -> None:
@@ -363,10 +432,16 @@ class ReviewSession:
             cue = self.project.captions[ref.segment]
             words = ripple(cue.words, ref.word, delta, duration=self.duration)
             self._set_cue_words(ref.segment, words)
+        self._settle(ref)
         self._changed()
 
     def drag_retime(
-        self, ref: WordRef, *, start: float | None = None, end: float | None = None
+        self,
+        ref: WordRef,
+        *,
+        start: float | None = None,
+        end: float | None = None,
+        keep_joined: bool = True,
     ) -> None:
         """Inside a gesture: *ref*'s edge where the pointer is now, applied to the gesture's start.
 
@@ -374,10 +449,13 @@ class ReviewSession:
         on the way did to a neighbour: drag an end past the next word and
         back, and the next word stays trimmed. Starting each move from the
         state the drag began in makes the result depend only on where the
-        pointer is, so dragging back puts everything back.
+        pointer is, so dragging back puts everything back. Like a nudge, it
+        goes through :meth:`retime`, so an edge the neighbour shared stays
+        shared while it is dragged, unless *keep_joined* is False (an Alt-drag
+        in the word strip), which detaches it.
         """
         self._restore_gesture_start()
-        self.retime(ref, start=start, end=end)
+        self.retime(ref, start=start, end=end, keep_joined=keep_joined)
 
     def drag_ripple(self, ref: WordRef, total_delta: float) -> None:
         """Inside a gesture: ripple from *ref* by the pointer's whole travel since the press.
@@ -454,22 +532,96 @@ class ReviewSession:
             return
         self._gesture_start = self._snapshot()
         self._undo.append(self._gesture_start)
-        self._redo.clear()
+        # Set aside, not cleared: a press that never moves is no edit and must
+        # leave redo as it was (see end_gesture). Nothing can redo mid-gesture.
+        self._gesture_redo, self._redo = self._redo, []
         self._in_gesture = True
 
     def end_gesture(self) -> None:
+        """Close the gesture; one that ends where it began is no edit at all.
+
+        "Where it began" is judged on the settled states (see ``_settled``),
+        and then the gesture-start snapshot is put back exactly — windows,
+        flags and all — and its undo entry dropped, so the project is not
+        dirty and there is nothing to undo; the redo history set aside when it
+        began comes back. A gesture that did edit starts a new branch, and the
+        redo history goes.
+        """
         if not self._in_gesture:
             return
         self._in_gesture = False
-        if self._undo and self._undo[-1] is self._gesture_start:
-            cards, captions, review = self._gesture_start
-            if (
-                cards == self.project.cards
-                and [c.to_dict() for c in captions] == [c.to_dict() for c in self.project.captions]
-                and review == self.project.review
-            ):
-                self._undo.pop()
-        self._gesture_start = None
+        start, self._gesture_start = self._gesture_start, None
+        redo, self._gesture_redo = self._gesture_redo, []
+        if start is None:
+            return
+        if not self._settles_to(start):
+            # A real edit; but one that undid the edits before it is the saved state.
+            if self._settle():
+                self._changed()
+            return
+        if self._undo and self._undo[-1] is start:
+            self._undo.pop()
+        self._redo = redo
+        if not self._is_exactly(start):
+            self._restore(start)
+            self._changed()
+
+    def _settle(self, ref: WordRef | None = None) -> bool:
+        """Outside a gesture, an edit that lands back on the saved state *is* the saved state.
+
+        A nudge and its opposite (or a ripple and its opposite) put every
+        time back, but each marked the words it moved as ``edited`` and
+        re-derived the card windows, so the project would read as unsaved
+        with nothing to save. When the settled states match (see
+        ``_settled``), the saved snapshot is put back exactly. Undo keeps its
+        entries: stepping back through the nudges is still possible. Returns
+        whether anything was put back.
+
+        *ref*, the word just edited, makes the usual case cheap: while that
+        word is away from its saved times the states cannot match, and the
+        whole-project comparison (a few milliseconds per thousand words) is
+        skipped.
+        """
+        if self._in_gesture:
+            return False
+        if ref is not None and not self._at_saved_times(ref):
+            return False
+        if not self._settles_to(self._saved_snapshot):
+            return False
+        if self._is_exactly(self._saved_snapshot):
+            return False
+        self._restore(self._saved_snapshot)
+        return True
+
+    def _settles_to(self, snapshot: tuple) -> bool:
+        """Whether the current state is *snapshot* once both are settled."""
+        current = (self.project.cards, self.project.captions, self.project.review)
+        return _settled(*current) == _settled(*snapshot)
+
+    def _at_saved_times(self, ref: WordRef) -> bool:
+        """Whether *ref* sits where the saved state has the word at its position.
+
+        False also when the saved state has no word there: then the two states
+        differ in shape and cannot settle to each other anyway.
+        """
+        cards, captions, _review = self._saved_snapshot
+        if ref.kind == CARD:
+            segments = [card.get("word_timings") or [] for card in cards]
+        else:
+            segments = [cue.words for cue in captions]
+        if ref.segment >= len(segments) or ref.word >= len(segments[ref.segment]):
+            return False
+        saved = segments[ref.segment][ref.word]
+        now = self._raw_words(ref)[ref.word]
+        return all(round(float(saved[k]), 3) == round(float(now[k]), 3) for k in ("start", "end"))
+
+    def _is_exactly(self, snapshot: tuple) -> bool:
+        cards, captions, review = snapshot
+        return (
+            cards == self.project.cards
+            and captions == self.project.captions
+            and review == self.project.review
+        )
 
     def undo(self) -> bool:
         if not self._undo:
@@ -506,6 +658,7 @@ class ReviewSession:
         """
         self._in_gesture = False
         self._gesture_start = None
+        self._gesture_redo = []
         self._undo.clear()
         self._redo.clear()
         self._restore(self._saved_snapshot)

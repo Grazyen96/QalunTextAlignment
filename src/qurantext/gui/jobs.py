@@ -8,7 +8,7 @@ calls, so the window can put review between them.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -17,7 +17,16 @@ from qurantext.config.paths import (
     RECITATION_MATCHING_OUTPUT_DIR,
     VIDEOS_OUTPUT_DIR,
 )
-from qurantext.jobs.project import Project, load_project, project_path_for, save_project
+from qurantext.gui.i18n import t
+from qurantext.jobs.project import (
+    JobSettings,
+    Project,
+    job_settings,
+    load_project,
+    project_path_for,
+    save_project,
+    set_job_settings,
+)
 from qurantext.jobs.project_render import render_project
 from qurantext.pipelines.detection import run_detection, run_recitation_range
 from qurantext.utils.progress import CancelToken, ProgressCallback, report
@@ -25,10 +34,10 @@ from qurantext.utils.progress import CancelToken, ProgressCallback, report
 __all__ = [
     "JobSpec",
     "JobOutcome",
+    "match_path_for",
     "project_path_for",
     "run_matching",
     "run_render",
-    "run_job",
 ]
 
 
@@ -44,10 +53,23 @@ class JobSpec:
     from_ayah: int | None = None
     to_ayah: int | None = None
     preset: str = "social"
-    render: bool = True
+    #: One of ``SUBTITLE_CHOICES``: in the picture, in files beside it, or both.
+    subtitles: str = "burn"
+    #: Subtitle file formats, when files are written.
+    formats: tuple[str, ...] = ("srt",)
     #: Render as soon as matching finishes, skipping review. For jobs you trust.
     render_right_away: bool = False
     output_dir: Path | None = None
+
+    @property
+    def settings(self) -> JobSettings:
+        """The output choices, as the project keeps them."""
+        return JobSettings(
+            preset=self.preset,
+            subtitles=self.subtitles,
+            formats=tuple(self.formats),
+            output_dir=Path(self.output_dir) if self.output_dir else None,
+        )
 
     @property
     def has_stated_range(self) -> bool:
@@ -59,15 +81,22 @@ class JobSpec:
         )
 
     def validate(self) -> str | None:
-        """Return a message to show the user, or None when the job can run."""
+        """Return an i18n key describing what is missing, or None when the job can run.
+
+        A key rather than English text, so the window can show it translated
+        (``qurantext.gui.i18n.t``) instead of baking one language into the model.
+        """
         if not self.audio or not Path(self.audio).is_file():
-            return "Choose an audio file."
+            return "job.need_audio"
         if not self.quran or not Path(self.quran).is_file():
-            return "Choose the Quran text file."
+            return "job.need_quran"
         if self.mode == "recitation" and not self.has_stated_range:
-            return "Choose the surah and the ayah range."
+            return "job.need_range"
         if self.has_stated_range and self.to_ayah < self.from_ayah:  # type: ignore[operator]
-            return "The last ayah cannot come before the first."
+            return "job.bad_range"
+        if self.subtitles in ("sidecar", "both") and not self.formats:
+            # Files beside the video, in no format, would write nothing.
+            return "job.need_format"
         return None
 
 
@@ -78,11 +107,7 @@ class JobOutcome:
     matches: Path
     video: Path | None
     cards: int
-    mode: str
     project: Path | None = None
-    subtitles: tuple[Path, ...] = ()
-    #: Where re-matching put an earlier project whose content differed, if it did.
-    backup: Path | None = None
 
 
 def _set_aside(path: Path) -> Path | None:
@@ -128,6 +153,23 @@ def _keep_earlier(destination: Path, derived: Project) -> Path | str | None:
     return _set_aside(destination)
 
 
+def match_path_for(spec: JobSpec) -> Path:
+    """The match file *spec* writes; its project goes beside it (``project_path_for``).
+
+    The one place the rule lives, so the window can tell before Start which
+    project a job will replace (and refuse while that project is open in a review).
+    """
+    match_dir = Path(
+        spec.output_dir
+        or (
+            RECITATION_MATCHING_OUTPUT_DIR
+            if spec.mode == "recitation"
+            else LECTURE_MATCHING_OUTPUT_DIR
+        )
+    )
+    return match_dir / f"{Path(spec.audio).stem}_{spec.mode}.json"
+
+
 def run_matching(
     spec: JobSpec,
     *,
@@ -139,30 +181,11 @@ def run_matching(
     An earlier project for the same match file is kept as a backup when its
     content differs, and the backup is reported as progress.
     """
-    project, _backup = _match(spec, progress=progress, cancel=cancel)
-    return project
-
-
-def _match(
-    spec: JobSpec,
-    *,
-    progress: ProgressCallback | None = None,
-    cancel: CancelToken | None = None,
-) -> tuple[Project, Path | None]:
-    """:func:`run_matching`, also returning the backup so :func:`run_job` can report it."""
     audio = Path(spec.audio)
-    match_dir = Path(
-        spec.output_dir
-        or (
-            RECITATION_MATCHING_OUTPUT_DIR
-            if spec.mode == "recitation"
-            else LECTURE_MATCHING_OUTPUT_DIR
-        )
-    )
-    match_path = match_dir / f"{audio.stem}_{spec.mode}.json"
+    match_path = match_path_for(spec)
 
     if spec.has_stated_range:
-        report(progress, "detect", "Aligning against the ayat you chose...")
+        report(progress, "detect", t("job.progress.aligning"))
         run_recitation_range(
             quran=spec.quran,
             output=match_path,
@@ -175,7 +198,7 @@ def _match(
             cancel=cancel,
         )
     else:
-        report(progress, "detect", "Looking for Quran in the audio...")
+        report(progress, "detect", t("job.progress.detecting"))
         run_detection(
             quran=spec.quran,
             output=match_path,
@@ -187,35 +210,48 @@ def _match(
         )
 
     project = Project.from_match_file(match_path, audio, mode=spec.mode)
+    set_job_settings(project, spec.settings)
     destination = project_path_for(match_path)
     kept = _keep_earlier(destination, project)
     if kept == _UNCHANGED:
-        return load_project(destination), None
-    backup = kept if isinstance(kept, Path) else None
-    if backup is not None:
-        report(progress, "detect", f"Kept your earlier corrections in {backup.name}")
+        # Same content: leave the file alone (review state, render record and
+        # all) unless this run chose differently, and then change only that.
+        existing = load_project(destination)
+        if job_settings(existing) != job_settings(project):
+            set_job_settings(existing, job_settings(project))
+            save_project(existing, destination)
+        return existing
+    if isinstance(kept, Path):
+        report(progress, "detect", t("job.progress.kept", name=kept.name))
     save_project(project, destination)
-    return project, backup
+    return project
 
 
 def run_render(
     project: Project,
     *,
-    preset: str = "social",
-    subtitles: str = "burn",
-    formats: tuple[str, ...] = ("srt",),
+    preset: str | None = None,
+    subtitles: str | None = None,
+    formats: tuple[str, ...] | None = None,
     output_dir: Path | None = None,
     progress: ProgressCallback | None = None,
     cancel: CancelToken | None = None,
 ) -> JobOutcome:
-    """Render the project — with whatever corrections it now holds."""
-    video_dir = Path(output_dir or VIDEOS_OUTPUT_DIR)
+    """Render the project — with whatever corrections it now holds.
+
+    The preset, subtitles, formats and folder are the job's own
+    (:func:`~qurantext.jobs.project.job_settings`), so a render from the review
+    makes what the job was started for. A keyword given here wins over the
+    job's choice; None means "use the job's".
+    """
+    settings = job_settings(project)
+    video_dir = Path(output_dir or settings.output_dir or VIDEOS_OUTPUT_DIR)
     result = render_project(
         project,
         video_dir / f"{Path(project.audio).stem}.mp4",
-        preset=preset,
-        subtitles=subtitles,
-        formats=formats,
+        preset=preset if preset is not None else settings.preset,
+        subtitles=subtitles if subtitles is not None else settings.subtitles,
+        formats=tuple(formats) if formats is not None else settings.formats,
         progress=progress,
         cancel=cancel,
     )
@@ -223,32 +259,5 @@ def run_render(
         matches=Path(project.matches),
         video=result.video,
         cards=len(project.cards),
-        mode=project.mode,
         project=project.path,
-        subtitles=tuple(result.subtitles),
     )
-
-
-def run_job(
-    spec: JobSpec,
-    *,
-    progress: ProgressCallback | None = None,
-    cancel: CancelToken | None = None,
-) -> JobOutcome:
-    """Match, then render. Both stages report progress and honour Cancel."""
-    project, backup = _match(spec, progress=progress, cancel=cancel)
-    if not spec.render:
-        return JobOutcome(
-            matches=Path(project.matches),
-            video=None,
-            cards=len(project.cards),
-            mode=spec.mode,
-            project=project.path,
-            backup=backup,
-        )
-    if cancel is not None:
-        cancel.raise_if_cancelled("render")
-    outcome = run_render(
-        project, preset=spec.preset, output_dir=spec.output_dir, progress=progress, cancel=cancel
-    )
-    return replace(outcome, backup=backup)

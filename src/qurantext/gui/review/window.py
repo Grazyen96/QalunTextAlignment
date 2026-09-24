@@ -60,7 +60,7 @@ from qurantext.gui.review.warnings_strip import WarningsStrip
 from qurantext.gui.review.waveform_view import WaveformView
 from qurantext.gui.review.word_strip import WordStrip
 from qurantext.gui.review.zoom_slider import ZoomSlider
-from qurantext.jobs.project import Project
+from qurantext.jobs.project import Project, job_settings
 from qurantext.utils.progress import CancelToken, ProgressEvent
 
 __all__ = ["ReviewWindow"]
@@ -83,12 +83,20 @@ def _clock(seconds: float) -> str:
 
 
 def _is_portrait(project: Project) -> bool:
-    """Whether the job's video is taller than wide: its last render, else its preset."""
+    """Whether the job's video is taller than wide: the job's preset, else its last render.
+
+    The preset is what the next render makes, so it wins over the size of a
+    render made before the job was re-run with another one. A project that
+    never recorded a preset falls back to the size it was last rendered at.
+    """
+    chosen = project.export.get("preset")
+    if isinstance(chosen, str) and chosen in VIDEO_PRESETS:
+        width, height = VIDEO_PRESETS[chosen][:2]
+        return height >= width
     render = project.render or {}
     width, height = render.get("width"), render.get("height")
     if not (isinstance(width, int) and isinstance(height, int)):
-        preset = VIDEO_PRESETS.get(str(project.export.get("preset") or "social"))
-        width, height = preset[:2] if preset else (1080, 1920)
+        width, height = VIDEO_PRESETS[job_settings(project).preset][:2]
     return height >= width
 
 
@@ -568,13 +576,13 @@ class ReviewWindow(QMainWindow):
         if self.session.dirty and not self.save():
             return
         snapshot = copy.deepcopy(self.session.project)
-        preset = (snapshot.render or {}).get("preset") or "social"
-        subtitles = snapshot.export.get("subtitles", "burn")
         self._render_project_copy = snapshot
         self._set_render_running(True)
+        # No preset or subtitles here: ``run_render`` reads the job's own, so
+        # this renders what the job was started for.
         self._render_cancel = self._jobs.start(
             lambda progress, cancel: jobs_module.run_render(
-                snapshot, preset=preset, subtitles=subtitles, progress=progress, cancel=cancel
+                snapshot, progress=progress, cancel=cancel
             ),
             on_progress=self._on_render_progress,
             on_finished=self._on_render_finished,

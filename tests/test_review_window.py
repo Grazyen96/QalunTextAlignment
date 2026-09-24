@@ -118,6 +118,19 @@ def test_nudge_moves_the_end_by_fifty_milliseconds(qt_app, tmp_path) -> None:
     assert window.session.words()[0].end == pytest.approx(2.05)
 
 
+def test_a_nudge_and_its_opposite_leave_nothing_to_save(qt_app, tmp_path) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    before = json.loads(json.dumps(window.session.project.cards))
+    window.show()
+    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Period)
+    assert window.session.words()[1].start == pytest.approx(2.05)
+    QTest.keyClick(window, Qt.Key.Key_Comma)
+    assert window.session.project.cards == before
+    assert not window.session.dirty
+    assert not window.windowTitle().endswith("*")
+
+
 def test_ctrl_s_saves_and_the_title_loses_its_marker(qt_app, tmp_path) -> None:
     window, _, _ = _window(qt_app, tmp_path)
     window.show()
@@ -454,9 +467,7 @@ def test_render_with_corrections_saves_then_renders_the_project(
     def fake_render(project, **kwargs):
         seen["end"] = project.cards[0]["word_timings"][0]["end"]
         seen["saved"] = load_project(project.path).cards[0]["word_timings"][0]["end"]
-        return JobOutcome(
-            matches=project.matches, video=tmp_path / "v.mp4", cards=1, mode="recitation"
-        )
+        return JobOutcome(matches=project.matches, video=tmp_path / "v.mp4", cards=1)
 
     monkeypatch.setattr(jobs_module, "run_render", fake_render)
     monkeypatch.setattr(
@@ -466,6 +477,84 @@ def test_render_with_corrections_saves_then_renders_the_project(
     # PySide6's QTest has no qWaitFor; _wait_for above (in this file) is its replacement.
     assert _wait_for(lambda: "done" in seen, 5000)
     assert seen["end"] == 2.05 and seen["saved"] == 2.05
+
+
+def test_render_with_corrections_uses_the_jobs_own_choices(qt_app, tmp_path, monkeypatch) -> None:
+    """The review names no preset or subtitles of its own: ``run_render`` reads the job's."""
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.gui.jobs import JobOutcome
+
+    window, _, _ = _window(qt_app, tmp_path)
+    window.session.project.render = {"preset": "high", "width": 1920, "height": 1080}
+    window.show()
+    seen = {}
+
+    def fake_render(project, **kwargs):
+        seen["kwargs"] = kwargs
+        return JobOutcome(matches=project.matches, video=tmp_path / "v.mp4", cards=1)
+
+    monkeypatch.setattr(jobs_module, "run_render", fake_render)
+    monkeypatch.setattr(
+        window, "_announce_render", lambda outcome: seen.setdefault("done", outcome)
+    )
+    window.render_requested.emit()
+    assert _wait_for(lambda: "done" in seen, 5000)
+    assert set(seen["kwargs"]) == {"progress", "cancel"}
+
+
+def _captioned_job(tmp_path, subtitles: str, preset: str = "social"):
+    from qurantext.jobs.project import CaptionCue, JobSettings, set_job_settings
+
+    project = _project(tmp_path)
+    project.captions = [
+        CaptionCue(
+            1.0,
+            3.0,
+            "hello world",
+            words=[
+                {"word": "hello", "start": 1.0, "end": 2.0},
+                {"word": "world", "start": 2.0, "end": 3.0},
+            ],
+        )
+    ]
+    set_job_settings(project, JobSettings(preset=preset, subtitles=subtitles))
+    return project
+
+
+@pytest.mark.parametrize(
+    ("subtitles", "band"), [("sidecar", False), ("burn", True), ("both", True)]
+)
+def test_the_frame_reserves_the_caption_band_only_when_it_is_burned_in(
+    qt_app, tmp_path, monkeypatch, subtitles, band
+) -> None:
+    """A sidecar-only render drops the band (``jobs/export.py``), so the preview must too."""
+    import numpy as np
+
+    from qurantext.gui.review import frame_view
+    from qurantext.gui.review.window import ReviewWindow
+
+    calls = []
+    monkeypatch.setattr(
+        frame_view,
+        "render_frame_pillow",
+        lambda *a, **k: calls.append(k) or np.zeros((480, 270, 3), np.uint8),
+    )
+    window = ReviewWindow(
+        _captioned_job(tmp_path, subtitles), player=FakePlayer(duration=10.0, now=_Now())
+    )
+    window.frame_view.show_at(1.5, force=True)
+    assert calls and calls[-1]["reserve_caption_band"] is band
+
+
+def test_the_frames_shape_follows_the_jobs_preset_before_any_render(qt_app, tmp_path) -> None:
+    from qurantext.gui.review.window import ReviewWindow
+
+    window = ReviewWindow(
+        _captioned_job(tmp_path, "burn", preset="high"),
+        player=FakePlayer(duration=10.0, now=_Now()),
+    )
+    hint = window.frame_view.sizeHint()
+    assert hint.width() > hint.height(), "a 1920x1080 job previews in landscape"
 
 
 def test_render_disables_editing_actions_until_done(qt_app, tmp_path, monkeypatch) -> None:
@@ -479,9 +568,7 @@ def test_render_disables_editing_actions_until_done(qt_app, tmp_path, monkeypatc
     seen = {}
 
     def fake_render(project, **kwargs):
-        return JobOutcome(
-            matches=project.matches, video=tmp_path / "v.mp4", cards=1, mode="recitation"
-        )
+        return JobOutcome(matches=project.matches, video=tmp_path / "v.mp4", cards=1)
 
     monkeypatch.setattr(jobs_module, "run_render", fake_render)
     monkeypatch.setattr(
@@ -568,9 +655,7 @@ def test_editing_is_blocked_everywhere_while_a_render_runs(qt_app, tmp_path, mon
     def fake_render(rendered_project, **kwargs):
         release.wait(timeout=5)
         rendered_project.record_render(tmp_path / "v.mp4", preset="social", basmala_offset_s=0.0)
-        return JobOutcome(
-            matches=rendered_project.matches, video=tmp_path / "v.mp4", cards=1, mode="lecture"
-        )
+        return JobOutcome(matches=rendered_project.matches, video=tmp_path / "v.mp4", cards=1)
 
     monkeypatch.setattr(jobs_module, "run_render", fake_render)
     monkeypatch.setattr(window, "_announce_render", lambda outcome: None)
@@ -613,9 +698,7 @@ def test_no_render_announcement_after_the_window_is_closed(qt_app, tmp_path, mon
 
     def fake_render(project, **kwargs):
         release.wait(timeout=5)
-        return JobOutcome(
-            matches=project.matches, video=tmp_path / "v.mp4", cards=1, mode="recitation"
-        )
+        return JobOutcome(matches=project.matches, video=tmp_path / "v.mp4", cards=1)
 
     monkeypatch.setattr(jobs_module, "run_render", fake_render)
     monkeypatch.setattr(
@@ -653,9 +736,7 @@ def test_the_live_project_is_updated_even_though_the_render_finishes_after_close
     def fake_render(project, **kwargs):
         release.wait(timeout=5)
         project.record_render(tmp_path / "v.mp4", preset="social", basmala_offset_s=0.0)
-        return JobOutcome(
-            matches=project.matches, video=tmp_path / "v.mp4", cards=1, mode="recitation"
-        )
+        return JobOutcome(matches=project.matches, video=tmp_path / "v.mp4", cards=1)
 
     monkeypatch.setattr(jobs_module, "run_render", fake_render)
     monkeypatch.setattr(window, "_announce_render", lambda outcome: None)
@@ -685,9 +766,7 @@ def test_cancelling_a_render_brings_the_buttons_back(qt_app, tmp_path, monkeypat
     def fake_render(project, *, cancel, **kwargs):
         release.wait(timeout=5)
         cancel.raise_if_cancelled("render")
-        return JobOutcome(
-            matches=project.matches, video=tmp_path / "v.mp4", cards=1, mode="recitation"
-        )
+        return JobOutcome(matches=project.matches, video=tmp_path / "v.mp4", cards=1)
 
     monkeypatch.setattr(jobs_module, "run_render", fake_render)
     seen = {}
@@ -854,9 +933,7 @@ def test_a_finished_render_is_announced_as_a_save(qt_app, tmp_path, monkeypatch)
     window.saved.connect(saved.append)
 
     def fake_render(project, **kwargs):
-        return JobOutcome(
-            matches=project.matches, video=tmp_path / "v.mp4", cards=1, mode="recitation"
-        )
+        return JobOutcome(matches=project.matches, video=tmp_path / "v.mp4", cards=1)
 
     monkeypatch.setattr(jobs_module, "run_render", fake_render)
     monkeypatch.setattr(window, "_announce_render", lambda outcome: None)
@@ -884,3 +961,26 @@ def test_the_export_dialog_closes_and_says_when_the_render_is_stale(qt_app, tmp_
     dialog.show()
     dialog.close_button.click()
     assert not dialog.isVisible()
+
+
+def test_the_frame_shape_follows_the_jobs_preset_over_an_older_render(tmp_path) -> None:
+    """A job re-run as landscape must not keep showing the portrait of its last render."""
+    from pathlib import Path
+
+    from qurantext.gui.review.window import _is_portrait
+    from qurantext.jobs.project import JobSettings, set_job_settings
+
+    project = Project(audio=Path("a.mp3"), cards=[])
+    assert _is_portrait(project), "the default preset is portrait"
+
+    project.record_render(
+        tmp_path / "a.mp4", preset="social", basmala_offset_s=0.0, width=1080, height=1920
+    )
+    set_job_settings(project, JobSettings(preset="high"))
+    assert not _is_portrait(project)
+
+    unrecorded = Project(audio=Path("a.mp3"), cards=[])
+    unrecorded.record_render(
+        tmp_path / "a.mp4", preset=None, basmala_offset_s=0.0, width=1920, height=1080
+    )
+    assert not _is_portrait(unrecorded), "no choice recorded: the render's own size"

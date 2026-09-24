@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from qurantext.config.paths import LECTURE_MATCHING_OUTPUT_DIR, RECITATION_MATCHING_OUTPUT_DIR
-from qurantext.jobs.project import Project, load_project
+from qurantext.jobs.project import Project, job_settings, load_project
 
 __all__ = [
     "CHANGED_SINCE_RENDER",
@@ -24,6 +24,7 @@ __all__ = [
     "JobEntry",
     "ayah_range",
     "default_job_dirs",
+    "job_dirs_for",
     "job_status",
     "list_jobs",
 ]
@@ -55,8 +56,25 @@ class JobEntry:
 
 def job_status(project: Project) -> str:
     if project.render is not None:
-        return CHANGED_SINCE_RENDER if project.render_is_stale else RENDERED
+        if project.render_is_stale or _choices_changed_since_render(project):
+            return CHANGED_SINCE_RENDER
+        return RENDERED
     return REVIEWED if project.review.get("state") == "reviewed" else NEEDS_REVIEW
+
+
+def _choices_changed_since_render(project: Project) -> bool:
+    """Whether the job now asks for another size or subtitle choice than its video has.
+
+    A job re-run as "landscape" or "files beside the video" keeps its old
+    render record, and that video is no longer what rendering would make. A
+    choice the record does not hold (an older render) is not second-guessed.
+    """
+    render = project.render or {}
+    settings = job_settings(project)
+    preset, subtitles = render.get("preset"), render.get("subtitles")
+    if isinstance(preset, str) and preset != settings.preset:
+        return True
+    return isinstance(subtitles, str) and subtitles != settings.subtitles
 
 
 def ayah_range(cards: list[dict[str, Any]]) -> str | None:
@@ -72,6 +90,24 @@ def ayah_range(cards: list[dict[str, Any]]) -> str | None:
 
 def default_job_dirs() -> list[Path]:
     return [RECITATION_MATCHING_OUTPUT_DIR, LECTURE_MATCHING_OUTPUT_DIR]
+
+
+def job_dirs_for(extra: Iterable[Path]) -> list[Path]:
+    """``default_job_dirs()`` plus *extra*, deduped by resolved path, order kept.
+
+    The job list scans the default matching folders plus every output folder
+    the person has chosen (``Prefs.job_dirs``), so a job rendered somewhere
+    unusual is still found without adding that folder twice.
+    """
+    dirs = default_job_dirs()
+    seen = {folder.resolve() for folder in dirs}
+    for folder in extra:
+        folder = Path(folder)
+        resolved = folder.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            dirs.append(folder)
+    return dirs
 
 
 def _entry_for(path: Path) -> JobEntry | None:
@@ -126,14 +162,28 @@ def _entry_for(path: Path) -> JobEntry | None:
     )
 
 
-def list_jobs(dirs: Iterable[Path] | None = None) -> list[JobEntry]:
-    """Projects under *dirs*, newest first."""
+def list_jobs(
+    dirs: Iterable[Path] | None = None, *, hidden: frozenset[Path] = frozenset()
+) -> list[JobEntry]:
+    """Projects under *dirs*, newest first.
+
+    Folders are deduped by resolved path, so the same folder listed twice
+    (the default matching folder chosen again as an output folder, say) lists
+    its jobs once. A project whose resolved path is in *hidden* is skipped —
+    "Remove from list" adds it there without touching the file.
+    """
     entries: list[JobEntry] = []
+    seen: set[Path] = set()
     for folder in dirs if dirs is not None else default_job_dirs():
-        folder = Path(folder)
-        if not folder.is_dir():
+        resolved = Path(folder).resolve()
+        if resolved in seen:
             continue
-        for path in folder.glob("*.qalun.json"):
+        seen.add(resolved)
+        if not resolved.is_dir():
+            continue
+        for path in resolved.glob("*.qalun.json"):
+            if path.resolve() in hidden:
+                continue
             entry = _entry_for(path)
             if entry is not None:
                 entries.append(entry)
