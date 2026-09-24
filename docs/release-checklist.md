@@ -9,7 +9,8 @@ Work top to bottom; stop at the first item that fails and fix it before going on
       **Package** step with `run: bash packaging/ci/package.sh ${{ matrix.artifact }}`.
       This needs a token with the `workflow` scope, which is why it is not done in the
       repository already (see `packaging/ci/README.md`). Until then the Linux zip stores
-      every symlinked library twice and unpacks to about 446 MB instead of 275 MB.
+      every symlinked library twice and unpacks to about 600 MB instead of about 430 MB
+      (both with FFmpeg).
 
 ## Build
 
@@ -20,14 +21,24 @@ Work top to bottom; stop at the first item that fails and fix it before going on
       as QT_MEDIA_BACKEND asks`. Windows and macOS also ship a native backend, and only
       this line shows the recording did not play through that one instead.
 - [ ] Record the Windows and macOS zip sizes (on the run's summary page) in the Size
-      table in `packaging/README.md`. Compare each with that platform's zip from the last
-      build before playback was added (an older workflow run or Release). If it grew far more than 30–40 MB, stop and find
-      out why before releasing.
-- [ ] Download `qalun-linux.zip` and unzip it with `unzip`. Check three things:
-  - `ls qalun/_internal | grep xcb-cursor` shows `libxcb-cursor.so.0`.
+      table in `packaging/README.md`. Compare each with that platform's zip from a build
+      of `30a159c` (23 Sep 2026) or earlier: the one before `57fc739`, which is where
+      Multimedia entered the bundle, because PyInstaller follows the player's import on
+      its own. There are no `v*` tags, so there is no Release to compare with, and
+      workflow artifacts expire after 30 days. If no such run survives, compare with
+      Linux instead: Multimedia added 20 MB to the Linux zip, so expect about that. If a
+      zip grew far more than 30–40 MB, stop and find out why before releasing.
+- [ ] Download `qalun-linux.zip` and unzip it with `unzip`. Check two things (the gate
+      already checks that `libxcb-cursor.so.0` is in the bundle):
   - `find qalun -type l | wc -l` is not 0. If it is 0, the links were not kept: check
     the Package step change above.
-  - `du -sm qalun` is about 275 MB plus FFmpeg (about 155 MB), not about 150 MB more.
+  - `du -sm qalun` is about 430 MB, FFmpeg included. About 600 MB means the links were
+    followed and every linked library is stored twice.
+- [ ] Extract `qalun-linux.zip` once more with the desktop's own **Extract here** (or
+      `unzip`), and start the app from that folder. Some extractors (Python's `zipfile`,
+      a few minimal tools) write each stored link as a small text file, and the app then
+      cannot find its Qt libraries. In the release notes, tell Linux users: "Extract with
+      your file manager or `unzip`."
 
 ## By ear, on Windows and Linux
 

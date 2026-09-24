@@ -1,9 +1,11 @@
 """The PyInstaller spec has to name Qt Multimedia, and must never exclude it.
 
-The review window imports ``PySide6.QtMultimedia`` inside a function, so
-PyInstaller's analysis cannot see it; without the spec naming it the bundle
-ships without a player, and the app quietly opens with playback disabled. The
-spec is read as text so the rule lives in a test rather than only in a comment.
+The review window imports ``PySide6.QtMultimedia`` inside a function, behind a
+try. PyInstaller's analysis does follow that import today (Task 3 found every
+build since 57fc739 already bundled it), but a release must not depend on it:
+without Multimedia the app quietly opens with playback disabled. So the spec
+names it, and is read as text here so the rule lives in a test rather than
+only in a comment.
 """
 
 from __future__ import annotations
