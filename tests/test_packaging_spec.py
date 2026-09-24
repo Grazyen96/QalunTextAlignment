@@ -20,3 +20,20 @@ def test_the_spec_names_qt_multimedia_and_excludes_none_of_it() -> None:
     assert '"PySide6.QtMultimedia"' in text
     excludes = text.split("excludes=[", 1)[1].split("]", 1)[0]
     assert "Multimedia" not in excludes
+
+
+COLLECT_LINUX = SPEC.parent / "ci" / "collect-linux.sh"
+
+
+def test_the_linux_build_machine_gets_the_libraries_qt_links() -> None:
+    """GitHub's Linux runner is a bare machine: no sound or graphics stack.
+
+    PyInstaller bundles only what it finds on the build machine, so without
+    libpulse the bundle has no sound library and playback cannot load; EGL is
+    never bundled (it belongs to the graphics driver, which every desktop has),
+    but the gate cannot load Qt's drawing library on the runner without it. The
+    first real CI run failed on exactly these two.
+    """
+    text = COLLECT_LINUX.read_text(encoding="utf-8")
+    for package in ("libpulse0", "libegl1", "libxcb-cursor0", "libxkbcommon-x11-0"):
+        assert package in text, package

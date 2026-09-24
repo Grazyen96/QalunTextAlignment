@@ -55,8 +55,9 @@ This is the spec's §6 manual check.
       matches too.
 - [ ] On Linux, play the recording on a real desktop other than the build machine, for
       example a PipeWire desktop or a distribution other than Ubuntu. Sound must come out.
-      The bundle carries the build machine's PulseAudio and libsndfile client libraries,
-      so the doctor's playback check on CI does not prove this.
+      The bundle carries the build runner's PulseAudio and libsndfile client libraries
+      (`collect-linux.sh` installs them there), so the doctor's playback check on CI,
+      which has no sound device, does not prove this.
 - [ ] On Linux, start the window in an X11 session as well as a Wayland one.
 
 ## Arabic, on a real desktop
