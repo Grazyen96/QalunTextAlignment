@@ -40,7 +40,8 @@ def ayah_label(match: dict[str, Any]) -> str:
     if isinstance(from_ayah, int) and isinstance(to_ayah, int):
         if from_ayah == to_ayah:
             return f"{surah_name} - الآية {from_ayah}"
-        return f"{surah_name} - الآيات {from_ayah} – {to_ayah}"
+        # A hyphen, not an en dash: the bundled Qaloon font has no en dash and draws a blank.
+        return f"{surah_name} - الآيات {from_ayah} - {to_ayah}"
 
     return surah_name
 
