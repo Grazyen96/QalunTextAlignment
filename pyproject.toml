@@ -49,6 +49,8 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+# A test running past two minutes dumps every thread's stack, so a hang explains itself.
+faulthandler_timeout = 120
 
 [tool.ruff]
 line-length = 100
