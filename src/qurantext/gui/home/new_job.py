@@ -633,14 +633,19 @@ class NewJobPanel(QWidget):
         if not running:
             self._refresh()
 
-    def set_progress(self, fraction: float | None, text: str) -> None:
-        """Update the progress bar (``None`` for an indeterminate stage) and status line."""
+    def set_progress(self, fraction: float | None, text: str | None) -> None:
+        """Update the progress bar (``None`` for an indeterminate stage) and status line.
+
+        *text* None leaves the status line as it is: the window keeps an answer
+        to the person up there while the bar moves on.
+        """
         if fraction is None:
             self.progress_bar.setRange(0, 0)
         else:
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(int(max(0.0, min(1.0, fraction)) * 100))
-        self.status_label.setText(text)
+        if text is not None:
+            self.status_label.setText(text)
 
     def show_status(self, text: str) -> None:
         """Show *text* on the status line (hidden when empty), running or not.

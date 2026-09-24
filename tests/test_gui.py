@@ -1472,22 +1472,40 @@ def test_the_app_names_itself_before_any_settings_are_read(qt_app) -> None:
 # --- the window's language -----------------------------------------------------
 
 
-def test_switching_to_arabic_rebuilds_the_home_window(qt_app, home, prefs, tmp_path) -> None:
+def test_switching_to_arabic_rebuilds_the_home_window(
+    qt_app, home, prefs, tmp_path, monkeypatch
+) -> None:
+    from PySide6.QtCore import QEvent
     from PySide6.QtWidgets import QLabel
 
     from qurantext.gui import i18n
+    from qurantext.gui.home.new_job import NewJobPanel
+    from qurantext.gui.main_window import MainWindow
 
     audio = tmp_path / "a.mp3"
     audio.touch()
     home.new_job.set_audio(audio)
+    home.new_job.surah_box.setCurrentIndex(24)  # Al-Furqan
+    home.new_job.from_spin.setValue(7)
+    home.new_job.to_spin.setValue(11)
+    surah = home.new_job.surah_box.currentData()
+    started: list = []
+    # Patched before the rebuild, so the new panel's connection is the one counted.
+    monkeypatch.setattr(MainWindow, "_start", lambda self, spec: started.append(spec))
 
     assert home.set_language("ar")
+    qt_app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
     assert prefs.language == "ar"
-    assert home.windowTitle() == i18n.STRINGS["ar"]["app.title"]
-    assert home.job_list.findChild(QLabel).text() != i18n.STRINGS["en"]["home.jobs"]  # rebuilt
+    assert home.job_list.findChild(QLabel).text() == i18n.STRINGS["ar"]["home.jobs"]  # rebuilt
     assert home.new_job.audio_path == audio  # the half-filled form survives
+    assert home.new_job.surah_box.currentData() == surah
+    assert (home.new_job.from_spin.value(), home.new_job.to_spin.value()) == (7, 11)
     assert home.language_combo.currentData() == "ar"
+    assert len(home.findChildren(NewJobPanel)) == 1, "the old panel is gone"
+    spec = _spec(tmp_path)
+    home.new_job.start_requested.emit(spec)
+    assert started == [spec], "the new panel is wired once"
 
     assert home.set_language("en")
     assert prefs.language == "en"
@@ -1564,3 +1582,108 @@ def test_the_language_does_not_change_while_a_job_runs(
         release.set()
         _spin_until(qt_app, lambda: home._cancel is None)
         _spin_until(qt_app, lambda: home._jobs.active == 0)
+
+
+def test_the_language_combo_is_off_while_a_review_is_open(qt_app, home, reviews, tmp_path) -> None:
+    """Offered only when a switch would be allowed; the tooltip says why not."""
+    from qurantext.gui import main_window as module
+
+    assert home.language_combo.isEnabled() and home.language_combo.toolTip() == ""
+    home._open_review(_saved_job(tmp_path / "jobs"))
+    assert not home.language_combo.isEnabled()
+    assert home.language_combo.toolTip() == module.t("home.language_busy")
+
+    reviews[0].close()
+    assert home.language_combo.isEnabled() and home.language_combo.toolTip() == ""
+
+
+def test_the_language_combo_is_off_while_a_job_runs(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    import threading
+
+    release = threading.Event()
+
+    def wait_for_release(progress, cancel):
+        assert release.wait(timeout=10), "the test forgot to release the job"
+
+    _fake_matching(monkeypatch, before=wait_for_release)
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    _spin_until(qt_app, lambda: home._cancel is not None)
+    try:
+        assert not home.language_combo.isEnabled()
+    finally:
+        release.set()
+        _spin_until(qt_app, lambda: home._cancel is None)
+        _spin_until(qt_app, lambda: home._jobs.active == 0)
+    for review in list(reviews):  # the finished job opened its review
+        review.close()
+    assert home.language_combo.isEnabled()
+
+
+def test_a_refusal_stays_up_until_the_job_s_stage_changes(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    """Progress of the same stage moves the bar, but does not wipe the refusal."""
+    import threading
+
+    from qurantext.gui import main_window as module
+
+    release = threading.Event()
+    project_path = _saved_job(tmp_path / "jobs", "a")
+
+    def wait_for_release(progress, cancel):
+        assert release.wait(timeout=10), "the test forgot to release the job"
+
+    _fake_matching(monkeypatch, before=wait_for_release)
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    _spin_until(qt_app, lambda: home._cancel is not None)
+    status = home.new_job.status_label
+    try:
+        home._on_progress(ProgressEvent("match", "Scanning..."))
+        home._open_review(project_path)
+        refused = module.t("home.busy_matching")
+        assert status.text() == refused
+
+        home._on_progress(ProgressEvent("match", "  Matching word 10/40", fraction=0.25))
+        assert status.text() == refused
+        assert home.new_job.progress_bar.value() == 25, "the bar still moves"
+        assert any("25%" in row for row in _running_rows(home)), "and so does the job's row"
+        home._on_progress(ProgressEvent("match", "a log line"))
+        home._on_progress(ProgressEvent("match", "kept", translated=True))
+        assert status.text() == refused
+
+        home._on_progress(ProgressEvent("render", "Building ASS subtitles..."))
+        assert status.text() == module.t("job.stage.render")
+    finally:
+        release.set()
+        _spin_until(qt_app, lambda: home._cancel is None)
+        _spin_until(qt_app, lambda: home._jobs.active == 0)
+
+
+def test_a_language_switch_says_the_last_status_again_and_keeps_the_focus(
+    qt_app, home, tmp_path
+) -> None:
+    from qurantext.gui import i18n
+
+    saved = tmp_path / "jobs" / "a_recitation.qalun.json"
+    home._review_saved(saved)
+    home.language_combo.setFocus()
+
+    assert home.set_language("ar")
+
+    status = home.new_job.status_label
+    assert status.text() == i18n.t("main.saved", path=i18n.path_text(saved))  # in Arabic
+    assert not status.isHidden()
+    assert home.focusWidget() is home.language_combo
+
+
+def test_a_status_said_from_raw_text_is_cleared_by_a_language_switch(qt_app, home) -> None:
+    """Only a sentence kept as its key can be said again; anything else would stay English."""
+    home._on_progress(ProgressEvent("detect", "Already in English", translated=True))
+    assert home.new_job.status_label.text() == "Already in English"
+
+    assert home.set_language("ar")
+
+    assert home.new_job.status_label.text() == ""
+    assert home.new_job.status_label.isHidden()
