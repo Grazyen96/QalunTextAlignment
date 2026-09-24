@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from qurantext.gui.i18n import t
+from qurantext.gui.i18n import t, tn
 from qurantext.gui.prefs import Prefs
 from qurantext.jobs.catalog import (
     CHANGED_SINCE_RENDER,
@@ -103,7 +103,6 @@ class JobListPanel(QWidget):
         layout.addLayout(header)
 
         self.list = QListWidget()
-        self.list.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         self.list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list.itemActivated.connect(self._on_activated)
@@ -154,7 +153,11 @@ class JobListPanel(QWidget):
         own to show up from disk, e.g. ``set_running("recitation.m4a", "Aligning… 40%", 0.4)``.
         The row's progress bar shows *fraction*, or a busy indicator while it is None.
         """
-        self._running_label = None if text is None else f"{name} — {text}"
+        # A template, not a join: in Arabic the file name and the progress are
+        # each isolated, so a Latin name does not turn the line left to right.
+        self._running_label = (
+            None if text is None else t("home.running_row", name=name, progress=text)
+        )
         self._running_fraction = fraction
         self._show_running_row()
 
@@ -232,12 +235,14 @@ class _JobRow(QWidget):
         layout.setSpacing(2)
 
         self.name_label = QLabel(entry.name)
+        self.name_label.setAlignment(_leading_edge(self))
         bold_font = self.name_label.font()
         bold_font.setBold(True)
         self.name_label.setFont(bold_font)
         layout.addWidget(self.name_label)
 
         self.detail_label = QLabel(_detail_text(entry))
+        self.detail_label.setAlignment(_leading_edge(self))
         if entry.status in _WARNING_STATUSES:
             # Inside the list's viewport a label inherits its Base background
             # and so paints with Text, not WindowText; pin the role so the
@@ -262,6 +267,7 @@ class _RunningRow(QWidget):
         layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(3)
         self.label = QLabel()
+        self.label.setAlignment(_leading_edge(self))
         layout.addWidget(self.label)
         self.progress_bar = QProgressBar()
         self.progress_bar.setTextVisible(False)
@@ -277,10 +283,24 @@ class _RunningRow(QWidget):
             self.progress_bar.setValue(int(max(0.0, min(1.0, fraction)) * 100))
 
 
+def _leading_edge(widget: QWidget) -> Qt.AlignmentFlag:
+    """The edge a row's lines start from: the layout's, not each line's own script.
+
+    A plain QLabel aligns to its text's direction, so in Arabic a Latin job
+    name would start at the left while its Arabic detail line starts at the
+    right. AlignAbsolute pins both to the edge the list reads from.
+    """
+    rtl = widget.layoutDirection() == Qt.LayoutDirection.RightToLeft
+    edge = Qt.AlignmentFlag.AlignRight if rtl else Qt.AlignmentFlag.AlignLeft
+    return edge | Qt.AlignmentFlag.AlignAbsolute | Qt.AlignmentFlag.AlignVCenter
+
+
 def _detail_text(entry: JobEntry) -> str:
     if entry.status == DAMAGED:
         return t(_STATUS_KEYS[DAMAGED])
     mode_text = t("home.mode.recitation") if entry.mode == "recitation" else t("home.mode.lecture")
-    scope = entry.ayah_range or t("home.cards", count=entry.card_count)
+    scope = entry.ayah_range or tn("home.cards", entry.card_count)
     status_text = t(_STATUS_KEYS[entry.status])
-    return f"{mode_text} · {scope} · {status_text}"
+    # One template, not a join: in Arabic each part is isolated, so a range
+    # such as "25:7–11" keeps its order between the words around it.
+    return t("home.row_detail", mode=mode_text, scope=scope, status=status_text)

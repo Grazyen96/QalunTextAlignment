@@ -46,14 +46,60 @@ class _Now:
         return self.t
 
 
+def _spin(ms: int) -> None:
+    """Run the event loop for about *ms*, never holding the GIL while it waits.
+
+    Not ``QTest.qWait``: PySide6 keeps the GIL for the whole of that call, so a
+    worker thread that needs it while holding a Qt lock the UI thread wants
+    deadlocks the two (the full suite hung that way). ``processEvents`` and
+    ``sendPostedEvents`` release it, and so does ``time.sleep``.
+    """
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    deadline = time.monotonic() + ms / 1000
+    while True:
+        QCoreApplication.processEvents()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return
+        time.sleep(min(0.005, left))
+
+
 def _wait_for(condition, timeout_ms):
     """Spin the event loop until *condition()* holds (PySide6's QTest has no qWaitFor)."""
     deadline = time.monotonic() + timeout_ms / 1000
     while not condition():
         if time.monotonic() > deadline:
             return False
-        QTest.qWait(20)
+        _spin(20)
     return True
+
+
+def test_waiting_lets_worker_threads_run_python(qt_app) -> None:
+    """``_wait_for`` must release the GIL while it spins the event loop.
+
+    ``QTest.qWait`` holds it throughout, so a worker thread needing it again
+    and again (every signal it emits, every Python line) crawls, and one that
+    needs it while holding a Qt lock the UI thread wants deadlocks — the full
+    suite hung that way inside ``_wait_for``. This worker takes the GIL back
+    50 times; while ``QTest.qWait`` spun, each took up to a whole wait slice.
+    """
+    import threading
+
+    done = threading.Event()
+
+    def worker() -> None:
+        for _ in range(50):
+            time.sleep(0.001)  # gives the GIL up, then needs it back
+        done.set()
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    try:
+        assert _wait_for(done.is_set, 500)
+    finally:
+        thread.join()
 
 
 def _project(tmp_path):
@@ -93,7 +139,7 @@ def _window(qt_app, tmp_path):
 
 def test_it_opens_on_a_missing_recording_and_says_so(qt_app, tmp_path) -> None:
     window, _, _ = _window(qt_app, tmp_path)
-    QTest.qWait(50)
+    _spin(50)
     assert "missing.mp3" in window.warnings.text()
 
 
@@ -393,6 +439,8 @@ def test_export_writes_the_chosen_formats_and_saves_first(qt_app, tmp_path, stor
     written = dialog.export()
     assert sorted(p.suffix for p in written) == [".srt", ".vtt"]
     assert not session.dirty, "unsaved edits are saved before exporting"
+    names = ", ".join(p.name for p in written)
+    assert dialog._result_label.text() == f"Wrote 2 files: {names}"
 
 
 def test_export_on_the_video_timeline_is_offered_only_after_a_render(qt_app, tmp_path) -> None:
@@ -449,7 +497,9 @@ def test_export_shows_a_save_failure_inline_instead_of_raising(qt_app, tmp_path)
     dialog.set_destination(tmp_path / "out", "clip")
     written = dialog.export()
     assert written == []
-    assert "no file to write back to" in dialog._result_label.text()
+    assert dialog._result_label.text() == (
+        "The subtitles were not written: This project has no file to write back to."
+    )
 
 
 def test_render_with_corrections_saves_then_renders_the_project(
@@ -953,11 +1003,14 @@ def test_the_export_dialog_closes_and_says_when_the_render_is_stale(qt_app, tmp_
     project.record_render(tmp_path / "v.mp4", preset="social", basmala_offset_s=1.0)
     session = ReviewSession(project)
     dialog = ExportDialog(session)
-    assert t("export.stale") not in dialog._video_radio.text()
+    assert dialog._video_radio.text() == t("export.match_video")
     session.retime(WordRef(CARD, 0, 0), end=2.5)
     dialog = ExportDialog(session)
-    assert dialog._video_radio.text() == f"{t('export.match_video')} {t('export.stale')}"
-    assert t("export.stale") == "(rendered before your latest changes)"
+    assert dialog._video_radio.text() == t("export.match_video_stale")
+    assert t("export.match_video_stale") == (
+        "Match the rendered video (includes the basmala at the start)"
+        " — rendered before your latest changes"
+    )
     dialog.show()
     dialog.close_button.click()
     assert not dialog.isVisible()

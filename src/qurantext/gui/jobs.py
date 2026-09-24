@@ -185,7 +185,7 @@ def run_matching(
     match_path = match_path_for(spec)
 
     if spec.has_stated_range:
-        report(progress, "detect", t("job.progress.aligning"))
+        report(progress, "detect", t("job.progress.aligning"), translated=True)
         run_recitation_range(
             quran=spec.quran,
             output=match_path,
@@ -198,7 +198,7 @@ def run_matching(
             cancel=cancel,
         )
     else:
-        report(progress, "detect", t("job.progress.detecting"))
+        report(progress, "detect", t("job.progress.detecting"), translated=True)
         run_detection(
             quran=spec.quran,
             output=match_path,
@@ -222,7 +222,7 @@ def run_matching(
             save_project(existing, destination)
         return existing
     if isinstance(kept, Path):
-        report(progress, "detect", t("job.progress.kept", name=kept.name))
+        report(progress, "detect", t("job.progress.kept", name=kept.name), translated=True)
     save_project(project, destination)
     return project
 

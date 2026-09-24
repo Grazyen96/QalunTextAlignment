@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 from qurantext.config.paths import QURAN_DB_PATH, VIDEOS_OUTPUT_DIR
 from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.gui.files import show_in_folder
-from qurantext.gui.i18n import t
+from qurantext.gui.i18n import t, tn
 from qurantext.gui.review.session import ReviewSession
 from qurantext.jobs.project_render import export_project_subtitles
 
@@ -127,7 +127,7 @@ class ExportDialog(QDialog):
         available = self.video_timeline_available()
         if project.render_is_stale:
             # Still the video's clock, but not the video's content: say so.
-            self._video_radio.setText(f"{t('export.match_video')} {t('export.stale')}")
+            self._video_radio.setText(t("export.match_video_stale"))
         self._video_radio.setEnabled(available)
         self._video_radio.setChecked(available)
         self._audio_radio.setChecked(not available)
@@ -194,7 +194,7 @@ class ExportDialog(QDialog):
             )
         except (ValueError, OSError, RuntimeError) as error:
             # RuntimeError: ffprobe could not read the recording's length.
-            self._show_error(str(error))
+            self._show_error(t("export.failed", details=str(error)))
             return []
         self._written = written
         self._show_result(written)
@@ -208,7 +208,7 @@ class ExportDialog(QDialog):
 
     def _show_result(self, written: list[Path]) -> None:
         names = ", ".join(p.name for p in written)
-        self._result_label.setText(f"{t('export.done', count=len(written))} {names}")
+        self._result_label.setText(tn("export.done", len(written), names=names))
         self._result_label.setVisible(True)
         self._show_button.setVisible(bool(written))
 

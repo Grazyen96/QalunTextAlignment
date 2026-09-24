@@ -254,6 +254,11 @@ comes from More options on the home window and is stored in `project.export`.
 - Language is stored in `QSettings`; default follows the system locale (Arabic
   if the locale is `ar*`, else English). Switching rebuilds the open windows
   in place, with `QApplication.setLayoutDirection(RightToLeft)` for Arabic.
+  *Amended 24 Sep 2026 (Phase 4 plan):* the language is chosen in the home
+  window and changes only while no review is open and no job runs; the home
+  window then rebuilds in place, and each review opens in the current language.
+  Rebuilding a review under unsaved corrections is where work would go missing,
+  and a language change is rare enough to ask for a quiet moment.
 - The waveform, word strip and time fields are pinned `LeftToRight` so time
   keeps its direction; everything else mirrors.
 - Numbers and times stay Western digits in both languages (they are timing

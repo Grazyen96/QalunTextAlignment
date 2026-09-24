@@ -416,6 +416,52 @@ def test_lecture_intro_lines_returns_none_without_ayah_numbers() -> None:
     assert lecture_intro_lines([]) is None
 
 
+def test_a_multi_ayah_header_joins_its_numbers_with_a_hyphen() -> None:
+    """The bundled Qaloon font has no en dash; one drew as a blank ("الآيات 7  11")."""
+    from qurantext.core.video_common import ayah_label
+
+    label = ayah_label({"surah_name": "سورة الفرقان", "from_ayah": 7, "to_ayah": 11})
+    assert label == "سورة الفرقان - الآيات 7 - 11"
+
+
+@pytest.mark.skipif(not DEFAULT_FONT_PATH.exists(), reason="bundled font missing")
+def test_every_header_and_intro_character_has_a_glyph_in_the_bundled_font() -> None:
+    """A character the font lacks draws as nothing, and the header silently loses it.
+
+    Marks (Mn), spaces (Zs) and format characters (Cf) have no ink of their own.
+    """
+    import unicodedata
+
+    from PIL import ImageFont
+
+    from qurantext.core.frame_renderer import DEFAULT_PLACEHOLDER_TITLE
+    from qurantext.core.video_common import ayah_label, lecture_intro_lines
+
+    font = ImageFont.truetype(str(DEFAULT_FONT_PATH), 40)
+    intro_range = lecture_intro_lines(
+        [{"surah_name": "سورة الأنفال", "from_ayah": 7, "to_ayah": 11, "_start_time": 0.0}]
+    )
+    intro_single = lecture_intro_lines(
+        [{"surah_name": "سورة الفاتحة", "from_ayah": 5, "to_ayah": 5, "_start_time": 0.0}]
+    )
+    assert intro_range is not None and intro_single is not None
+    texts = [
+        ayah_label({"surah_name": "سورة الفرقان", "from_ayah": 7, "to_ayah": 11}),
+        ayah_label({"surah_name": "سورة الفرقان", "from_ayah": 7, "to_ayah": 7}),
+        ayah_label({"from_ayah": 7, "to_ayah": 11}),  # the unknown-surah name
+        DEFAULT_PLACEHOLDER_TITLE,
+        *intro_range,
+        *intro_single,
+    ]
+    missing = {
+        f"U+{ord(c):04X}"
+        for text in texts
+        for c in text
+        if unicodedata.category(c) not in ("Mn", "Zs", "Cf") and font.getmask(c).getbbox() is None
+    }
+    assert not missing, sorted(missing)
+
+
 @pytest.mark.skipif(not _BUNDLED_FONT.exists(), reason="bundled font missing")
 def test_render_frame_pillow_produces_valid_highlighted_frame() -> None:
     from PIL import features

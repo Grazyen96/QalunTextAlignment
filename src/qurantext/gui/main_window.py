@@ -12,7 +12,7 @@ review windows it opens — one per project.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 
@@ -20,6 +20,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
     QMainWindow,
     QMessageBox,
     QSplitter,
@@ -28,11 +31,13 @@ from PySide6.QtWidgets import (
 )
 
 from qurantext.config.paths import DEFAULT_QURAN_PATH, QURAN_INPUT_DIR
+from qurantext.gui import i18n
 from qurantext.gui.files import show_in_folder
 from qurantext.gui.home.job_list import JobListPanel
 from qurantext.gui.home.new_job import NewJobPanel
-from qurantext.gui.i18n import t
+from qurantext.gui.i18n import path_text, t, tn
 from qurantext.gui.jobs import JobOutcome, JobSpec, match_path_for, run_matching, run_render
+from qurantext.gui.language import apply_language
 from qurantext.gui.prefs import Prefs
 from qurantext.gui.review import ReviewWindow
 from qurantext.gui.review.background import BackgroundJobs
@@ -43,6 +48,26 @@ __all__ = ["MainWindow"]
 
 #: The job list's share of the window; the form takes the rest.
 _JOB_LIST_WIDTH = 300
+#: The window's size on first opening; a language switch keeps whatever it is now.
+_WINDOW_SIZE = (1024, 680)
+#: The stages the pipeline reports, each said in the window's words as
+#: ``job.stage.<stage>``; any other stage says ``job.stage.working``.
+_KNOWN_STAGES = frozenset({"detect", "match", "render", "export"})
+
+
+@dataclass(frozen=True, slots=True)
+class _Said:
+    """A status line kept as its key and values, so a language switch can say it again."""
+
+    key: str
+    fmt: dict[str, object] = field(default_factory=dict)
+    #: Set for a key with plural forms, read with ``tn``.
+    count: int | None = None
+
+    def text(self) -> str:
+        if self.count is None:
+            return t(self.key, **self.fmt)
+        return tn(self.key, self.count, **self.fmt)
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,12 +113,20 @@ class MainWindow(QMainWindow):
         self._closing = False
         #: The job running now, and how it ended (said once the form stops running).
         self._running_spec: JobSpec | None = None
-        self._ending = ""
+        self._ending: _Said | None = None
+        #: The stage the running job last reported, so its sentence is said once.
+        self._stage: str | None = None
+        #: What the status line says, when it was said from a key (see ``_say``).
+        self._status: _Said | None = None
+        #: Set while an answer to the person is up during a job; progress of the
+        #: same stage leaves it there (see ``_answer``).
+        self._holding = False
         #: One review window per open project, keyed by its file: reopening the
         #: same project raises what is already there instead of a second window.
         #: A window leaves this once it closes, so the next review reads the file afresh.
         self._reviews: dict[Path, ReviewWindow] = {}
 
+        self.resize(*_WINDOW_SIZE)
         self._build()
 
     # -- construction ---------------------------------------------------------
@@ -108,21 +141,105 @@ class MainWindow(QMainWindow):
         self.new_job.start_requested.connect(self._start)
         self.new_job.cancel_requested.connect(self._request_cancel)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter = splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
         splitter.addWidget(self.job_list)
         splitter.addWidget(self.new_job)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
 
+        # Built here, not once in __init__, so a language switch gets a fresh one in its words.
+        self.language_combo = QComboBox()
+        for code in i18n.LANGUAGES:
+            self.language_combo.addItem(i18n.LANGUAGE_NAMES[code], code)
+        self._select_language_in_combo(i18n.current_language())
+        self.language_combo.activated.connect(self._language_chosen)
+        footer = QHBoxLayout()
+        footer.addStretch(1)
+        footer.addWidget(QLabel(t("home.language")))
+        footer.addWidget(self.language_combo)
+
         root = QWidget()
         layout = QVBoxLayout(root)
         layout.setContentsMargins(12, 12, 12, 12)
-        layout.addWidget(splitter)
+        layout.addWidget(splitter, 1)
+        layout.addLayout(footer)
         self.setCentralWidget(root)
 
-        self.resize(1024, 680)
-        splitter.setSizes([_JOB_LIST_WIDTH, self.width() - _JOB_LIST_WIDTH])
+        splitter.setSizes([_JOB_LIST_WIDTH, max(0, self.width() - _JOB_LIST_WIDTH)])
+        self._update_language_combo()
+
+    # -- language ---------------------------------------------------------------
+
+    def _language_chosen(self, index: int) -> None:
+        self.set_language(self.language_combo.itemData(index))
+
+    def _select_language_in_combo(self, code: str) -> None:
+        self.language_combo.setCurrentIndex(self.language_combo.findData(code))
+
+    def _language_busy(self) -> bool:
+        return bool(self._reviews) or self._cancel is not None
+
+    def _update_language_combo(self) -> None:
+        """Offer a switch only when ``set_language`` would allow it; the tooltip says why not."""
+        busy = self._language_busy()
+        self.language_combo.setEnabled(not busy)
+        self.language_combo.setToolTip(t("home.language_busy") if busy else "")
+
+    def set_language(self, code: str) -> bool:
+        """Switch the window's language; refuse while anything could lose its place.
+
+        A review window holds unsaved corrections and a job its progress rows;
+        rebuilding under them is where things would go missing, and switching a
+        language is rare enough to ask for a quiet moment. Returns whether the
+        window is now in *code*.
+        """
+        if code == i18n.current_language():
+            # Picking the language the system already gave is still a choice to keep.
+            self._prefs.language = code
+            return True
+        if self._language_busy():
+            self._select_language_in_combo(i18n.current_language())
+            self._answer(_Said("home.language_busy"))
+            return False
+        audio = self.new_job.audio_path
+        sizes = self._splitter.sizes()
+        apply_language(QApplication.instance(), code)
+        self._prefs.language = code
+        self.setWindowTitle(t("app.title"))
+        # setCentralWidget deletes the old panels (later); the new ones read the
+        # rest of the form back from prefs, all but the audio, which is not kept there.
+        self._build()
+        self._splitter.setSizes(sizes)  # where the person left the divider
+        if audio is not None:
+            self.new_job.set_audio(audio)
+        if self._status is not None:
+            self.new_job.show_status(self._status.text())  # said again, in the new language
+        # The combo just went with the old panels; a keyboard user stays where they were.
+        self.language_combo.setFocus()
+        return True
+
+    # -- the status line ------------------------------------------------------
+
+    def _say(self, said: _Said | None) -> None:
+        """Show *said* on the status line (None clears it), kept so a switch can say it again."""
+        self._status = said
+        self.new_job.show_status(said.text() if said is not None else "")
+
+    def _answer(self, said: _Said) -> None:
+        """Say *said* in answer to the person, and keep it up while the job's stage lasts.
+
+        A running job rewrites the status line with every progress event; a
+        refusal overwritten at once would make the request look ignored. The
+        next stage's sentence replaces it; until then progress moves only the bar.
+        """
+        self._say(said)
+        self._holding = self._cancel is not None
+
+    def _show_raw(self, text: str) -> None:
+        """Show *text*, which has no key: a language switch clears it rather than keep it."""
+        self._status = None
+        self.new_job.show_status(text)
 
     # -- running --------------------------------------------------------------
 
@@ -131,19 +248,22 @@ class MainWindow(QMainWindow):
             return  # one job at a time; the form is disabled while one runs
         problem = spec.validate()
         if problem is not None:
-            self.new_job.show_status(t(problem))
+            self._answer(_Said(problem))
             return
         open_review = self._review_of(project_path_for(match_path_for(spec)))
         if open_review is not None:
             # Re-matching replaces that project on disk, under whatever the
             # person has not saved in its review; saving then would overwrite
             # the new match with the old one. They finish there first.
-            self.new_job.show_status(t("home.close_review_first"))
+            self._answer(_Said("home.close_review_first"))
             _raise(open_review)
             return
 
         self._running_spec = spec
-        self._ending = ""
+        self._ending = None
+        self._stage = None
+        self._holding = False
+        self._status = None
         starting = t("home.progress.starting")
         self.new_job.set_running(True)
         self.new_job.set_progress(None, starting)
@@ -159,52 +279,79 @@ class MainWindow(QMainWindow):
             on_cancelled=self._on_cancelled,
             on_done=self._on_done,
         )
+        self._update_language_combo()
 
     def _request_cancel(self) -> None:
         if self._cancel is not None:
             self._cancel.cancel()
-            self.new_job.show_status(t("home.progress.stopping"))
+            self._answer(_Said("home.progress.stopping"))
 
     def _on_progress(self, event: ProgressEvent) -> None:
+        """Say how the job is going, in the window's words only.
+
+        The pipeline's messages are English log lines, so none is shown. An
+        event without a fraction says its stage's sentence when the stage
+        begins, or, when it carries a sentence this window already said in its
+        language (``translated``), that sentence as it is. An event with a
+        fraction shows the stage's percentage. While an answer to the person is
+        held (``_answer``), only a new stage replaces it.
+        """
+        new_stage = event.stage != self._stage
+        self._stage = event.stage
+        self._holding = self._holding and not new_stage
         if event.fraction is None:
-            if event.message.strip():
-                self.new_job.show_status(event.message.strip())
+            if self._holding:
+                return
+            if event.translated and event.message.strip():
+                self._show_raw(event.message.strip())
+            elif new_stage:
+                self._say(_Said(_stage_key(event.stage)))
             return
         text = _progress_text(event)
-        self.new_job.set_progress(event.fraction, text)
         if self._running_spec is not None:
             self.job_list.set_running(Path(self._running_spec.audio).name, text, event.fraction)
+        if self._holding:
+            self.new_job.set_progress(event.fraction, None)  # the bar moves; the answer stays
+            return
+        self._status = None
+        self.new_job.set_progress(event.fraction, text)
 
     def _on_finished(self, finished: _Finished) -> None:
-        if self._closing:
-            return  # no review, and no list, under a window that is going away
-        self._remember_output_dir()
         project = finished.project
         project_path = project.path or project_path_for(project.matches)
+        # State, not UI: the list must show this job next launch, closed window or not.
+        self._remember_output_dir()
         # Running a job again is asking for it: one removed from the list comes back.
         self._prefs.unhide_job(project_path)
+        if self._closing:
+            return  # no review, and no list, under a window that is going away
         self.job_list.set_running("", None)
         self.job_list.refresh()
 
         outcome = finished.outcome
         if outcome is not None and outcome.video is not None:
             # Rendered right away: the person chose to skip the review.
-            self._ending = t("home.finished.rendered", path=str(outcome.video))
+            self._ending = _Said("home.finished.rendered", {"path": path_text(outcome.video)})
             return
         problem = self._show_review(project_path)
-        self._ending = problem or t("home.finished.matched", count=len(project.cards))
+        self._ending = problem or _Said("home.finished.matched", count=len(project.cards))
 
     def _on_failed(self, message: str) -> None:
+        self._remember_matched_output()
         if self._closing:
             return  # the person closed the window; a dialog now would bring it back
-        self._ending = t("home.failed", details=message)
+        # The worker's message may be an OS or library detail in English; the
+        # sentence around it is in the person's language.
+        said = _Said("home.failed", {"details": message})
+        self._ending = said
         self._list_a_half_done_job()
-        QMessageBox.warning(self, t("home.failed.title"), message)
+        QMessageBox.warning(self, t("home.failed.title"), said.text())
 
     def _on_cancelled(self) -> None:
+        self._remember_matched_output()
         if self._closing:
             return
-        self._ending = t("home.cancelled")
+        self._ending = _Said("home.cancelled")
         self._list_a_half_done_job()
 
     def _remember_output_dir(self) -> None:
@@ -213,12 +360,21 @@ class MainWindow(QMainWindow):
         if spec is not None and spec.output_dir:
             self._prefs.job_dirs = [*self._prefs.job_dirs, Path(spec.output_dir)]
 
+    def _remember_matched_output(self) -> None:
+        """A render right away that stopped may follow a matching that saved its project.
+
+        State, not UI, so it runs even once the window has closed: the next
+        launch must still list that project.
+        """
+        spec = self._running_spec
+        if spec is not None and spec.render_right_away:
+            self._remember_output_dir()
+
     def _list_a_half_done_job(self) -> None:
-        """A render right away that stopped may follow a matching that saved its project."""
+        """Show the project a stopped render right away's matching saved (see above)."""
         spec = self._running_spec
         if spec is None or not spec.render_right_away:
             return
-        self._remember_output_dir()
         self.job_list.set_running("", None)
         self.job_list.refresh()
 
@@ -232,9 +388,11 @@ class MainWindow(QMainWindow):
             return
         self._cancel = None
         self._running_spec = None
+        self._holding = False
         self.job_list.set_running("", None)
         self.new_job.set_running(False)
-        self.new_job.show_status(self._ending)
+        self._say(self._ending)
+        self._update_language_combo()
 
     # -- the job list -----------------------------------------------------------
 
@@ -242,17 +400,35 @@ class MainWindow(QMainWindow):
         show_in_folder(path)
 
     def _show_damaged(self, error: str) -> None:
-        self.new_job.show_status(t("home.damaged", details=error))
+        self._answer(_Said("home.damaged", {"details": error}))
 
     # -- review windows -------------------------------------------------------
 
     def _open_review(self, project_path: Path) -> None:
-        """Open *project_path* for review, or say on the status line why it cannot be."""
+        """Open *project_path* for review, or say on the status line why it cannot be.
+
+        The job being matched is refused here rather than in ``_show_review``,
+        because ``_on_finished`` opens that same project through
+        ``_show_review`` before ``_on_done`` clears ``_running_spec``.
+        """
+        if self._is_being_matched(project_path):
+            # Its file is about to be replaced; a review opened now would show the old
+            # match, and saving it would overwrite the new one.
+            self._answer(_Said("home.busy_matching"))
+            return
         problem = self._show_review(project_path)
         if problem is not None:
-            self.new_job.show_status(problem)
+            self._answer(problem)
 
-    def _show_review(self, project_path: Path) -> str | None:
+    def _is_being_matched(self, project_path: Path) -> bool:
+        """Whether the running job will write *project_path*, however either is spelled."""
+        spec = self._running_spec
+        if spec is None:
+            return False
+        target = project_path_for(match_path_for(spec))
+        return Path(target).resolve() == Path(project_path).resolve()
+
+    def _show_review(self, project_path: Path) -> _Said | None:
         """Show the review window for *project_path*; return why not, or None.
 
         Reopening the same project raises the window already open on it rather
@@ -269,7 +445,7 @@ class MainWindow(QMainWindow):
         try:
             project = load_project(project_path)
         except (OSError, ValueError, KeyError, TypeError) as error:
-            return t("home.review_failed", name=project_path.name, details=str(error))
+            return _Said("home.review_failed", {"name": project_path.name, "details": str(error)})
 
         window = ReviewWindow(project)
         window.saved.connect(self._review_saved)
@@ -277,6 +453,7 @@ class MainWindow(QMainWindow):
         window.show()
         # Keep a reference: a window without one is collected and vanishes.
         self._reviews[project_path] = window
+        self._update_language_combo()
         return None
 
     def _review_of(self, project_path: Path) -> ReviewWindow | None:
@@ -290,7 +467,7 @@ class MainWindow(QMainWindow):
     def _review_saved(self, path: Path) -> None:
         self.job_list.refresh()
         if self._cancel is None:  # while a job runs, the status line is its progress
-            self.new_job.show_status(t("main.saved", path=path))
+            self._say(_Said("main.saved", {"path": path_text(path)}))
 
     def _forget_review(self, project_path: Path, window: ReviewWindow) -> None:
         """Let a closed review window go, unless another has taken its place."""
@@ -298,6 +475,7 @@ class MainWindow(QMainWindow):
             del self._reviews[project_path]
         window.deleteLater()
         self.job_list.refresh()
+        self._update_language_combo()
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt override
         """Close every open review window first; a refusal keeps this window open too.
@@ -331,6 +509,11 @@ def _raise(window: QWidget) -> None:
     window.show()
     window.raise_()
     window.activateWindow()
+
+
+def _stage_key(stage: str) -> str:
+    """The key of what the status line says while *stage* runs and reports no fraction."""
+    return f"job.stage.{stage}" if stage in _KNOWN_STAGES else "job.stage.working"
 
 
 def _progress_text(event: ProgressEvent) -> str:

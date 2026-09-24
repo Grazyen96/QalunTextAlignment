@@ -49,6 +49,8 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+# A test running past two minutes dumps every thread's stack, so a hang explains itself.
+faulthandler_timeout = 120
 
 [tool.ruff]
 line-length = 100
@@ -59,7 +61,9 @@ target-version = "py310"
 exclude = ["prototypes"]
 
 [tool.ruff.lint]
-select = ["B", "E", "F", "I", "UP"]
+# PLE2502: no literal direction marks in source; the Arabic table writes them as
+# \u escapes so a reviewer can see them (and cannot be misled by them).
+select = ["B", "E", "F", "I", "UP", "PLE2502"]
 ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]

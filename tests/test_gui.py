@@ -393,7 +393,7 @@ def test_a_changed_rematch_keeps_a_backup_and_says_so(tmp_path, monkeypatch) -> 
     assert load_project(backup).cards[0]["start_time"] == 0.25
     kept = t("job.progress.kept", name=backup.name)
     assert kept == f"Kept your earlier corrections in {backup.name}"
-    assert any(e.stage == "detect" and e.message == kept for e in events)
+    assert any(e.stage == "detect" and e.message == kept and e.translated for e in events)
 
 
 def test_an_unreadable_earlier_project_is_always_kept(tmp_path, monkeypatch) -> None:
@@ -770,7 +770,7 @@ def test_start_runs_matching_and_opens_its_review(
 
     assert calls == [spec]
     assert [r.project.path for r in reviews] == [tmp_path / "jobs" / "a_recitation.qalun.json"]
-    assert home.new_job.status_label.text() == module.t("home.finished.matched", count=1)
+    assert home.new_job.status_label.text() == "Matched 1 card. The review is open."
 
 
 def test_a_finished_job_whose_review_cannot_open_says_why(
@@ -814,7 +814,7 @@ def test_render_right_away_also_renders_and_skips_the_review(
     assert rendered == [tmp_path / "jobs" / "a_recitation.qalun.json"]
     assert reviews == [], "render right away skips the review"
     assert home.new_job.status_label.text() == module.t(
-        "home.finished.rendered", path=str(tmp_path / "a.mp4")
+        "home.finished.rendered", path=module.path_text(tmp_path / "a.mp4")
     )
 
 
@@ -854,7 +854,7 @@ def test_the_running_row_shows_during_the_job_and_goes_after(
     home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
 
     _spin_until(qt_app, lambda: any("40%" in text for text in _running_rows(home)))
-    assert _running_rows(home)[0].startswith("a.mp3")
+    assert _running_rows(home)[0].startswith("\u2068a.mp3\u2069")  # the name, isolated
     assert "40%" in home.new_job.status_label.text()
 
     release.set()
@@ -862,6 +862,53 @@ def test_the_running_row_shows_during_the_job_and_goes_after(
     _spin_until(qt_app, lambda: home._jobs.active == 0)
     assert _running_rows(home) == []
     assert home.job_list.list.count() == 2, "the earlier job, and the new one from disk"
+
+
+def test_the_status_line_says_each_stage_in_the_window_s_words(qt_app, home) -> None:
+    """The pipeline's log lines are English and never shown; the window names the stage."""
+    from qurantext.gui import main_window as module
+
+    status = home.new_job.status_label
+    home._on_progress(ProgressEvent("detect", "[1/3] Parsing Quran text: /x/quran.txt"))
+    assert status.text() == module.t("job.stage.detect")
+    home._on_progress(ProgressEvent("render", "Building ASS subtitles..."))
+    assert status.text() == module.t("job.stage.render")
+    home._on_progress(ProgressEvent("export", "Writing subtitle files..."))
+    assert status.text() == module.t("job.stage.export")
+    home._on_progress(ProgressEvent("tuning", "Something new..."))
+    assert status.text() == module.t("job.stage.working")
+    # With a fraction the line is the table's percentage sentence, as before.
+    home._on_progress(ProgressEvent("render", "  Segments 4/10", fraction=0.4))
+    assert status.text() == module.t("home.progress.rendering", percent=40)
+
+
+def test_the_window_s_own_progress_sentences_are_shown_as_they_are(qt_app, home) -> None:
+    """``gui/jobs.py`` marks what it already said in the window's language, and it stays up."""
+    from qurantext.gui import main_window as module
+
+    status = home.new_job.status_label
+    aligning = module.t("job.progress.aligning")
+    home._on_progress(ProgressEvent("detect", aligning, translated=True))
+    assert status.text() == aligning
+    home._on_progress(ProgressEvent("detect", "[2/3] Aligning 12 ayat..."))
+    assert status.text() == aligning, "a log line of the same stage does not replace it"
+
+
+def test_every_stage_the_pipeline_reports_has_its_own_sentence() -> None:
+    """A stage added to the pipeline without a sentence would only ever say "Working…"."""
+    import re
+
+    from qurantext.gui import main_window as module
+    from qurantext.jobs import export as export_job
+    from qurantext.jobs import render as render_job
+
+    source = Path(module.__file__).resolve().parents[1]
+    reported = {export_job.STAGE, render_job.STAGE}
+    for path in source.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        reported |= set(re.findall(r"""report\(\s*progress,\s*["']([a-z_]+)["']""", text))
+    assert reported, "the scan found no stage"
+    assert reported <= module._KNOWN_STAGES, sorted(reported - module._KNOWN_STAGES)
 
 
 def test_cancel_says_so_in_the_status_line_without_a_dialog(
@@ -893,6 +940,7 @@ def test_cancel_says_so_in_the_status_line_without_a_dialog(
 
 def test_a_failure_says_what_went_wrong(qt_app, home, reviews, tmp_path, monkeypatch) -> None:
     from qurantext.gui import main_window as module
+    from qurantext.gui.i18n import t
 
     def fail(progress, cancel):
         raise RuntimeError("the recogniser is unreachable")
@@ -905,6 +953,10 @@ def test_a_failure_says_what_went_wrong(qt_app, home, reviews, tmp_path, monkeyp
 
     assert "the recogniser is unreachable" in home.new_job.status_label.text()
     assert warned and reviews == [] and _running_rows(home) == []
+    # The box frames the worker's words in a sentence of the window's language.
+    _parent, title, body = warned[0]
+    assert title == t("home.failed.title")
+    assert body == t("home.failed", details="the recogniser is unreachable")
 
 
 class _NoOpThread:
@@ -1151,6 +1203,103 @@ def test_a_job_that_fails_during_the_close_shows_no_dialog(
     _spin_until(qt_app, lambda: quits)
 
 
+def test_a_job_finishing_after_close_still_lists_its_folder_and_unhides_it(
+    qt_app, home, prefs, reviews, tmp_path, monkeypatch
+) -> None:
+    """The window is going, but the next launch must still list the job it ran."""
+    import threading
+
+    from qurantext.gui import main_window as module
+    from qurantext.jobs.project import load_project
+
+    out = tmp_path / "out"
+    project_path = _saved_job(out, "a")
+    prefs.hide_job(project_path)
+    release = threading.Event()
+    finish = _blocked_until(
+        release,
+        finish=lambda spec: module._Finished(
+            load_project(_saved_job(Path(spec.output_dir), Path(spec.audio).stem))
+        ),
+    )
+    monkeypatch.setattr(module, "_match_then_render", finish)
+    monkeypatch.setattr(module.QMessageBox, "warning", lambda *a: pytest.fail("no dialog"))
+    quits = _record_quits(monkeypatch)
+
+    home.show()
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=out))
+    _spin_until(qt_app, lambda: home._cancel is not None)
+    home.close()
+    release.set()
+    _spin_until(qt_app, lambda: quits)
+
+    assert out.resolve() in prefs.job_dirs
+    assert project_path.resolve() not in prefs.hidden_jobs
+    assert home._reviews == {} and reviews == [], "still no review under a closed window"
+
+
+@pytest.mark.parametrize("ending", ["fails", "is cancelled"])
+def test_a_render_right_away_stopping_after_close_still_lists_its_folder(
+    qt_app, home, prefs, reviews, tmp_path, monkeypatch, ending
+) -> None:
+    """Matching saved the project before the render stopped; closing must not lose its folder."""
+    import threading
+
+    from qurantext.gui import main_window as module
+
+    release = threading.Event()
+    _fake_matching(monkeypatch)
+
+    def render(project, *, progress=None, cancel=None):
+        assert release.wait(timeout=10), "the test forgot to release the render"
+        if ending == "fails":
+            raise RuntimeError("the encoder gave up")
+        raise JobCancelled("render")
+
+    monkeypatch.setattr(module, "run_render", render)
+    monkeypatch.setattr(module.QMessageBox, "warning", lambda *a: pytest.fail("no dialog"))
+    quits = _record_quits(monkeypatch)
+    custom = tmp_path / "elsewhere"
+
+    home.show()
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=custom, render_right_away=True))
+    _spin_until(qt_app, lambda: home._cancel is not None)
+    home.close()
+    release.set()
+    _spin_until(qt_app, lambda: quits)
+
+    assert custom.resolve() in prefs.job_dirs
+
+
+def test_opening_the_review_of_a_job_being_matched_again_is_refused(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    """Its file is about to be replaced: a review now would show, and save over, the old match."""
+    import threading
+
+    from qurantext.gui import main_window as module
+
+    release = threading.Event()
+    project_path = _saved_job(tmp_path / "jobs", "a")
+
+    def wait_for_release(progress, cancel):
+        assert release.wait(timeout=10), "the test forgot to release the job"
+
+    _fake_matching(monkeypatch, before=wait_for_release)
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    _spin_until(qt_app, lambda: home._cancel is not None)
+
+    home._open_review(project_path)
+
+    assert home._reviews == {} and reviews == []
+    assert home.new_job.status_label.text() == module.t("home.busy_matching")
+
+    release.set()
+    _spin_until(qt_app, lambda: home._cancel is None)
+    _spin_until(qt_app, lambda: home._jobs.active == 0)
+    assert home._review_of(project_path) is not None, "once matched, its review opens as usual"
+
+
 @pytest.fixture()
 def real_reviews(qt_app, prefs, monkeypatch):
     """The main window's real review window, with a fake player; closed after the test."""
@@ -1318,3 +1467,223 @@ def test_the_app_names_itself_before_any_settings_are_read(qt_app) -> None:
     finally:
         QCoreApplication.setOrganizationName(before[0])
         QCoreApplication.setApplicationName(before[1])
+
+
+# --- the window's language -----------------------------------------------------
+
+
+def test_switching_to_arabic_rebuilds_the_home_window(
+    qt_app, home, prefs, tmp_path, monkeypatch
+) -> None:
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QLabel
+
+    from qurantext.gui import i18n
+    from qurantext.gui.home.new_job import NewJobPanel
+    from qurantext.gui.main_window import MainWindow
+
+    audio = tmp_path / "a.mp3"
+    audio.touch()
+    home.new_job.set_audio(audio)
+    home.new_job.surah_box.setCurrentIndex(24)  # Al-Furqan
+    home.new_job.from_spin.setValue(7)
+    home.new_job.to_spin.setValue(11)
+    surah = home.new_job.surah_box.currentData()
+    started: list = []
+    # Patched before the rebuild, so the new panel's connection is the one counted.
+    monkeypatch.setattr(MainWindow, "_start", lambda self, spec: started.append(spec))
+
+    assert home.set_language("ar")
+    qt_app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+    assert prefs.language == "ar"
+    assert home.job_list.findChild(QLabel).text() == i18n.STRINGS["ar"]["home.jobs"]  # rebuilt
+    assert home.new_job.audio_path == audio  # the half-filled form survives
+    assert home.new_job.surah_box.currentData() == surah
+    assert (home.new_job.from_spin.value(), home.new_job.to_spin.value()) == (7, 11)
+    assert home.language_combo.currentData() == "ar"
+    assert len(home.findChildren(NewJobPanel)) == 1, "the old panel is gone"
+    spec = _spec(tmp_path)
+    home.new_job.start_requested.emit(spec)
+    assert started == [spec], "the new panel is wired once"
+
+    assert home.set_language("en")
+    assert prefs.language == "en"
+    assert home.job_list.findChild(QLabel).text() == i18n.STRINGS["en"]["home.jobs"]
+    assert home.language_combo.currentData() == "en"
+
+
+def test_choosing_a_language_in_the_combo_switches_to_it(qt_app, home, prefs) -> None:
+    from qurantext.gui import i18n
+
+    index = home.language_combo.findData("ar")
+    home.language_combo.setCurrentIndex(index)
+    home.language_combo.activated.emit(index)
+
+    assert i18n.current_language() == "ar"
+    assert prefs.language == "ar"
+
+
+def test_choosing_the_language_already_shown_is_remembered(qt_app, home, prefs) -> None:
+    assert prefs.language is None  # following the system
+    assert home.set_language("en")
+    assert prefs.language == "en"
+
+
+def test_a_rebuild_keeps_the_window_size(qt_app, home) -> None:
+    home.resize(900, 600)
+    home.set_language("ar")
+    assert (home.width(), home.height()) == (900, 600)
+
+
+def test_the_language_does_not_change_while_a_review_is_open(
+    qt_app, home, prefs, reviews, tmp_path
+) -> None:
+    from qurantext.gui import i18n
+    from qurantext.gui import main_window as module
+
+    home._open_review(_saved_job(tmp_path / "jobs"))
+    assert reviews, "the review should have opened"
+
+    index = home.language_combo.findData("ar")
+    home.language_combo.setCurrentIndex(index)  # what the person picked
+    assert not home.set_language("ar")
+
+    assert i18n.current_language() == "en"
+    assert prefs.language is None
+    assert home.new_job.status_label.text() == module.t("home.language_busy")
+    assert home.language_combo.currentData() == "en"  # the combo snaps back
+
+
+def test_the_language_does_not_change_while_a_job_runs(
+    qt_app, home, prefs, reviews, tmp_path, monkeypatch
+) -> None:
+    import threading
+
+    from qurantext.gui import i18n
+    from qurantext.gui import main_window as module
+
+    release = threading.Event()
+
+    def wait_for_release(progress, cancel):
+        assert release.wait(timeout=10), "the test forgot to release the job"
+
+    _fake_matching(monkeypatch, before=wait_for_release)
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    _spin_until(qt_app, lambda: home._cancel is not None)
+    try:
+        home.language_combo.setCurrentIndex(home.language_combo.findData("ar"))
+        assert not home.set_language("ar")
+
+        assert i18n.current_language() == "en"
+        assert home.new_job.status_label.text() == module.t("home.language_busy")
+        assert home.language_combo.currentData() == "en"
+    finally:
+        release.set()
+        _spin_until(qt_app, lambda: home._cancel is None)
+        _spin_until(qt_app, lambda: home._jobs.active == 0)
+
+
+def test_the_language_combo_is_off_while_a_review_is_open(qt_app, home, reviews, tmp_path) -> None:
+    """Offered only when a switch would be allowed; the tooltip says why not."""
+    from qurantext.gui import main_window as module
+
+    assert home.language_combo.isEnabled() and home.language_combo.toolTip() == ""
+    home._open_review(_saved_job(tmp_path / "jobs"))
+    assert not home.language_combo.isEnabled()
+    assert home.language_combo.toolTip() == module.t("home.language_busy")
+
+    reviews[0].close()
+    assert home.language_combo.isEnabled() and home.language_combo.toolTip() == ""
+
+
+def test_the_language_combo_is_off_while_a_job_runs(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    import threading
+
+    release = threading.Event()
+
+    def wait_for_release(progress, cancel):
+        assert release.wait(timeout=10), "the test forgot to release the job"
+
+    _fake_matching(monkeypatch, before=wait_for_release)
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    _spin_until(qt_app, lambda: home._cancel is not None)
+    try:
+        assert not home.language_combo.isEnabled()
+    finally:
+        release.set()
+        _spin_until(qt_app, lambda: home._cancel is None)
+        _spin_until(qt_app, lambda: home._jobs.active == 0)
+    for review in list(reviews):  # the finished job opened its review
+        review.close()
+    assert home.language_combo.isEnabled()
+
+
+def test_a_refusal_stays_up_until_the_job_s_stage_changes(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    """Progress of the same stage moves the bar, but does not wipe the refusal."""
+    import threading
+
+    from qurantext.gui import main_window as module
+
+    release = threading.Event()
+    project_path = _saved_job(tmp_path / "jobs", "a")
+
+    def wait_for_release(progress, cancel):
+        assert release.wait(timeout=10), "the test forgot to release the job"
+
+    _fake_matching(monkeypatch, before=wait_for_release)
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    _spin_until(qt_app, lambda: home._cancel is not None)
+    status = home.new_job.status_label
+    try:
+        home._on_progress(ProgressEvent("match", "Scanning..."))
+        home._open_review(project_path)
+        refused = module.t("home.busy_matching")
+        assert status.text() == refused
+
+        home._on_progress(ProgressEvent("match", "  Matching word 10/40", fraction=0.25))
+        assert status.text() == refused
+        assert home.new_job.progress_bar.value() == 25, "the bar still moves"
+        assert any("25%" in row for row in _running_rows(home)), "and so does the job's row"
+        home._on_progress(ProgressEvent("match", "a log line"))
+        home._on_progress(ProgressEvent("match", "kept", translated=True))
+        assert status.text() == refused
+
+        home._on_progress(ProgressEvent("render", "Building ASS subtitles..."))
+        assert status.text() == module.t("job.stage.render")
+    finally:
+        release.set()
+        _spin_until(qt_app, lambda: home._cancel is None)
+        _spin_until(qt_app, lambda: home._jobs.active == 0)
+
+
+def test_a_language_switch_says_the_last_status_again_and_keeps_the_focus(
+    qt_app, home, tmp_path
+) -> None:
+    from qurantext.gui import i18n
+
+    saved = tmp_path / "jobs" / "a_recitation.qalun.json"
+    home._review_saved(saved)
+    home.language_combo.setFocus()
+
+    assert home.set_language("ar")
+
+    status = home.new_job.status_label
+    assert status.text() == i18n.t("main.saved", path=i18n.path_text(saved))  # in Arabic
+    assert not status.isHidden()
+    assert home.focusWidget() is home.language_combo
+
+
+def test_a_status_said_from_raw_text_is_cleared_by_a_language_switch(qt_app, home) -> None:
+    """Only a sentence kept as its key can be said again; anything else would stay English."""
+    home._on_progress(ProgressEvent("detect", "Already in English", translated=True))
+    assert home.new_job.status_label.text() == "Already in English"
+
+    assert home.set_language("ar")
+
+    assert home.new_job.status_label.text() == ""
+    assert home.new_job.status_label.isHidden()

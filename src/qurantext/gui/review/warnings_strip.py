@@ -15,7 +15,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QLabel, QWidget
 
 from qurantext.core.coverage import UncoveredSpeech
-from qurantext.gui.i18n import t
+from qurantext.gui.i18n import t, time_span, tn
 
 __all__ = ["WarningsStrip"]
 
@@ -62,16 +62,17 @@ class WarningsStrip(QLabel):
     def _render(self) -> None:
         lines = [html.escape(notice) for notice in self._notices]
         if self._gaps:
-            lines.append(html.escape(t("review.gaps", count=len(self._gaps))))
+            lines.append(html.escape(tn("review.gaps", len(self._gaps))))
             jump = html.escape(t("review.jump"))
             for gap in self._gaps[:_MAX_GAP_LINES]:
-                text = t("review.gap", duration=gap.duration, start=gap.start, end=gap.end)
+                span = time_span(gap.start, gap.end, digits=1)
+                text = t("review.gap", duration=gap.duration, span=span)
                 lines.append(
                     f'&nbsp;&nbsp;{html.escape(text)} <a href="{gap.start:.3f}">{jump}</a>'
                 )
             hidden = len(self._gaps) - _MAX_GAP_LINES
             if hidden > 0:
-                lines.append(f"&nbsp;&nbsp;{html.escape(t('review.more_gaps', count=hidden))}")
+                lines.append(f"&nbsp;&nbsp;{html.escape(tn('review.more_gaps', hidden))}")
         elif self._gaps is not None:
             lines.append(html.escape(t("review.covered")))
         elif self._checking:

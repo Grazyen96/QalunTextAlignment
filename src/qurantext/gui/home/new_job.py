@@ -37,7 +37,7 @@ from qurantext.config.paths import QURAN_DB_PATH, QURAN_INPUT_DIR
 from qurantext.config.settings import VIDEO_PRESETS
 from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.data.quran_db import ensure_quran_db, list_surahs
-from qurantext.gui.i18n import t
+from qurantext.gui.i18n import path_text, t, tn
 from qurantext.gui.jobs import JobSpec
 from qurantext.gui.prefs import Prefs
 from qurantext.jobs.project import SUBTITLE_CHOICES
@@ -213,7 +213,7 @@ class NewJobPanel(QWidget):
         self.more_button.setText(t("home.more"))
         self.more_button.setCheckable(True)
         self.more_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.more_button.setArrowType(Qt.ArrowType.RightArrow)
+        self.more_button.setArrowType(self._more_arrow(open_=False))
         self.more_button.toggled.connect(self._toggle_more_options)
         layout.addWidget(self.more_button)
 
@@ -390,11 +390,11 @@ class NewJobPanel(QWidget):
         self.surah_box.setEnabled(True)
         for surah in surahs:
             self.surah_box.addItem(
-                t(
+                tn(
                     "home.surah_item",
+                    surah["ayah_count"],
                     num=surah["surah_num"],
                     name=surah["name"],
-                    count=surah["ayah_count"],
                 ),
                 surah,
             )
@@ -422,10 +422,15 @@ class NewJobPanel(QWidget):
         if name:
             self.set_audio(Path(name))
 
+    @property
+    def audio_path(self) -> Path | None:
+        """The chosen audio file, or None; the one choice prefs do not keep."""
+        return self._audio
+
     def set_audio(self, path: Path) -> None:
         """Set the chosen audio file; used by the dialog, and by drops."""
         self._audio = path
-        self.drop_label.setText(f"{path.name}\n{path.parent}")
+        self.drop_label.setText(f"{path.name}\n{path_text(path.parent)}")
         self.drop_label.setToolTip(str(path))
         self._refresh()
 
@@ -464,7 +469,7 @@ class NewJobPanel(QWidget):
     def _update_quran_label(self) -> None:
         override = self._usable_override()
         if override is not None:
-            self.quran_label.setText(t("home.quran_override.custom", path=str(override)))
+            self.quran_label.setText(t("home.quran_override.custom", path=path_text(override)))
         elif self._quran_default is not None:
             self.quran_label.setText(t("home.quran_override.default"))
         else:
@@ -472,7 +477,7 @@ class NewJobPanel(QWidget):
 
     def _update_output_dir_label(self) -> None:
         if self._output_dir is not None:
-            self.output_label.setText(t("home.output_dir.custom", path=str(self._output_dir)))
+            self.output_label.setText(t("home.output_dir.custom", path=path_text(self._output_dir)))
         else:
             self.output_label.setText(t("home.output_dir.default"))
 
@@ -530,7 +535,19 @@ class NewJobPanel(QWidget):
 
     def _set_more_options_visibility(self, open_: bool) -> None:
         self.more_group.setVisible(open_)
-        self.more_button.setArrowType(Qt.ArrowType.DownArrow if open_ else Qt.ArrowType.RightArrow)
+        self.more_button.setArrowType(self._more_arrow(open_=open_))
+
+    def _more_arrow(self, *, open_: bool) -> Qt.ArrowType:
+        """Down when the options show; else toward where the line reads on, as a disclosure does.
+
+        In Arabic a line reads on to the left, so a right arrow there would
+        point back at the label instead of past it.
+        """
+        if open_:
+            return Qt.ArrowType.DownArrow
+        if self.layoutDirection() == Qt.LayoutDirection.RightToLeft:
+            return Qt.ArrowType.LeftArrow
+        return Qt.ArrowType.RightArrow
 
     def _current_subtitles(self) -> str:
         for value, button in self.subtitle_buttons.items():
@@ -616,14 +633,19 @@ class NewJobPanel(QWidget):
         if not running:
             self._refresh()
 
-    def set_progress(self, fraction: float | None, text: str) -> None:
-        """Update the progress bar (``None`` for an indeterminate stage) and status line."""
+    def set_progress(self, fraction: float | None, text: str | None) -> None:
+        """Update the progress bar (``None`` for an indeterminate stage) and status line.
+
+        *text* None leaves the status line as it is: the window keeps an answer
+        to the person up there while the bar moves on.
+        """
         if fraction is None:
             self.progress_bar.setRange(0, 0)
         else:
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(int(max(0.0, min(1.0, fraction)) * 100))
-        self.status_label.setText(text)
+        if text is not None:
+            self.status_label.setText(text)
 
     def show_status(self, text: str) -> None:
         """Show *text* on the status line (hidden when empty), running or not.

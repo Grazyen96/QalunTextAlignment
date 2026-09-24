@@ -32,6 +32,7 @@ from qurantext.core.timing_edit import (
     ripple_in_cards,
 )
 from qurantext.core.video_common import validated_matches
+from qurantext.gui.i18n import t
 from qurantext.jobs.project import CaptionCue, Project, job_settings, save_project
 
 __all__ = ["CAPTION", "CARD", "ReviewSession", "TimelineWord", "WordRef"]
@@ -451,8 +452,8 @@ class ReviewSession:
         state the drag began in makes the result depend only on where the
         pointer is, so dragging back puts everything back. Like a nudge, it
         goes through :meth:`retime`, so an edge the neighbour shared stays
-        shared while it is dragged, unless *keep_joined* is False (an Alt-drag
-        in the word strip), which detaches it.
+        shared while it is dragged, unless *keep_joined* is False (a Ctrl or
+        Alt drag in the word strip), which detaches it.
         """
         self._restore_gesture_start()
         self.retime(ref, start=start, end=end, keep_joined=keep_joined)
@@ -490,7 +491,7 @@ class ReviewSession:
     ) -> None:
         card = self.project.cards[index]
         if card.get("word_timings"):
-            raise ValueError("This card's times follow its words; retime the words instead.")
+            raise ValueError(t("session.card_follows_words"))
         self._before_change()
         new = dict(card)
         if start is not None:
@@ -643,7 +644,7 @@ class ReviewSession:
 
     def save(self) -> Path:
         if self.project.path is None:
-            raise ValueError("This project has no file to write back to.")
+            raise ValueError(t("session.no_file"))
         path = save_project(self.project, self.project.path)
         self._saved_key = self._key()
         self._saved_snapshot = self._snapshot()

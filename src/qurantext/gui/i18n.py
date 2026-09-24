@@ -4,25 +4,63 @@ Every string a person reads in the window comes from here, so adding a
 language means adding a table, not editing widgets. English is the fallback for
 a key a newer build added before its translation; the key itself is the last
 resort, and a test fails the build long before that shows.
+
+A key whose sentence depends on a number maps to its plural forms (CLDR's
+cardinal categories: ``zero one two few many other``) and is read with
+:func:`tn`; English needs ``one`` and ``other``, Arabic all six. In a
+right-to-left language every value formatted into a sentence is isolated, so a
+time range or a Latin file name keeps its own direction instead of being
+reordered by the Arabic around it.
+
+No Qt here: the review session raises errors in these words, and it imports no Qt.
 """
 
 from __future__ import annotations
 
-__all__ = ["LANGUAGES", "STRINGS", "current_language", "set_language", "t"]
+import string
 
-STRINGS: dict[str, dict[str, str]] = {
+__all__ = [
+    "LANGUAGES",
+    "LANGUAGE_NAMES",
+    "RTL_LANGUAGES",
+    "STRINGS",
+    "current_language",
+    "is_rtl",
+    "ltr",
+    "path_text",
+    "plural_category",
+    "set_language",
+    "t",
+    "time_span",
+    "tn",
+]
+
+#: Languages written right to left: their layout mirrors, and every value
+#: formatted into their sentences is isolated so it keeps its own direction.
+RTL_LANGUAGES = frozenset({"ar"})
+
+#: Each language by its own name, for the language menu; never translated.
+LANGUAGE_NAMES = {"en": "English", "ar": "العربية"}
+
+_FSI, _LRI, _PDI, _LRM = "\u2068", "\u2066", "\u2069", "\u200e"
+
+STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
     "en": {
         # Tasks 3–9 add their keys here, grouped by widget.
         "home.jobs": "Your jobs",
         "home.refresh": "Refresh",
         "home.mode.recitation": "Recitation",
         "home.mode.lecture": "Lecture",
-        "home.cards": "{count} card(s)",
+        "home.cards": {"one": "{count} card", "other": "{count} cards"},
         "home.status.needs_review": "Needs review",
         "home.status.reviewed": "Reviewed",
         "home.status.rendered": "Rendered",
         "home.status.changed_since_render": "Changed since render",
         "home.status.damaged": "Damaged",
+        "home.row_detail": "{mode} · {scope} · {status}",
+        # The name is isolated here too: an Arabic file name leading the line
+        # would otherwise lay it out right to left.
+        "home.running_row": "\u2068{name}\u2069 — {progress}",
         "home.show_in_folder": "Show in folder",
         "home.remove_from_list": "Remove from list",
         "home.empty": "Your jobs appear here once you start one.",
@@ -31,7 +69,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "home.choose": "Choose…",
         "home.choose_audio.dialog_title": "Choose an audio file",
         "home.surah": "Surah",
-        "home.surah_item": "{num}. {name}  ({count} ayat)",
+        "home.surah_item": {
+            "one": "{num}. {name}  ({count} ayah)",
+            "other": "{num}. {name}  ({count} ayat)",
+        },
         "home.filter.audio": "Audio and video",
         "home.filter.text": "Text files",
         "home.filter.all": "All files",
@@ -71,6 +112,13 @@ STRINGS: dict[str, dict[str, str]] = {
         "job.progress.aligning": "Aligning against the ayat you chose…",
         "job.progress.detecting": "Looking for Quran in the audio…",
         "job.progress.kept": "Kept your earlier corrections in {name}",
+        # What the status line says while a stage runs; the pipeline's own
+        # messages are English log lines and are never shown.
+        "job.stage.detect": "Matching the recording to the Quran text…",
+        "job.stage.match": "Looking for Quran citations in the lecture…",
+        "job.stage.render": "Rendering the video…",
+        "job.stage.export": "Writing subtitle files…",
+        "job.stage.working": "Working…",
         "app.title": "Qalun",
         "home.progress.starting": "Starting…",
         "home.progress.stopping": "Stopping…",
@@ -80,14 +128,22 @@ STRINGS: dict[str, dict[str, str]] = {
         "home.progress.rendering_eta": "Rendering — {percent}%, about {eta} left",
         "home.eta.seconds": "{seconds}s",
         "home.eta.minutes": "{minutes}m {seconds}s",
-        "home.finished.matched": "Matched {count} card(s). The review is open.",
+        "home.finished.matched": {
+            "one": "Matched {count} card. The review is open.",
+            "other": "Matched {count} cards. The review is open.",
+        },
         "home.finished.rendered": "Saved the video to {path}",
         "home.failed": "That did not finish: {details}",
         "home.failed.title": "That did not finish",
         "home.cancelled": "Stopped before it finished.",
         "home.damaged": "This job cannot be opened: {details}",
         "home.close_review_first": "Close the review of this job before running it again.",
+        "home.busy_matching": "This job is running again; open its review once it finishes.",
         "home.review_failed": "Could not open {name} for review: {details}",
+        "home.language": "Language",
+        "home.language_busy": (
+            "Close the open reviews and wait for the job to finish before changing the language."
+        ),
         "main.saved": "Corrections saved to {path}",
         "player.unavailable": "Playback is off on this machine: {details}",
         "player.unavailable_short": "Playback is off: install PySide6-Addons to hear the recording.",
@@ -117,19 +173,25 @@ STRINGS: dict[str, dict[str, str]] = {
         "review.minus": "−50 ms",
         "review.plus": "+50 ms",
         "review.no_selection": "Select a word to retime it",
-        "review.selected": "{word}  {start} → {end} s",
-        "review.gaps": "{count} stretch(es) of speech have no word:",
-        "review.gap": "{duration:.1f} s at {start:.1f}–{end:.1f} s",
+        # The word is isolated here too: a Quran word leading the line would
+        # otherwise lay it out right to left and reverse the two times.
+        "review.selected": "\u2068{word}\u2069  {span} s",
+        "review.gaps": {
+            "one": "{count} stretch of speech has no word:",
+            "other": "{count} stretches of speech have no word:",
+        },
+        "review.gap": "{duration:.1f} s at {span} s",
         "review.jump": "Jump",
         "review.covered": "Every stretch of speech is covered by a word.",
         "review.checking": "Checking the recording for speech with no word…",
-        "review.more_gaps": "…and {count} more",
+        "review.more_gaps": {"one": "…and {count} more", "other": "…and {count} more"},
         "review.audio_missing": "The recording is not where the project says: {path}",
+        "review.save_failed": "The corrections were not saved: {details}",
         "review.discard_title": "Save your corrections?",
         "review.discard_text": "This review has changes that are not saved.",
         "review.shortcuts": (
             "Space plays · ←/→ step words · [ and ] set start/end at the playhead · "
-            ", and . nudge · Alt-drag an edge to part two words · Ctrl+Z undoes"
+            ", and . nudge · Ctrl-drag an edge to part two words · Ctrl+Z undoes"
         ),
         "export.title": "Export subtitles",
         "export.formats": "Formats",
@@ -137,13 +199,20 @@ STRINGS: dict[str, dict[str, str]] = {
         "export.choose": "Choose…",
         "export.name": "File name",
         "export.match_video": "Match the rendered video (includes the basmala at the start)",
+        "export.match_video_stale": (
+            "Match the rendered video (includes the basmala at the start)"
+            " — rendered before your latest changes"
+        ),
         "export.match_audio": "Match the original recording",
         "export.go": "Export",
-        "export.done": "Wrote {count} file(s):",
+        "export.done": {
+            "one": "Wrote {count} file: {names}",
+            "other": "Wrote {count} files: {names}",
+        },
         "export.show": "Show in folder",
         "export.none_chosen": "Choose at least one format.",
         "export.no_name": "Enter a file name.",
-        "export.stale": "(rendered before your latest changes)",
+        "export.failed": "The subtitles were not written: {details}",
         "export.close": "Close",
         "render.running": "Rendering — {percent}%",
         "render.done": "The video is ready: {path}",
@@ -151,6 +220,218 @@ STRINGS: dict[str, dict[str, str]] = {
         "render.failed": "The render did not finish: {details}",
         "render.cancelled": "Rendering stopped.",
         "render.cancel": "Cancel",
+        "session.card_follows_words": (
+            "This card's times follow its words; retime the words instead."
+        ),
+        "session.no_file": "This project has no file to write back to.",
+    },
+    # Drafted for the first release; a native speaker must review every line
+    # before it ships (spec §4). Keep the order and grouping of "en".
+    # \u2066…\u2069 isolates keep Latin and number runs left to right, and a leading
+    # \u200f (RLM) makes a line of only values read right to left; they must be kept.
+    "ar": {
+        "home.jobs": "مهامك",
+        "home.refresh": "حدِّث",
+        "home.mode.recitation": "تلاوة",
+        "home.mode.lecture": "محاضرة",
+        "home.cards": {
+            "zero": "لا بطاقات",
+            "one": "بطاقة واحدة",
+            "two": "بطاقتان",
+            "few": "{count} بطاقات",
+            "many": "{count} بطاقة",
+            "other": "{count} بطاقة",
+        },
+        "home.status.needs_review": "بحاجة إلى مراجعة",
+        "home.status.reviewed": "تمت المراجعة",
+        "home.status.rendered": "تم إخراج الفيديو",
+        "home.status.changed_since_render": "عُدِّلت بعد إخراج الفيديو",
+        "home.status.damaged": "تالفة",
+        # Only values and marks: the RLM makes the line right to left, else it
+        # would be laid out left to right with the mode on the left.
+        "home.row_detail": "\u200f{mode} · {scope} · {status}",
+        "home.running_row": "\u200f{name} — {progress}",
+        "home.show_in_folder": "اعرض في المجلد",
+        "home.remove_from_list": "أزِل من القائمة",
+        "home.empty": "تظهر مهامك هنا بعد أن تبدأ أول مهمة.",
+        "home.new_job": "مهمة جديدة",
+        "home.drop": "أفلِت ملفًا صوتيًا هنا، أو اختر واحدًا",
+        "home.choose": "اختر…",
+        "home.choose_audio.dialog_title": "اختر ملفًا صوتيًا",
+        "home.surah": "السورة",
+        "home.surah_item": {
+            "zero": "{num}. {name}  (لا آيات)",
+            "one": "{num}. {name}  (آية واحدة)",
+            "two": "{num}. {name}  (آيتان)",
+            "few": "{num}. {name}  ({count} آيات)",
+            "many": "{num}. {name}  ({count} آية)",
+            "other": "{num}. {name}  ({count} آية)",
+        },
+        "home.filter.audio": "ملفات الصوت والفيديو",
+        "home.filter.text": "ملفات نصية",
+        "home.filter.all": "كل الملفات",
+        "home.range": "الآيات",
+        "home.range_from": "من",
+        "home.range_to": "إلى",
+        "home.video_size": "مقاس الفيديو",
+        "preset.social": "عمودي \u20661080×1920\u2069 · 30 إطارًا/ث",
+        "preset.high": "أفقي \u20661920×1080\u2069 · 30 إطارًا/ث",
+        "preset.standard": "أفقي \u20661280×720\u2069 · 25 إطارًا/ث",
+        "preset.fast": "مسودة سريعة \u2066960×540\u2069 · 24 إطارًا/ث",
+        "home.more": "خيارات أخرى",
+        "home.quran_missing": "اختر ملف نص القرآن أولًا",
+        "home.quran_store_error": "تعذّرت قراءة قاعدة بيانات القرآن: {details}",
+        "home.quran_override.default": "نص القرآن: النص الموثَّق المرفق مع Qalun",
+        "home.quran_override.custom": "نص القرآن: {path}",
+        "home.quran_override.reset": "استخدم النص المرفق",
+        "home.quran_override.dialog_title": "اختر ملف نص القرآن",
+        "home.output_dir.default": "مجلد الحفظ: الموضع الافتراضي",
+        "home.output_dir.custom": "مجلد الحفظ: {path}",
+        "home.output_dir.reset": "الافتراضي",
+        "home.output_dir.dialog_title": "اختر مجلد الحفظ",
+        "home.subtitles.burn": "مدمجة في الصورة",
+        "home.subtitles.sidecar": "ملفات بجانب الفيديو",
+        "home.subtitles.both": "كلاهما",
+        "format.srt": "SRT",
+        "format.vtt": "VTT",
+        "format.ass": "ASS",
+        "home.render_right_away": "أخرِج الفيديو مباشرةً (دون مراجعة)",
+        "home.start": "ابدأ",
+        "home.cancel": "إلغاء",
+        "job.need_audio": "اختر ملفًا صوتيًا.",
+        "job.need_quran": "اختر ملف نص القرآن.",
+        "job.need_range": "اختر السورة ونطاق الآيات.",
+        "job.bad_range": "لا يمكن أن تسبق الآيةُ الأخيرة الآيةَ الأولى.",
+        "job.need_format": "اختر صيغة واحدة على الأقل للترجمة النصية.",
+        "job.progress.aligning": "جارٍ مطابقة التلاوة مع الآيات التي اخترتها…",
+        "job.progress.detecting": "جارٍ البحث عن القرآن في التسجيل…",
+        "job.progress.kept": "أُبقيت تصحيحاتك السابقة في {name}",
+        "job.stage.detect": "جارٍ مطابقة التسجيل مع نص القرآن…",
+        "job.stage.match": "جارٍ البحث عن الاستشهادات القرآنية في المحاضرة…",
+        "job.stage.render": "جارٍ إخراج الفيديو…",
+        "job.stage.export": "جارٍ كتابة ملفات الترجمة النصية…",
+        "job.stage.working": "جارٍ العمل…",
+        "app.title": "Qalun",
+        "home.progress.starting": "جارٍ البدء…",
+        "home.progress.stopping": "جارٍ الإيقاف…",
+        "home.progress.matching": "المطابقة — \u2066{percent}%\u2069",
+        "home.progress.matching_eta": "المطابقة — \u2066{percent}%\u2069، يتبقى نحو {eta}",
+        "home.progress.rendering": "إخراج الفيديو — \u2066{percent}%\u2069",
+        "home.progress.rendering_eta": "إخراج الفيديو — \u2066{percent}%\u2069، يتبقى نحو {eta}",
+        "home.eta.seconds": "{seconds} ث",
+        "home.eta.minutes": "{minutes} د {seconds} ث",
+        "home.finished.matched": {
+            "zero": "لم تتم مطابقة أي بطاقة. المراجعة مفتوحة.",
+            "one": "تمت مطابقة بطاقة واحدة. المراجعة مفتوحة.",
+            "two": "تمت مطابقة بطاقتين. المراجعة مفتوحة.",
+            "few": "تمت مطابقة {count} بطاقات. المراجعة مفتوحة.",
+            "many": "تمت مطابقة {count} بطاقة. المراجعة مفتوحة.",
+            "other": "تمت مطابقة {count} بطاقة. المراجعة مفتوحة.",
+        },
+        "home.finished.rendered": "حُفظ الفيديو في {path}",
+        "home.failed": "لم تكتمل العملية: {details}",
+        "home.failed.title": "لم تكتمل العملية",
+        "home.cancelled": "توقفت العملية قبل أن تكتمل.",
+        "home.damaged": "لا يمكن فتح هذه المهمة: {details}",
+        "home.close_review_first": "أغلق مراجعة هذه المهمة قبل تشغيلها مرة أخرى.",
+        "home.busy_matching": "هذه المهمة قيد التشغيل مرة أخرى؛ افتح مراجعتها بعد أن تنتهي.",
+        "home.review_failed": "تعذّر فتح {name} للمراجعة: {details}",
+        "home.language": "اللغة",
+        "home.language_busy": "أغلق المراجعات المفتوحة وانتظر انتهاء المهمة قبل تغيير اللغة.",
+        "main.saved": "حُفظت التصحيحات في {path}",
+        "player.unavailable": "التشغيل غير متاح على هذا الجهاز: {details}",
+        "player.unavailable_short": "التشغيل غير متاح: ثبّت PySide6-Addons لسماع التسجيل.",
+        "waveform.reading": "جارٍ قراءة التسجيل…",
+        "waveform.missing": "التسجيل غير متاح.",
+        "frame.error": "تعذّر رسم الإطار: {details}",
+        "segments.ref": "الآية",
+        "segments.time": "الوقت",
+        "segments.text": "النص",
+        "segments.retimed": "أُعيد توقيتها",
+        "segments.speech": "كلام",
+        "segments.locked": "يُقرأ نص القرآن من قاعدة البيانات ولا يمكن تعديله هنا.",
+        "review.title": "مراجعة — {name}",
+        "review.save": "احفظ",
+        "review.undo": "تراجع",
+        "review.redo": "إعادة",
+        "review.mark_reviewed": "علِّم كمُراجَعة",
+        "review.export": "صدِّر الترجمة النصية…",
+        "review.render": "أخرِج الفيديو بالتصحيحات",
+        "review.remove": "أزِل المحدد",
+        "review.remove_none": "حدِّد صفًا لإزالته.",
+        "review.play": "شغِّل",
+        "review.pause": "أوقف مؤقتًا",
+        "review.rate": "\u2066{rate:g}×\u2069",
+        "review.zoom": "التكبير",
+        "review.snap": "اضبط على مؤشر التشغيل",
+        "review.minus": "\u2066−50\u2069 م.ث",
+        "review.plus": "\u2066+50\u2069 م.ث",
+        "review.no_selection": "اختر كلمة لتعديل توقيتها",
+        "review.selected": "{word}  {span} ث",
+        "review.gaps": {
+            "zero": "لا مقاطع كلام لا تغطيها أي كلمة:",
+            "one": "مقطع كلام واحد لا تغطيه أي كلمة:",
+            "two": "مقطعا كلام لا تغطيهما أي كلمة:",
+            "few": "{count} مقاطع كلام لا تغطيها أي كلمة:",
+            "many": "{count} مقطع كلام لا تغطيه أي كلمة:",
+            "other": "{count} مقطع كلام لا تغطيه أي كلمة:",
+        },
+        "review.gap": "{duration:.1f} ث عند {span} ث",
+        "review.jump": "انتقل",
+        "review.covered": "كل مقاطع الكلام تغطيها كلمات.",
+        "review.checking": "جارٍ فحص التسجيل بحثًا عن كلام لا تغطيه أي كلمة…",
+        "review.more_gaps": {
+            "zero": "…ولا مقاطع أخرى",
+            "one": "…ومقطع آخر",
+            "two": "…ومقطعان آخران",
+            "few": "…و{count} مقاطع أخرى",
+            "many": "…و{count} مقطعًا آخر",
+            "other": "…و{count} مقطع آخر",
+        },
+        "review.audio_missing": "التسجيل ليس في الموضع الذي يذكره المشروع: {path}",
+        "review.save_failed": "لم تُحفظ التصحيحات: {details}",
+        "review.discard_title": "هل تحفظ تصحيحاتك؟",
+        "review.discard_text": "في هذه المراجعة تغييرات غير محفوظة.",
+        "review.shortcuts": (
+            "المسافة للتشغيل · \u2066←/→\u2069 للتنقل بين الكلمات · "
+            "\u2066[\u2069 للبداية و\u2066]\u2069 للنهاية عند مؤشر التشغيل · "
+            "\u2066,\u2069 و\u2066.\u2069 للإزاحة الدقيقة · "
+            "اسحب حافة مع Ctrl لفصل كلمتين · Ctrl+Z للتراجع"
+        ),
+        "export.title": "تصدير الترجمة النصية",
+        "export.formats": "الصيغ",
+        "export.folder": "المجلد",
+        "export.choose": "اختر…",
+        "export.name": "اسم الملف",
+        "export.match_video": "طابِق الفيديو المُخرَج (يتضمن البسملة في بدايته)",
+        "export.match_video_stale": (
+            "طابِق الفيديو المُخرَج (يتضمن البسملة في بدايته) — أُخرِج قبل آخر تغييراتك"
+        ),
+        "export.match_audio": "طابِق التسجيل الأصلي",
+        "export.go": "صدِّر",
+        "export.done": {
+            "zero": "لم يُكتب أي ملف: {names}",
+            "one": "كُتب ملف واحد: {names}",
+            "two": "كُتب ملفان: {names}",
+            "few": "كُتبت {count} ملفات: {names}",
+            "many": "كُتب {count} ملفًا: {names}",
+            "other": "كُتب {count} ملف: {names}",
+        },
+        "export.show": "اعرض في المجلد",
+        "export.none_chosen": "اختر صيغة واحدة على الأقل.",
+        "export.no_name": "أدخل اسمًا للملف.",
+        "export.failed": "لم تُكتب الترجمة النصية: {details}",
+        "export.close": "إغلاق",
+        "render.running": "إخراج الفيديو — \u2066{percent}%\u2069",
+        "render.done": "الفيديو جاهز: {path}",
+        "render.show": "اعرض الفيديو",
+        "render.failed": "لم يكتمل إخراج الفيديو: {details}",
+        "render.cancelled": "توقف إخراج الفيديو.",
+        "render.cancel": "إلغاء",
+        "session.card_follows_words": (
+            "توقيت هذه البطاقة يتبع كلماتها؛ عدِّل توقيت الكلمات بدلًا منها."
+        ),
+        "session.no_file": "ليس لهذا المشروع ملف يُحفظ فيه.",
     },
 }
 LANGUAGES = tuple(STRINGS)
@@ -169,6 +450,111 @@ def set_language(code: str) -> None:
     _current = code
 
 
+def is_rtl(code: str | None = None) -> bool:
+    """Whether *code* (default: the current language) is written right to left."""
+    return (code or _current) in RTL_LANGUAGES
+
+
+def plural_category(language: str, n: int) -> str:
+    """CLDR's cardinal category of *n* in *language* (only the two we ship).
+
+    Arabic has six forms: 0, 1, 2, then by the last two digits 3–10 ("few")
+    and 11–99 ("many"), and "other" for the hundreds (100, 102…). Every other
+    language falls back to English's one/other.
+    """
+    n = abs(int(n))
+    if language == "ar":
+        if n == 0:
+            return "zero"
+        if n == 1:
+            return "one"
+        if n == 2:
+            return "two"
+        if 3 <= n % 100 <= 10:
+            return "few"
+        if 11 <= n % 100 <= 99:
+            return "many"
+        return "other"
+    return "one" if n == 1 else "other"
+
+
+class _Isolating(string.Formatter):
+    """Wraps every formatted value in FSI…PDI.
+
+    Without it a time range inside an Arabic sentence ("12.3–15.2") is laid out
+    as "15.2–12.3", and a Latin file name drags the words around it out of order.
+    FSI gives each value the direction of its own first strong letter, and a
+    value with none (a number, a range of times) runs left to right.
+    """
+
+    def format_field(self, value: object, format_spec: str) -> str:
+        return _FSI + super().format_field(value, format_spec) + _PDI
+
+
+_ISOLATING = _Isolating()
+
+
+def _lookup(key: str) -> tuple[str, str | dict[str, str]] | None:
+    """*key*'s entry and the language it came from: the current one, else English."""
+    for language in (_current, "en"):
+        value = STRINGS.get(language, {}).get(key)
+        if value:
+            return language, value
+    return None
+
+
+def _format(text: str, fmt: dict[str, object]) -> str:
+    """The one place values enter a sentence, so none escapes isolation in RTL."""
+    if not fmt:
+        return text
+    return _ISOLATING.format(text, **fmt) if is_rtl() else text.format(**fmt)
+
+
 def t(key: str, **fmt: object) -> str:
-    text = STRINGS.get(_current, {}).get(key) or STRINGS["en"].get(key) or key
-    return text.format(**fmt) if fmt else text
+    """*key*'s text in the current language, with *fmt* formatted in."""
+    found = _lookup(key)
+    if found is None:
+        return key
+    _, value = found
+    if isinstance(value, dict):
+        raise TypeError(f"{key!r} depends on a count; use tn({key!r}, count).")
+    return _format(value, fmt)
+
+
+def tn(key: str, count: int, **fmt: object) -> str:
+    """*key*'s text for *count* things, in the current language's plural form.
+
+    The form is chosen by the language the text came from, so an English
+    fallback inside an Arabic window still reads "1 file", not "1 files".
+    """
+    found = _lookup(key)
+    if found is None:
+        return key
+    language, value = found
+    if isinstance(value, str):
+        return _format(value, {"count": count, **fmt})
+    text = value.get(plural_category(language, count)) or value["other"]
+    return _format(text, {"count": count, **fmt})
+
+
+def time_span(start: float, end: float, *, digits: int = 2, sep: str = "–") -> str:
+    """Two times as one value, so a sentence in any language keeps them in order."""
+    return f"{start:.{digits}f}{sep}{end:.{digits}f}"
+
+
+def ltr(text: str) -> str:
+    """*text* forced left to right inside right-to-left surroundings (a table cell of times)."""
+    return f"{_LRI}{text}{_PDI}" if is_rtl() else text
+
+
+def path_text(path: object) -> str:
+    """*path* as one left-to-right run whose folders keep their order, in any language.
+
+    An isolate alone is not enough: inside it, two Arabic folder names with a
+    "/" between them merge into one right-to-left run and swap places
+    ("/home/k/فيديو/تلاوة.mp4" read as ".../تلاوة/فيديو"). An LRM after each
+    separator ends every folder's run at its separator. The same in every
+    language, since an English sentence can hold an Arabic folder too.
+    """
+    text = "".join(c + _LRM if c in "/\\" else c for c in str(path))
+    return f"{_LRI}{text}{_PDI}"

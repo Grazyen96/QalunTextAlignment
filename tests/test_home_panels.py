@@ -10,7 +10,7 @@ from PySide6.QtGui import QDropEvent
 
 from qurantext.gui.home.job_list import JobListPanel
 from qurantext.gui.home.new_job import NewJobPanel
-from qurantext.gui.i18n import t
+from qurantext.gui.i18n import path_text, t
 from qurantext.gui.jobs import JobSpec
 from qurantext.gui.prefs import Prefs
 from qurantext.jobs.catalog import DAMAGED
@@ -496,7 +496,7 @@ def test_a_quran_override_that_exists_wins_over_the_default(qt_app, prefs, store
 
     assert panel.spec().quran == QURAN_FILE.resolve()
     assert panel.quran_label.text() == t(
-        "home.quran_override.custom", path=str(QURAN_FILE.resolve())
+        "home.quran_override.custom", path=path_text(QURAN_FILE.resolve())
     )
 
 
@@ -540,9 +540,7 @@ def test_the_surah_picker_and_file_filters_read_from_the_string_table(
 
     panel = _panel(prefs, store)
     first = panel.surah_box.itemData(0)
-    assert panel.surah_box.itemText(0) == t(
-        "home.surah_item", num=1, name=first["name"], count=first["ayah_count"]
-    )
+    assert panel.surah_box.itemText(0) == f"1. {first['name']}  (7 ayat)"
 
     filters: list = []
 
@@ -575,3 +573,10 @@ def test_a_remembered_range_is_clamped_to_the_surah(qt_app, prefs, store) -> Non
     spec = _panel(prefs, store).spec()
 
     assert (spec.surah_num, spec.from_ayah, spec.to_ayah) == (1, 5, 7)
+
+
+def test_an_arabic_file_name_does_not_turn_the_running_row_around(qt_app, prefs) -> None:
+    """Isolated, an Arabic name cannot make the English line right to left."""
+    panel = JobListPanel(prefs)
+    panel.set_running("تلاوة.m4a", "Starting…")
+    assert _running_text(panel) == "\u2068تلاوة.m4a\u2069 — Starting…"

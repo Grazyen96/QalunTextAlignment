@@ -45,7 +45,13 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication(list(argv) if argv is not None else sys.argv)
     app.setApplicationDisplayName(_APP_NAME)
 
-    window = MainWindow()
+    from qurantext.gui.language import apply_language, initial_language
+    from qurantext.gui.prefs import Prefs
+
+    # Before the window: every widget reads its words and direction as it is built.
+    prefs = Prefs()
+    apply_language(app, initial_language(prefs))
+    window = MainWindow(prefs=prefs)
     window.show()
     code = app.exec()
 
