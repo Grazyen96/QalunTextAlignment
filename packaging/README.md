@@ -6,6 +6,10 @@ or press *Run workflow* in the Actions tab, and download the zips. Nobody needs
 Python installed: not the people who use the app, and not the person releasing
 it. What follows is for building by hand.
 
+Before tagging a release, work through
+[docs/release-checklist.md](../docs/release-checklist.md): what has to be checked by
+hand, on real machines, because CI cannot.
+
 Builds the desktop app as a self-contained bundle. `qalun.spec` is shared by all
 three platforms; what differs is the wrapper around the result and the signing.
 
@@ -88,8 +92,16 @@ FFmpeg and FriBiDi not included (they are the same before and after):
 | after | 275 MB | 164 MB |
 | difference | 26 MB | 20 MB |
 
+These zips were made the way the release workflow made them until then, with
+Python's `shutil.make_archive`, which stores each of the bundle's 59 symlinked
+libraries a second time (the zip unpacks to 446 MB). `packaging/ci/package.sh`
+keeps the links: the same after-bundle zips to 113 MB and unpacks to the 275 MB
+folder. The workflow uses it once its Package step is changed; see
+[ci/README.md](ci/README.md).
+
 Windows and macOS: record from the first release-workflow run after this change
-(the zip sizes on the run's summary page) — see docs/release-checklist.md.
+(the zip sizes on the run's summary page) — see
+[docs/release-checklist.md](../docs/release-checklist.md).
 
 ## Not done here
 
