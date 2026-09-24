@@ -1687,3 +1687,37 @@ def test_a_status_said_from_raw_text_is_cleared_by_a_language_switch(qt_app, hom
 
     assert home.new_job.status_label.text() == ""
     assert home.new_job.status_label.isHidden()
+
+
+def test_a_refusal_made_before_the_first_progress_event_stays_up(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    """The job's first event is not a change of stage: nothing had been reported yet."""
+    import threading
+
+    from qurantext.gui import main_window as module
+
+    release = threading.Event()
+    project_path = _saved_job(tmp_path / "jobs", "a")
+
+    def wait_for_release(progress, cancel):
+        assert release.wait(timeout=10), "the test forgot to release the job"
+
+    _fake_matching(monkeypatch, before=wait_for_release)
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    _spin_until(qt_app, lambda: home._cancel is not None)
+    status = home.new_job.status_label
+    try:
+        home._open_review(project_path)
+        refused = module.t("home.busy_matching")
+        assert status.text() == refused
+
+        home._on_progress(ProgressEvent("detect", "Scanning..."))
+        assert status.text() == refused
+
+        home._on_progress(ProgressEvent("render", "Building ASS subtitles..."))
+        assert status.text() == module.t("job.stage.render"), "a later stage still replaces it"
+    finally:
+        release.set()
+        _spin_until(qt_app, lambda: home._cancel is None)
+        _spin_until(qt_app, lambda: home._jobs.active == 0)

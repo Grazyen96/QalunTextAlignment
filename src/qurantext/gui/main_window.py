@@ -119,7 +119,7 @@ class MainWindow(QMainWindow):
         #: What the status line says, when it was said from a key (see ``_say``).
         self._status: _Said | None = None
         #: Set while an answer to the person is up during a job; progress of the
-        #: same stage leaves it there (see ``_answer``).
+        #: same stage, or the job's first report, leaves it there (see ``_answer``).
         self._holding = False
         #: One review window per open project, keyed by its file: reopening the
         #: same project raises what is already there instead of a second window.
@@ -232,6 +232,8 @@ class MainWindow(QMainWindow):
         A running job rewrites the status line with every progress event; a
         refusal overwritten at once would make the request look ignored. The
         next stage's sentence replaces it; until then progress moves only the bar.
+        An answer given before the job reported anything lasts through its
+        first stage: that first report starts a stage, it does not end one.
         """
         self._say(said)
         self._holding = self._cancel is not None
@@ -294,11 +296,12 @@ class MainWindow(QMainWindow):
         begins, or, when it carries a sentence this window already said in its
         language (``translated``), that sentence as it is. An event with a
         fraction shows the stage's percentage. While an answer to the person is
-        held (``_answer``), only a new stage replaces it.
+        held (``_answer``), only a move on from a stage already reported replaces it.
         """
         new_stage = event.stage != self._stage
+        moved_on = new_stage and self._stage is not None
         self._stage = event.stage
-        self._holding = self._holding and not new_stage
+        self._holding = self._holding and not moved_on
         if event.fraction is None:
             if self._holding:
                 return
