@@ -54,7 +54,7 @@ from qurantext.core.coverage import speech_levels, uncovered_from_levels
 from qurantext.core.waveform import Peaks, load_or_compute_peaks, peaks_path_for
 from qurantext.gui import jobs as jobs_module
 from qurantext.gui.files import show_in_folder
-from qurantext.gui.i18n import path_text, t
+from qurantext.gui.i18n import path_text, plain_title, t
 from qurantext.gui.jobs import JobOutcome
 from qurantext.gui.review.background import BackgroundJobs
 from qurantext.gui.review.export_dialog import ExportDialog
@@ -628,7 +628,7 @@ class ReviewWindow(QMainWindow):
             session.project.review.get("state") != "reviewed" and editable
         )
         title = t("review.title", name=self._audio.stem)
-        self.setWindowTitle(f"{title} *" if session.dirty else title)
+        self.setWindowTitle(plain_title(f"{title} *" if session.dirty else title))
         self._show_selection(self.strip.selected)
 
     def _show_selection(self, ref: WordRef | None) -> None:
@@ -743,7 +743,7 @@ class ReviewWindow(QMainWindow):
         """Say the render is ready, with a button to reveal it (the tests replace this)."""
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Information)
-        box.setWindowTitle(t("review.render"))
+        box.setWindowTitle(plain_title(t("review.render")))
         box.setText(t("render.done", path=path_text(outcome.video)))
         show_button = box.addButton(t("render.show"), QMessageBox.ButtonRole.ActionRole)
         box.addButton(QMessageBox.StandardButton.Ok)
@@ -756,7 +756,7 @@ class ReviewWindow(QMainWindow):
         icon = QMessageBox.Icon.Warning if kind == "failed" else QMessageBox.Icon.Information
         box = QMessageBox(self)
         box.setIcon(icon)
-        box.setWindowTitle(t("review.render"))
+        box.setWindowTitle(plain_title(t("review.render")))
         box.setText(text)
         box.exec()
 
@@ -789,7 +789,7 @@ class ReviewWindow(QMainWindow):
         """Ask what to do with unsaved changes: ``"save"``, ``"discard"`` or ``"cancel"``."""
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Question)
-        box.setWindowTitle(t("review.discard_title"))
+        box.setWindowTitle(plain_title(t("review.discard_title")))
         box.setText(t("review.discard_text"))
         buttons = QMessageBox.StandardButton
         box.setStandardButtons(buttons.Save | buttons.Discard | buttons.Cancel)

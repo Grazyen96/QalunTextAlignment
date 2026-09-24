@@ -18,6 +18,7 @@ No Qt here: the review session raises errors in these words, and it imports no Q
 from __future__ import annotations
 
 import string
+import unicodedata
 
 __all__ = [
     "LANGUAGES",
@@ -28,6 +29,7 @@ __all__ = [
     "is_rtl",
     "ltr",
     "path_text",
+    "plain_title",
     "plural_category",
     "set_language",
     "t",
@@ -43,6 +45,7 @@ RTL_LANGUAGES = frozenset({"ar"})
 LANGUAGE_NAMES = {"en": "English", "ar": "العربية"}
 
 _FSI, _LRI, _PDI, _LRM = "\u2068", "\u2066", "\u2069", "\u200e"
+_RLI, _RLM = "\u2067", "\u200f"
 
 STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
     "en": {
@@ -558,3 +561,68 @@ def path_text(path: object) -> str:
     """
     text = "".join(c + _LRM if c in "/\\" else c for c in str(path))
     return f"{_LRI}{text}{_PDI}"
+
+
+def _first_strong(text: str) -> str | None:
+    """``"L"`` or ``"R"``: the direction of *text*'s first strong letter, as FSI reads it.
+
+    Letters inside an isolate nested in *text* do not count, as in the Unicode
+    bidi algorithm; None when there is no strong letter (a number, a time).
+    """
+    depth = 0
+    for char in text:
+        if char in (_FSI, _LRI, _RLI):
+            depth += 1
+        elif char == _PDI:
+            depth = max(0, depth - 1)
+        elif depth == 0:
+            kind = unicodedata.bidirectional(char)
+            if kind == "L":
+                return "L"
+            if kind in ("R", "AL"):
+                return "R"
+    return None
+
+
+def plain_title(text: str) -> str:
+    """*text* with its isolates turned into order marks, for a window's title bar.
+
+    Some native title bars (older Windows and X11 window managers among them)
+    predate the isolate controls and draw each one as a box. Each outermost
+    FSI/LRI/RLI…PDI run becomes its content followed by an LRM when it runs left
+    to right (LRI, or FSI over Latin letters or none) or an RLM when it runs
+    right to left (RLI, or FSI over Arabic): marks every title bar has
+    understood for decades, which keep a Latin name from pulling the Arabic
+    words or the ``*`` after it into its run. Order marks already in *text* stay,
+    a stray PDI goes, and an isolate left open ends at the end of the text.
+    """
+    out: list[str] = []
+    opener = ""  # the outermost open isolate
+    start = 0  # where its content starts in *text*
+    depth = 0
+
+    def close(end: int) -> None:
+        if opener == _LRI:
+            direction = "L"
+        elif opener == _RLI:
+            direction = "R"
+        else:
+            direction = _first_strong(text[start:end]) or "L"
+        out.append(_RLM if direction == "R" else _LRM)
+
+    for index, char in enumerate(text):
+        if char in (_FSI, _LRI, _RLI):
+            if depth == 0:
+                opener, start = char, index + 1
+            depth += 1
+        elif char == _PDI:
+            if depth == 0:
+                continue  # closes nothing
+            depth -= 1
+            if depth == 0:
+                close(index)
+        else:
+            out.append(char)
+    if depth:
+        close(len(text))
+    return "".join(out)

@@ -499,3 +499,12 @@ def test_the_rate_reads_number_then_times_sign(qt_app) -> None:
     from tests.bidi_helpers import left_to_right
 
     assert left_to_right(i18n.t("review.rate", rate=1.5), ["×", "1.5"], rtl=True) == ["1.5", "×"]
+
+
+def test_the_arabic_review_title_keeps_the_name_in_place_without_isolates(
+    qt_app, review_window
+) -> None:
+    """Some title bars draw isolate controls as boxes; an LRM keeps the Latin name in place."""
+    title = review_window.windowTitle()
+    assert not any(c in title for c in "\u2066\u2067\u2068\u2069")
+    assert title == "مراجعة — missing\u200e"

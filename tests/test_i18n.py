@@ -299,3 +299,45 @@ def test_a_path_is_one_left_to_right_run_whose_folders_keep_their_order() -> Non
         assert i18n.path_text("/a") == f"{_LRI}/{lrm}a{_PDI}", "the same in every language"
     finally:
         set_language("en")
+
+
+_ISOLATES = "\u2066\u2067\u2068\u2069"
+_LRM, _RLM = "\u200e", "\u200f"
+
+
+def test_plain_title_drops_isolates_and_keeps_order_marks() -> None:
+    text = f"مراجعة — {_FSI}furquanTra7-11{_PDI}"
+    out = i18n.plain_title(text)
+    assert not any(c in out for c in _ISOLATES)
+    assert "furquanTra7-11" in out
+    assert out == f"مراجعة — furquanTra7-11{_LRM}"
+
+
+@pytest.mark.parametrize(
+    ("text", "plain"),
+    [
+        (f"{_FSI}تلاوة{_PDI} *", f"تلاوة{_RLM} *"),  # an Arabic name ends with an RLM
+        (f"a {_FSI}12.5{_PDI} b", f"a 12.5{_LRM} b"),  # no strong letter: left to right
+        (f"{_LRI}{_FSI}تلاوة{_PDI}{_PDI}", f"تلاوة{_LRM}"),  # the outer isolate decides
+        (f"\u2067abc{_PDI}", f"abc{_RLM}"),  # RLI is right to left whatever it holds
+        (f"{_FSI}12 تلاوة{_PDI}", f"12 تلاوة{_RLM}"),  # FSI: the first strong letter
+        (f"{_FSI}{_LRI}abc{_PDI} تلاوة{_PDI}", f"abc تلاوة{_RLM}"),  # skipping nested runs
+        (f"{_RLM}a{_LRM}b", f"{_RLM}a{_LRM}b"),  # order marks already there stay
+        (f"a{_PDI}b{_FSI}c", f"abc{_LRM}"),  # a stray PDI goes; an unclosed isolate ends at the end
+        ("Qalun", "Qalun"),
+    ],
+)
+def test_plain_title_marks_each_run_by_its_direction(text, plain) -> None:
+    assert i18n.plain_title(text) == plain
+
+
+def test_every_window_title_goes_through_plain_title() -> None:
+    """A title set without it would show its isolate controls as boxes on some title bars."""
+    calls = [
+        (path.name, line.strip())
+        for path in GUI_SOURCE.rglob("*.py")
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if "setWindowTitle(" in line
+    ]
+    assert calls, "the scan found no window titles at all"
+    assert [c for c in calls if "setWindowTitle(plain_title(" not in c[1]] == []

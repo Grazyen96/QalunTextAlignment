@@ -35,7 +35,7 @@ from qurantext.gui import i18n
 from qurantext.gui.files import show_in_folder
 from qurantext.gui.home.job_list import JobListPanel
 from qurantext.gui.home.new_job import NewJobPanel
-from qurantext.gui.i18n import path_text, t, tn
+from qurantext.gui.i18n import path_text, plain_title, t, tn
 from qurantext.gui.jobs import JobOutcome, JobSpec, match_path_for, run_matching, run_render
 from qurantext.gui.language import apply_language
 from qurantext.gui.prefs import Prefs
@@ -103,7 +103,7 @@ class MainWindow(QMainWindow):
     def __init__(self, prefs: Prefs | None = None) -> None:
         super().__init__()
         self._prefs = prefs if prefs is not None else Prefs()
-        self.setWindowTitle(t("app.title"))
+        self.setWindowTitle(plain_title(t("app.title")))
 
         self._cancel: CancelToken | None = None
         #: Runs the matching/render job off the UI thread.
@@ -206,7 +206,7 @@ class MainWindow(QMainWindow):
         sizes = self._splitter.sizes()
         apply_language(QApplication.instance(), code)
         self._prefs.language = code
-        self.setWindowTitle(t("app.title"))
+        self.setWindowTitle(plain_title(t("app.title")))
         # setCentralWidget deletes the old panels (later); the new ones read the
         # rest of the form back from prefs, all but the audio, which is not kept there.
         self._build()
