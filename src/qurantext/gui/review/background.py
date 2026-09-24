@@ -22,7 +22,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from PySide6.QtCore import QObject, QThread
+from PySide6.QtCore import QCoreApplication, QObject, QThread
 
 from qurantext.gui.worker import JobWorker, run_in_thread
 from qurantext.utils.progress import CancelToken, ProgressEvent
@@ -30,6 +30,8 @@ from qurantext.utils.progress import CancelToken, ProgressEvent
 __all__ = ["BackgroundJobs", "join_lingering"]
 
 #: Threads that were still running when their window closed, kept alive until they end.
+#: A finaliser off the UI thread may append at any time, so the UI thread only
+#: ever removes entries from it, one by one, never rebuilds it (which could lose one).
 _LINGERING: list[tuple[QThread, JobWorker]] = []
 
 #: How long closing the window waits for each job to notice it was cancelled.
@@ -89,7 +91,19 @@ class BackgroundJobs(QObject):
         a test's widget collected), and with it the last reference to a
         ``QThread`` that still runs, which aborts the process. Parked, the
         thread lives on until a later :meth:`stop` or :func:`join_lingering`.
+
+        A finaliser runs on whichever thread drops the last reference, and
+        under the cyclic collector that can be a worker. There nothing is
+        joined or dropped (dropping a finished ``JobWorker`` deletes a
+        Python-made QObject off the UI thread, the pattern that deadlocked the
+        home window): every entry is parked, for the UI thread to let go of.
         """
+        if not _on_ui_thread():
+            for thread, worker, cancel in self._running:
+                cancel.cancel()
+                _LINGERING.append((thread, worker))
+            self._running = []
+            return
         for thread, worker, cancel in self._running:
             cancel.cancel()
             try:
@@ -126,13 +140,10 @@ class BackgroundJobs(QObject):
             thread.quit()
             if not thread.wait(wait_ms):
                 _LINGERING.append((thread, worker))
-        lingering = []
-        for pair in _LINGERING:
+        for pair in list(_LINGERING):
             if pair[0].isFinished():
                 _join(pair[0])
-            else:
-                lingering.append(pair)
-        _LINGERING[:] = lingering
+                _LINGERING.remove(pair)
 
 
 def join_lingering(timeout_ms: int) -> bool:
@@ -143,15 +154,22 @@ def join_lingering(timeout_ms: int) -> bool:
     process. Returns whether all of them ended; the ones that did are dropped.
     """
     deadline = time.monotonic() + timeout_ms / 1000
-    remaining = []
-    for pair in _LINGERING:
+    for pair in list(_LINGERING):
         left_ms = max(0, int((deadline - time.monotonic()) * 1000))
         if pair[0].wait(left_ms):
             _join(pair[0])
-        else:
-            remaining.append(pair)
-    _LINGERING[:] = remaining
-    return not remaining
+            _LINGERING.remove(pair)
+    return not _LINGERING
+
+
+def _on_ui_thread() -> bool:
+    """Whether this code runs on the application's thread; True when there is no application.
+
+    With no application (at interpreter teardown) there is no UI thread to
+    leave the work to, so the caller does it where it is.
+    """
+    app = QCoreApplication.instance()
+    return app is None or QThread.currentThread() == app.thread()
 
 
 def _join(thread: QThread) -> None:

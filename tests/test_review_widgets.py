@@ -625,3 +625,50 @@ def test_threads_still_lingering_at_exit_are_joined_within_a_bound(qt_app, monke
     release.set()
     assert background.join_lingering(5000)
     assert background._LINGERING == []
+
+
+def test_background_jobs_dropped_off_the_ui_thread_park_everything(qt_app, monkeypatch) -> None:
+    """A finaliser runs on whichever thread drops the last reference: under the cyclic
+    GC, possibly a worker. There it must not join a thread or drop a finished worker
+    (deleting a Python-made QObject off the UI thread is what deadlocked 8572c7a's
+    window); it parks every entry for the UI thread's next stop to let go of."""
+    import threading
+
+    from PySide6.QtCore import QObject
+
+    from qurantext.gui.review import background
+    from qurantext.gui.review.background import BackgroundJobs
+
+    class _Sink(QObject):
+        def finished(self, _result: object) -> None:
+            pass
+
+        def failed(self, _message: str) -> None:
+            pass
+
+    def at_once(progress, cancel):
+        return None
+
+    def until_cancelled(progress, cancel):
+        while not cancel.cancelled:
+            time.sleep(0.005)
+
+    monkeypatch.setattr(background, "_LINGERING", [])
+    sink = _Sink()
+    jobs = BackgroundJobs()
+    jobs.start(at_once, on_finished=sink.finished, on_failed=sink.failed)
+    jobs.start(until_cancelled, on_finished=sink.finished, on_failed=sink.failed)
+    first = jobs._running[0][0]
+    deadline = time.monotonic() + 5
+    while not first.isFinished() and time.monotonic() < deadline:
+        _spin_briefly(qt_app)
+    assert first.isFinished()
+
+    worker_thread = threading.Thread(target=jobs.__del__)
+    worker_thread.start()
+    worker_thread.join(5)
+
+    assert jobs._running == []
+    assert len(background._LINGERING) == 2, "the finished one is parked, not joined and dropped"
+    assert background.join_lingering(5000), "the running one was cancelled"
+    _spin_briefly(qt_app)
