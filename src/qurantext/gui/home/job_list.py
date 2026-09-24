@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from qurantext.gui.i18n import t
+from qurantext.gui.i18n import t, tn
 from qurantext.gui.prefs import Prefs
 from qurantext.jobs.catalog import (
     CHANGED_SINCE_RENDER,
@@ -281,6 +281,6 @@ def _detail_text(entry: JobEntry) -> str:
     if entry.status == DAMAGED:
         return t(_STATUS_KEYS[DAMAGED])
     mode_text = t("home.mode.recitation") if entry.mode == "recitation" else t("home.mode.lecture")
-    scope = entry.ayah_range or t("home.cards", count=entry.card_count)
+    scope = entry.ayah_range or tn("home.cards", entry.card_count)
     status_text = t(_STATUS_KEYS[entry.status])
     return f"{mode_text} · {scope} · {status_text}"

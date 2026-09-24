@@ -31,7 +31,7 @@ from qurantext.config.paths import DEFAULT_QURAN_PATH, QURAN_INPUT_DIR
 from qurantext.gui.files import show_in_folder
 from qurantext.gui.home.job_list import JobListPanel
 from qurantext.gui.home.new_job import NewJobPanel
-from qurantext.gui.i18n import t
+from qurantext.gui.i18n import t, tn
 from qurantext.gui.jobs import JobOutcome, JobSpec, match_path_for, run_matching, run_render
 from qurantext.gui.prefs import Prefs
 from qurantext.gui.review import ReviewWindow
@@ -193,7 +193,7 @@ class MainWindow(QMainWindow):
             self._ending = t("home.finished.rendered", path=str(outcome.video))
             return
         problem = self._show_review(project_path)
-        self._ending = problem or t("home.finished.matched", count=len(project.cards))
+        self._ending = problem or tn("home.finished.matched", len(project.cards))
 
     def _on_failed(self, message: str) -> None:
         self._remember_matched_output()

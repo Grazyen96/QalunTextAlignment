@@ -540,9 +540,7 @@ def test_the_surah_picker_and_file_filters_read_from_the_string_table(
 
     panel = _panel(prefs, store)
     first = panel.surah_box.itemData(0)
-    assert panel.surah_box.itemText(0) == t(
-        "home.surah_item", num=1, name=first["name"], count=first["ayah_count"]
-    )
+    assert panel.surah_box.itemText(0) == f"1. {first['name']}  (7 ayat)"
 
     filters: list = []
 

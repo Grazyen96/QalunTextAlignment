@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from qurantext.core.subtitles import card_ref
-from qurantext.gui.i18n import t
+from qurantext.gui.i18n import ltr, t, time_span
 from qurantext.gui.review.session import CAPTION, CARD, ReviewSession
 
 __all__ = ["SegmentList"]
@@ -123,7 +123,8 @@ class SegmentList(QTableWidget):
         self._row_by_segment[(kind, index)] = row
 
         self._set_item(row, _COLUMN_REF, ref_text, kind, index, editable=False)
-        self._set_item(row, _COLUMN_TIME, f"{start:.2f}–{end:.2f}", kind, index, editable=False)
+        span = ltr(time_span(start, end))
+        self._set_item(row, _COLUMN_TIME, span, kind, index, editable=False)
         text_item = self._set_item(row, _COLUMN_TEXT, text, kind, index, editable=text_editable)
         text_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         if not text_editable:

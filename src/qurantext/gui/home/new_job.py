@@ -37,7 +37,7 @@ from qurantext.config.paths import QURAN_DB_PATH, QURAN_INPUT_DIR
 from qurantext.config.settings import VIDEO_PRESETS
 from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.data.quran_db import ensure_quran_db, list_surahs
-from qurantext.gui.i18n import t
+from qurantext.gui.i18n import t, tn
 from qurantext.gui.jobs import JobSpec
 from qurantext.gui.prefs import Prefs
 from qurantext.jobs.project import SUBTITLE_CHOICES
@@ -390,11 +390,11 @@ class NewJobPanel(QWidget):
         self.surah_box.setEnabled(True)
         for surah in surahs:
             self.surah_box.addItem(
-                t(
+                tn(
                     "home.surah_item",
+                    surah["ayah_count"],
                     num=surah["surah_num"],
                     name=surah["name"],
-                    count=surah["ayah_count"],
                 ),
                 surah,
             )

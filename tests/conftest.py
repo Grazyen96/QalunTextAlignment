@@ -8,6 +8,28 @@ from qurantext.data.quran_db import build_quran_db
 from tests.media_helpers import QURAN_FILE
 
 
+@pytest.fixture(autouse=True)
+def _english_left_to_right():
+    """Every test starts, and leaves, in English laid out left to right.
+
+    A test that switches language and then fails would otherwise leave every
+    later test reading Arabic, and asserting English text against it.
+    """
+    from qurantext.gui import i18n
+
+    yield
+    # Task 4 also removes the Qt translators here.
+    i18n.set_language("en")
+    try:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+    except ModuleNotFoundError:
+        return
+    app = QApplication.instance()
+    if app is not None:
+        app.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+
+
 @pytest.fixture()
 def no_basmala(monkeypatch):
     """Render without the basmala splice.

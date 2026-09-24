@@ -10,7 +10,7 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
-from qurantext.gui.i18n import t
+from qurantext.gui.i18n import t, time_span
 from qurantext.gui.review.session import TimelineWord
 
 __all__ = ["NUDGE_S", "SelectionBar"]
@@ -50,6 +50,5 @@ class SelectionBar(QWidget):
         if word is None:
             self.label.setText(t("review.no_selection"))
             return
-        self.label.setText(
-            t("review.selected", word=word.text, start=f"{word.start:.2f}", end=f"{word.end:.2f}")
-        )
+        span = time_span(word.start, word.end, sep=" → ")
+        self.label.setText(t("review.selected", word=word.text, span=span))

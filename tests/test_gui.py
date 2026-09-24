@@ -770,7 +770,7 @@ def test_start_runs_matching_and_opens_its_review(
 
     assert calls == [spec]
     assert [r.project.path for r in reviews] == [tmp_path / "jobs" / "a_recitation.qalun.json"]
-    assert home.new_job.status_label.text() == module.t("home.finished.matched", count=1)
+    assert home.new_job.status_label.text() == "Matched 1 card. The review is open."
 
 
 def test_a_finished_job_whose_review_cannot_open_says_why(

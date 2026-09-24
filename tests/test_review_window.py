@@ -439,6 +439,8 @@ def test_export_writes_the_chosen_formats_and_saves_first(qt_app, tmp_path, stor
     written = dialog.export()
     assert sorted(p.suffix for p in written) == [".srt", ".vtt"]
     assert not session.dirty, "unsaved edits are saved before exporting"
+    names = ", ".join(p.name for p in written)
+    assert dialog._result_label.text() == f"Wrote 2 files: {names}"
 
 
 def test_export_on_the_video_timeline_is_offered_only_after_a_render(qt_app, tmp_path) -> None:
@@ -495,7 +497,9 @@ def test_export_shows_a_save_failure_inline_instead_of_raising(qt_app, tmp_path)
     dialog.set_destination(tmp_path / "out", "clip")
     written = dialog.export()
     assert written == []
-    assert "no file to write back to" in dialog._result_label.text()
+    assert dialog._result_label.text() == (
+        "The subtitles were not written: This project has no file to write back to."
+    )
 
 
 def test_render_with_corrections_saves_then_renders_the_project(
@@ -999,11 +1003,13 @@ def test_the_export_dialog_closes_and_says_when_the_render_is_stale(qt_app, tmp_
     project.record_render(tmp_path / "v.mp4", preset="social", basmala_offset_s=1.0)
     session = ReviewSession(project)
     dialog = ExportDialog(session)
-    assert t("export.stale") not in dialog._video_radio.text()
+    assert dialog._video_radio.text() == t("export.match_video")
     session.retime(WordRef(CARD, 0, 0), end=2.5)
     dialog = ExportDialog(session)
-    assert dialog._video_radio.text() == f"{t('export.match_video')} {t('export.stale')}"
-    assert t("export.stale") == "(rendered before your latest changes)"
+    assert dialog._video_radio.text() == t("export.match_video_stale")
+    assert t("export.match_video_stale") == (
+        "Match the video's timeline (rendered before your latest changes)"
+    )
     dialog.show()
     dialog.close_button.click()
     assert not dialog.isVisible()

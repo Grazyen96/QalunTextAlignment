@@ -501,14 +501,43 @@ def test_the_last_waveform_column_ends_at_the_window(qt_app) -> None:
 
 def test_the_warnings_strip_lists_five_gaps_then_counts_the_rest(qt_app) -> None:
     from qurantext.core.coverage import UncoveredSpeech
-    from qurantext.gui.i18n import t
     from qurantext.gui.review.warnings_strip import WarningsStrip
 
     strip = WarningsStrip()
     strip.set_gaps([UncoveredSpeech(float(i), i + 0.5, -20.0) for i in range(8)])
     assert strip.text().count("Jump") == 5
-    assert t("review.more_gaps", count=3) in strip.text()
-    assert t("review.more_gaps", count=3) == "…and 3 more"
+    assert "8 stretches of speech have no word:" in strip.text()
+    assert "…and 3 more" in strip.text()
+    assert "0.5 s at 0.0–0.5 s" in strip.text()
+
+
+def test_the_warnings_strip_counts_a_single_gap_in_the_singular(qt_app) -> None:
+    from qurantext.core.coverage import UncoveredSpeech
+    from qurantext.gui.review.warnings_strip import WarningsStrip
+
+    strip = WarningsStrip()
+    strip.set_gaps([UncoveredSpeech(4.0, 6.0, -20.0)])
+    assert "1 stretch of speech has no word:" in strip.text()
+    assert "2.0 s at 4.0–6.0 s" in strip.text()
+
+
+def test_the_selection_bar_shows_the_span_as_one_value(qt_app) -> None:
+    from qurantext.gui.review.selection_bar import SelectionBar
+    from qurantext.gui.review.session import CARD, TimelineWord, WordRef
+
+    bar = SelectionBar()
+    bar.show_word(
+        TimelineWord(ref=WordRef(CARD, 0, 0), text="ٱلۡحَمۡدُ", start=1.5, end=2.25, edited=False)
+    )
+    assert bar.label.text() == "ٱلۡحَمۡدُ  1.50 → 2.25 s"
+
+
+def test_the_segment_list_shows_a_row_s_times_as_one_span(qt_app) -> None:
+    from qurantext.gui.review.segment_list import SegmentList
+
+    session, _ = _strip(qt_app)
+    table = SegmentList(session)
+    assert table.item(0, 1).text() == "0.00–10.00"
 
 
 def test_the_warnings_strip_says_it_is_checking_until_the_first_result(qt_app) -> None:
