@@ -81,7 +81,8 @@ def run_in_thread(
     """Start *job* on a worker thread and wire the callbacks given.
 
     Returns the thread and worker so the caller can keep them alive; letting
-    either be garbage collected while running crashes Qt.
+    either be garbage collected while running crashes Qt. Drop them together,
+    on the UI thread, once the thread has ended: that is what deletes the worker.
     """
     thread = QThread()
     worker = JobWorker(job, cancel)
@@ -104,7 +105,15 @@ def run_in_thread(
     # event loop, so anything that waits on the thread without spinning that
     # loop would wait for ever.
     worker.done.connect(thread.quit, Qt.ConnectionType.DirectConnection)
-    thread.finished.connect(worker.deleteLater)
+    # No ``thread.finished -> worker.deleteLater``: that deletes the worker on its
+    # own thread as the thread ends, and deleting a Python-made QObject there
+    # takes a Qt signal lock and then asks for the GIL. The UI thread, holding
+    # the GIL while it builds a widget and connects its signals, can want that
+    # same lock (Qt hashes objects onto a small pool of them), and the two wait
+    # for each other for ever; the home window hung that way as it opened,
+    # while its job list's first read ended. The worker is Python-owned, so it
+    # goes on the UI thread once the caller has waited for the thread and
+    # dropped both (``BackgroundJobs`` does), with the GIL already held.
 
     thread.start()
     return thread, worker

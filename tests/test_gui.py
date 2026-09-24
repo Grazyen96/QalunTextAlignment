@@ -177,6 +177,22 @@ def test_run_in_thread_runs_off_the_calling_thread(qt_app) -> None:
     assert finished == ["value"]
 
 
+def test_a_worker_outlives_its_thread_until_the_caller_drops_it(qt_app) -> None:
+    """Deleting the worker as its thread ends deadlocked the UI thread (see ``run_in_thread``).
+
+    It must still exist once the thread has finished and the posted deletes
+    have run, so it is the caller, on the UI thread, that lets it go.
+    """
+    import shiboken6
+    from PySide6.QtCore import QEvent
+
+    thread, worker = run_in_thread(lambda *, progress, cancel: None, CancelToken())
+    assert thread.wait(10_000), "the worker thread did not finish"
+    QCoreApplication.processEvents()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert shiboken6.isValid(worker)
+
+
 # --- the whole job ------------------------------------------------------------
 
 
