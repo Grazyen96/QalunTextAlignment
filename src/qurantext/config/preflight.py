@@ -719,6 +719,12 @@ def _arabic_ui_font(release: bool) -> CheckResult:
     )
 
 
+#: Checks whose failure leaves rendering working: the job, the review window or
+#: the Arabic interface is what suffers, so the report must not say "Cannot render".
+_NOT_RENDERING = frozenset(
+    {"Transcription", "Window", "Playback", "Window translation", "Arabic interface font"}
+)
+
 #: Qt logging rules for the doctor: the FFmpeg plugin prints the test recording's
 #: stream details to stderr, noise in the report a person sends.
 _DOCTOR_LOGGING_RULES = "qt.multimedia.ffmpeg*=false"
@@ -783,9 +789,10 @@ def format_report(results: list[CheckResult]) -> str:
             lines.append(f"  {result.name}: {result.remedy}")
     blocking = [r for r in results if r.blocking]
     lines.append("")
-    lines.append(
-        "Ready to render."
-        if not blocking
-        else f"Cannot render yet: {len(blocking)} problem(s) above must be fixed."
-    )
+    if not blocking:
+        lines.append("Ready to render.")
+    elif any(r.name not in _NOT_RENDERING for r in blocking):
+        lines.append(f"Cannot render yet: {len(blocking)} problem(s) above must be fixed.")
+    else:
+        lines.append(f"Not ready for release: {len(blocking)} problem(s) above.")
     return "\n".join(lines)

@@ -67,6 +67,27 @@ def test_the_report_ends_with_a_verdict() -> None:
     assert "fix it" in report
 
 
+def test_a_release_check_that_fails_does_not_claim_rendering_is_broken() -> None:
+    """Without playback, Qt's Arabic or an Arabic font the app still renders; the build
+    is only unfit to ship, and whoever reads the report should be told that."""
+    for name in ("Playback", "Window translation", "Arabic interface font", "Transcription"):
+        report = format_report([CheckResult(name, Status.FAIL, "missing", "fix it")])
+        assert report.rstrip().endswith("Not ready for release: 1 problem(s) above."), name
+        assert "Cannot render" not in report
+
+
+def test_a_render_check_that_fails_says_so_whatever_else_fails() -> None:
+    results = [
+        CheckResult("Arabic shaping", Status.FAIL, "no raqm", "install it"),
+        CheckResult("Playback", Status.FAIL, "missing", "fix it"),
+    ]
+    assert (
+        format_report(results)
+        .rstrip()
+        .endswith("Cannot render yet: 2 problem(s) above must be fixed.")
+    )
+
+
 def test_a_warning_is_not_a_blocker() -> None:
     results = [CheckResult("A", Status.WARN, "not built yet", "build it")]
     assert not results[0].blocking
