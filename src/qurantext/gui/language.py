@@ -20,14 +20,26 @@ __all__ = ["apply_language", "initial_language", "system_language"]
 _qt_translator: QTranslator | None = None
 
 
+def _ui_language_name(locale: QLocale) -> str:
+    """The language *locale*'s user interface is in (``"ar-SA"``), else its name.
+
+    Not ``name()`` alone: on Windows and macOS that is the region format, so an
+    English Windows with Saudi regional settings would start in Arabic.
+    """
+    languages = locale.uiLanguages()
+    return languages[0] if languages else locale.name()
+
+
 def system_language(locale_name: str | None = None) -> str:
     """The language the window starts in when none was chosen: Arabic on an Arabic system.
 
-    *locale_name* is a Qt locale name such as ``"ar_EG"``; the default reads the
-    system's. Any language the window has no table for falls back to English.
+    *locale_name* is a locale name such as ``"ar_EG"`` or ``"ar-SA"``; the default
+    reads the system's UI language. Any language the window has no table for
+    falls back to English.
     """
-    name = locale_name if locale_name is not None else QLocale.system().name()
-    return "ar" if name.lower().startswith("ar") else "en"
+    name = locale_name if locale_name is not None else _ui_language_name(QLocale.system())
+    language = name.replace("-", "_").split("_", 1)[0].lower()
+    return "ar" if language == "ar" else "en"
 
 
 def initial_language(prefs: Prefs, locale_name: str | None = None) -> str:

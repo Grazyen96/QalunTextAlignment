@@ -8,16 +8,10 @@ from qurantext.data.quran_db import build_quran_db
 from tests.media_helpers import QURAN_FILE
 
 
-@pytest.fixture(autouse=True)
-def _english_left_to_right():
-    """Every test starts, and leaves, in English laid out left to right, with Qt's buttons too.
-
-    A test that switches language and then fails would otherwise leave every
-    later test reading Arabic, and asserting English text against it.
-    """
+def _reset_to_english() -> None:
+    """English, left to right, Qt's own buttons in English, and Western digits."""
     from qurantext.gui import i18n
 
-    yield
     i18n.set_language("en")
     try:
         from PySide6.QtWidgets import QApplication
@@ -27,8 +21,25 @@ def _english_left_to_right():
         return
     app = QApplication.instance()
     if app is not None:
-        # Also removes Qt's own translation and sets the direction back.
+        # Also removes Qt's own translation, sets the direction back and the C locale.
         apply_language(app, "en")
+
+
+@pytest.fixture(autouse=True)
+def _english_left_to_right():
+    """Every test starts, and leaves, in English laid out left to right, with Qt's buttons too.
+
+    Reset before the test as well as after: the first test of a run would
+    otherwise run under the system's own locale (a comma for the decimal point
+    on some machines) and every later one under the C locale, so a test could
+    pass or fail by its place in the order. A test that switches language and
+    then fails would otherwise leave every later test reading Arabic. Qt's part
+    needs the ``QApplication``, which a Qt test's module-scoped ``qt_app`` has
+    already made when this runs (pytest sets up the wider scope first).
+    """
+    _reset_to_english()
+    yield
+    _reset_to_english()
 
 
 @pytest.fixture()
