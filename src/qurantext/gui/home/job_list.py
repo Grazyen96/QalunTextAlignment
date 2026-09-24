@@ -99,6 +99,9 @@ class JobListPanel(QWidget):
         self._running_fraction: float | None = None
         #: The transient "matching…" row set_running adds, or None.
         self._running_item: QListWidgetItem | None = None
+        #: The running job has ended (:meth:`end_running`): its row goes when
+        #: the read that lists the job in its place lands.
+        self._running_ends_on_read = False
         #: Reads the folders off the UI thread (see :meth:`refresh`).
         self._reads = BackgroundJobs(self)
         #: Bumped by every refresh; a read that lands under an older number is
@@ -187,6 +190,9 @@ class JobListPanel(QWidget):
         if listing.generation != self._generation:
             return  # a newer refresh is on its way; this one is already out of date
         self._shown_generation = listing.generation
+        if self._running_ends_on_read:
+            self._running_ends_on_read = False
+            self._running_label = None
         if listing.entries is not None:
             self.list.clear()
             self._running_item = None
@@ -224,7 +230,11 @@ class JobListPanel(QWidget):
         Used while a job is being matched, before it has a project file of its
         own to show up from disk, e.g. ``set_running("recitation.m4a", "Aligning… 40%", 0.4)``.
         The row's progress bar shows *fraction*, or a busy indicator while it is None.
+        Clearing it after :meth:`end_running` leaves the row to that read.
         """
+        if text is None and self._running_ends_on_read:
+            return  # it goes when the read end_running started lands
+        self._running_ends_on_read = False
         # A template, not a join: in Arabic the file name and the progress are
         # each isolated, so a Latin name does not turn the line left to right.
         self._running_label = (
@@ -232,6 +242,16 @@ class JobListPanel(QWidget):
         )
         self._running_fraction = fraction
         self._show_running_row()
+
+    def end_running(self) -> None:
+        """The running job has ended: read the folders, and let its row go when that lands.
+
+        What the job saved only shows up with the read, so taking the row away
+        at once left a gap, and after a first job an empty list saying there
+        were no jobs, for as long as the read took.
+        """
+        self._running_ends_on_read = self._running_label is not None
+        self.refresh()
 
     def _show_running_row(self) -> None:
         """Make the top row match ``_running_label``: added, relabelled or removed."""
@@ -257,8 +277,8 @@ class JobListPanel(QWidget):
         self._update_empty_state()
 
     def _update_empty_state(self) -> None:
-        # Until the first read lands, "your jobs appear here" would be a guess.
-        self.empty_label.setText(t("home.empty") if self._shown_generation else t("home.reading"))
+        # While a read is out, "your jobs appear here" would be a guess.
+        self.empty_label.setText(t("home.reading") if self.reading else t("home.empty"))
         has_rows = self.list.count() > 0
         self.list.setVisible(has_rows)
         self.empty_label.setVisible(not has_rows)
@@ -291,8 +311,14 @@ class JobListPanel(QWidget):
             self.remove_from_list(entry.project)
 
     def remove_from_list(self, path: Path) -> None:
-        """Hide *path* (through ``Prefs``) and rebuild the list without it."""
+        """Hide *path* (through ``Prefs``), take its row away now, and read the list again."""
         self._prefs.hide_job(path)
+        spellings = {Path(path), Path(path).resolve()}
+        for index in range(self.list.count()):
+            entry = self.list.item(index).data(Qt.ItemDataRole.UserRole)
+            if isinstance(entry, JobEntry) and entry.project in spellings:
+                self.list.takeItem(index)
+                break
         self.refresh()
 
     def reveal(self, path: Path) -> None:

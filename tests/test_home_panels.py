@@ -315,6 +315,70 @@ def test_the_first_read_does_not_claim_there_are_no_jobs(qt_app, prefs, monkeypa
     assert not panel.empty_label.isHidden() and panel.list.isHidden()
 
 
+def test_a_refresh_of_an_empty_list_says_it_is_reading(qt_app, prefs, monkeypatch) -> None:
+    """Not only the first read: "your jobs appear here" is wrong while any read is out."""
+    panel = _listed(prefs)
+    assert panel.empty_label.text() == t("home.empty")
+    release, _calls = blocking_list_jobs(monkeypatch)
+
+    panel.refresh()
+    assert panel.empty_label.text() == t("home.reading")
+
+    release.set()
+    wait_until_listed(panel)
+    assert panel.empty_label.text() == t("home.empty")
+
+
+def test_an_ended_job_keeps_its_row_until_the_read_that_lists_it_lands(
+    qt_app, prefs, monkeypatch
+) -> None:
+    """Taking the row away at once left a gap, and after a first job an empty list
+    claiming there were no jobs, for as long as the read took."""
+    panel = _listed(prefs)
+    release, _calls = blocking_list_jobs(monkeypatch)
+    panel.set_running("one.m4a", "Aligning… 90%")
+    _save(prefs.job_dirs[0], "one")  # what the job saved as it ended
+
+    panel.end_running()
+    panel.set_running("", None)  # the window clears the row as the job's thread ends
+    assert panel.reading
+    assert panel.list.count() == 1 and "90%" in _running_text(panel)
+    assert panel.empty_label.isHidden()
+
+    release.set()
+    wait_until_listed(panel)
+    assert panel.list.count() == 1
+    assert panel.list.item(0).data(Qt.ItemDataRole.UserRole).name == "one"
+
+
+def test_a_job_started_before_the_read_lands_keeps_its_own_row(qt_app, prefs, monkeypatch) -> None:
+    panel = _listed(prefs)
+    release, _calls = blocking_list_jobs(monkeypatch)
+    panel.set_running("one.m4a", "Aligning… 90%")
+    panel.end_running()
+    panel.set_running("two.m4a", "Starting…")
+
+    release.set()
+    wait_until_listed(panel)
+    assert panel.list.count() == 1 and "two.m4a" in _running_text(panel)
+
+
+def test_remove_from_list_takes_the_row_away_at_once(qt_app, prefs, monkeypatch) -> None:
+    jobs_dir = prefs.job_dirs[0]
+    _save(jobs_dir, "one")
+    _save(jobs_dir, "two")
+    panel = _listed(prefs)
+    release, _calls = blocking_list_jobs(monkeypatch)
+
+    panel.remove_from_list(jobs_dir / "one_recitation.qalun.json")
+    names = [panel.list.item(i).data(Qt.ItemDataRole.UserRole).name for i in range(1)]
+    assert panel.list.count() == 1 and names == ["two"], "gone before the read lands"
+
+    release.set()
+    wait_until_listed(panel)
+    assert panel.list.count() == 1
+
+
 def test_a_cancelled_read_stops_instead_of_returning_an_empty_listing(prefs) -> None:
     """Stopping the panel cancels its read; it must stop, not report that nothing was found."""
     cancel = CancelToken()

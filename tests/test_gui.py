@@ -26,7 +26,7 @@ from qurantext.gui.jobs import JobSpec, run_matching, run_render  # noqa: E402
 from qurantext.gui.prefs import Prefs  # noqa: E402
 from qurantext.gui.worker import JobWorker, run_in_thread  # noqa: E402
 from qurantext.utils.progress import CancelToken, JobCancelled, ProgressEvent  # noqa: E402
-from tests.qt_helpers import wait_until_listed  # noqa: E402
+from tests.qt_helpers import blocking_list_jobs, wait_until_listed  # noqa: E402
 
 QURAN_FILE = DEFAULT_QURAN_PATH
 _FFMPEG = shutil.which("ffmpeg")
@@ -791,6 +791,31 @@ def test_start_runs_matching_and_opens_its_review(
     assert calls == [spec]
     assert [r.project.path for r in reviews] == [tmp_path / "jobs" / "a_recitation.qalun.json"]
     assert home.new_job.status_label.text() == "Matched 1 card. The review is open."
+
+
+def test_a_finished_job_keeps_its_row_until_the_list_is_read(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    """The job's own row only comes with the read; until it lands the list must not
+    lose the job, or (after a first job) say there are none."""
+    from qurantext.gui.i18n import t
+
+    _fake_matching(monkeypatch)
+    release, _calls = blocking_list_jobs(monkeypatch)
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    _spin_until(qt_app, lambda: home._cancel is None)
+    _spin_until(qt_app, lambda: home._jobs.active == 0)
+    qt_app.processEvents()
+
+    panel = home.job_list
+    assert panel.reading
+    assert len(_running_rows(home)) == 1 and panel.list.count() == 1
+    assert panel.empty_label.isHidden() and panel.empty_label.text() != t("home.empty")
+
+    release.set()
+    wait_until_listed(panel)
+    assert _running_rows(home) == []
+    assert panel.list.count() == 1, "the job's own row took its place"
 
 
 def test_a_finished_job_whose_review_cannot_open_says_why(

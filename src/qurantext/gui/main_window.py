@@ -345,8 +345,7 @@ class MainWindow(QMainWindow):
         self._prefs.unhide_job(project_path)
         if self._closing:
             return  # no review, and no list, under a window that is going away
-        self.job_list.set_running("", None)
-        self.job_list.refresh()
+        self.job_list.end_running()
 
         outcome = finished.outcome
         if outcome is not None and outcome.video is not None:
@@ -395,8 +394,7 @@ class MainWindow(QMainWindow):
         spec = self._running_spec
         if spec is None or not spec.render_right_away:
             return
-        self.job_list.set_running("", None)
-        self.job_list.refresh()
+        self.job_list.end_running()
 
     def _on_done(self) -> None:
         if self._closing:
