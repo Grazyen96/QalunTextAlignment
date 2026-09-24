@@ -9,15 +9,21 @@ which Qt would otherwise draw in the system locale's digits.
 from __future__ import annotations
 
 from PySide6.QtCore import QLibraryInfo, QLocale, Qt, QTranslator
+from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication
 
+from qurantext.config.paths import DEFAULT_FONT_PATH
+from qurantext.config.preflight import CannotMeasureFonts, arabic_ui_families
 from qurantext.gui import i18n
 from qurantext.gui.prefs import Prefs
 
-__all__ = ["apply_language", "initial_language", "system_language"]
+__all__ = ["apply_language", "ensure_arabic_font", "initial_language", "system_language"]
 
 #: Qt's own translation for the language in use, kept so the next switch can remove it.
 _qt_translator: QTranslator | None = None
+
+#: The bundled font once registered as the Arabic fallback: its font id and family.
+_fallback: tuple[int, str] | None = None
 
 
 def _ui_language_name(locale: QLocale) -> str:
@@ -47,6 +53,38 @@ def initial_language(prefs: Prefs, locale_name: str | None = None) -> str:
     return prefs.language or system_language(locale_name)
 
 
+def ensure_arabic_font(app: QApplication) -> str | None:
+    """Let the window draw Arabic letters on a machine with no Arabic font of its own.
+
+    Such a machine shows every Arabic word as empty boxes. The bundled Qaloon
+    font has Arabic letters, but it is a Quran face with no Latin ones, so it is
+    only ever a fallback: it becomes a substitute of the application font's
+    family, and Qt draws the Arabic letters with it and everything else with the
+    system font. A machine with an Arabic font keeps it, and so does one whose
+    fonts cannot be measured (``CannotMeasureFonts``): that says nothing about
+    what is installed, and a fallback registered on a guess would take over
+    Arabic from the font the system has.
+
+    Returns the family registered as the fallback (also when an earlier call
+    registered it), or None when nothing was registered.
+    """
+    global _fallback
+    try:
+        if arabic_ui_families():
+            return None
+    except CannotMeasureFonts:
+        return None
+    if _fallback is None:
+        font_id = QFontDatabase.addApplicationFont(str(DEFAULT_FONT_PATH))
+        families = QFontDatabase.applicationFontFamilies(font_id) if font_id != -1 else []
+        if not families:
+            return None  # a missing or unreadable font file; the doctor reports it
+        _fallback = (font_id, families[0])
+    # Qt keeps each substitute once, so a second language switch adds nothing.
+    QFont.insertSubstitution(app.font().family(), _fallback[1])
+    return _fallback[1]
+
+
 def apply_language(app: QApplication, code: str) -> None:
     """Switch the words, Qt's own translation, the digits and the direction to *code*.
 
@@ -69,6 +107,8 @@ def apply_language(app: QApplication, code: str) -> None:
             translator.deleteLater()  # Qt's buttons stay English; the window's words do not
     # The C locale draws 0-9 and a decimal point whatever the system is set to.
     QLocale.setDefault(QLocale.c())
+    # In every language: an Arabic job name shows in the English window too.
+    ensure_arabic_font(app)
     # After the translator: installing one may set a direction of its own.
     app.setLayoutDirection(
         Qt.LayoutDirection.RightToLeft if i18n.is_rtl(code) else Qt.LayoutDirection.LeftToRight
