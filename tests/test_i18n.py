@@ -310,25 +310,49 @@ def test_plain_title_drops_isolates_and_keeps_order_marks() -> None:
     out = i18n.plain_title(text)
     assert not any(c in out for c in _ISOLATES)
     assert "furquanTra7-11" in out
-    assert out == f"مراجعة — furquanTra7-11{_LRM}"
+    assert out == f"مراجعة — {_LRM}furquanTra7-11{_LRM}"
 
 
 @pytest.mark.parametrize(
     ("text", "plain"),
     [
-        (f"{_FSI}تلاوة{_PDI} *", f"تلاوة{_RLM} *"),  # an Arabic name ends with an RLM
-        (f"a {_FSI}12.5{_PDI} b", f"a 12.5{_LRM} b"),  # no strong letter: left to right
-        (f"{_LRI}{_FSI}تلاوة{_PDI}{_PDI}", f"تلاوة{_LRM}"),  # the outer isolate decides
-        (f"\u2067abc{_PDI}", f"abc{_RLM}"),  # RLI is right to left whatever it holds
-        (f"{_FSI}12 تلاوة{_PDI}", f"12 تلاوة{_RLM}"),  # FSI: the first strong letter
-        (f"{_FSI}{_LRI}abc{_PDI} تلاوة{_PDI}", f"abc تلاوة{_RLM}"),  # skipping nested runs
+        (f"{_FSI}تلاوة{_PDI} *", f"{_RLM}تلاوة{_RLM} *"),  # an Arabic name: RLM on both sides
+        (f"a {_FSI}12.5{_PDI} b", f"a {_LRM}12.5{_LRM} b"),  # no strong letter: left to right
+        (f"{_LRI}{_FSI}تلاوة{_PDI}{_PDI}", f"{_LRM}تلاوة{_LRM}"),  # the outer isolate decides
+        (f"\u2067abc{_PDI}", f"{_RLM}abc{_RLM}"),  # RLI is right to left whatever it holds
+        (f"{_FSI}12 تلاوة{_PDI}", f"{_RLM}12 تلاوة{_RLM}"),  # FSI: the first strong letter
+        (f"{_FSI}{_LRI}abc{_PDI} تلاوة{_PDI}", f"{_RLM}abc تلاوة{_RLM}"),  # skipping nested runs
         (f"{_RLM}a{_LRM}b", f"{_RLM}a{_LRM}b"),  # order marks already there stay
-        (f"a{_PDI}b{_FSI}c", f"abc{_LRM}"),  # a stray PDI goes; an unclosed isolate ends at the end
+        (f"a{_PDI}b{_FSI}c", f"ab{_LRM}c{_LRM}"),  # a stray PDI goes; an open one ends at the end
+        (f"مراجعة — {_FSI}25_7-11{_PDI}", f"مراجعة — {_LRM}25_7-11{_LRM}"),  # digits first
+        (f"مراجعة — {_FSI}2024-05-01 lecture{_PDI}", f"مراجعة — {_LRM}2024-05-01 lecture{_LRM}"),
         ("Qalun", "Qalun"),
     ],
 )
 def test_plain_title_marks_each_run_by_its_direction(text, plain) -> None:
     assert i18n.plain_title(text) == plain
+
+
+@pytest.mark.parametrize(
+    ("name", "parts"),
+    [
+        ("25_7-11", ["25", "7", "11"]),
+        ("2024-05-01 lecture", ["2024", "05", "01", "lecture"]),
+        ("furquanTra7-11", ["furquanTra", "7", "11"]),
+    ],
+)
+def test_a_name_that_starts_with_digits_keeps_its_order_in_an_arabic_title(
+    qt_app, name, parts
+) -> None:
+    """A mark only after the name let Arabic before it turn its leading digits into
+    Arabic numbers (UAX #9 W2), so "25_7-11" drew as "11-7_25"; one before it too
+    makes them follow a left-to-right letter, and the name reads as typed."""
+    from tests.bidi_helpers import left_to_right
+
+    title = i18n.plain_title(f"مراجعة — {_FSI}{name}{_PDI} *")
+    assert name in title
+    drawn = left_to_right(title, ["*", *parts, "مراجعة"], rtl=True)
+    assert drawn == ["*", *parts, "مراجعة"]
 
 
 def test_every_window_title_goes_through_plain_title() -> None:

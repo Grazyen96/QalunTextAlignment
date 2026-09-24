@@ -511,4 +511,4 @@ def test_the_arabic_review_title_keeps_the_name_in_place_without_isolates(
     """Some title bars draw isolate controls as boxes; an LRM keeps the Latin name in place."""
     title = review_window.windowTitle()
     assert not any(c in title for c in "\u2066\u2067\u2068\u2069")
-    assert title == "مراجعة — missing\u200e"
+    assert title == "مراجعة — \u200emissing\u200e"

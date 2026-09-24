@@ -591,16 +591,20 @@ def plain_title(text: str) -> str:
 
     Some native title bars (older Windows and X11 window managers among them)
     predate the isolate controls and draw each one as a box. Each outermost
-    FSI/LRI/RLI…PDI run becomes its content followed by an LRM when it runs left
-    to right (LRI, or FSI over Latin letters or none) or an RLM when it runs
+    FSI/LRI/RLI…PDI run becomes its content between two LRMs when it runs left
+    to right (LRI, or FSI over Latin letters or none) or two RLMs when it runs
     right to left (RLI, or FSI over Arabic): marks every title bar has
-    understood for decades, which keep a Latin name from pulling the Arabic
-    words or the ``*`` after it into its run. Order marks already in *text* stay,
-    a stray PDI goes, and an isolate left open ends at the end of the text.
+    understood for decades. The mark after keeps a Latin name from pulling the
+    Arabic words or the ``*`` after it into its run; the mark before keeps the
+    Arabic words before it from turning a name's leading digits into Arabic
+    numbers (UAX #9 W2), which drew "25_7-11" as "11-7_25". Order marks already
+    in *text* stay, a stray PDI goes, and an isolate left open ends at the end
+    of the text.
     """
     out: list[str] = []
     opener = ""  # the outermost open isolate
     start = 0  # where its content starts in *text*
+    mark_at = 0  # where its content starts in *out*
     depth = 0
 
     def close(end: int) -> None:
@@ -610,12 +614,14 @@ def plain_title(text: str) -> str:
             direction = "R"
         else:
             direction = _first_strong(text[start:end]) or "L"
-        out.append(_RLM if direction == "R" else _LRM)
+        mark = _RLM if direction == "R" else _LRM
+        out.insert(mark_at, mark)
+        out.append(mark)
 
     for index, char in enumerate(text):
         if char in (_FSI, _LRI, _RLI):
             if depth == 0:
-                opener, start = char, index + 1
+                opener, start, mark_at = char, index + 1, len(out)
             depth += 1
         elif char == _PDI:
             if depth == 0:
