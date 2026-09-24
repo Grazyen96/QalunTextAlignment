@@ -10,10 +10,16 @@ A row that cannot be read (``DAMAGED``) is still listed, with its error kept
 on the row as a status tip; double-clicking it hands that error to whoever
 shows it (``damaged_activated``) instead of trying to open a project that
 failed to load.
+
+The folders are read on a worker thread (:meth:`JobListPanel.refresh`): a
+folder of hundreds of projects, or one on a slow network drive, would
+otherwise freeze the whole window while every file is opened and parsed.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, Qt, Signal
@@ -33,6 +39,7 @@ from PySide6.QtWidgets import (
 
 from qurantext.gui.i18n import t, tn
 from qurantext.gui.prefs import Prefs
+from qurantext.gui.review.background import BackgroundJobs
 from qurantext.jobs.catalog import (
     CHANGED_SINCE_RENDER,
     DAMAGED,
@@ -75,6 +82,8 @@ class JobListPanel(QWidget):
     reveal_requested = Signal(object)
     #: A damaged row was opened; carries its error, for ``MainWindow`` to show.
     damaged_activated = Signal(str)
+    #: The rows were rebuilt from the latest read of the folders.
+    refreshed = Signal()
 
     def __init__(self, prefs: Prefs, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -86,6 +95,13 @@ class JobListPanel(QWidget):
         self._running_fraction: float | None = None
         #: The transient "matching…" row set_running adds, or None.
         self._running_item: QListWidgetItem | None = None
+        #: Reads the folders off the UI thread (see :meth:`refresh`).
+        self._reads = BackgroundJobs(self)
+        #: Bumped by every refresh; a read that lands under an older number is
+        #: dropped, so a slow early read can never overwrite a newer one.
+        self._generation = 0
+        #: The number of the read the rows show now; 0 until the first lands.
+        self._shown_generation = 0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -109,7 +125,7 @@ class JobListPanel(QWidget):
         self.list.customContextMenuRequested.connect(self._on_context_menu)
         layout.addWidget(self.list)
 
-        self.empty_label = QLabel(t("home.empty"))
+        self.empty_label = QLabel()  # its words are set by _update_empty_state
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty_label.setWordWrap(True)
         layout.addWidget(self.empty_label)
@@ -119,17 +135,59 @@ class JobListPanel(QWidget):
     # -- filling ----------------------------------------------------------------
 
     def refresh(self) -> None:
-        """Rebuild the list from disk, keeping the running job's row on top.
+        """Start reading the folders again; returns at once, the rows follow.
+
+        The current rows stay up until the read lands (:meth:`_on_listed`),
+        so a refresh does not blank the list. What to read is taken here, on
+        the UI thread, where ``Prefs`` lives; only the file system is touched
+        on the worker.
+        """
+        self._generation += 1
+        self._reads.start(
+            partial(
+                _read_jobs, self._generation, list(self._prefs.job_dirs), self._prefs.hidden_jobs
+            ),
+            on_finished=self._on_listed,
+            # _read_jobs catches everything, so this is only a backstop; a bound
+            # method all the same, so it runs on the UI thread.
+            on_failed=self._on_list_failed,
+        )
+        self._update_empty_state()
+
+    @property
+    def reading(self) -> bool:
+        """Whether the latest refresh's read has yet to land in the rows."""
+        return self._shown_generation != self._generation
+
+    def stop_reading(self) -> None:
+        """Let go of any read still running; for whoever is about to drop this panel.
+
+        A read has nothing to lose by being cut short, so this does not wait
+        for it: the thread is parked until it ends (see ``review/background.py``).
+        """
+        self._reads.stop(wait_ms=0)
+
+    def _on_listed(self, listing: _Listing) -> None:
+        """Rebuild the rows from *listing*, keeping the running job's row on top.
 
         A refresh can come mid-job (a review saved, or Refresh pressed); the
         running job has no project file to be read back yet, so its row is put
-        back rather than vanishing until the next progress update.
+        back rather than vanishing until the next progress update. A folder
+        that could not be read leaves the rows as they were.
         """
-        self.list.clear()
-        self._running_item = None
-        for entry in list_jobs(job_dirs_for(self._prefs.job_dirs), hidden=self._prefs.hidden_jobs):
-            self._add_entry(entry)
+        if listing.generation != self._generation:
+            return  # a newer refresh is on its way; this one is already out of date
+        self._shown_generation = listing.generation
+        if listing.entries is not None:
+            self.list.clear()
+            self._running_item = None
+            for entry in listing.entries:
+                self._add_entry(entry)
         self._show_running_row()
+        self.refreshed.emit()
+
+    def _on_list_failed(self, _message: str) -> None:
+        self._on_listed(_Listing(self._generation, None))
 
     def _add_entry(self, entry: JobEntry) -> None:
         item = QListWidgetItem()
@@ -185,6 +243,8 @@ class JobListPanel(QWidget):
         self._update_empty_state()
 
     def _update_empty_state(self) -> None:
+        # Until the first read lands, "your jobs appear here" would be a guess.
+        self.empty_label.setText(t("home.empty") if self._shown_generation else t("home.reading"))
         has_rows = self.list.count() > 0
         self.list.setVisible(has_rows)
         self.empty_label.setVisible(not has_rows)
@@ -223,6 +283,33 @@ class JobListPanel(QWidget):
 
     def reveal(self, path: Path) -> None:
         self.reveal_requested.emit(path)
+
+
+@dataclass(frozen=True, slots=True)
+class _Listing:
+    """One read of the folders: which refresh asked for it, and what it found.
+
+    *entries* is None when the read failed, so the rows are left as they were.
+    """
+
+    generation: int
+    entries: tuple[JobEntry, ...] | None
+
+
+def _read_jobs(
+    generation: int, extra: list[Path], hidden: frozenset[Path], **_: object
+) -> _Listing:
+    """Read every project under the job folders; runs on a worker thread, so no widgets.
+
+    Takes (and ignores) the ``progress=``/``cancel=`` every background job is
+    called with: the read is short enough not to report, and a cancelled one
+    is dropped by generation rather than stopped.
+    """
+    try:
+        entries = list_jobs(job_dirs_for(extra), hidden=hidden)
+    except Exception:  # noqa: BLE001 - a folder that cannot be read must not empty the list
+        return _Listing(generation, None)
+    return _Listing(generation, tuple(entries))
 
 
 class _JobRow(QWidget):

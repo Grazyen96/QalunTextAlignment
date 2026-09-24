@@ -26,6 +26,7 @@ from qurantext.gui.jobs import JobSpec, run_matching, run_render  # noqa: E402
 from qurantext.gui.prefs import Prefs  # noqa: E402
 from qurantext.gui.worker import JobWorker, run_in_thread  # noqa: E402
 from qurantext.utils.progress import CancelToken, JobCancelled, ProgressEvent  # noqa: E402
+from tests.qt_helpers import wait_until_listed  # noqa: E402
 
 QURAN_FILE = DEFAULT_QURAN_PATH
 _FFMPEG = shutil.which("ffmpeg")
@@ -700,8 +701,10 @@ def home(qt_app, prefs):
     from qurantext.gui.main_window import MainWindow
 
     window = MainWindow(prefs=prefs)
+    wait_until_listed(window.job_list)
     yield window
     window._jobs.stop()  # cancel and join anything a test left running
+    window.job_list.stop_reading()
     window.deleteLater()
     qt_app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
@@ -722,6 +725,7 @@ def _run_start(qt_app, window, spec: JobSpec) -> None:
     window.new_job.start_requested.emit(spec)
     _spin_until(qt_app, lambda: window._cancel is None)
     _spin_until(qt_app, lambda: window._jobs.active == 0)
+    wait_until_listed(window.job_list)  # the refresh the job's end asked for
     qt_app.processEvents()
 
 
@@ -867,6 +871,7 @@ def test_the_running_row_shows_during_the_job_and_goes_after(
     _fake_matching(monkeypatch, before=report_then_wait)
     _saved_job(tmp_path / "jobs", "earlier")
     home.job_list.refresh()
+    wait_until_listed(home.job_list)
     home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
 
     _spin_until(qt_app, lambda: any("40%" in text for text in _running_rows(home)))
@@ -876,6 +881,7 @@ def test_the_running_row_shows_during_the_job_and_goes_after(
     release.set()
     _spin_until(qt_app, lambda: home._cancel is None)
     _spin_until(qt_app, lambda: home._jobs.active == 0)
+    wait_until_listed(home.job_list)
     assert _running_rows(home) == []
     assert home.job_list.list.count() == 2, "the earlier job, and the new one from disk"
 
@@ -1013,6 +1019,7 @@ def test_double_clicking_a_job_opens_its_review(qt_app, prefs, reviews, tmp_path
 
     project_path = _saved_job(tmp_path / "jobs")
     window = MainWindow(prefs=prefs)
+    wait_until_listed(window.job_list)
 
     window.job_list.list.itemActivated.emit(window.job_list.list.item(0))
 
@@ -1026,6 +1033,7 @@ def test_double_clicking_a_damaged_job_shows_its_error(qt_app, prefs, reviews, t
     (tmp_path / "jobs" / "broken.qalun.json").write_text("{not json", encoding="utf-8")
     window = MainWindow(prefs=prefs)
     window.show()
+    wait_until_listed(window.job_list)
 
     item = window.job_list.list.item(0)
     window.job_list.list.itemActivated.emit(item)
@@ -1048,15 +1056,18 @@ def test_show_in_folder_reveals_the_project(qt_app, home, monkeypatch, tmp_path)
 def test_a_review_that_saves_or_closes_refreshes_the_list(qt_app, home, reviews, tmp_path) -> None:
     first = _saved_job(tmp_path / "jobs", "first")
     home.job_list.refresh()
+    wait_until_listed(home.job_list)
     home._open_review(first)
     assert home.job_list.list.count() == 1
 
     _saved_job(tmp_path / "jobs", "second")
     reviews[0].saved.emit(first)
+    wait_until_listed(home.job_list)
     assert home.job_list.list.count() == 2
 
     _saved_job(tmp_path / "jobs", "third")
     reviews[0].close()
+    wait_until_listed(home.job_list)
     assert home.job_list.list.count() == 3
 
 
@@ -1428,6 +1439,7 @@ def test_rerunning_a_removed_job_lists_it_again(
     project_path = _saved_job(tmp_path / "jobs", "a")
     home.job_list.refresh()
     home.job_list.remove_from_list(project_path)
+    wait_until_listed(home.job_list)
     assert home.job_list.list.count() == 0
 
     _run_start(qt_app, home, _spec(tmp_path, output_dir=tmp_path / "jobs"))

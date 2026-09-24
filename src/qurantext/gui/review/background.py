@@ -1,7 +1,8 @@
-"""The review window's background reads: the waveform's peaks and the coverage check.
+"""The windows' background reads: the waveform's peaks, the coverage check, the job list.
 
-Both decode the whole recording, which takes seconds on a long lecture, so
-they run on worker threads while the window is already usable. This keeps the
+The first two decode the whole recording, which takes seconds on a long
+lecture, and the last reads every project in a folder, so they run on worker
+threads while the window is already usable. This keeps the
 thread bookkeeping out of the window: every job's thread, worker and cancel
 token stay referenced until it ends (Qt crashes if a running ``QThread`` is
 garbage collected), and closing the window cancels them all.
@@ -81,6 +82,27 @@ class BackgroundJobs(QObject):
         self._prune()
         return len(self._running)
 
+    def __del__(self) -> None:
+        """Park what still runs when this is dropped without :meth:`stop`.
+
+        A widget can go without anyone stopping its jobs (a panel rebuilt, or
+        a test's widget collected), and with it the last reference to a
+        ``QThread`` that still runs, which aborts the process. Parked, the
+        thread lives on until a later :meth:`stop` or :func:`join_lingering`.
+        """
+        for thread, worker, cancel in self._running:
+            cancel.cancel()
+            try:
+                thread.quit()
+                finished = thread.isFinished()
+            except RuntimeError:
+                continue  # its C++ side is already gone (at exit): nothing left to run
+            if finished:
+                _join(thread)
+            else:
+                _LINGERING.append((thread, worker))
+        self._running = []
+
     def _prune(self) -> None:
         running = []
         for entry in self._running:
@@ -90,14 +112,19 @@ class BackgroundJobs(QObject):
                 running.append(entry)
         self._running = running
 
-    def stop(self) -> None:
-        """Cancel every running job and wait briefly for each to end."""
+    def stop(self, wait_ms: int = _CLOSE_WAIT_MS) -> None:
+        """Cancel every running job and wait briefly (*wait_ms* each) for each to end.
+
+        A job with nothing to lose by being cut short (a read whose result is no
+        longer wanted) can pass ``wait_ms=0``: it is parked at once rather than
+        holding the UI thread up while it finishes.
+        """
         running, self._running = self._running, []
         for _thread, _worker, cancel in running:
             cancel.cancel()
         for thread, worker, _cancel in running:
             thread.quit()
-            if not thread.wait(_CLOSE_WAIT_MS):
+            if not thread.wait(wait_ms):
                 _LINGERING.append((thread, worker))
         lingering = []
         for pair in _LINGERING:

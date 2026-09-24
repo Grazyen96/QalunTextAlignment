@@ -2,21 +2,27 @@
 
 from __future__ import annotations
 
+import gc
 import os
+import threading
 from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QMimeData, QPointF, QSettings, Qt, QUrl
 from PySide6.QtGui import QDropEvent
 
+from qurantext.gui.home import job_list as job_list_module
 from qurantext.gui.home.job_list import JobListPanel
 from qurantext.gui.home.new_job import NewJobPanel
 from qurantext.gui.i18n import path_text, t
 from qurantext.gui.jobs import JobSpec
 from qurantext.gui.prefs import Prefs
+from qurantext.gui.review.background import join_lingering
+from qurantext.jobs import catalog
 from qurantext.jobs.catalog import DAMAGED
 from qurantext.jobs.project import Project, save_project
 from tests.media_helpers import QURAN_FILE
+from tests.qt_helpers import spin, wait_for, wait_until_listed
 
 
 @pytest.fixture()
@@ -32,6 +38,13 @@ def prefs(tmp_path, no_default_job_dirs):
 
 def _card(surah=25, a=7, b=8):
     return {"surah_num": surah, "from_ayah": a, "to_ayah": b, "start_time": 0.0, "end_time": 5.0}
+
+
+def _listed(prefs):
+    """A ``JobListPanel`` whose first read of the folders has landed."""
+    panel = JobListPanel(prefs)
+    wait_until_listed(panel)
+    return panel
 
 
 def _running_text(panel):
@@ -56,7 +69,7 @@ def test_rows_appear_newest_first_with_status(qt_app, prefs) -> None:
     reviewed_project.mark_reviewed()
     save_project(reviewed_project, jobs_dir / "reviewed_recitation.qalun.json")
 
-    panel = JobListPanel(prefs)
+    panel = _listed(prefs)
 
     assert panel.list.count() == 2
     names = [panel.list.itemWidget(panel.list.item(i)).name_label.text() for i in range(2)]
@@ -75,7 +88,7 @@ def test_double_click_emits_open_requested(qt_app, prefs) -> None:
     jobs_dir = prefs.job_dirs[0]
     saved = _save(jobs_dir, "one")
 
-    panel = JobListPanel(prefs)
+    panel = _listed(prefs)
     received = []
     panel.open_requested.connect(received.append)
 
@@ -89,10 +102,11 @@ def test_remove_from_list_hides_and_persists(qt_app, prefs, tmp_path) -> None:
     kept = _save(jobs_dir, "kept")
     removed = _save(jobs_dir, "removed")
 
-    panel = JobListPanel(prefs)
+    panel = _listed(prefs)
     assert panel.list.count() == 2
 
     panel.remove_from_list(removed)
+    wait_until_listed(panel)
 
     assert panel.list.count() == 1
     remaining = panel.list.itemWidget(panel.list.item(0)).name_label.text()
@@ -102,7 +116,7 @@ def test_remove_from_list_hides_and_persists(qt_app, prefs, tmp_path) -> None:
     # A fresh panel built on the same INI must not show it either.
     fresh_settings = QSettings(str(tmp_path / "prefs.ini"), QSettings.Format.IniFormat)
     fresh_prefs = Prefs(fresh_settings)
-    fresh_panel = JobListPanel(fresh_prefs)
+    fresh_panel = _listed(fresh_prefs)
     fresh_names = [
         fresh_panel.list.itemWidget(fresh_panel.list.item(i)).name_label.text()
         for i in range(fresh_panel.list.count())
@@ -112,7 +126,7 @@ def test_remove_from_list_hides_and_persists(qt_app, prefs, tmp_path) -> None:
 
 
 def test_set_running_adds_and_removes_transient_row(qt_app, prefs) -> None:
-    panel = JobListPanel(prefs)
+    panel = _listed(prefs)
     assert panel.list.count() == 0
 
     panel.set_running("recitation.m4a", "Aligning… 40%")
@@ -129,7 +143,7 @@ def test_set_running_adds_and_removes_transient_row(qt_app, prefs) -> None:
 
 
 def test_the_running_row_shows_how_far_the_job_is(qt_app, prefs) -> None:
-    panel = JobListPanel(prefs)
+    panel = _listed(prefs)
 
     panel.set_running("a.m4a", "Starting…")
     bar = panel.list.itemWidget(panel.list.item(0)).progress_bar
@@ -141,6 +155,7 @@ def test_the_running_row_shows_how_far_the_job_is(qt_app, prefs) -> None:
     assert "40%" in _running_text(panel)
 
     panel.refresh()
+    wait_until_listed(panel)
     bar = panel.list.itemWidget(panel.list.item(0)).progress_bar
     assert bar.value() == 40, "a refresh mid-job keeps the bar where it was"
 
@@ -153,7 +168,7 @@ def test_rows_name_their_folder_so_two_jobs_of_one_name_differ(qt_app, prefs, tm
     _save(first, "same")
     _save(second, "same")
 
-    panel = JobListPanel(prefs)
+    panel = _listed(prefs)
 
     tips = sorted(panel.list.item(i).toolTip() for i in range(panel.list.count()))
     assert tips == sorted([str(first.resolve()), str(second.resolve())])
@@ -165,7 +180,7 @@ def test_damaged_file_is_listed_and_does_not_open(qt_app, prefs) -> None:
     jobs_dir = prefs.job_dirs[0]
     (jobs_dir / "broken.qalun.json").write_text("{not json", encoding="utf-8")
 
-    panel = JobListPanel(prefs)
+    panel = _listed(prefs)
     received = []
     panel.open_requested.connect(received.append)
 
@@ -181,7 +196,7 @@ def test_double_clicking_a_damaged_row_emits_its_error(qt_app, prefs) -> None:
     jobs_dir = prefs.job_dirs[0]
     (jobs_dir / "broken.qalun.json").write_text("{not json", encoding="utf-8")
 
-    panel = JobListPanel(prefs)
+    panel = _listed(prefs)
     errors = []
     panel.damaged_activated.connect(errors.append)
 
@@ -202,7 +217,7 @@ def test_a_row_that_needs_attention_is_amber_and_bold(qt_app, prefs) -> None:
     save_project(reviewed, jobs_dir / "calm_recitation.qalun.json")
     (jobs_dir / "broken.qalun.json").write_text("{not json", encoding="utf-8")
 
-    panel = JobListPanel(prefs)
+    panel = _listed(prefs)
     panel.resize(300, 400)
     panel.show()
     rows = {}
@@ -225,10 +240,11 @@ def test_refresh_keeps_the_running_row(qt_app, prefs) -> None:
     """A job saved elsewhere (a review's Save) refreshes the list mid-job; the row stays."""
     jobs_dir = prefs.job_dirs[0]
     _save(jobs_dir, "done")
-    panel = JobListPanel(prefs)
+    panel = _listed(prefs)
 
     panel.set_running("recitation.m4a", "Aligning… 40%")
     panel.refresh()
+    wait_until_listed(panel)
 
     assert panel.list.count() == 2
     assert "40%" in _running_text(panel)
@@ -239,7 +255,142 @@ def test_refresh_keeps_the_running_row(qt_app, prefs) -> None:
 
     panel.set_running("recitation.m4a", None)
     panel.refresh()
+    wait_until_listed(panel)
     assert panel.list.count() == 1
+
+
+# -- reading off the UI thread -----------------------------------------------------------
+
+
+def _blocking_list_jobs(monkeypatch):
+    """Make the panel's reads wait for ``release``; returns (release, started calls)."""
+    release = threading.Event()
+    calls: list[int] = []
+    real = catalog.list_jobs
+
+    def blocked(*args, **kwargs):
+        calls.append(threading.get_ident())
+        result = real(*args, **kwargs)
+        assert release.wait(10), "the test never released the read"
+        return result
+
+    monkeypatch.setattr(job_list_module, "list_jobs", blocked)
+    return release, calls
+
+
+def test_refresh_reads_projects_off_the_ui_thread(qt_app, prefs, monkeypatch) -> None:
+    seen = {}
+    real = catalog.list_jobs
+
+    def spy(*args, **kwargs):
+        seen["thread"] = threading.get_ident()
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(job_list_module, "list_jobs", spy)
+    panel = JobListPanel(prefs)
+    assert wait_for(lambda: "thread" in seen)
+    assert seen["thread"] != threading.get_ident()
+    wait_until_listed(panel)
+
+
+def test_refresh_returns_before_the_read_and_says_so_when_it_lands(
+    qt_app, prefs, monkeypatch
+) -> None:
+    _save(prefs.job_dirs[0], "one")
+    release, _calls = _blocking_list_jobs(monkeypatch)
+
+    panel = JobListPanel(prefs)  # would hang here if the read ran on this thread
+    landed = []
+    panel.refreshed.connect(lambda: landed.append(panel.list.count()))
+    assert panel.reading and panel.list.count() == 0
+
+    release.set()
+    wait_until_listed(panel)
+    assert landed == [1], "refreshed is emitted once, after the rows are rebuilt"
+
+
+def test_the_first_read_does_not_claim_there_are_no_jobs(qt_app, prefs, monkeypatch) -> None:
+    """Until the folders have been read, "your jobs appear here" would be a guess."""
+    _save(prefs.job_dirs[0], "one")
+    release, _calls = _blocking_list_jobs(monkeypatch)
+
+    panel = JobListPanel(prefs)
+    assert panel.empty_label.text() == t("home.reading")
+    assert panel.empty_label.text() != t("home.empty")
+
+    release.set()
+    wait_until_listed(panel)
+    assert panel.list.count() == 1
+
+    panel.remove_from_list(prefs.job_dirs[0] / "one_recitation.qalun.json")
+    wait_until_listed(panel)
+    assert panel.empty_label.text() == t("home.empty")
+    assert not panel.empty_label.isHidden() and panel.list.isHidden()
+
+
+def test_a_late_stale_read_never_overwrites_a_newer_one(qt_app, prefs, monkeypatch) -> None:
+    jobs_dir = prefs.job_dirs[0]
+    _save(jobs_dir, "one")
+    panel = _listed(prefs)
+
+    first_read_done = threading.Event()
+    release_first = threading.Event()
+    calls: list[int] = []
+    real = catalog.list_jobs
+
+    def reads(*args, **kwargs):
+        calls.append(1)
+        result = real(*args, **kwargs)
+        if len(calls) == 1:  # the first refresh: sees only "one", then arrives late
+            first_read_done.set()
+            assert release_first.wait(10), "the test never released the first read"
+        return result
+
+    monkeypatch.setattr(job_list_module, "list_jobs", reads)
+    landed = []
+    panel.refreshed.connect(lambda: landed.append(panel.list.count()))
+
+    panel.refresh()
+    assert wait_for(first_read_done.is_set)
+    _save(jobs_dir, "two")
+    panel.refresh()
+    wait_until_listed(panel)
+    assert panel.list.count() == 2
+
+    release_first.set()
+    assert wait_for(lambda: panel._reads.active == 0)
+    spin(100)  # let the stale result's queued call be delivered
+    assert panel.list.count() == 2, "the first refresh's older rows were dropped"
+    assert landed == [2]
+
+
+def test_a_panel_dropped_while_it_reads_does_not_take_the_process_down(
+    qt_app, prefs, monkeypatch
+) -> None:
+    """Destroying a QThread that still runs aborts; the running read is parked instead."""
+    release, calls = _blocking_list_jobs(monkeypatch)
+    panel = JobListPanel(prefs)
+    assert wait_for(lambda: calls)
+    del panel
+    gc.collect()
+    release.set()
+    assert join_lingering(10_000)
+
+
+def test_closing_the_home_window_while_it_reads_does_not_crash(qt_app, prefs, monkeypatch) -> None:
+    from qurantext.gui.main_window import MainWindow
+
+    release, calls = _blocking_list_jobs(monkeypatch)
+    window = MainWindow(prefs=prefs)
+    window.show()
+    assert wait_for(lambda: calls)
+    assert window.job_list.reading
+
+    assert window.close()
+    release.set()
+    assert join_lingering(10_000)
+    window.deleteLater()
+    spin(50)
 
 
 # -- NewJobPanel ----------------------------------------------------------------------
@@ -578,7 +729,7 @@ def test_a_remembered_range_is_clamped_to_the_surah(qt_app, prefs, store) -> Non
 
 def test_an_arabic_file_name_does_not_turn_the_running_row_around(qt_app, prefs) -> None:
     """Isolated, an Arabic name cannot make the English line right to left."""
-    panel = JobListPanel(prefs)
+    panel = _listed(prefs)
     panel.set_running("تلاوة.m4a", "Starting…")
     assert _running_text(panel) == "\u2068تلاوة.m4a\u2069 — Starting…"
 

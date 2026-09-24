@@ -20,6 +20,8 @@ from qurantext.jobs.project import (  # noqa: E402
     save_project,
 )
 from tests.media_helpers import MEDIA_AVAILABLE, MEDIA_REASON, build_job  # noqa: E402
+from tests.qt_helpers import spin as _spin  # noqa: E402
+from tests.qt_helpers import wait_for as _wait_for  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -44,36 +46,6 @@ class _Now:
 
     def __call__(self):
         return self.t
-
-
-def _spin(ms: int) -> None:
-    """Run the event loop for about *ms*, never holding the GIL while it waits.
-
-    Not ``QTest.qWait``: PySide6 keeps the GIL for the whole of that call, so a
-    worker thread that needs it while holding a Qt lock the UI thread wants
-    deadlocks the two (the full suite hung that way). ``processEvents`` and
-    ``sendPostedEvents`` release it, and so does ``time.sleep``.
-    """
-    from PySide6.QtCore import QCoreApplication, QEvent
-
-    deadline = time.monotonic() + ms / 1000
-    while True:
-        QCoreApplication.processEvents()
-        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-        left = deadline - time.monotonic()
-        if left <= 0:
-            return
-        time.sleep(min(0.005, left))
-
-
-def _wait_for(condition, timeout_ms):
-    """Spin the event loop until *condition()* holds (PySide6's QTest has no qWaitFor)."""
-    deadline = time.monotonic() + timeout_ms / 1000
-    while not condition():
-        if time.monotonic() > deadline:
-            return False
-        _spin(20)
-    return True
 
 
 def test_waiting_lets_worker_threads_run_python(qt_app) -> None:

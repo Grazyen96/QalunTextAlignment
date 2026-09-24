@@ -209,6 +209,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(plain_title(t("app.title")))
         # setCentralWidget deletes the old panels (later); the new ones read the
         # rest of the form back from prefs, all but the audio, which is not kept there.
+        # The old list's read is let go first: its rows are about to go anyway.
+        self.job_list.stop_reading()
         self._build()
         self._splitter.setSizes(sizes)  # where the person left the divider
         if audio is not None:
@@ -402,6 +404,7 @@ class MainWindow(QMainWindow):
             self._cancel = None
             self._running_spec = None
             self._jobs.stop()
+            self.job_list.stop_reading()
             QApplication.quit()
             return
         self._cancel = None
@@ -519,6 +522,7 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         self._jobs.stop()
+        self.job_list.stop_reading()
         super().closeEvent(event)
 
 
