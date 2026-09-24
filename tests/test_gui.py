@@ -1415,3 +1415,100 @@ def test_the_app_names_itself_before_any_settings_are_read(qt_app) -> None:
     finally:
         QCoreApplication.setOrganizationName(before[0])
         QCoreApplication.setApplicationName(before[1])
+
+
+# --- the window's language -----------------------------------------------------
+
+
+def test_switching_to_arabic_rebuilds_the_home_window(qt_app, home, prefs, tmp_path) -> None:
+    from PySide6.QtWidgets import QLabel
+
+    from qurantext.gui import i18n
+
+    audio = tmp_path / "a.mp3"
+    audio.touch()
+    home.new_job.set_audio(audio)
+
+    assert home.set_language("ar")
+
+    assert prefs.language == "ar"
+    assert home.windowTitle() == i18n.STRINGS["ar"]["app.title"]
+    assert home.job_list.findChild(QLabel).text() != i18n.STRINGS["en"]["home.jobs"]  # rebuilt
+    assert home.new_job.audio_path == audio  # the half-filled form survives
+    assert home.language_combo.currentData() == "ar"
+
+    assert home.set_language("en")
+    assert prefs.language == "en"
+    assert home.job_list.findChild(QLabel).text() == i18n.STRINGS["en"]["home.jobs"]
+    assert home.language_combo.currentData() == "en"
+
+
+def test_choosing_a_language_in_the_combo_switches_to_it(qt_app, home, prefs) -> None:
+    from qurantext.gui import i18n
+
+    index = home.language_combo.findData("ar")
+    home.language_combo.setCurrentIndex(index)
+    home.language_combo.activated.emit(index)
+
+    assert i18n.current_language() == "ar"
+    assert prefs.language == "ar"
+
+
+def test_choosing_the_language_already_shown_is_remembered(qt_app, home, prefs) -> None:
+    assert prefs.language is None  # following the system
+    assert home.set_language("en")
+    assert prefs.language == "en"
+
+
+def test_a_rebuild_keeps_the_window_size(qt_app, home) -> None:
+    home.resize(900, 600)
+    home.set_language("ar")
+    assert (home.width(), home.height()) == (900, 600)
+
+
+def test_the_language_does_not_change_while_a_review_is_open(
+    qt_app, home, prefs, reviews, tmp_path
+) -> None:
+    from qurantext.gui import i18n
+    from qurantext.gui import main_window as module
+
+    home._open_review(_saved_job(tmp_path / "jobs"))
+    assert reviews, "the review should have opened"
+
+    index = home.language_combo.findData("ar")
+    home.language_combo.setCurrentIndex(index)  # what the person picked
+    assert not home.set_language("ar")
+
+    assert i18n.current_language() == "en"
+    assert prefs.language is None
+    assert home.new_job.status_label.text() == module.t("home.language_busy")
+    assert home.language_combo.currentData() == "en"  # the combo snaps back
+
+
+def test_the_language_does_not_change_while_a_job_runs(
+    qt_app, home, prefs, reviews, tmp_path, monkeypatch
+) -> None:
+    import threading
+
+    from qurantext.gui import i18n
+    from qurantext.gui import main_window as module
+
+    release = threading.Event()
+
+    def wait_for_release(progress, cancel):
+        assert release.wait(timeout=10), "the test forgot to release the job"
+
+    _fake_matching(monkeypatch, before=wait_for_release)
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    _spin_until(qt_app, lambda: home._cancel is not None)
+    try:
+        home.language_combo.setCurrentIndex(home.language_combo.findData("ar"))
+        assert not home.set_language("ar")
+
+        assert i18n.current_language() == "en"
+        assert home.new_job.status_label.text() == module.t("home.language_busy")
+        assert home.language_combo.currentData() == "en"
+    finally:
+        release.set()
+        _spin_until(qt_app, lambda: home._cancel is None)
+        _spin_until(qt_app, lambda: home._jobs.active == 0)

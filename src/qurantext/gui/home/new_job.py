@@ -422,6 +422,11 @@ class NewJobPanel(QWidget):
         if name:
             self.set_audio(Path(name))
 
+    @property
+    def audio_path(self) -> Path | None:
+        """The chosen audio file, or None; the one choice prefs do not keep."""
+        return self._audio
+
     def set_audio(self, path: Path) -> None:
         """Set the chosen audio file; used by the dialog, and by drops."""
         self._audio = path

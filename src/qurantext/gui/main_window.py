@@ -20,6 +20,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
     QMainWindow,
     QMessageBox,
     QSplitter,
@@ -28,11 +31,13 @@ from PySide6.QtWidgets import (
 )
 
 from qurantext.config.paths import DEFAULT_QURAN_PATH, QURAN_INPUT_DIR
+from qurantext.gui import i18n
 from qurantext.gui.files import show_in_folder
 from qurantext.gui.home.job_list import JobListPanel
 from qurantext.gui.home.new_job import NewJobPanel
 from qurantext.gui.i18n import t, tn
 from qurantext.gui.jobs import JobOutcome, JobSpec, match_path_for, run_matching, run_render
+from qurantext.gui.language import apply_language
 from qurantext.gui.prefs import Prefs
 from qurantext.gui.review import ReviewWindow
 from qurantext.gui.review.background import BackgroundJobs
@@ -43,6 +48,8 @@ __all__ = ["MainWindow"]
 
 #: The job list's share of the window; the form takes the rest.
 _JOB_LIST_WIDTH = 300
+#: The window's size on first opening; a language switch keeps whatever it is now.
+_WINDOW_SIZE = (1024, 680)
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +101,7 @@ class MainWindow(QMainWindow):
         #: A window leaves this once it closes, so the next review reads the file afresh.
         self._reviews: dict[Path, ReviewWindow] = {}
 
+        self.resize(*_WINDOW_SIZE)
         self._build()
 
     # -- construction ---------------------------------------------------------
@@ -108,21 +116,69 @@ class MainWindow(QMainWindow):
         self.new_job.start_requested.connect(self._start)
         self.new_job.cancel_requested.connect(self._request_cancel)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter = splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
         splitter.addWidget(self.job_list)
         splitter.addWidget(self.new_job)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
 
+        # Built here, not once in __init__, so a language switch gets a fresh one in its words.
+        self.language_combo = QComboBox()
+        for code in i18n.LANGUAGES:
+            self.language_combo.addItem(i18n.LANGUAGE_NAMES[code], code)
+        self._select_language_in_combo(i18n.current_language())
+        self.language_combo.activated.connect(self._language_chosen)
+        footer = QHBoxLayout()
+        footer.addStretch(1)
+        footer.addWidget(QLabel(t("home.language")))
+        footer.addWidget(self.language_combo)
+
         root = QWidget()
         layout = QVBoxLayout(root)
         layout.setContentsMargins(12, 12, 12, 12)
-        layout.addWidget(splitter)
+        layout.addWidget(splitter, 1)
+        layout.addLayout(footer)
         self.setCentralWidget(root)
 
-        self.resize(1024, 680)
-        splitter.setSizes([_JOB_LIST_WIDTH, self.width() - _JOB_LIST_WIDTH])
+        splitter.setSizes([_JOB_LIST_WIDTH, max(0, self.width() - _JOB_LIST_WIDTH)])
+
+    # -- language ---------------------------------------------------------------
+
+    def _language_chosen(self, index: int) -> None:
+        self.set_language(self.language_combo.itemData(index))
+
+    def _select_language_in_combo(self, code: str) -> None:
+        self.language_combo.setCurrentIndex(self.language_combo.findData(code))
+
+    def set_language(self, code: str) -> bool:
+        """Switch the window's language; refuse while anything could lose its place.
+
+        A review window holds unsaved corrections and a job its progress rows;
+        rebuilding under them is where things would go missing, and switching a
+        language is rare enough to ask for a quiet moment. Returns whether the
+        window is now in *code*.
+        """
+        if code == i18n.current_language():
+            # Picking the language the system already gave is still a choice to keep.
+            self._prefs.language = code
+            return True
+        if self._reviews or self._cancel is not None:
+            self._select_language_in_combo(i18n.current_language())
+            self.new_job.show_status(t("home.language_busy"))
+            return False
+        audio = self.new_job.audio_path
+        sizes = self._splitter.sizes()
+        apply_language(QApplication.instance(), code)
+        self._prefs.language = code
+        self.setWindowTitle(t("app.title"))
+        # setCentralWidget deletes the old panels (later); the new ones read the
+        # rest of the form back from prefs, all but the audio, which is not kept there.
+        self._build()
+        self._splitter.setSizes(sizes)  # where the person left the divider
+        if audio is not None:
+            self.new_job.set_audio(audio)
+        return True
 
     # -- running --------------------------------------------------------------
 

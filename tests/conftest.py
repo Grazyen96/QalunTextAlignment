@@ -10,7 +10,7 @@ from tests.media_helpers import QURAN_FILE
 
 @pytest.fixture(autouse=True)
 def _english_left_to_right():
-    """Every test starts, and leaves, in English laid out left to right.
+    """Every test starts, and leaves, in English laid out left to right, with Qt's buttons too.
 
     A test that switches language and then fails would otherwise leave every
     later test reading Arabic, and asserting English text against it.
@@ -18,16 +18,17 @@ def _english_left_to_right():
     from qurantext.gui import i18n
 
     yield
-    # Task 4 also removes the Qt translators here.
     i18n.set_language("en")
     try:
-        from PySide6.QtCore import Qt
         from PySide6.QtWidgets import QApplication
+
+        from qurantext.gui.language import apply_language
     except ModuleNotFoundError:
         return
     app = QApplication.instance()
     if app is not None:
-        app.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        # Also removes Qt's own translation and sets the direction back.
+        apply_language(app, "en")
 
 
 @pytest.fixture()

@@ -154,3 +154,29 @@ def test_unhiding_a_job_that_was_never_hidden_is_fine(settings) -> None:
     prefs = Prefs(settings)
     prefs.unhide_job(Path("/tmp/never/hidden.qalun.json"))
     assert prefs.hidden_jobs == set()
+
+
+def test_the_language_follows_the_system_until_one_is_chosen(tmp_path) -> None:
+    from PySide6.QtCore import QSettings
+
+    path = str(tmp_path / "prefs.ini")
+    assert Prefs(QSettings(path, QSettings.Format.IniFormat)).language is None
+
+    Prefs(QSettings(path, QSettings.Format.IniFormat)).language = "ar"
+    assert Prefs(QSettings(path, QSettings.Format.IniFormat)).language == "ar"
+
+    Prefs(QSettings(path, QSettings.Format.IniFormat)).language = None
+    assert Prefs(QSettings(path, QSettings.Format.IniFormat)).language is None
+
+
+def test_an_unknown_stored_language_follows_the_system(tmp_path) -> None:
+    from PySide6.QtCore import QSettings
+
+    path = tmp_path / "prefs.ini"
+    path.write_text("[General]\nlanguage=klingon\n")
+    assert Prefs(QSettings(str(path), QSettings.Format.IniFormat)).language is None
+
+
+def test_only_a_known_language_can_be_chosen(settings) -> None:
+    with pytest.raises(ValueError):
+        Prefs(settings).language = "klingon"

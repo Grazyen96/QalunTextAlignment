@@ -128,6 +128,10 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "home.close_review_first": "Close the review of this job before running it again.",
         "home.busy_matching": "This job is running again; open its review once it finishes.",
         "home.review_failed": "Could not open {name} for review: {details}",
+        "home.language": "Language",
+        "home.language_busy": (
+            "Close the open reviews and wait for the job to finish before changing the language."
+        ),
         "main.saved": "Corrections saved to {path}",
         "player.unavailable": "Playback is off on this machine: {details}",
         "player.unavailable_short": "Playback is off: install PySide6-Addons to hear the recording.",
@@ -308,6 +312,8 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "home.close_review_first": "أغلق مراجعة هذه المهمة قبل تشغيلها مرة أخرى.",
         "home.busy_matching": "هذه المهمة قيد التشغيل مرة أخرى؛ افتح مراجعتها بعد أن تنتهي.",
         "home.review_failed": "تعذّر فتح {name} للمراجعة: {details}",
+        "home.language": "اللغة",
+        "home.language_busy": "أغلق المراجعات المفتوحة وانتظر انتهاء المهمة قبل تغيير اللغة.",
         "main.saved": "حُفظت التصحيحات في {path}",
         "player.unavailable": "التشغيل غير متاح على هذا الجهاز: {details}",
         "player.unavailable_short": "التشغيل غير متاح: ثبّت PySide6-Addons لسماع التسجيل.",

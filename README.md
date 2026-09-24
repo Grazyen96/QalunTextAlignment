@@ -109,6 +109,14 @@ More options points the job at a folder of its own — then its match, project
 and video files all go there together, and that folder is remembered so the
 job list keeps finding it.
 
+**Language.** The window is in English or Arabic. It follows the system's
+language until you choose one at the bottom of the home window, and remembers
+that choice from then on (switching waits until no review is open and no job
+is running). Arabic lays the window out right to left, while the waveform, the
+word strip and the time fields keep time running left to right, and numbers
+stay Western digits in both. The Arabic text is a draft awaiting review by a
+native speaker.
+
 Qt is an optional dependency, so the command line installs without it. Running
 `qalun` without it prints one line telling you what to install.
 

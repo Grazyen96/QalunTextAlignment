@@ -20,6 +20,7 @@ from PySide6.QtCore import QSettings
 
 from qurantext.config.settings import VIDEO_PRESETS
 from qurantext.core.subtitles import SUBTITLE_FORMATS
+from qurantext.gui.i18n import LANGUAGES
 from qurantext.jobs.project import SUBTITLE_CHOICES
 
 __all__ = ["Prefs"]
@@ -79,6 +80,25 @@ class Prefs:
 
     def __init__(self, settings: QSettings | None = None) -> None:
         self._settings = settings if settings is not None else QSettings()
+
+    # -- language ---------------------------------------------------------------
+    # None until the person picks one: until then the window follows the
+    # system's language, so a machine switched to Arabic later still gets it.
+
+    @property
+    def language(self) -> str | None:
+        value = self._settings.value("language", "")
+        return value if isinstance(value, str) and value in LANGUAGES else None
+
+    @language.setter
+    def language(self, value: str | None) -> None:
+        if value is None:
+            self._settings.remove("language")
+        elif value in LANGUAGES:
+            self._settings.setValue("language", value)
+        else:
+            raise ValueError(f"Unknown language {value!r}; choose from {', '.join(LANGUAGES)}.")
+        self._settings.sync()
 
     # -- mode -----------------------------------------------------------------
 
