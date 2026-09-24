@@ -259,10 +259,28 @@ class MainWindow(QMainWindow):
     # -- review windows -------------------------------------------------------
 
     def _open_review(self, project_path: Path) -> None:
-        """Open *project_path* for review, or say on the status line why it cannot be."""
+        """Open *project_path* for review, or say on the status line why it cannot be.
+
+        The job being matched is refused here rather than in ``_show_review``,
+        because ``_on_finished`` opens that same project through
+        ``_show_review`` before ``_on_done`` clears ``_running_spec``.
+        """
+        if self._is_being_matched(project_path):
+            # Its file is about to be replaced; a review opened now would show the old
+            # match, and saving it would overwrite the new one.
+            self.new_job.show_status(t("home.busy_matching"))
+            return
         problem = self._show_review(project_path)
         if problem is not None:
             self.new_job.show_status(problem)
+
+    def _is_being_matched(self, project_path: Path) -> bool:
+        """Whether the running job will write *project_path*, however either is spelled."""
+        spec = self._running_spec
+        if spec is None:
+            return False
+        target = project_path_for(match_path_for(spec))
+        return Path(target).resolve() == Path(project_path).resolve()
 
     def _show_review(self, project_path: Path) -> str | None:
         """Show the review window for *project_path*; return why not, or None.

@@ -87,6 +87,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "home.cancelled": "Stopped before it finished.",
         "home.damaged": "This job cannot be opened: {details}",
         "home.close_review_first": "Close the review of this job before running it again.",
+        "home.busy_matching": (
+            "This job is being matched again; its review opens when that finishes."
+        ),
         "home.review_failed": "Could not open {name} for review: {details}",
         "main.saved": "Corrections saved to {path}",
         "player.unavailable": "Playback is off on this machine: {details}",

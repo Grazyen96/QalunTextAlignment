@@ -1219,6 +1219,35 @@ def test_a_render_right_away_stopping_after_close_still_lists_its_folder(
     assert custom.resolve() in prefs.job_dirs
 
 
+def test_opening_the_review_of_a_job_being_matched_again_is_refused(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    """Its file is about to be replaced: a review now would show, and save over, the old match."""
+    import threading
+
+    from qurantext.gui import main_window as module
+
+    release = threading.Event()
+    project_path = _saved_job(tmp_path / "jobs", "a")
+
+    def wait_for_release(progress, cancel):
+        assert release.wait(timeout=10), "the test forgot to release the job"
+
+    _fake_matching(monkeypatch, before=wait_for_release)
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    _spin_until(qt_app, lambda: home._cancel is not None)
+
+    home._open_review(project_path)
+
+    assert home._reviews == {} and reviews == []
+    assert home.new_job.status_label.text() == module.t("home.busy_matching")
+
+    release.set()
+    _spin_until(qt_app, lambda: home._cancel is None)
+    _spin_until(qt_app, lambda: home._jobs.active == 0)
+    assert home._review_of(project_path) is not None, "once matched, its review opens as usual"
+
+
 @pytest.fixture()
 def real_reviews(qt_app, prefs, monkeypatch):
     """The main window's real review window, with a fake player; closed after the test."""
