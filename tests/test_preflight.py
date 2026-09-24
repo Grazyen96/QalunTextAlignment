@@ -71,9 +71,7 @@ def test_a_release_check_that_fails_does_not_claim_rendering_is_broken() -> None
     """Without playback, Qt's Arabic or an Arabic font the app still renders; the build
     is only unfit to ship, and whoever reads the report should be told that."""
     for name in ("Playback", "Window translation", "Arabic interface font", "Transcription"):
-        report = format_report(
-            [CheckResult(name, Status.FAIL, "missing", "fix it")], release=True
-        )
+        report = format_report([CheckResult(name, Status.FAIL, "missing", "fix it")], release=True)
         assert report.rstrip().endswith("Not ready for release: 1 problem(s) above."), name
         assert "Cannot render" not in report
 
@@ -82,9 +80,7 @@ def test_outside_a_release_a_failure_that_leaves_rendering_working_names_what_ca
     """A person running a plain doctor is not shipping anything: "Not ready for release"
     would only puzzle them. They are told rendering works and what does not yet."""
     report = format_report([CheckResult("Transcription", Status.FAIL, "missing", "fix it")])
-    assert report.rstrip().endswith(
-        "Rendering works; Transcription cannot run yet: see above."
-    )
+    assert report.rstrip().endswith("Rendering works; Transcription cannot run yet: see above.")
     assert "release" not in report.lower()
 
     both = [
