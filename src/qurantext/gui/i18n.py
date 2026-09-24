@@ -209,8 +209,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
     },
     # Drafted for the first release; a native speaker must review every line
     # before it ships (spec §4). Keep the order and grouping of "en".
-    # ⁦…⁩ (LRI…PDI) keeps a Latin-order run — a resolution, "50%", a key
-    # name — from being reordered or mirrored by the Arabic around it.
+    # \u2066…\u2069 isolates keep Latin and number runs left to right; they must be kept.
     "ar": {
         "home.jobs": "مهامك",
         "home.refresh": "حدِّث",
@@ -252,10 +251,10 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "home.range_from": "من",
         "home.range_to": "إلى",
         "home.video_size": "مقاس الفيديو",
-        "preset.social": "عمودي ⁦1080×1920⁩ · 30 إطارًا/ث",
-        "preset.high": "أفقي ⁦1920×1080⁩ · 30 إطارًا/ث",
-        "preset.standard": "أفقي ⁦1280×720⁩ · 25 إطارًا/ث",
-        "preset.fast": "مسودة سريعة ⁦960×540⁩ · 24 إطارًا/ث",
+        "preset.social": "عمودي \u20661080×1920\u2069 · 30 إطارًا/ث",
+        "preset.high": "أفقي \u20661920×1080\u2069 · 30 إطارًا/ث",
+        "preset.standard": "أفقي \u20661280×720\u2069 · 25 إطارًا/ث",
+        "preset.fast": "مسودة سريعة \u2066960×540\u2069 · 24 إطارًا/ث",
         "home.more": "خيارات أخرى",
         "home.quran_missing": "اختر ملف نص القرآن أولًا",
         "home.quran_store_error": "تعذّرت قراءة قاعدة بيانات القرآن: {details}",
@@ -287,10 +286,10 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "app.title": "Qalun",
         "home.progress.starting": "جارٍ البدء…",
         "home.progress.stopping": "جارٍ الإيقاف…",
-        "home.progress.matching": "المطابقة — ⁦{percent}%⁩",
-        "home.progress.matching_eta": "المطابقة — ⁦{percent}%⁩، يتبقى نحو {eta}",
-        "home.progress.rendering": "إخراج الفيديو — ⁦{percent}%⁩",
-        "home.progress.rendering_eta": "إخراج الفيديو — ⁦{percent}%⁩، يتبقى نحو {eta}",
+        "home.progress.matching": "المطابقة — \u2066{percent}%\u2069",
+        "home.progress.matching_eta": "المطابقة — \u2066{percent}%\u2069، يتبقى نحو {eta}",
+        "home.progress.rendering": "إخراج الفيديو — \u2066{percent}%\u2069",
+        "home.progress.rendering_eta": "إخراج الفيديو — \u2066{percent}%\u2069، يتبقى نحو {eta}",
         "home.eta.seconds": "{seconds} ث",
         "home.eta.minutes": "{minutes} د {seconds} ث",
         "home.finished.matched": {
@@ -335,8 +334,8 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.rate": "{rate:g}×",
         "review.zoom": "التكبير",
         "review.snap": "اضبط على مؤشر التشغيل",
-        "review.minus": "⁦−50⁩ م.ث",
-        "review.plus": "⁦+50⁩ م.ث",
+        "review.minus": "\u2066−50\u2069 م.ث",
+        "review.plus": "\u2066+50\u2069 م.ث",
         "review.no_selection": "اختر كلمة لتعديل توقيتها",
         "review.selected": "{word}  {span} ث",
         "review.gaps": {
@@ -364,9 +363,9 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.discard_title": "هل تحفظ تصحيحاتك؟",
         "review.discard_text": "في هذه المراجعة تغييرات غير محفوظة.",
         "review.shortcuts": (
-            "المسافة للتشغيل · ⁦←/→⁩ للتنقل بين الكلمات · "
-            "⁦[⁩ للبداية و⁦]⁩ للنهاية عند مؤشر التشغيل · "
-            "⁦,⁩ و⁦.⁩ للإزاحة الدقيقة · "
+            "المسافة للتشغيل · \u2066←/→\u2069 للتنقل بين الكلمات · "
+            "\u2066[\u2069 للبداية و\u2066]\u2069 للنهاية عند مؤشر التشغيل · "
+            "\u2066,\u2069 و\u2066.\u2069 للإزاحة الدقيقة · "
             "اسحب حافة مع Ctrl لفصل كلمتين · Ctrl+Z للتراجع"
         ),
         "export.title": "تصدير الترجمة النصية",
@@ -393,7 +392,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "export.no_name": "أدخل اسمًا للملف.",
         "export.failed": "لم تُكتب الترجمة النصية: {details}",
         "export.close": "إغلاق",
-        "render.running": "إخراج الفيديو — ⁦{percent}%⁩",
+        "render.running": "إخراج الفيديو — \u2066{percent}%\u2069",
         "render.done": "الفيديو جاهز: {path}",
         "render.show": "اعرض الفيديو",
         "render.failed": "لم يكتمل إخراج الفيديو: {details}",
