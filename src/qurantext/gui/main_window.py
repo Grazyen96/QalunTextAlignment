@@ -295,29 +295,44 @@ class MainWindow(QMainWindow):
         event without a fraction says its stage's sentence when the stage
         begins, or, when it carries a sentence this window already said in its
         language (``translated``), that sentence as it is. An event with a
-        fraction shows the stage's percentage. While an answer to the person is
-        held (``_answer``), only a move on from a stage already reported replaces it.
+        fraction shows the stage's percentage. The job's row says the same,
+        so it names the stage before any percentage arrives. While an answer to
+        the person is held (``_answer``), only a move on from a stage already
+        reported replaces it on the status line; the row always moves on.
         """
         new_stage = event.stage != self._stage
         moved_on = new_stage and self._stage is not None
         self._stage = event.stage
         self._holding = self._holding and not moved_on
         if event.fraction is None:
+            said: _Said | None = None
+            if event.translated and event.message.strip():
+                text = event.message.strip()
+            elif new_stage:
+                said = _Said(_stage_key(event.stage))
+                text = said.text()
+            else:
+                return  # a log line of the stage already said
+            self._show_running_row(text, None)
             if self._holding:
                 return
-            if event.translated and event.message.strip():
-                self._show_raw(event.message.strip())
-            elif new_stage:
-                self._say(_Said(_stage_key(event.stage)))
+            if said is None:
+                self._show_raw(text)
+            else:
+                self._say(said)
             return
         text = _progress_text(event)
-        if self._running_spec is not None:
-            self.job_list.set_running(Path(self._running_spec.audio).name, text, event.fraction)
+        self._show_running_row(text, event.fraction)
         if self._holding:
             self.new_job.set_progress(event.fraction, None)  # the bar moves; the answer stays
             return
         self._status = None
         self.new_job.set_progress(event.fraction, text)
+
+    def _show_running_row(self, text: str, fraction: float | None) -> None:
+        """Put *text* (and *fraction*, None for a busy bar) on the running job's row."""
+        if self._running_spec is not None:
+            self.job_list.set_running(Path(self._running_spec.audio).name, text, fraction)
 
     def _on_finished(self, finished: _Finished) -> None:
         project = finished.project

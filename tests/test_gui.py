@@ -1721,3 +1721,31 @@ def test_a_refusal_made_before_the_first_progress_event_stays_up(
         release.set()
         _spin_until(qt_app, lambda: home._cancel is None)
         _spin_until(qt_app, lambda: home._jobs.active == 0)
+
+
+def test_the_running_row_names_the_stage_before_any_percentage(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    """Not "Starting…" for the whole of a stage that reports no fraction."""
+    import threading
+
+    from qurantext.gui import main_window as module
+
+    release = threading.Event()
+
+    def wait_for_release(progress, cancel):
+        assert release.wait(timeout=10), "the test forgot to release the job"
+
+    _fake_matching(monkeypatch, before=wait_for_release)
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    _spin_until(qt_app, lambda: home._cancel is not None)
+    try:
+        home._on_progress(ProgressEvent("detect", "Scanning...", fraction=None))
+        assert module.t("job.stage.detect") in _running_rows(home)[0]
+
+        home._on_progress(ProgressEvent("detect", "  word 10/40", fraction=0.25))
+        assert "25%" in _running_rows(home)[0], "a percentage still shows as before"
+    finally:
+        release.set()
+        _spin_until(qt_app, lambda: home._cancel is None)
+        _spin_until(qt_app, lambda: home._jobs.active == 0)
