@@ -5,7 +5,10 @@ flags ``qurantext generate-video`` already declared, with its own drifting
 defaults. Rendering is now a callable job — see
 :mod:`qurantext.jobs.render` — and the package CLI is the only parser.
 
-What remains here is the re-export surface older imports rely on.
+What remains here is the re-export surface older imports rely on. It stops at
+the renderer modules: ``RenderRequest``, ``RenderResult`` and ``render_video``
+live in :mod:`qurantext.jobs.render` and are imported from there, because
+``core/`` never imports ``jobs/`` (``tests/test_layering.py``).
 """
 
 from __future__ import annotations
@@ -32,7 +35,6 @@ from qurantext.core.video_common import (
     validate_input_file,
     warn,
 )
-from qurantext.jobs.render import RenderRequest, RenderResult, render_video
 
 DEFAULT_WIDTH = 1280
 DEFAULT_HEIGHT = 720
@@ -44,8 +46,6 @@ __all__ = [
     "DEFAULT_PLACEHOLDER_TITLE",
     "DEFAULT_WIDTH",
     "ActiveMatchTracker",
-    "RenderRequest",
-    "RenderResult",
     "active_match_at",
     "ass_time",
     "ayah_label",
@@ -57,7 +57,6 @@ __all__ = [
     "render_ass_video",
     "render_frame_pillow",
     "render_frame_video",
-    "render_video",
     "validate_dimensions",
     "validate_font_file",
     "validate_font_name",

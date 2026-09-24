@@ -46,7 +46,7 @@ QuranText is organized around a small number of stable layers:
 - `coverage.py` finds recited audio that no word timing covers, from the waveform.
 - `frame_renderer.py` contains the Pillow frame renderer and active-match tracking. Frames are
   streamed straight into FFmpeg, so the video is encoded once with no intermediate file.
-- `video_renderer.py` is now the thin CLI/orchestration layer over the renderer modules.
+- `video_renderer.py` only re-exports the renderer modules for older imports; the render job itself is `jobs/render.py` (`core/` never imports `jobs/` or `gui/`, which `tests/test_layering.py` enforces).
 
 ### `src/qurantext/io`
 
