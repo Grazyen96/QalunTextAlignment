@@ -98,6 +98,8 @@ class BackgroundJobs(QObject):
         Python-made QObject off the UI thread, the pattern that deadlocked the
         home window): every entry is parked, for the UI thread to let go of.
         """
+        if not self._running:
+            return
         if not _on_ui_thread():
             for thread, worker, cancel in self._running:
                 cancel.cancel()
