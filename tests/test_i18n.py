@@ -222,3 +222,46 @@ def test_the_table_imports_no_qt() -> None:
         [sys.executable, "-c", probe], capture_output=True, text=True, check=True
     )
     assert result.stdout.strip() == "False"
+
+
+def test_arabic_is_a_language() -> None:
+    assert "ar" in i18n.LANGUAGES
+    assert i18n.is_rtl("ar")
+
+
+def test_arabic_plural_keys_have_every_category() -> None:
+    for key, value in i18n.STRINGS["en"].items():
+        if isinstance(value, dict):
+            assert set(i18n.STRINGS["ar"][key]) >= {"zero", "one", "two", "few", "many", "other"}, (
+                key
+            )
+
+
+def test_arabic_differs_from_english_where_it_should() -> None:
+    """A copied English string is a missed translation; only codes and symbols may match."""
+    same_ok = {"format.srt", "format.vtt", "format.ass", "review.rate", "app.title"}
+    for key, text in i18n.STRINGS["en"].items():
+        if key in same_ok or isinstance(text, dict):
+            continue
+        assert i18n.STRINGS["ar"][key] != text, key
+
+
+def test_arabic_uses_western_digits_only() -> None:
+    """Spec §4: numbers stay Western digits in both languages."""
+    for key, value in i18n.STRINGS["ar"].items():
+        for variant in value.values() if isinstance(value, dict) else [value]:
+            assert not re.search("[٠-٩۰-۹]", variant), key
+
+
+def test_the_counted_strings_agree_with_their_number_in_arabic() -> None:
+    set_language("ar")
+    try:
+        assert tn("home.cards", 0) == "لا بطاقات"
+        assert tn("home.cards", 1) == "بطاقة واحدة"
+        assert tn("home.cards", 2) == "بطاقتان"
+        assert tn("home.cards", 3) == f"{_FSI}3{_PDI} بطاقات"
+        assert tn("home.cards", 11) == f"{_FSI}11{_PDI} بطاقة"
+        assert tn("home.cards", 100) == f"{_FSI}100{_PDI} بطاقة"
+        assert tn("export.done", 12, names="a.srt") == f"كُتب {_FSI}12{_PDI} ملفًا: {_FSI}a.srt{_PDI}"
+    finally:
+        set_language("en")

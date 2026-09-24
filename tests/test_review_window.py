@@ -1008,7 +1008,8 @@ def test_the_export_dialog_closes_and_says_when_the_render_is_stale(qt_app, tmp_
     dialog = ExportDialog(session)
     assert dialog._video_radio.text() == t("export.match_video_stale")
     assert t("export.match_video_stale") == (
-        "Match the video's timeline (rendered before your latest changes)"
+        "Match the rendered video (includes the basmala at the start)"
+        " — rendered before your latest changes"
     )
     dialog.show()
     dialog.close_button.click()
