@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import re
 import string
 import subprocess
@@ -355,13 +356,57 @@ def test_a_name_that_starts_with_digits_keeps_its_order_in_an_arabic_title(
     assert drawn == ["*", *parts, "مراجعة"]
 
 
+#: Qt's static dialogs that put their second argument in a native title bar.
+_TITLED_STATICS = {
+    "QMessageBox": {"about", "critical", "information", "question", "warning"},
+    "QFileDialog": {
+        "getExistingDirectory",
+        "getExistingDirectoryUrl",
+        "getOpenFileName",
+        "getOpenFileNames",
+        "getOpenFileUrl",
+        "getOpenFileUrls",
+        "getSaveFileName",
+        "getSaveFileUrl",
+    },
+}
+
+
+def _native_titles() -> list[tuple[str, int, str, ast.expr | None]]:
+    """(file, line, call, title argument) for every call that sets a native title."""
+    found = []
+    for path in GUI_SOURCE.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            attr, owner = node.func.attr, node.func.value
+            if attr == "setWindowTitle":
+                title = node.args[0] if node.args else None
+            elif isinstance(owner, ast.Name) and attr in _TITLED_STATICS.get(owner.id, ()):
+                title = node.args[1] if len(node.args) > 1 else None
+                attr = f"{owner.id}.{attr}"
+            else:
+                continue
+            found.append((path.name, node.lineno, attr, title))
+    return found
+
+
+def _is_plain_title(node: ast.expr | None) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "plain_title"
+    )
+
+
 def test_every_window_title_goes_through_plain_title() -> None:
-    """A title set without it would show its isolate controls as boxes on some title bars."""
-    calls = [
-        (path.name, line.strip())
-        for path in GUI_SOURCE.rglob("*.py")
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if "setWindowTitle(" in line
-    ]
-    assert calls, "the scan found no window titles at all"
-    assert [c for c in calls if "setWindowTitle(plain_title(" not in c[1]] == []
+    """A title set without it would show its isolate controls as boxes on some title bars:
+    a window's own, a message box's and a file dialog's caption alike."""
+    calls = _native_titles()
+    kinds = {call for _, _, call, _ in calls}
+    assert "setWindowTitle" in kinds, "the scan found no window titles at all"
+    assert "QMessageBox.warning" in kinds, "the scan found no message box titles"
+    assert any(k.startswith("QFileDialog.") for k in kinds), "the scan found no file dialogs"
+    bare = [(name, line, call) for name, line, call, title in calls if not _is_plain_title(title)]
+    assert bare == []

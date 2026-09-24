@@ -37,7 +37,7 @@ from qurantext.config.paths import QURAN_DB_PATH, QURAN_INPUT_DIR
 from qurantext.config.settings import VIDEO_PRESETS
 from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.data.quran_db import ensure_quran_db, list_surahs
-from qurantext.gui.i18n import path_text, t, tn
+from qurantext.gui.i18n import path_text, plain_title, t, tn
 from qurantext.gui.jobs import JobSpec
 from qurantext.gui.prefs import Prefs
 from qurantext.jobs.project import SUBTITLE_CHOICES
@@ -417,7 +417,7 @@ class NewJobPanel(QWidget):
     def _choose_audio(self) -> None:
         name, _ = QFileDialog.getOpenFileName(
             self,
-            t("home.choose_audio.dialog_title"),
+            plain_title(t("home.choose_audio.dialog_title")),
             str(Path.home()),
             _file_filter(t("home.filter.audio"), sorted(AUDIO_SUFFIXES)),
         )
@@ -462,7 +462,7 @@ class NewJobPanel(QWidget):
     def _choose_quran_override(self) -> None:
         name, _ = QFileDialog.getOpenFileName(
             self,
-            t("home.quran_override.dialog_title"),
+            plain_title(t("home.quran_override.dialog_title")),
             str(QURAN_INPUT_DIR),
             _file_filter(t("home.filter.text"), [".txt"]),
         )
@@ -479,7 +479,7 @@ class NewJobPanel(QWidget):
 
     def _choose_output_dir(self) -> None:
         name = QFileDialog.getExistingDirectory(
-            self, t("home.output_dir.dialog_title"), str(Path.home())
+            self, plain_title(t("home.output_dir.dialog_title")), str(Path.home())
         )
         if name:
             self.set_output_dir(Path(name))

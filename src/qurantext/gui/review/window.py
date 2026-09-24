@@ -779,7 +779,11 @@ class ReviewWindow(QMainWindow):
         try:
             path = self.session.save()
         except (OSError, ValueError) as error:
-            QMessageBox.warning(self, t("review.save"), t("review.save_failed", details=str(error)))
+            QMessageBox.warning(
+                self,
+                plain_title(t("review.save")),
+                t("review.save_failed", details=str(error)),
+            )
             return False
         self._sync_state()
         self.saved.emit(path)

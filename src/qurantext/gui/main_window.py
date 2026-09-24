@@ -365,7 +365,7 @@ class MainWindow(QMainWindow):
         said = _Said("home.failed", {"details": message})
         self._ending = said
         self._list_a_half_done_job()
-        QMessageBox.warning(self, t("home.failed.title"), said.text())
+        QMessageBox.warning(self, plain_title(t("home.failed.title")), said.text())
 
     def _on_cancelled(self) -> None:
         self._remember_matched_output()

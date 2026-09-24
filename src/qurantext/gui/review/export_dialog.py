@@ -162,7 +162,7 @@ class ExportDialog(QDialog):
 
     def _choose_folder(self) -> None:
         chosen = QFileDialog.getExistingDirectory(
-            self, t("export.choose"), self._folder_field.text()
+            self, plain_title(t("export.choose")), self._folder_field.text()
         )
         if chosen:
             self._folder_field.setText(chosen)
