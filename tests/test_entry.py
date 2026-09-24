@@ -190,3 +190,21 @@ class TestDoctorRelease:
         seen = self._record(monkeypatch)
         assert entry.main(["--doctor"]) == 0
         assert seen == [False]
+
+    @pytest.mark.parametrize(
+        ("args", "closing"),
+        [
+            (["--doctor", "--release"], "Not ready for release: 1 problem(s) above."),
+            (["--doctor"], "Rendering works; Transcription cannot run yet: see above."),
+        ],
+    )
+    def test_the_closing_line_speaks_to_whoever_ran_it(
+        self, entry, monkeypatch, capsys, args, closing
+    ) -> None:
+        """The gate is told the build is unfit to ship; a person, what cannot run yet."""
+        from qurantext.config import preflight
+
+        failing = [preflight.CheckResult("Transcription", preflight.Status.FAIL, "no client")]
+        monkeypatch.setattr(preflight, "run_checks", lambda *, release=False: failing)
+        assert entry.main(args) == 1
+        assert closing in capsys.readouterr().out

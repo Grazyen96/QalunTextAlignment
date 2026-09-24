@@ -771,8 +771,20 @@ def run_checks(*, release: bool = False) -> list[CheckResult]:
     ]
 
 
-def format_report(results: list[CheckResult]) -> str:
-    """The checks as text, with the remedies for anything that needs one."""
+def _joined(names: list[str]) -> str:
+    """``A``, ``A and B``, ``A, B and C``."""
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+
+
+def format_report(results: list[CheckResult], *, release: bool = False) -> str:
+    """The checks as text, with the remedies for anything that needs one.
+
+    The closing line says what the failures mean for whoever reads it. A render
+    check failing means nothing renders. Anything else failing leaves rendering
+    working: under *release* (the build gate) that build is not fit to ship; in a
+    person's own ``--doctor`` it names what cannot run yet, since they are not
+    shipping anything and "not ready for release" would only puzzle them.
+    """
     marks = {Status.OK: "ok  ", Status.WARN: "note", Status.FAIL: "FAIL"}
     lines = [
         f"Qalun on {sys.platform}",
@@ -794,6 +806,9 @@ def format_report(results: list[CheckResult]) -> str:
         lines.append("Ready to render.")
     elif any(r.name not in _NOT_RENDERING for r in blocking):
         lines.append(f"Cannot render yet: {len(blocking)} problem(s) above must be fixed.")
-    else:
+    elif release:
         lines.append(f"Not ready for release: {len(blocking)} problem(s) above.")
+    else:
+        names = _joined([r.name for r in blocking])
+        lines.append(f"Rendering works; {names} cannot run yet: see above.")
     return "\n".join(lines)

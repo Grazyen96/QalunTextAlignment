@@ -134,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
         release = "--release" in args[1:]
         prepare_doctor_process(release=release)
         results = run_checks(release=release)
-        report = format_report(results)
+        report = format_report(results, release=release)
         print(report)
         saved = _save_report(report)
         if saved:
