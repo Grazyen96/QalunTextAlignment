@@ -56,6 +56,10 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "home.status.rendered": "Rendered",
         "home.status.changed_since_render": "Changed since render",
         "home.status.damaged": "Damaged",
+        "home.row_detail": "{mode} · {scope} · {status}",
+        # The name is isolated here too: an Arabic file name leading the line
+        # would otherwise lay it out right to left.
+        "home.running_row": "\u2068{name}\u2069 — {progress}",
         "home.show_in_folder": "Show in folder",
         "home.remove_from_list": "Remove from list",
         "home.empty": "Your jobs appear here once you start one.",
@@ -161,7 +165,9 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.minus": "−50 ms",
         "review.plus": "+50 ms",
         "review.no_selection": "Select a word to retime it",
-        "review.selected": "{word}  {span} s",
+        # The word is isolated here too: a Quran word leading the line would
+        # otherwise lay it out right to left and reverse the two times.
+        "review.selected": "\u2068{word}\u2069  {span} s",
         "review.gaps": {
             "one": "{count} stretch of speech has no word:",
             "other": "{count} stretches of speech have no word:",
@@ -213,7 +219,8 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
     },
     # Drafted for the first release; a native speaker must review every line
     # before it ships (spec §4). Keep the order and grouping of "en".
-    # \u2066…\u2069 isolates keep Latin and number runs left to right; they must be kept.
+    # \u2066…\u2069 isolates keep Latin and number runs left to right, and a leading
+    # \u200f (RLM) makes a line of only values read right to left; they must be kept.
     "ar": {
         "home.jobs": "مهامك",
         "home.refresh": "حدِّث",
@@ -232,6 +239,10 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "home.status.rendered": "تم إخراج الفيديو",
         "home.status.changed_since_render": "عُدِّلت بعد إخراج الفيديو",
         "home.status.damaged": "تالفة",
+        # Only values and marks: the RLM makes the line right to left, else it
+        # would be laid out left to right with the mode on the left.
+        "home.row_detail": "\u200f{mode} · {scope} · {status}",
+        "home.running_row": "\u200f{name} — {progress}",
         "home.show_in_folder": "اعرض في المجلد",
         "home.remove_from_list": "أزِل من القائمة",
         "home.empty": "تظهر مهامك هنا بعد أن تبدأ أول مهمة.",
@@ -337,7 +348,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.remove_none": "حدِّد صفًا لإزالته.",
         "review.play": "شغِّل",
         "review.pause": "أوقف مؤقتًا",
-        "review.rate": "{rate:g}×",
+        "review.rate": "\u2066{rate:g}×\u2069",
         "review.zoom": "التكبير",
         "review.snap": "اضبط على مؤشر التشغيل",
         "review.minus": "\u2066−50\u2069 م.ث",

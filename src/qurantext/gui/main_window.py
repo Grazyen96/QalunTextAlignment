@@ -255,9 +255,12 @@ class MainWindow(QMainWindow):
         self._remember_matched_output()
         if self._closing:
             return  # the person closed the window; a dialog now would bring it back
-        self._ending = t("home.failed", details=message)
+        # The worker's message may be an OS or library detail in English; the
+        # sentence around it is in the person's language.
+        said = t("home.failed", details=message)
+        self._ending = said
         self._list_a_half_done_job()
-        QMessageBox.warning(self, t("home.failed.title"), message)
+        QMessageBox.warning(self, t("home.failed.title"), said)
 
     def _on_cancelled(self) -> None:
         self._remember_matched_output()

@@ -854,7 +854,7 @@ def test_the_running_row_shows_during_the_job_and_goes_after(
     home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
 
     _spin_until(qt_app, lambda: any("40%" in text for text in _running_rows(home)))
-    assert _running_rows(home)[0].startswith("a.mp3")
+    assert _running_rows(home)[0].startswith("\u2068a.mp3\u2069")  # the name, isolated
     assert "40%" in home.new_job.status_label.text()
 
     release.set()
@@ -893,6 +893,7 @@ def test_cancel_says_so_in_the_status_line_without_a_dialog(
 
 def test_a_failure_says_what_went_wrong(qt_app, home, reviews, tmp_path, monkeypatch) -> None:
     from qurantext.gui import main_window as module
+    from qurantext.gui.i18n import t
 
     def fail(progress, cancel):
         raise RuntimeError("the recogniser is unreachable")
@@ -905,6 +906,10 @@ def test_a_failure_says_what_went_wrong(qt_app, home, reviews, tmp_path, monkeyp
 
     assert "the recogniser is unreachable" in home.new_job.status_label.text()
     assert warned and reviews == [] and _running_rows(home) == []
+    # The box frames the worker's words in a sentence of the window's language.
+    _parent, title, body = warned[0]
+    assert title == t("home.failed.title")
+    assert body == t("home.failed", details="the recogniser is unreachable")
 
 
 class _NoOpThread:

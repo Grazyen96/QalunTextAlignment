@@ -573,3 +573,10 @@ def test_a_remembered_range_is_clamped_to_the_surah(qt_app, prefs, store) -> Non
     spec = _panel(prefs, store).spec()
 
     assert (spec.surah_num, spec.from_ayah, spec.to_ayah) == (1, 5, 7)
+
+
+def test_an_arabic_file_name_does_not_turn_the_running_row_around(qt_app, prefs) -> None:
+    """Isolated, an Arabic name cannot make the English line right to left."""
+    panel = JobListPanel(prefs)
+    panel.set_running("تلاوة.m4a", "Starting…")
+    assert _running_text(panel) == "\u2068تلاوة.m4a\u2069 — Starting…"

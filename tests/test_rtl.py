@@ -1,0 +1,276 @@
+"""The Arabic window: laid out right to left, except where time runs.
+
+Every test here switches to Arabic itself, before building anything (a widget
+takes the application's direction when it is made); the autouse fixture in
+``conftest.py`` puts the next test back into English.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Iterator
+
+import pytest
+
+pytest.importorskip("PySide6", reason="the window needs Qt: pip install 'qurantext[gui]'")
+
+from PySide6.QtCore import QEvent, QSettings, Qt  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
+from PySide6.QtWidgets import (  # noqa: E402
+    QAbstractButton,
+    QApplication,
+    QComboBox,
+    QGroupBox,
+    QLabel,
+    QLineEdit,
+    QTableWidget,
+    QWidget,
+)
+
+from qurantext.gui import i18n  # noqa: E402
+from qurantext.gui.home.job_list import JobListPanel  # noqa: E402
+from qurantext.gui.home.new_job import NewJobPanel  # noqa: E402
+from qurantext.gui.language import apply_language  # noqa: E402
+from qurantext.gui.prefs import Prefs  # noqa: E402
+from qurantext.gui.review.player import FakePlayer  # noqa: E402
+from qurantext.jobs.project import CaptionCue, Project, save_project  # noqa: E402
+from tests.media_helpers import QURAN_FILE  # noqa: E402
+
+LTR = Qt.LayoutDirection.LeftToRight
+RTL = Qt.LayoutDirection.RightToLeft
+
+#: The first words of Al-Furqan 25:7, so the card's text is Arabic as a real one is.
+_AYAH_WORDS = ("وَقَالُوا", "مَالِ")
+
+
+@pytest.fixture(autouse=True)
+def _arabic(qt_app) -> Iterator[None]:
+    """Arabic for the whole test, and no window left behind for the next one."""
+    apply_language(QApplication.instance(), "ar")
+    yield
+    for widget in qt_app.topLevelWidgets():
+        widget.hide()
+        widget.deleteLater()
+    qt_app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+class _Now:
+    t = 0.0
+
+    def __call__(self) -> float:
+        return self.t
+
+
+def _prefs(tmp_path) -> Prefs:
+    return Prefs(QSettings(str(tmp_path / "prefs.ini"), QSettings.Format.IniFormat))
+
+
+def _recitation_project(tmp_path) -> Project:
+    cards = [
+        {
+            "surah_num": 25,
+            "from_ayah": 7,
+            "to_ayah": 7,
+            "full_text": " ".join(_AYAH_WORDS),
+            "confidence": 1.0,
+            "start_time": 0.0,
+            "end_time": 10.0,
+            "word_timings": [
+                {"word": _AYAH_WORDS[0], "start": 1.0, "end": 2.0},
+                {"word": _AYAH_WORDS[1], "start": 2.0, "end": 3.0},
+            ],
+        }
+    ]
+    matches = tmp_path / "m.json"
+    matches.write_text(
+        json.dumps({"matches": cards, "meta": {"mode": "recitation"}}), encoding="utf-8"
+    )
+    project = Project(audio=tmp_path / "missing.mp3", cards=cards, matches=matches)
+    save_project(project, tmp_path / "m.qalun.json")
+    return project
+
+
+@pytest.fixture()
+def review_window(qt_app, tmp_path):
+    from qurantext.gui.review.window import ReviewWindow
+
+    window = ReviewWindow(
+        _recitation_project(tmp_path), player=FakePlayer(duration=10.0, now=_Now())
+    )
+    window.resize(1100, 800)
+    return window
+
+
+@pytest.fixture()
+def lecture_review_window(qt_app, tmp_path):
+    from qurantext.gui.review.window import ReviewWindow
+
+    words = [{"word": "Hello", "start": 0.0, "end": 1.0}]
+    project = Project(
+        audio=tmp_path / "missing.mp3",
+        mode="lecture",
+        captions=[CaptionCue(0.0, 1.0, "Hello", words=words)],
+    )
+    window = ReviewWindow(project, player=FakePlayer(duration=4.0, now=_Now()))
+    window.resize(1100, 800)
+    return window
+
+
+def _texts(root: QWidget) -> Iterator[str]:
+    """Every word *root* shows a person: titles, labels, buttons, tips, items, headers."""
+    yield root.windowTitle()
+    for widget in [root, *root.findChildren(QWidget)]:
+        yield widget.toolTip()
+        if isinstance(widget, QLabel):
+            yield widget.text()
+        if isinstance(widget, QAbstractButton):
+            yield widget.text()
+        if isinstance(widget, QGroupBox):
+            yield widget.title()
+        if isinstance(widget, QLineEdit):
+            yield widget.placeholderText()
+        if isinstance(widget, QComboBox):
+            yield from (widget.itemText(i) for i in range(widget.count()))
+        if isinstance(widget, QTableWidget):
+            for i in range(widget.columnCount()):
+                header = widget.horizontalHeaderItem(i)
+                if header is not None:
+                    yield header.text()
+
+
+def test_time_widgets_keep_left_to_right_and_the_rest_mirrors(qt_app, review_window) -> None:
+    w = review_window
+    pinned = (
+        w.waveform,
+        w.strip,
+        w.zoom_slider,
+        w.frame_view,
+        w.time_label,
+        w.selection_bar.nudge_row,
+    )
+    for widget in pinned:
+        assert widget.layoutDirection() == LTR, widget
+    for widget in (w, w.segment_list, w.warnings, w.save_button):
+        assert widget.layoutDirection() == RTL, widget
+
+
+def test_arrow_keys_step_time_the_same_way_in_arabic(qt_app, review_window) -> None:
+    w = review_window
+    w.seek(5.0)
+    QTest.keyClick(w, Qt.Key.Key_Left)
+    assert w.player.position() < 5.0  # Left is earlier on a left-to-right time axis
+
+
+def test_the_minus_button_sits_left_of_plus(qt_app, review_window) -> None:
+    bar = review_window.selection_bar
+    # The whole window, not the bar alone: a child of a hidden window stays
+    # hidden, and the buttons' own row is only laid out once it shows.
+    review_window.show()
+    qt_app.processEvents()
+    assert bar.minus_button.x() < bar.plus_button.x()
+    assert bar.plus_button.x() < bar.snap_button.x()
+
+
+def test_segment_times_are_isolated_and_text_aligns_to_its_script(qt_app, review_window) -> None:
+    table = review_window.segment_list
+    time_text = table.item(0, 1).text()
+    assert time_text.startswith("\u2066") and time_text.endswith("\u2069")
+    alignment = table.item(0, 2).textAlignment()
+    assert alignment & Qt.AlignmentFlag.AlignAbsolute
+    assert alignment & Qt.AlignmentFlag.AlignRight  # Quran text is Arabic: its right edge
+
+
+def test_a_latin_caption_aligns_left(qt_app, lecture_review_window) -> None:
+    table = lecture_review_window.segment_list
+    assert table.item(0, 2).text() == "Hello"
+    alignment = table.item(0, 2).textAlignment()
+    assert alignment & Qt.AlignmentFlag.AlignAbsolute
+    assert alignment & Qt.AlignmentFlag.AlignLeft
+    assert not alignment & Qt.AlignmentFlag.AlignRight
+
+
+def test_the_job_list_mirrors(qt_app, tmp_path, no_default_job_dirs) -> None:
+    panel = JobListPanel(_prefs(tmp_path))
+    assert panel.list.layoutDirection() == RTL
+
+
+def test_more_options_points_the_way_arabic_reads(
+    qt_app, tmp_path, store, no_default_job_dirs
+) -> None:
+    panel = NewJobPanel(_prefs(tmp_path), quran_default=QURAN_FILE, db_path=store)
+    panel.more_button.setChecked(False)
+    assert panel.more_button.arrowType() == Qt.ArrowType.LeftArrow
+    panel.more_button.setChecked(True)
+    assert panel.more_button.arrowType() == Qt.ArrowType.DownArrow
+    panel.more_button.setChecked(False)
+    assert panel.more_button.arrowType() == Qt.ArrowType.LeftArrow
+
+
+def test_no_english_is_left_in_the_arabic_windows(
+    qt_app, tmp_path, no_default_job_dirs, review_window
+) -> None:
+    """Every word a person reads comes from the Arabic table (or is a name, a code, a number)."""
+    from qurantext.gui.main_window import MainWindow
+
+    english = {
+        text
+        for key, text in i18n.STRINGS["en"].items()
+        if isinstance(text, str) and "{" not in text and text != i18n.STRINGS["ar"][key]
+    }
+    main = MainWindow(prefs=_prefs(tmp_path))
+    for root in (main, review_window, review_window._make_export_dialog()):
+        shown = set(_texts(root))
+        assert not (shown & english), (root, sorted(shown & english))
+
+
+def test_a_job_row_isolates_each_part_of_its_detail_line(
+    qt_app, tmp_path, no_default_job_dirs
+) -> None:
+    """Mode, scope and status are each their own run, so "25:7–8" is not reordered."""
+    prefs = _prefs(tmp_path)
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    prefs.job_dirs = [jobs_dir]
+    card = {"surah_num": 25, "from_ayah": 7, "to_ayah": 8, "start_time": 0.0, "end_time": 5.0}
+    project = Project(audio=jobs_dir / "one.m4a", mode="recitation", cards=[card])
+    save_project(project, jobs_dir / "one_recitation.qalun.json")
+
+    panel = JobListPanel(prefs)
+    detail = panel.list.itemWidget(panel.list.item(0)).detail_label.text()
+    assert detail == i18n.t(
+        "home.row_detail",
+        mode=i18n.t("home.mode.recitation"),
+        scope="25:7\u20138",
+        status=i18n.t("home.status.needs_review"),
+    )
+    assert detail.count("\u2068") == 3
+
+
+def test_a_job_row_starts_from_the_right_whatever_its_name_is_written_in(
+    qt_app, tmp_path, no_default_job_dirs
+) -> None:
+    """A Latin job name lines up with its Arabic detail line, at the list's right edge."""
+    prefs = _prefs(tmp_path)
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    prefs.job_dirs = [jobs_dir]
+    project = Project(audio=jobs_dir / "lesson.m4a", mode="recitation", cards=[])
+    save_project(project, jobs_dir / "lesson_recitation.qalun.json")
+
+    panel = JobListPanel(prefs)
+    panel.set_running("recitation.m4a", i18n.t("home.progress.starting"))
+    rows = [panel.list.itemWidget(panel.list.item(i)) for i in range(2)]
+    for label in (rows[0].label, rows[1].name_label, rows[1].detail_label):
+        alignment = label.alignment()
+        assert alignment & Qt.AlignmentFlag.AlignAbsolute, label.text()
+        assert alignment & Qt.AlignmentFlag.AlignRight, label.text()
+
+
+def test_the_running_row_isolates_the_file_name(qt_app, tmp_path, no_default_job_dirs) -> None:
+    """A Latin file name first would otherwise lay the whole Arabic line out left to right."""
+    panel = JobListPanel(_prefs(tmp_path))
+    starting = i18n.t("home.progress.starting")
+    panel.set_running("recitation.m4a", starting)
+    text = panel.list.itemWidget(panel.list.item(0)).label.text()
+    assert text == i18n.t("home.running_row", name="recitation.m4a", progress=starting)
+    assert "\u2068recitation.m4a\u2069" in text

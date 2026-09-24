@@ -250,7 +250,10 @@ class ReviewWindow(QMainWindow):
 
         transport = QHBoxLayout()
         self.play_button = QPushButton(t("review.play"))
+        # The transport row mirrors (Play leads on the right in Arabic); the
+        # clock is a time field and reads left to right, as time does.
         self.time_label = QLabel(_clock(0.0))
+        self.time_label.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         self.rate_combo = QComboBox()
         for rate in RATES:
             self.rate_combo.addItem(t("review.rate", rate=rate), rate)

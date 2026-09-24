@@ -6,6 +6,7 @@ import re
 import string
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -239,11 +240,30 @@ def test_arabic_plural_keys_have_every_category() -> None:
 
 def test_arabic_differs_from_english_where_it_should() -> None:
     """A copied English string is a missed translation; only codes and symbols may match."""
-    same_ok = {"format.srt", "format.vtt", "format.ass", "review.rate", "app.title"}
+    same_ok = {"format.srt", "format.vtt", "format.ass", "app.title"}
     for key, text in i18n.STRINGS["en"].items():
         if key in same_ok or isinstance(text, dict):
             continue
         assert i18n.STRINGS["ar"][key] != text, key
+
+
+def test_every_arabic_line_reads_right_to_left() -> None:
+    """Outside its values, an Arabic line starts with an Arabic letter (or an RLM).
+
+    Qt lays a line out in the direction of its first strong letter and skips
+    isolated values, so a line of only values and marks ("{mode} · {scope}")
+    is laid out left to right and read in reverse. A code written in Latin
+    ("SRT") and a line that is one isolated run ("1.5×") are fine as they are.
+    """
+    strong = {"L", "R", "AL"}
+    for key, value in i18n.STRINGS["ar"].items():
+        for variant in value.values() if isinstance(value, dict) else [value]:
+            outside = re.sub("[\u2066\u2067\u2068][^\u2069]*\u2069", "", variant)
+            outside = re.sub(r"\{[^}]*\}", "", outside)
+            kinds = [unicodedata.bidirectional(c) for c in outside]
+            first = next((k for k in kinds if k in strong), None)
+            latin_code = "R" not in kinds and "AL" not in kinds and first == "L"
+            assert first in ("R", "AL") or latin_code or not outside.strip(), key
 
 
 def test_arabic_uses_western_digits_only() -> None:

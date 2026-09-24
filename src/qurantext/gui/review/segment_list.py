@@ -14,6 +14,7 @@ characters, which are always looked up from the store at render time.
 
 from __future__ import annotations
 
+import unicodedata
 from typing import Any
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
@@ -45,7 +46,6 @@ class SegmentList(QTableWidget):
 
     def __init__(self, session: ReviewSession, parent: QWidget | None = None) -> None:
         super().__init__(0, 4, parent)
-        self.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         self.setHorizontalHeaderLabels(
             [t("segments.ref"), t("segments.time"), t("segments.text"), t("segments.retimed")]
         )
@@ -126,7 +126,7 @@ class SegmentList(QTableWidget):
         span = ltr(time_span(start, end))
         self._set_item(row, _COLUMN_TIME, span, kind, index, editable=False)
         text_item = self._set_item(row, _COLUMN_TEXT, text, kind, index, editable=text_editable)
-        text_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        text_item.setTextAlignment(_text_alignment(text))
         if not text_editable:
             text_item.setToolTip(t("segments.locked"))
         self._set_item(row, _COLUMN_RETIMED, retimed, kind, index, editable=False)
@@ -224,6 +224,30 @@ class SegmentList(QTableWidget):
         if kind != CAPTION:
             return
         self._session.set_caption_text(index, item.text())
+
+
+def _starts_right_to_left(text: str) -> bool:
+    """Whether *text*'s first strong letter is a right-to-left one (False when it has none)."""
+    for character in text:
+        kind = unicodedata.bidirectional(character)
+        if kind == "L":
+            return False
+        if kind in ("R", "AL"):
+            return True
+    return False
+
+
+def _text_alignment(text: str) -> Qt.AlignmentFlag:
+    """The edge a line of *text* starts from, whatever the window's direction.
+
+    Quran text is Arabic and reads from the right in an English window too; a
+    Latin lecture caption reads from the left in an Arabic one. AlignAbsolute
+    stops Qt from mirroring the edge with the layout.
+    """
+    edge = (
+        Qt.AlignmentFlag.AlignRight if _starts_right_to_left(text) else Qt.AlignmentFlag.AlignLeft
+    )
+    return edge | Qt.AlignmentFlag.AlignAbsolute | Qt.AlignmentFlag.AlignVCenter
 
 
 def _card_text(card: dict[str, Any]) -> str:

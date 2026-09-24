@@ -213,7 +213,7 @@ class NewJobPanel(QWidget):
         self.more_button.setText(t("home.more"))
         self.more_button.setCheckable(True)
         self.more_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.more_button.setArrowType(Qt.ArrowType.RightArrow)
+        self.more_button.setArrowType(self._more_arrow(open_=False))
         self.more_button.toggled.connect(self._toggle_more_options)
         layout.addWidget(self.more_button)
 
@@ -535,7 +535,19 @@ class NewJobPanel(QWidget):
 
     def _set_more_options_visibility(self, open_: bool) -> None:
         self.more_group.setVisible(open_)
-        self.more_button.setArrowType(Qt.ArrowType.DownArrow if open_ else Qt.ArrowType.RightArrow)
+        self.more_button.setArrowType(self._more_arrow(open_=open_))
+
+    def _more_arrow(self, *, open_: bool) -> Qt.ArrowType:
+        """Down when the options show; else toward where the line reads on, as a disclosure does.
+
+        In Arabic a line reads on to the left, so a right arrow there would
+        point back at the label instead of past it.
+        """
+        if open_:
+            return Qt.ArrowType.DownArrow
+        if self.layoutDirection() == Qt.LayoutDirection.RightToLeft:
+            return Qt.ArrowType.LeftArrow
+        return Qt.ArrowType.RightArrow
 
     def _current_subtitles(self) -> str:
         for value, button in self.subtitle_buttons.items():

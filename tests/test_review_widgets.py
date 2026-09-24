@@ -529,7 +529,9 @@ def test_the_selection_bar_shows_the_span_as_one_value(qt_app) -> None:
     bar.show_word(
         TimelineWord(ref=WordRef(CARD, 0, 0), text="ٱلۡحَمۡدُ", start=1.5, end=2.25, edited=False)
     )
-    assert bar.label.text() == "ٱلۡحَمۡدُ  1.50 → 2.25 s"
+    # The Quran word is isolated even in English: leading the line unisolated,
+    # it would lay the line out right to left and draw "2.25 → 1.50".
+    assert bar.label.text() == "\u2068ٱلۡحَمۡدُ\u2069  1.50 → 2.25 s"
 
 
 def test_the_segment_list_shows_a_row_s_times_as_one_span(qt_app) -> None:

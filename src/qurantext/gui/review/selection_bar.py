@@ -7,7 +7,7 @@ other edit.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 from qurantext.gui.i18n import t, time_span
@@ -36,8 +36,15 @@ class SelectionBar(QWidget):
         self.plus_button = QPushButton(t("review.plus"))
         self.snap_button = QPushButton(t("review.snap"))
         row.addWidget(self.label, 1)
+        # The buttons move time, and time runs left to right in every language:
+        # "earlier" stays on the left of "later". The label outside mirrors.
+        self.nudge_row = QWidget()
+        self.nudge_row.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        nudges = QHBoxLayout(self.nudge_row)
+        nudges.setContentsMargins(0, 0, 0, 0)
         for button in (self.minus_button, self.plus_button, self.snap_button):
-            row.addWidget(button)
+            nudges.addWidget(button)
+        row.addWidget(self.nudge_row)
         self.minus_button.clicked.connect(lambda: self.nudge_requested.emit(-NUDGE_S))
         self.plus_button.clicked.connect(lambda: self.nudge_requested.emit(NUDGE_S))
         self.snap_button.clicked.connect(self.snap_requested)
