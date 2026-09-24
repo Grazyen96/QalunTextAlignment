@@ -17,7 +17,8 @@ pyinstaller packaging/qalun.spec --noconfirm
 Verified on Linux: the bundle runs with no Python, no virtual environment and no
 repository present, builds the Quran store into the platform data directory,
 renders a video using the font from inside the bundle, and writes sidecar
-subtitles with the Arabic intact. About 223 MB.
+subtitles with the Arabic intact. About 275 MB, before FFmpeg and FriBiDi are
+copied in (see Size).
 
 The frozen app can diagnose itself, which matters because a packaged app that
 will not render is exactly when there is no Python to run anything else with:
@@ -74,6 +75,21 @@ Copying it there is enough: `require_binary` looks beside the running executable
 before it looks at `PATH`, so a packaged app uses the FFmpeg it shipped with and
 a user who has installed nothing still gets a video. Verified by rendering with
 an empty `PATH`. `--doctor` reports which one was found and its version.
+
+## Size
+
+Playback (Qt Multimedia, from PySide6-Addons) is the one thing the review editor
+added to the bundle. Measured on Linux, 24 Sep 2026, PyInstaller 6.22, PySide6 6.11.2,
+FFmpeg and FriBiDi not included (they are the same before and after):
+
+| | folder | zip |
+|---|---|---|
+| before (Multimedia excluded) | 249 MB | 144 MB |
+| after | 275 MB | 164 MB |
+| difference | 26 MB | 20 MB |
+
+Windows and macOS: record from the first release-workflow run after this change
+(the zip sizes on the run's summary page) — see docs/release-checklist.md.
 
 ## Not done here
 

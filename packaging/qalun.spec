@@ -59,7 +59,16 @@ a = Analysis(
     pathex=[str(ROOT / "src")],
     binaries=binaries,
     datas=datas,
-    hiddenimports=["qurantext.gui.app", "qurantext.gui.main_window"],
+    hiddenimports=[
+        "qurantext.gui.app", "qurantext.gui.main_window",
+        # The review window's player. It is imported inside a function, behind a
+        # try, so that a machine without it only loses playback; named here so a
+        # release never depends on the analysis following that lazy import. Its
+        # PyInstaller hook brings the rest: plugins/multimedia (the FFmpeg media
+        # plugin), the libav*/libsw* it links from PySide6's Qt/lib, and
+        # translations/qtmultimedia_*.qm. QtCore's hook brings qtbase_*.qm.
+        "PySide6.QtMultimedia",
+    ],
     excludes=[
         # Nothing here is used, and each drags in a lot.
         "tkinter", "matplotlib", "scipy", "pandas", "pytest",
