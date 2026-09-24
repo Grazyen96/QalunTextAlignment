@@ -12,12 +12,24 @@ $env:PATH = "$env:SystemRoot\system32;$env:SystemRoot"
 # and PowerShell neither waits for a windowed executable nor sets $LASTEXITCODE
 # for one. The call returned instantly with no exit code at all, and "no exit
 # code" compared unequal to zero, so a build whose app had just printed "Ready
-# to render." failed its own gate. -Wait -PassThru is the form that waits and
-# hands back the real code.
+# to render." failed its own gate. -PassThru hands back the process to wait on
+# and read the real code from.
+#
+# Bounded: -Wait would wait for ever, and a hang (starting Qt, asking for audio
+# outputs) would hold the job for its 6 hours. After 180 s the app is killed and
+# the gate fails.
+$limitMs = 180000
 $out = "doctor-out.txt"
 $err = "doctor-err.txt"
 $proc = Start-Process -FilePath "dist\qalun\qalun.exe" -ArgumentList "--doctor","--release" `
-  -Wait -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
+  -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
+# Reading the handle now is what keeps ExitCode readable after the process ends.
+$null = $proc.Handle
+$finished = $proc.WaitForExit($limitMs)
+if (-not $finished) {
+  $proc.Kill($true)
+  $proc.WaitForExit()
+}
 $code = $proc.ExitCode
 
 foreach ($file in @($out, $err)) {
@@ -32,5 +44,10 @@ if (Test-Path $report) {
   Get-Content $report
 }
 
-if ($code -ne 0) { throw "The built app cannot render yet (exit code $code; see above)." }
+if (-not $finished) {
+  throw "The gate failed: the built app's doctor did not finish within $($limitMs / 1000) s."
+}
+if ($code -ne 0) {
+  throw "The gate failed: the built app's doctor reported a problem (exit code $code; see above)."
+}
 Write-Host "The built app reports it can render."
