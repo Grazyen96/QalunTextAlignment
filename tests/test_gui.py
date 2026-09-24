@@ -393,7 +393,7 @@ def test_a_changed_rematch_keeps_a_backup_and_says_so(tmp_path, monkeypatch) -> 
     assert load_project(backup).cards[0]["start_time"] == 0.25
     kept = t("job.progress.kept", name=backup.name)
     assert kept == f"Kept your earlier corrections in {backup.name}"
-    assert any(e.stage == "detect" and e.message == kept for e in events)
+    assert any(e.stage == "detect" and e.message == kept and e.translated for e in events)
 
 
 def test_an_unreadable_earlier_project_is_always_kept(tmp_path, monkeypatch) -> None:
@@ -862,6 +862,53 @@ def test_the_running_row_shows_during_the_job_and_goes_after(
     _spin_until(qt_app, lambda: home._jobs.active == 0)
     assert _running_rows(home) == []
     assert home.job_list.list.count() == 2, "the earlier job, and the new one from disk"
+
+
+def test_the_status_line_says_each_stage_in_the_window_s_words(qt_app, home) -> None:
+    """The pipeline's log lines are English and never shown; the window names the stage."""
+    from qurantext.gui import main_window as module
+
+    status = home.new_job.status_label
+    home._on_progress(ProgressEvent("detect", "[1/3] Parsing Quran text: /x/quran.txt"))
+    assert status.text() == module.t("job.stage.detect")
+    home._on_progress(ProgressEvent("render", "Building ASS subtitles..."))
+    assert status.text() == module.t("job.stage.render")
+    home._on_progress(ProgressEvent("export", "Writing subtitle files..."))
+    assert status.text() == module.t("job.stage.export")
+    home._on_progress(ProgressEvent("tuning", "Something new..."))
+    assert status.text() == module.t("job.stage.working")
+    # With a fraction the line is the table's percentage sentence, as before.
+    home._on_progress(ProgressEvent("render", "  Segments 4/10", fraction=0.4))
+    assert status.text() == module.t("home.progress.rendering", percent=40)
+
+
+def test_the_window_s_own_progress_sentences_are_shown_as_they_are(qt_app, home) -> None:
+    """``gui/jobs.py`` marks what it already said in the window's language, and it stays up."""
+    from qurantext.gui import main_window as module
+
+    status = home.new_job.status_label
+    aligning = module.t("job.progress.aligning")
+    home._on_progress(ProgressEvent("detect", aligning, translated=True))
+    assert status.text() == aligning
+    home._on_progress(ProgressEvent("detect", "[2/3] Aligning 12 ayat..."))
+    assert status.text() == aligning, "a log line of the same stage does not replace it"
+
+
+def test_every_stage_the_pipeline_reports_has_its_own_sentence() -> None:
+    """A stage added to the pipeline without a sentence would only ever say "Working…"."""
+    import re
+
+    from qurantext.gui import main_window as module
+    from qurantext.jobs import export as export_job
+    from qurantext.jobs import render as render_job
+
+    source = Path(module.__file__).resolve().parents[1]
+    reported = {export_job.STAGE, render_job.STAGE}
+    for path in source.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        reported |= set(re.findall(r"""report\(\s*progress,\s*["']([a-z_]+)["']""", text))
+    assert reported, "the scan found no stage"
+    assert reported <= module._KNOWN_STAGES, sorted(reported - module._KNOWN_STAGES)
 
 
 def test_cancel_says_so_in_the_status_line_without_a_dialog(

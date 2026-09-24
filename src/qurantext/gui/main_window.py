@@ -50,6 +50,9 @@ __all__ = ["MainWindow"]
 _JOB_LIST_WIDTH = 300
 #: The window's size on first opening; a language switch keeps whatever it is now.
 _WINDOW_SIZE = (1024, 680)
+#: The stages the pipeline reports, each said in the window's words as
+#: ``job.stage.<stage>``; any other stage says ``job.stage.working``.
+_KNOWN_STAGES = frozenset({"detect", "match", "render", "export"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +99,8 @@ class MainWindow(QMainWindow):
         #: The job running now, and how it ended (said once the form stops running).
         self._running_spec: JobSpec | None = None
         self._ending = ""
+        #: The stage the running job last reported, so its sentence is said once.
+        self._stage: str | None = None
         #: One review window per open project, keyed by its file: reopening the
         #: same project raises what is already there instead of a second window.
         #: A window leaves this once it closes, so the next review reads the file afresh.
@@ -200,6 +205,7 @@ class MainWindow(QMainWindow):
 
         self._running_spec = spec
         self._ending = ""
+        self._stage = None
         starting = t("home.progress.starting")
         self.new_job.set_running(True)
         self.new_job.set_progress(None, starting)
@@ -222,9 +228,21 @@ class MainWindow(QMainWindow):
             self.new_job.show_status(t("home.progress.stopping"))
 
     def _on_progress(self, event: ProgressEvent) -> None:
+        """Say how the job is going, in the window's words only.
+
+        The pipeline's messages are English log lines, so none is shown. An
+        event without a fraction says its stage's sentence when the stage
+        begins, or, when it carries a sentence this window already said in its
+        language (``translated``), that sentence as it is. An event with a
+        fraction shows the stage's percentage.
+        """
+        new_stage = event.stage != self._stage
+        self._stage = event.stage
         if event.fraction is None:
-            if event.message.strip():
+            if event.translated and event.message.strip():
                 self.new_job.show_status(event.message.strip())
+            elif new_stage:
+                self.new_job.show_status(_stage_text(event.stage))
             return
         text = _progress_text(event)
         self.new_job.set_progress(event.fraction, text)
@@ -420,6 +438,11 @@ def _raise(window: QWidget) -> None:
     window.show()
     window.raise_()
     window.activateWindow()
+
+
+def _stage_text(stage: str) -> str:
+    """What the status line says while *stage* runs and reports no fraction."""
+    return t(f"job.stage.{stage}" if stage in _KNOWN_STAGES else "job.stage.working")
 
 
 def _progress_text(event: ProgressEvent) -> str:

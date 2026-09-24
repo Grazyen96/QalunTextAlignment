@@ -44,6 +44,11 @@ class ProgressEvent:
     eta_seconds: float | None = None
     #: True for a stage's final event, so a reporter can close out its line.
     done: bool = False
+    #: True when *message* is already in the window's language: the GUI's own
+    #: sentences (``gui/jobs.py``). A window shows only these as they are; any
+    #: other message is the pipeline's English log line, and the window names
+    #: the stage in its own words instead. The terminal prints both alike.
+    translated: bool = False
 
 
 ProgressCallback = Callable[[ProgressEvent], None]
@@ -87,6 +92,7 @@ def report(
     fraction: float | None = None,
     eta_seconds: float | None = None,
     done: bool = False,
+    translated: bool = False,
 ) -> None:
     """Send one event to *progress*, if a caller supplied one.
 
@@ -103,6 +109,7 @@ def report(
             fraction=fraction,
             eta_seconds=eta_seconds,
             done=done,
+            translated=translated,
         )
     )
 

@@ -223,6 +223,31 @@ def test_no_english_is_left_in_the_arabic_windows(
         assert not (shown & english), (root, sorted(shown & english))
 
 
+@pytest.mark.parametrize(
+    ("stage", "message"),
+    [
+        ("render", "Building ASS subtitles..."),
+        ("detect", "[1/3] Parsing Quran text: /home/k/quran.txt"),
+        ("export", "Writing subtitle files..."),
+        ("match", "Scanning 12,345 transcript words for Quran citations..."),
+    ],
+)
+def test_the_pipeline_s_english_never_reaches_the_arabic_status_line(
+    qt_app, tmp_path, no_default_job_dirs, stage, message
+) -> None:
+    """Spec §4: every word a person reads comes from the table, progress included."""
+    import re
+
+    from qurantext.gui.main_window import MainWindow
+    from qurantext.utils.progress import ProgressEvent
+
+    main = MainWindow(prefs=_prefs(tmp_path))
+    main._on_progress(ProgressEvent(stage=stage, message=message, fraction=None))
+    text = main.new_job.status_label.text()
+    assert text == i18n.t(f"job.stage.{stage}")
+    assert not re.search("[A-Za-z]", text), text
+
+
 def test_a_job_row_isolates_each_part_of_its_detail_line(
     qt_app, tmp_path, no_default_job_dirs
 ) -> None:
