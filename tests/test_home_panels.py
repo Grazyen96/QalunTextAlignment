@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 
 import pytest
+
+pytest.importorskip("PySide6", reason="the window needs Qt: pip install 'qurantext[gui]'")
 from PySide6.QtCore import QMimeData, QPointF, QSettings, Qt, QUrl
 from PySide6.QtGui import QDropEvent
 
