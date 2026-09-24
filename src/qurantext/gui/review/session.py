@@ -451,8 +451,8 @@ class ReviewSession:
         state the drag began in makes the result depend only on where the
         pointer is, so dragging back puts everything back. Like a nudge, it
         goes through :meth:`retime`, so an edge the neighbour shared stays
-        shared while it is dragged, unless *keep_joined* is False (an Alt-drag
-        in the word strip), which detaches it.
+        shared while it is dragged, unless *keep_joined* is False (a Ctrl or
+        Alt drag in the word strip), which detaches it.
         """
         self._restore_gesture_start()
         self.retime(ref, start=start, end=end, keep_joined=keep_joined)

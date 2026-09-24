@@ -144,12 +144,14 @@ def test_dragging_an_edge_retimes_through_the_session_as_one_undo(qt_app) -> Non
     assert not session.can_undo
 
 
-def test_alt_dragging_a_shared_edge_opens_a_gap(qt_app) -> None:
+@pytest.mark.parametrize(
+    "modifier", [Qt.KeyboardModifier.ControlModifier, Qt.KeyboardModifier.AltModifier]
+)
+def test_dragging_a_joined_edge_with_ctrl_or_alt_leaves_the_neighbour(qt_app, modifier) -> None:
     session, strip = _strip(qt_app)
-    alt = Qt.KeyboardModifier.AltModifier
-    QTest.mousePress(strip, Qt.MouseButton.LeftButton, alt, QPoint(200, 17))
+    QTest.mousePress(strip, Qt.MouseButton.LeftButton, modifier, QPoint(200, 17))
     QTest.mouseMove(strip, QPoint(180, 17))
-    QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, alt, QPoint(180, 17))
+    QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, modifier, QPoint(180, 17))
     words = session.words()
     assert words[0].end == pytest.approx(1.8, abs=0.02)
     assert words[1].start == 2.0, "detached: the next word stays where it was"

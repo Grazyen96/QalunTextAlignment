@@ -5,9 +5,9 @@ boundary between two words grabs the earlier word's end (retiming a shared
 edge moves both words at once); a press near any other edge grabs that edge
 alone; a plain press inside a word selects it and asks to seek there; a
 shift-press inside a word starts a ripple drag that pushes every later word
-by the same amount the pointer travels. An edge dragged with Alt held moves
-alone: a shared edge detaches from its neighbour, so a gap can be opened
-between two joined words. Every move of a drag is applied from
+by the same amount the pointer travels. An edge dragged with Ctrl (or Alt)
+held moves alone: a shared edge detaches from its neighbour, so a gap can be
+opened between two joined words. Every move of a drag is applied from
 the state the drag began in, so dragging back undoes what the way out did.
 The strip never writes a timing itself — every drag goes through
 :class:`ReviewSession`, which is the one place the rules about what an edit
@@ -44,6 +44,10 @@ _EDITED_DOT = QColor(239, 159, 39)
 #: fraction of a pixel wide and the label would not be legible anyway.
 _MIN_TEXT_WIDTH_PX = 12.0
 
+#: Held while grabbing a joined edge: the edge leaves its neighbour behind.
+#: Ctrl works on every desktop; Alt is taken for moving windows on some Linux ones.
+_DETACH = Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier
+
 
 @dataclass(slots=True)
 class _EdgeDrag:
@@ -52,7 +56,7 @@ class _EdgeDrag:
     ref: WordRef
     edge: str  # "start" | "end"
     revision_before: int
-    #: False for an Alt-drag: the edge leaves a neighbour it touched behind.
+    #: False for a Ctrl (or Alt) drag: the edge leaves a neighbour it touched behind.
     keep_joined: bool = True
 
 
@@ -194,7 +198,7 @@ class WordStrip(QWidget):
             self._last_edge = kind
             revision_before = self._session.revision
             self._session.begin_gesture()
-            detach = bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
+            detach = bool(event.modifiers() & _DETACH)
             self._drag = _EdgeDrag(ref, kind, revision_before, keep_joined=not detach)
             self.setCursor(Qt.CursorShape.SizeHorCursor)
             return
