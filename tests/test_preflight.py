@@ -290,6 +290,15 @@ class TestWhatThePackagedAppMustDo:
         assert "Windows Media Foundation" in result.detail
         assert preflight._playback(release=False).status == Status.WARN
 
+    def test_a_release_that_loaded_a_second_backend_too_fails(self, qt_app, monkeypatch) -> None:
+        """Two loaded means the one asked for was tried and something else took over."""
+        monkeypatch.setenv("QT_MEDIA_BACKEND", "ffmpeg")
+        monkeypatch.setattr(preflight, "_load_test_recording", lambda: (True, "0.50 s"))
+        monkeypatch.setattr(
+            preflight, "_media_backends_loaded", lambda: ["FFmpeg", "Windows Media Foundation"]
+        )
+        assert preflight._playback(release=True).status == Status.FAIL
+
     def test_a_release_that_cannot_tell_its_backend_fails(self, qt_app, monkeypatch) -> None:
         monkeypatch.setenv("QT_MEDIA_BACKEND", "ffmpeg")
         monkeypatch.setattr(preflight, "_load_test_recording", lambda: (True, "0.50 s"))

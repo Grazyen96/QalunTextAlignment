@@ -571,7 +571,8 @@ def _playback(release: bool) -> CheckResult:
     on_disk = f"plugins on disk: {', '.join(_media_plugins()) or 'none named'}"
     if forced:
         wanted = _MEDIA_BACKENDS.get(forced.lower(), forced)
-        if not in_use or wanted not in in_use:
+        # Only it: a second backend loaded means Qt tried it and fell back.
+        if in_use != [wanted]:
             got = ", ".join(in_use) if in_use else "cannot tell which"
             return CheckResult(
                 name,
