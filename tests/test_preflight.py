@@ -350,11 +350,11 @@ class TestWhatThePackagedAppMustDo:
         assert "InvalidMedia" in result.detail
         assert result.remedy
 
-    def test_the_arabic_window_translation_is_found(self) -> None:
+    def test_the_arabic_window_translation_is_found(self, qt_app) -> None:
         assert preflight._qt_translation(release=True).status == Status.OK
 
     def test_a_missing_translation_says_what_the_arabic_window_loses(
-        self, monkeypatch, tmp_path
+        self, qt_app, monkeypatch, tmp_path
     ) -> None:
         monkeypatch.setattr(preflight, "_qt_translations_folder", lambda: str(tmp_path))
         assert preflight._qt_translation(release=False).status == Status.WARN

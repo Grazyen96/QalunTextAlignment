@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("PySide6", reason="the window needs Qt: pip install 'qurantext[gui]'")
+
 from qurantext.gui.prefs import Prefs
 
 
