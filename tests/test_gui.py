@@ -1151,6 +1151,74 @@ def test_a_job_that_fails_during_the_close_shows_no_dialog(
     _spin_until(qt_app, lambda: quits)
 
 
+def test_a_job_finishing_after_close_still_lists_its_folder_and_unhides_it(
+    qt_app, home, prefs, reviews, tmp_path, monkeypatch
+) -> None:
+    """The window is going, but the next launch must still list the job it ran."""
+    import threading
+
+    from qurantext.gui import main_window as module
+    from qurantext.jobs.project import load_project
+
+    out = tmp_path / "out"
+    project_path = _saved_job(out, "a")
+    prefs.hide_job(project_path)
+    release = threading.Event()
+    finish = _blocked_until(
+        release,
+        finish=lambda spec: module._Finished(
+            load_project(_saved_job(Path(spec.output_dir), Path(spec.audio).stem))
+        ),
+    )
+    monkeypatch.setattr(module, "_match_then_render", finish)
+    monkeypatch.setattr(module.QMessageBox, "warning", lambda *a: pytest.fail("no dialog"))
+    quits = _record_quits(monkeypatch)
+
+    home.show()
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=out))
+    _spin_until(qt_app, lambda: home._cancel is not None)
+    home.close()
+    release.set()
+    _spin_until(qt_app, lambda: quits)
+
+    assert out.resolve() in prefs.job_dirs
+    assert project_path.resolve() not in prefs.hidden_jobs
+    assert home._reviews == {} and reviews == [], "still no review under a closed window"
+
+
+@pytest.mark.parametrize("ending", ["fails", "is cancelled"])
+def test_a_render_right_away_stopping_after_close_still_lists_its_folder(
+    qt_app, home, prefs, reviews, tmp_path, monkeypatch, ending
+) -> None:
+    """Matching saved the project before the render stopped; closing must not lose its folder."""
+    import threading
+
+    from qurantext.gui import main_window as module
+
+    release = threading.Event()
+    _fake_matching(monkeypatch)
+
+    def render(project, *, progress=None, cancel=None):
+        assert release.wait(timeout=10), "the test forgot to release the render"
+        if ending == "fails":
+            raise RuntimeError("the encoder gave up")
+        raise JobCancelled("render")
+
+    monkeypatch.setattr(module, "run_render", render)
+    monkeypatch.setattr(module.QMessageBox, "warning", lambda *a: pytest.fail("no dialog"))
+    quits = _record_quits(monkeypatch)
+    custom = tmp_path / "elsewhere"
+
+    home.show()
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=custom, render_right_away=True))
+    _spin_until(qt_app, lambda: home._cancel is not None)
+    home.close()
+    release.set()
+    _spin_until(qt_app, lambda: quits)
+
+    assert custom.resolve() in prefs.job_dirs
+
+
 @pytest.fixture()
 def real_reviews(qt_app, prefs, monkeypatch):
     """The main window's real review window, with a fake player; closed after the test."""

@@ -176,13 +176,14 @@ class MainWindow(QMainWindow):
             self.job_list.set_running(Path(self._running_spec.audio).name, text, event.fraction)
 
     def _on_finished(self, finished: _Finished) -> None:
-        if self._closing:
-            return  # no review, and no list, under a window that is going away
-        self._remember_output_dir()
         project = finished.project
         project_path = project.path or project_path_for(project.matches)
+        # State, not UI: the list must show this job next launch, closed window or not.
+        self._remember_output_dir()
         # Running a job again is asking for it: one removed from the list comes back.
         self._prefs.unhide_job(project_path)
+        if self._closing:
+            return  # no review, and no list, under a window that is going away
         self.job_list.set_running("", None)
         self.job_list.refresh()
 
@@ -195,6 +196,7 @@ class MainWindow(QMainWindow):
         self._ending = problem or t("home.finished.matched", count=len(project.cards))
 
     def _on_failed(self, message: str) -> None:
+        self._remember_matched_output()
         if self._closing:
             return  # the person closed the window; a dialog now would bring it back
         self._ending = t("home.failed", details=message)
@@ -202,6 +204,7 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(self, t("home.failed.title"), message)
 
     def _on_cancelled(self) -> None:
+        self._remember_matched_output()
         if self._closing:
             return
         self._ending = t("home.cancelled")
@@ -213,12 +216,21 @@ class MainWindow(QMainWindow):
         if spec is not None and spec.output_dir:
             self._prefs.job_dirs = [*self._prefs.job_dirs, Path(spec.output_dir)]
 
+    def _remember_matched_output(self) -> None:
+        """A render right away that stopped may follow a matching that saved its project.
+
+        State, not UI, so it runs even once the window has closed: the next
+        launch must still list that project.
+        """
+        spec = self._running_spec
+        if spec is not None and spec.render_right_away:
+            self._remember_output_dir()
+
     def _list_a_half_done_job(self) -> None:
-        """A render right away that stopped may follow a matching that saved its project."""
+        """Show the project a stopped render right away's matching saved (see above)."""
         spec = self._running_spec
         if spec is None or not spec.render_right_away:
             return
-        self._remember_output_dir()
         self.job_list.set_running("", None)
         self.job_list.refresh()
 
