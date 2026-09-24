@@ -28,6 +28,7 @@ an instruction.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -310,6 +311,65 @@ def _frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
+#: The loader's words when a library a module links is not on the system.
+_MISSING_LIBRARY = re.compile(r"(lib[\w.+-]+?\.so[\w.]*): cannot open shared object file")
+
+#: The Debian/Ubuntu package for the system libraries Qt links that no build may
+#: carry (EGL, GL: they belong to the machine's graphics driver) or that a build
+#: made on a bare machine left out. Anything else is named for a package search.
+_LIBRARY_PACKAGES = {
+    "libEGL.so.1": "libegl1",
+    "libGL.so.1": "libgl1",
+    "libOpenGL.so.0": "libopengl0",
+    "libpulse.so.0": "libpulse0",
+    "libxkbcommon.so.0": "libxkbcommon0",
+    "libxkbcommon-x11.so.0": "libxkbcommon-x11-0",
+    "libxcb-cursor.so.0": "libxcb-cursor0",
+    "libfontconfig.so.1": "libfontconfig1",
+    "libdbus-1.so.3": "libdbus-1-3",
+}
+
+
+def _missing_system_library(error: BaseException) -> str | None:
+    """The library an import failed for, when the failure is a missing system library.
+
+    Qt's modules link libraries a Linux system provides (EGL through the graphics
+    driver, PulseAudio for sound). When one is absent the import fails with its
+    file name, and that name is the whole diagnosis, so the checks report it
+    instead of blaming the build or the Python install.
+    """
+    match = _MISSING_LIBRARY.search(str(error))
+    return match.group(1) if match else None
+
+
+def _system_library_remedy(library: str) -> str:
+    package = _LIBRARY_PACKAGES.get(library)
+    where = (
+        f"on Debian or Ubuntu: sudo apt install {package}"
+        if package
+        else f"search your distribution's packages for {library}"
+    )
+    return (
+        f"This machine is missing {library}, a system library Qt needs. "
+        f"Install the package that provides it ({where}), then run this again."
+    )
+
+
+def _qt_import_failure(name: str, release: bool, what: str, error: ImportError) -> CheckResult:
+    """A Qt import that failed: a missing system library named as such, else Qt absent."""
+    library = _missing_system_library(error)
+    if library is not None:
+        return CheckResult(
+            name,
+            _strict(release),
+            f"{what}: the system library {library} is missing",
+            _system_library_remedy(library),
+        )
+    return CheckResult(
+        name, _strict(release), f"Qt is not installed ({error})", "pip install 'qurantext[gui]'"
+    )
+
+
 def _strict(release: bool) -> str:
     """What a missing capability is: a note in a checkout, a failure in a release."""
     return Status.FAIL if release else Status.WARN
@@ -552,6 +612,15 @@ def _playback(release: bool) -> CheckResult:
     try:
         loaded, what = _load_test_recording()
     except ImportError as error:
+        library = _missing_system_library(error)
+        if library is not None:
+            return CheckResult(
+                name,
+                _strict(release),
+                f"Qt Multimedia will not import: the system library {library} is missing; "
+                f"{without}",
+                _system_library_remedy(library),
+            )
         return CheckResult(
             name, _strict(release), f"Qt Multimedia will not import ({error}); {without}", remedy
         )
@@ -622,12 +691,7 @@ def _qt_translation(release: bool) -> CheckResult:
 
         folder = _qt_translations_folder()
     except ImportError as error:
-        return CheckResult(
-            name,
-            _strict(release),
-            f"Qt is not installed ({error})",
-            "pip install 'qurantext[gui]'",
-        )
+        return _qt_import_failure(name, release, "Qt will not import", error)
     if QTranslator().load("qtbase_ar", folder):
         return CheckResult(name, Status.OK, f"qtbase_ar in {folder}")
     if _frozen():
@@ -692,12 +756,7 @@ def _arabic_ui_font(release: bool) -> CheckResult:
     try:
         families = arabic_ui_families()
     except ImportError as error:
-        return CheckResult(
-            name,
-            _strict(release),
-            f"Qt is not installed ({error})",
-            "pip install 'qurantext[gui]'",
-        )
+        return _qt_import_failure(name, release, "Qt's drawing library will not load", error)
     except CannotMeasureFonts as error:
         if _frozen():
             remedy = (

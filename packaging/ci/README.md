@@ -14,7 +14,7 @@ should not mean editing the build file three times in a row.
 | --- | --- | --- |
 | `collect-windows.ps1` | Windows | fetch FFmpeg and FriBiDi into `vendor/` |
 | `collect-macos.sh` | macOS | the same, and make FFmpeg self-contained |
-| `collect-linux.sh` | Linux | the same |
+| `collect-linux.sh` | Linux | the same, and install the libraries Qt links (sound, graphics, xcb) on the bare runner, so PyInstaller bundles the ones it may and the gate can load Qt |
 | `stage.sh` | all | copy `vendor/` in beside the built executable |
 | `check.sh` / `check.ps1` | all | run the built app's own `--doctor --release`, with PATH stripped: render, transcribe, play audio (through FFmpeg), Qt's Arabic translation, an Arabic interface font. Killed and failed after 180 s. On Linux, also fail when the bundle has no `libxcb-cursor.so.0`, which the doctor, drawing offscreen, cannot notice |
 | `package.sh <artifact>` | all | zip the app into `out/<artifact>.zip`: `ditto` on macOS, `zip -ry` on Linux so symlinks stay symlinks, Python's `make_archive` on Windows |

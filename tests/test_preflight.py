@@ -425,3 +425,47 @@ class TestWhatThePackagedAppMustDo:
         pytest.importorskip("PySide6")
         assert preflight._platform_plugin_found("offscreen")
         assert not preflight._platform_plugin_found("no-such-platform")
+
+
+class TestMissingSystemLibrary:
+    """Qt links libraries a Linux system provides (EGL, PulseAudio). When one is missing,
+    the import fails with the library's name, and that name is the whole diagnosis: the
+    report must say which one and where it comes from, not blame packaging or pip."""
+
+    _EGL = ImportError("libEGL.so.1: cannot open shared object file: No such file or directory")
+    _PULSE = ImportError("libpulse.so.0: cannot open shared object file: No such file or directory")
+
+    def test_the_missing_library_is_read_from_the_error(self) -> None:
+        assert preflight._missing_system_library(self._EGL) == "libEGL.so.1"
+        assert preflight._missing_system_library(ImportError("No module named 'PySide6'")) is None
+
+    @pytest.mark.parametrize("frozen", [True, False])
+    def test_playback_names_the_library_and_its_package(self, monkeypatch, frozen) -> None:
+        monkeypatch.setattr(preflight, "_frozen", lambda: frozen)
+
+        def missing():
+            raise self._PULSE
+
+        monkeypatch.setattr(preflight, "_load_test_recording", missing)
+        result = preflight._playback(release=True)
+        assert result.status == Status.FAIL
+        assert "libpulse.so.0" in result.detail
+        assert "libpulse0" in result.remedy
+        assert "not bundled" not in result.remedy and "pip install" not in result.remedy
+
+    def test_the_font_check_names_the_graphics_library(self, monkeypatch) -> None:
+        monkeypatch.setattr(preflight, "_frozen", lambda: True)
+
+        def missing():
+            raise self._EGL
+
+        monkeypatch.setattr(preflight, "arabic_ui_families", missing)
+        result = preflight._arabic_ui_font(release=True)
+        assert result.status == Status.FAIL
+        assert "libEGL.so.1" in result.detail
+        assert "libegl1" in result.remedy
+        assert "Qt is not installed" not in result.detail
+
+    def test_an_unknown_library_still_says_what_to_look_for(self) -> None:
+        remedy = preflight._system_library_remedy("libfoo.so.3")
+        assert "libfoo.so.3" in remedy

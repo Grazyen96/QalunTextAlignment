@@ -3,11 +3,27 @@
 set -euo pipefail
 
 sudo apt-get update -qq
-# libxcb-cursor0 is not for vendor/: Qt 6.5 and later's xcb platform plugin
-# links libxcb-cursor.so.0, and PyInstaller can only bundle it if the build
-# machine has it. Without it the window cannot start on an X11 desktop that
-# lacks the package (Wayland sessions are unaffected).
-sudo apt-get install -y --no-install-recommends libfribidi0 libxcb-cursor0
+# The runner is a bare machine, with no sound or graphics stack, and PyInstaller
+# bundles only the libraries it finds on the build machine. So the libraries
+# Qt links are installed here, none of them for vendor/:
+#
+#   libpulse0          Qt Multimedia's sound output. Without it on the runner the
+#                      bundle has no libpulse and playback cannot load at all (the
+#                      first real CI build failed on exactly this).
+#   libxcb-cursor0,    Qt's xcb platform plugin and its helpers; Qt 6.5 and later
+#   libxcb-*,          need libxcb-cursor, and a desktop without these packages
+#   libxkbcommon*      cannot open the window on X11. Bundled once present here.
+#   libegl1, libgl1,   never bundled (PyInstaller leaves the graphics driver's
+#   libfontconfig1,    libraries to the system, which every desktop has), but the
+#   libdbus-1-3        gate cannot load Qt's drawing library on the runner without
+#                      them.
+sudo apt-get install -y --no-install-recommends \
+  libfribidi0 \
+  libpulse0 \
+  libegl1 libgl1 libfontconfig1 libdbus-1-3 \
+  libxkbcommon0 libxkbcommon-x11-0 \
+  libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+  libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xkb1
 mkdir -p vendor
 
 fetch() {
