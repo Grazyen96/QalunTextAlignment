@@ -125,3 +125,85 @@ def test_qt_own_buttons_follow_the_language(qt_app) -> None:
     apply_language(QApplication.instance(), "en")
     box = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
     assert box.button(QDialogButtonBox.StandardButton.Cancel).text().replace("&", "") == "Cancel"
+
+
+@pytest.fixture()
+def _forget_the_fallback(qt_app):
+    """Undo whatever fallback a test registers, so later tests see the system's fonts only."""
+    from PySide6.QtGui import QFont, QFontDatabase
+
+    from qurantext.gui import language
+
+    app_family = QApplication.font().family()
+    before = QFont.substitutes(app_family)
+    language._fallback = None
+    yield
+    if language._fallback is not None:
+        QFontDatabase.removeApplicationFont(language._fallback[0])
+        language._fallback = None
+    QFont.removeSubstitutions(app_family)
+    for family in before:
+        QFont.insertSubstitution(app_family, family)
+
+
+def test_without_a_system_arabic_font_the_bundled_one_is_the_fallback(
+    qt_app, monkeypatch, _forget_the_fallback
+) -> None:
+    from PySide6.QtGui import QFont, QFontDatabase
+
+    from qurantext.gui import language
+
+    monkeypatch.setattr(language, "arabic_ui_families", lambda: [])
+    family = language.ensure_arabic_font(QApplication.instance())
+    assert family  # registered from DEFAULT_FONT_PATH
+    assert family in QFontDatabase.families()
+    # Qt keeps substitutes in lower case.
+    substitutes = QFont.substitutes(QApplication.font().family())
+    assert family.lower() in substitutes
+    # Every language switch calls it again: the font is registered and substituted once.
+    assert language.ensure_arabic_font(QApplication.instance()) == family
+    assert QFont.substitutes(QApplication.font().family()) == substitutes
+    assert QFontDatabase.families().count(family) == 1
+
+
+def test_with_a_system_arabic_font_nothing_is_registered(
+    qt_app, monkeypatch, _forget_the_fallback
+) -> None:
+    from PySide6.QtGui import QFont
+
+    from qurantext.gui import language
+
+    before = QFont.substitutes(QApplication.font().family())
+    monkeypatch.setattr(language, "arabic_ui_families", lambda: ["Noto Sans Arabic"])
+    assert language.ensure_arabic_font(QApplication.instance()) is None
+    assert QFont.substitutes(QApplication.font().family()) == before
+
+
+def test_when_fonts_cannot_be_measured_nothing_is_registered_on_a_guess(
+    qt_app, monkeypatch, _forget_the_fallback
+) -> None:
+    from PySide6.QtGui import QFont
+
+    from qurantext.config.preflight import CannotMeasureFonts
+    from qurantext.gui import language
+
+    def cannot() -> list[str]:
+        raise CannotMeasureFonts("no display")
+
+    before = QFont.substitutes(QApplication.font().family())
+    monkeypatch.setattr(language, "arabic_ui_families", cannot)
+    assert language.ensure_arabic_font(QApplication.instance()) is None
+    assert QFont.substitutes(QApplication.font().family()) == before
+
+
+@pytest.mark.parametrize("code", ["en", "ar"])
+def test_every_language_makes_sure_arabic_letters_can_be_drawn(
+    qt_app, monkeypatch, _forget_the_fallback, code
+) -> None:
+    """Arabic job names show in the English window too."""
+    from qurantext.gui import language
+
+    asked: list[object] = []
+    monkeypatch.setattr(language, "ensure_arabic_font", asked.append)
+    apply_language(QApplication.instance(), code)
+    assert asked == [QApplication.instance()]

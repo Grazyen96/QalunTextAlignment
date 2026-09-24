@@ -26,6 +26,7 @@ from qurantext.gui.jobs import JobSpec, run_matching, run_render  # noqa: E402
 from qurantext.gui.prefs import Prefs  # noqa: E402
 from qurantext.gui.worker import JobWorker, run_in_thread  # noqa: E402
 from qurantext.utils.progress import CancelToken, JobCancelled, ProgressEvent  # noqa: E402
+from tests.qt_helpers import blocking_list_jobs, wait_until_listed  # noqa: E402
 
 QURAN_FILE = DEFAULT_QURAN_PATH
 _FFMPEG = shutil.which("ffmpeg")
@@ -175,6 +176,22 @@ def test_run_in_thread_runs_off_the_calling_thread(qt_app) -> None:
 
     assert ran_on and ran_on[0] != threading.get_ident()
     assert finished == ["value"]
+
+
+def test_a_worker_outlives_its_thread_until_the_caller_drops_it(qt_app) -> None:
+    """Deleting the worker as its thread ends deadlocked the UI thread (see ``run_in_thread``).
+
+    It must still exist once the thread has finished and the posted deletes
+    have run, so it is the caller, on the UI thread, that lets it go.
+    """
+    import shiboken6
+    from PySide6.QtCore import QEvent
+
+    thread, worker = run_in_thread(lambda *, progress, cancel: None, CancelToken())
+    assert thread.wait(10_000), "the worker thread did not finish"
+    QCoreApplication.processEvents()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert shiboken6.isValid(worker)
 
 
 # --- the whole job ------------------------------------------------------------
@@ -684,8 +701,10 @@ def home(qt_app, prefs):
     from qurantext.gui.main_window import MainWindow
 
     window = MainWindow(prefs=prefs)
+    wait_until_listed(window.job_list)
     yield window
     window._jobs.stop()  # cancel and join anything a test left running
+    window.job_list.stop_reading()
     window.deleteLater()
     qt_app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
@@ -706,6 +725,7 @@ def _run_start(qt_app, window, spec: JobSpec) -> None:
     window.new_job.start_requested.emit(spec)
     _spin_until(qt_app, lambda: window._cancel is None)
     _spin_until(qt_app, lambda: window._jobs.active == 0)
+    wait_until_listed(window.job_list)  # the refresh the job's end asked for
     qt_app.processEvents()
 
 
@@ -771,6 +791,31 @@ def test_start_runs_matching_and_opens_its_review(
     assert calls == [spec]
     assert [r.project.path for r in reviews] == [tmp_path / "jobs" / "a_recitation.qalun.json"]
     assert home.new_job.status_label.text() == "Matched 1 card. The review is open."
+
+
+def test_a_finished_job_keeps_its_row_until_the_list_is_read(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    """The job's own row only comes with the read; until it lands the list must not
+    lose the job, or (after a first job) say there are none."""
+    from qurantext.gui.i18n import t
+
+    _fake_matching(monkeypatch)
+    release, _calls = blocking_list_jobs(monkeypatch)
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    _spin_until(qt_app, lambda: home._cancel is None)
+    _spin_until(qt_app, lambda: home._jobs.active == 0)
+    qt_app.processEvents()
+
+    panel = home.job_list
+    assert panel.reading
+    assert len(_running_rows(home)) == 1 and panel.list.count() == 1
+    assert panel.empty_label.isHidden() and panel.empty_label.text() != t("home.empty")
+
+    release.set()
+    wait_until_listed(panel)
+    assert _running_rows(home) == []
+    assert panel.list.count() == 1, "the job's own row took its place"
 
 
 def test_a_finished_job_whose_review_cannot_open_says_why(
@@ -851,6 +896,7 @@ def test_the_running_row_shows_during_the_job_and_goes_after(
     _fake_matching(monkeypatch, before=report_then_wait)
     _saved_job(tmp_path / "jobs", "earlier")
     home.job_list.refresh()
+    wait_until_listed(home.job_list)
     home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
 
     _spin_until(qt_app, lambda: any("40%" in text for text in _running_rows(home)))
@@ -860,6 +906,7 @@ def test_the_running_row_shows_during_the_job_and_goes_after(
     release.set()
     _spin_until(qt_app, lambda: home._cancel is None)
     _spin_until(qt_app, lambda: home._jobs.active == 0)
+    wait_until_listed(home.job_list)
     assert _running_rows(home) == []
     assert home.job_list.list.count() == 2, "the earlier job, and the new one from disk"
 
@@ -997,6 +1044,7 @@ def test_double_clicking_a_job_opens_its_review(qt_app, prefs, reviews, tmp_path
 
     project_path = _saved_job(tmp_path / "jobs")
     window = MainWindow(prefs=prefs)
+    wait_until_listed(window.job_list)
 
     window.job_list.list.itemActivated.emit(window.job_list.list.item(0))
 
@@ -1010,6 +1058,7 @@ def test_double_clicking_a_damaged_job_shows_its_error(qt_app, prefs, reviews, t
     (tmp_path / "jobs" / "broken.qalun.json").write_text("{not json", encoding="utf-8")
     window = MainWindow(prefs=prefs)
     window.show()
+    wait_until_listed(window.job_list)
 
     item = window.job_list.list.item(0)
     window.job_list.list.itemActivated.emit(item)
@@ -1032,15 +1081,18 @@ def test_show_in_folder_reveals_the_project(qt_app, home, monkeypatch, tmp_path)
 def test_a_review_that_saves_or_closes_refreshes_the_list(qt_app, home, reviews, tmp_path) -> None:
     first = _saved_job(tmp_path / "jobs", "first")
     home.job_list.refresh()
+    wait_until_listed(home.job_list)
     home._open_review(first)
     assert home.job_list.list.count() == 1
 
     _saved_job(tmp_path / "jobs", "second")
     reviews[0].saved.emit(first)
+    wait_until_listed(home.job_list)
     assert home.job_list.list.count() == 2
 
     _saved_job(tmp_path / "jobs", "third")
     reviews[0].close()
+    wait_until_listed(home.job_list)
     assert home.job_list.list.count() == 3
 
 
@@ -1412,6 +1464,7 @@ def test_rerunning_a_removed_job_lists_it_again(
     project_path = _saved_job(tmp_path / "jobs", "a")
     home.job_list.refresh()
     home.job_list.remove_from_list(project_path)
+    wait_until_listed(home.job_list)
     assert home.job_list.list.count() == 0
 
     _run_start(qt_app, home, _spec(tmp_path, output_dir=tmp_path / "jobs"))
@@ -1687,3 +1740,65 @@ def test_a_status_said_from_raw_text_is_cleared_by_a_language_switch(qt_app, hom
 
     assert home.new_job.status_label.text() == ""
     assert home.new_job.status_label.isHidden()
+
+
+def test_a_refusal_made_before_the_first_progress_event_stays_up(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    """The job's first event is not a change of stage: nothing had been reported yet."""
+    import threading
+
+    from qurantext.gui import main_window as module
+
+    release = threading.Event()
+    project_path = _saved_job(tmp_path / "jobs", "a")
+
+    def wait_for_release(progress, cancel):
+        assert release.wait(timeout=10), "the test forgot to release the job"
+
+    _fake_matching(monkeypatch, before=wait_for_release)
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    _spin_until(qt_app, lambda: home._cancel is not None)
+    status = home.new_job.status_label
+    try:
+        home._open_review(project_path)
+        refused = module.t("home.busy_matching")
+        assert status.text() == refused
+
+        home._on_progress(ProgressEvent("detect", "Scanning..."))
+        assert status.text() == refused
+
+        home._on_progress(ProgressEvent("render", "Building ASS subtitles..."))
+        assert status.text() == module.t("job.stage.render"), "a later stage still replaces it"
+    finally:
+        release.set()
+        _spin_until(qt_app, lambda: home._cancel is None)
+        _spin_until(qt_app, lambda: home._jobs.active == 0)
+
+
+def test_the_running_row_names_the_stage_before_any_percentage(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    """Not "Starting…" for the whole of a stage that reports no fraction."""
+    import threading
+
+    from qurantext.gui import main_window as module
+
+    release = threading.Event()
+
+    def wait_for_release(progress, cancel):
+        assert release.wait(timeout=10), "the test forgot to release the job"
+
+    _fake_matching(monkeypatch, before=wait_for_release)
+    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
+    _spin_until(qt_app, lambda: home._cancel is not None)
+    try:
+        home._on_progress(ProgressEvent("detect", "Scanning...", fraction=None))
+        assert module.t("job.stage.detect") in _running_rows(home)[0]
+
+        home._on_progress(ProgressEvent("detect", "  word 10/40", fraction=0.25))
+        assert "25%" in _running_rows(home)[0], "a percentage still shows as before"
+    finally:
+        release.set()
+        _spin_until(qt_app, lambda: home._cancel is None)
+        _spin_until(qt_app, lambda: home._jobs.active == 0)

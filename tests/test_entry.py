@@ -18,6 +18,16 @@ import pytest
 ENTRY = Path(__file__).resolve().parents[1] / "packaging" / "entry.py"
 
 
+#: What the doctor sets in its own process before Qt reads it; put back after every test.
+_DOCTOR_VARIABLES = ("QT_MEDIA_BACKEND", "QT_LOGGING_RULES")
+
+
+@pytest.fixture(autouse=True)
+def _doctor_variables_restored(monkeypatch) -> None:
+    for name in _DOCTOR_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture(scope="module")
 def entry():
     spec = importlib.util.spec_from_file_location("qalun_entry", ENTRY)
@@ -104,3 +114,79 @@ def test_every_text_command_can_reach_a_console() -> None:
         branch = body.index(flag)
         following = body[branch : branch + 400]
         assert "_attach_console()" in following, f"{flag} would print nowhere on Windows"
+
+
+class TestDoctorRelease:
+    """The CI gate runs ``--doctor --release``: what a developer is told, a release fails on."""
+
+    @staticmethod
+    def _record(monkeypatch) -> list[bool]:
+        from qurantext.config import preflight
+
+        seen: list[bool] = []
+
+        def fake(*, release: bool = False):
+            seen.append(release)
+            return [preflight.CheckResult("A", preflight.Status.OK, "fine")]
+
+        monkeypatch.setattr(preflight, "run_checks", fake)
+        return seen
+
+    @pytest.fixture(autouse=True)
+    def _no_saved_report(self, entry, monkeypatch) -> None:
+        monkeypatch.setattr(entry, "_save_report", lambda report: None)
+
+    @staticmethod
+    def _record_environment(monkeypatch) -> list[dict[str, str | None]]:
+        """What the checks would see of the two variables Qt reads once."""
+        import os
+
+        from qurantext.config import preflight
+
+        seen: list[dict[str, str | None]] = []
+
+        def fake(*, release: bool = False):
+            seen.append({name: os.environ.get(name) for name in _DOCTOR_VARIABLES})
+            return [preflight.CheckResult("A", preflight.Status.OK, "fine")]
+
+        monkeypatch.setattr(preflight, "run_checks", fake)
+        return seen
+
+    def test_release_asks_qt_for_the_ffmpeg_backend(self, entry, monkeypatch, capsys) -> None:
+        """Windows and macOS ship a native backend too; the gate must load through FFmpeg."""
+        seen = self._record_environment(monkeypatch)
+        assert entry.main(["--doctor", "--release"]) == 0
+        assert seen[0]["QT_MEDIA_BACKEND"] == "ffmpeg"
+
+    def test_plain_doctor_leaves_the_backend_to_qt(self, entry, monkeypatch, capsys) -> None:
+        seen = self._record_environment(monkeypatch)
+        assert entry.main(["--doctor"]) == 0
+        assert seen[0]["QT_MEDIA_BACKEND"] is None
+
+    def test_a_backend_someone_chose_is_theirs(self, entry, monkeypatch, capsys) -> None:
+        monkeypatch.setenv("QT_MEDIA_BACKEND", "windows")
+        seen = self._record_environment(monkeypatch)
+        entry.main(["--doctor", "--release"])
+        assert seen[0]["QT_MEDIA_BACKEND"] == "windows"
+
+    def test_the_ffmpeg_plugin_keeps_quiet_in_the_report(self, entry, monkeypatch, capsys) -> None:
+        """It prints the test recording's stream details to stderr, into the report a user sends."""
+        seen = self._record_environment(monkeypatch)
+        entry.main(["--doctor"])
+        assert seen[0]["QT_LOGGING_RULES"] == "qt.multimedia.ffmpeg*=false"
+
+    def test_logging_rules_already_set_are_kept(self, entry, monkeypatch, capsys) -> None:
+        monkeypatch.setenv("QT_LOGGING_RULES", "qt.qpa.*=true")
+        seen = self._record_environment(monkeypatch)
+        entry.main(["--doctor"])
+        assert seen[0]["QT_LOGGING_RULES"] == "qt.qpa.*=true;qt.multimedia.ffmpeg*=false"
+
+    def test_release_is_strict(self, entry, monkeypatch, capsys) -> None:
+        seen = self._record(monkeypatch)
+        assert entry.main(["--doctor", "--release"]) == 0
+        assert seen == [True]
+
+    def test_plain_doctor_is_not(self, entry, monkeypatch, capsys) -> None:
+        seen = self._record(monkeypatch)
+        assert entry.main(["--doctor"]) == 0
+        assert seen == [False]

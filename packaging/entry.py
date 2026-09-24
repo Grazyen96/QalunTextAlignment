@@ -20,6 +20,9 @@ USAGE = """Qalun — turn Arabic audio into a subtitled video.
 
   qalun                 open the window
   qalun --doctor        check this machine can render, and say what to fix
+  qalun --doctor --release
+                        the same, failing on anything a release must have
+                        (playback, Qt's Arabic translation, an Arabic font)
   qalun --cli ...       run a command-line subcommand, e.g. --cli preview --help
   qalun --version       print the version
 """
@@ -117,10 +120,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args and args[0] == "--doctor":
-        from qurantext.config.preflight import Status, format_report, run_checks
+        from qurantext.config.preflight import (
+            Status,
+            format_report,
+            prepare_doctor_process,
+            run_checks,
+        )
 
         _attach_console()
-        results = run_checks()
+        # --release is the build gate: what a checkout is only told about, a
+        # release must have. Its environment is set before the checks import Qt,
+        # which reads it once.
+        release = "--release" in args[1:]
+        prepare_doctor_process(release=release)
+        results = run_checks(release=release)
         report = format_report(results)
         print(report)
         saved = _save_report(report)

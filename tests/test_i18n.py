@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import re
 import string
 import subprocess
@@ -299,3 +300,113 @@ def test_a_path_is_one_left_to_right_run_whose_folders_keep_their_order() -> Non
         assert i18n.path_text("/a") == f"{_LRI}/{lrm}a{_PDI}", "the same in every language"
     finally:
         set_language("en")
+
+
+_ISOLATES = "\u2066\u2067\u2068\u2069"
+_LRM, _RLM = "\u200e", "\u200f"
+
+
+def test_plain_title_drops_isolates_and_keeps_order_marks() -> None:
+    text = f"مراجعة — {_FSI}furquanTra7-11{_PDI}"
+    out = i18n.plain_title(text)
+    assert not any(c in out for c in _ISOLATES)
+    assert "furquanTra7-11" in out
+    assert out == f"مراجعة — {_LRM}furquanTra7-11{_LRM}"
+
+
+@pytest.mark.parametrize(
+    ("text", "plain"),
+    [
+        (f"{_FSI}تلاوة{_PDI} *", f"{_RLM}تلاوة{_RLM} *"),  # an Arabic name: RLM on both sides
+        (f"a {_FSI}12.5{_PDI} b", f"a {_LRM}12.5{_LRM} b"),  # no strong letter: left to right
+        (f"{_LRI}{_FSI}تلاوة{_PDI}{_PDI}", f"{_LRM}تلاوة{_LRM}"),  # the outer isolate decides
+        (f"\u2067abc{_PDI}", f"{_RLM}abc{_RLM}"),  # RLI is right to left whatever it holds
+        (f"{_FSI}12 تلاوة{_PDI}", f"{_RLM}12 تلاوة{_RLM}"),  # FSI: the first strong letter
+        (f"{_FSI}{_LRI}abc{_PDI} تلاوة{_PDI}", f"{_RLM}abc تلاوة{_RLM}"),  # skipping nested runs
+        (f"{_RLM}a{_LRM}b", f"{_RLM}a{_LRM}b"),  # order marks already there stay
+        (f"a{_PDI}b{_FSI}c", f"ab{_LRM}c{_LRM}"),  # a stray PDI goes; an open one ends at the end
+        (f"مراجعة — {_FSI}25_7-11{_PDI}", f"مراجعة — {_LRM}25_7-11{_LRM}"),  # digits first
+        (f"مراجعة — {_FSI}2024-05-01 lecture{_PDI}", f"مراجعة — {_LRM}2024-05-01 lecture{_LRM}"),
+        ("Qalun", "Qalun"),
+    ],
+)
+def test_plain_title_marks_each_run_by_its_direction(text, plain) -> None:
+    assert i18n.plain_title(text) == plain
+
+
+@pytest.mark.parametrize(
+    ("name", "parts"),
+    [
+        ("25_7-11", ["25", "7", "11"]),
+        ("2024-05-01 lecture", ["2024", "05", "01", "lecture"]),
+        ("furquanTra7-11", ["furquanTra", "7", "11"]),
+    ],
+)
+def test_a_name_that_starts_with_digits_keeps_its_order_in_an_arabic_title(
+    qt_app, name, parts
+) -> None:
+    """A mark only after the name let Arabic before it turn its leading digits into
+    Arabic numbers (UAX #9 W2), so "25_7-11" drew as "11-7_25"; one before it too
+    makes them follow a left-to-right letter, and the name reads as typed."""
+    from tests.bidi_helpers import left_to_right
+
+    title = i18n.plain_title(f"مراجعة — {_FSI}{name}{_PDI} *")
+    assert name in title
+    drawn = left_to_right(title, ["*", *parts, "مراجعة"], rtl=True)
+    assert drawn == ["*", *parts, "مراجعة"]
+
+
+#: Qt's static dialogs that put their second argument in a native title bar.
+_TITLED_STATICS = {
+    "QMessageBox": {"about", "critical", "information", "question", "warning"},
+    "QFileDialog": {
+        "getExistingDirectory",
+        "getExistingDirectoryUrl",
+        "getOpenFileName",
+        "getOpenFileNames",
+        "getOpenFileUrl",
+        "getOpenFileUrls",
+        "getSaveFileName",
+        "getSaveFileUrl",
+    },
+}
+
+
+def _native_titles() -> list[tuple[str, int, str, ast.expr | None]]:
+    """(file, line, call, title argument) for every call that sets a native title."""
+    found = []
+    for path in GUI_SOURCE.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            attr, owner = node.func.attr, node.func.value
+            if attr == "setWindowTitle":
+                title = node.args[0] if node.args else None
+            elif isinstance(owner, ast.Name) and attr in _TITLED_STATICS.get(owner.id, ()):
+                title = node.args[1] if len(node.args) > 1 else None
+                attr = f"{owner.id}.{attr}"
+            else:
+                continue
+            found.append((path.name, node.lineno, attr, title))
+    return found
+
+
+def _is_plain_title(node: ast.expr | None) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "plain_title"
+    )
+
+
+def test_every_window_title_goes_through_plain_title() -> None:
+    """A title set without it would show its isolate controls as boxes on some title bars:
+    a window's own, a message box's and a file dialog's caption alike."""
+    calls = _native_titles()
+    kinds = {call for _, _, call, _ in calls}
+    assert "setWindowTitle" in kinds, "the scan found no window titles at all"
+    assert "QMessageBox.warning" in kinds, "the scan found no message box titles"
+    assert any(k.startswith("QFileDialog.") for k in kinds), "the scan found no file dialogs"
+    bare = [(name, line, call) for name, line, call, title in calls if not _is_plain_title(title)]
+    assert bare == []

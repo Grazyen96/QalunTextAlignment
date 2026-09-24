@@ -38,6 +38,7 @@ from qurantext.gui.prefs import Prefs  # noqa: E402
 from qurantext.gui.review.player import FakePlayer  # noqa: E402
 from qurantext.jobs.project import CaptionCue, Project, save_project  # noqa: E402
 from tests.media_helpers import QURAN_FILE  # noqa: E402
+from tests.qt_helpers import wait_until_listed  # noqa: E402
 
 LTR = Qt.LayoutDirection.LeftToRight
 RTL = Qt.LayoutDirection.RightToLeft
@@ -266,7 +267,7 @@ def test_no_english_is_left_in_the_arabic_windows(
     main = MainWindow(prefs=prefs)
     main.resize(1024, 680)
     main.show()
-    qt_app.processEvents()
+    wait_until_listed(main.job_list)
     main.job_list.set_running("recitation.m4a", i18n.t("home.progress.starting"))
     main.new_job.set_running(True)
     main._on_progress(ProgressEvent("render", "Building ASS subtitles..."))
@@ -387,6 +388,7 @@ def test_a_job_row_isolates_each_part_of_its_detail_line(
     save_project(project, jobs_dir / "one_recitation.qalun.json")
 
     panel = JobListPanel(prefs)
+    wait_until_listed(panel)
     detail = panel.list.itemWidget(panel.list.item(0)).detail_label.text()
     assert detail == i18n.t(
         "home.row_detail",
@@ -409,6 +411,7 @@ def test_a_job_row_starts_from_the_right_whatever_its_name_is_written_in(
     save_project(project, jobs_dir / "lesson_recitation.qalun.json")
 
     panel = JobListPanel(prefs)
+    wait_until_listed(panel)
     panel.set_running("recitation.m4a", i18n.t("home.progress.starting"))
     rows = [panel.list.itemWidget(panel.list.item(i)) for i in range(2)]
     for label in (rows[0].label, rows[1].name_label, rows[1].detail_label):
@@ -446,6 +449,7 @@ def test_a_job_detail_line_reads_mode_scope_status_from_the_right(
     save_project(project, jobs_dir / "one_recitation.qalun.json")
 
     panel = JobListPanel(prefs)
+    wait_until_listed(panel)
     line = panel.list.itemWidget(panel.list.item(0)).detail_label.text()
     mode, status = i18n.t("home.mode.recitation"), i18n.t("home.status.needs_review")
     # From the left: the status, then 25:7–11 left to right, then the mode at the right edge.
@@ -499,3 +503,12 @@ def test_the_rate_reads_number_then_times_sign(qt_app) -> None:
     from tests.bidi_helpers import left_to_right
 
     assert left_to_right(i18n.t("review.rate", rate=1.5), ["×", "1.5"], rtl=True) == ["1.5", "×"]
+
+
+def test_the_arabic_review_title_keeps_the_name_in_place_without_isolates(
+    qt_app, review_window
+) -> None:
+    """Some title bars draw isolate controls as boxes; an LRM keeps the Latin name in place."""
+    title = review_window.windowTitle()
+    assert not any(c in title for c in "\u2066\u2067\u2068\u2069")
+    assert title == "مراجعة — \u200emissing\u200e"

@@ -6,6 +6,10 @@ or press *Run workflow* in the Actions tab, and download the zips. Nobody needs
 Python installed: not the people who use the app, and not the person releasing
 it. What follows is for building by hand.
 
+Before tagging a release, work through
+[docs/release-checklist.md](../docs/release-checklist.md): what has to be checked by
+hand, on real machines, because CI cannot.
+
 Builds the desktop app as a self-contained bundle. `qalun.spec` is shared by all
 three platforms; what differs is the wrapper around the result and the signing.
 
@@ -17,7 +21,8 @@ pyinstaller packaging/qalun.spec --noconfirm
 Verified on Linux: the bundle runs with no Python, no virtual environment and no
 repository present, builds the Quran store into the platform data directory,
 renders a video using the font from inside the bundle, and writes sidecar
-subtitles with the Arabic intact. About 223 MB.
+subtitles with the Arabic intact. About 275 MB, before FFmpeg and FriBiDi are
+copied in (see Size).
 
 The frozen app can diagnose itself, which matters because a packaged app that
 will not render is exactly when there is no Python to run anything else with:
@@ -26,6 +31,14 @@ will not render is exactly when there is no Python to run anything else with:
 qalun --doctor          what works on this machine, and what to do about the rest
 qalun --cli <command>   any command-line subcommand
 ```
+
+To test playback and fonts, the doctor starts a Qt application of its own (offscreen on
+Linux, the native one on Windows and macOS), so it can take a few seconds. An exported
+`QT_QPA_PLATFORM` is honoured: over SSH with `QT_QPA_PLATFORM=xcb` and no display, Qt
+aborts the doctor instead of letting it report, so unset it or set it to `offscreen`.
+The doctor keeps the FFmpeg plugin's own log out of its report (`QT_LOGGING_RULES`), and
+`--doctor --release` asks Qt for the FFmpeg multimedia backend (`QT_MEDIA_BACKEND`) and
+fails unless the test recording played through it.
 
 ## Per platform
 
@@ -74,6 +87,29 @@ Copying it there is enough: `require_binary` looks beside the running executable
 before it looks at `PATH`, so a packaged app uses the FFmpeg it shipped with and
 a user who has installed nothing still gets a video. Verified by rendering with
 an empty `PATH`. `--doctor` reports which one was found and its version.
+
+## Size
+
+Playback (Qt Multimedia, from PySide6-Addons) is the one thing the review editor
+added to the bundle. Measured on Linux, 24 Sep 2026, PyInstaller 6.22, PySide6 6.11.2,
+FFmpeg and FriBiDi not included (they are the same before and after):
+
+| | folder | zip |
+|---|---|---|
+| before (Multimedia excluded) | 249 MB | 144 MB |
+| after | 275 MB | 164 MB |
+| difference | 26 MB | 20 MB |
+
+These zips were made the way the release workflow made them until then, with
+Python's `shutil.make_archive`, which stores each of the bundle's 59 symlinked
+libraries a second time (the zip unpacks to 446 MB). `packaging/ci/package.sh`
+keeps the links: the same after-bundle zips to 113 MB and unpacks to the 275 MB
+folder. The workflow uses it once its Package step is changed; see
+[ci/README.md](ci/README.md).
+
+Windows and macOS: record from the first release-workflow run after this change
+(the zip sizes on the run's summary page) — see
+[docs/release-checklist.md](../docs/release-checklist.md).
 
 ## Not done here
 

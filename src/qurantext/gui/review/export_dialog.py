@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 from qurantext.config.paths import QURAN_DB_PATH, VIDEOS_OUTPUT_DIR
 from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.gui.files import show_in_folder
-from qurantext.gui.i18n import t, tn
+from qurantext.gui.i18n import plain_title, t, tn
 from qurantext.gui.review.session import ReviewSession
 from qurantext.jobs.project_render import export_project_subtitles
 
@@ -58,7 +58,7 @@ class ExportDialog(QDialog):
         self._session = session
         self._db_path = db_path
         self._written: list[Path] = []
-        self.setWindowTitle(t("export.title"))
+        self.setWindowTitle(plain_title(t("export.title")))
 
         self._format_boxes: dict[str, QCheckBox] = {}
         self._build()
@@ -162,7 +162,7 @@ class ExportDialog(QDialog):
 
     def _choose_folder(self) -> None:
         chosen = QFileDialog.getExistingDirectory(
-            self, t("export.choose"), self._folder_field.text()
+            self, plain_title(t("export.choose")), self._folder_field.text()
         )
         if chosen:
             self._folder_field.setText(chosen)

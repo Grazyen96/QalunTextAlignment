@@ -3,7 +3,11 @@
 set -euo pipefail
 
 sudo apt-get update -qq
-sudo apt-get install -y --no-install-recommends libfribidi0
+# libxcb-cursor0 is not for vendor/: Qt 6.5 and later's xcb platform plugin
+# links libxcb-cursor.so.0, and PyInstaller can only bundle it if the build
+# machine has it. Without it the window cannot start on an X11 desktop that
+# lacks the package (Wayland sessions are unaffected).
+sudo apt-get install -y --no-install-recommends libfribidi0 libxcb-cursor0
 mkdir -p vendor
 
 fetch() {

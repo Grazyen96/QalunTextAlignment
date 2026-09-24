@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -37,7 +37,7 @@ from qurantext.config.paths import QURAN_DB_PATH, QURAN_INPUT_DIR
 from qurantext.config.settings import VIDEO_PRESETS
 from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.data.quran_db import ensure_quran_db, list_surahs
-from qurantext.gui.i18n import path_text, t, tn
+from qurantext.gui.i18n import path_text, plain_title, t, tn
 from qurantext.gui.jobs import JobSpec
 from qurantext.gui.prefs import Prefs
 from qurantext.jobs.project import SUBTITLE_CHOICES
@@ -145,9 +145,11 @@ class NewJobPanel(QWidget):
         self.drop_label = QLabel(t("home.drop"))
         self.drop_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.drop_label.setWordWrap(True)
-        # A long folder path must not widen the whole window; it is clipped
-        # here and shown in full as the tooltip.
+        # A long folder path must not widen the whole window, nor wrap past the
+        # zone's fixed height: each line is elided to the label's width (again
+        # on every resize) and the whole path is the tooltip.
         self.drop_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.drop_label.installEventFilter(self)
         drop_layout.addWidget(self.drop_label)
         self.choose_button = QPushButton(t("home.choose"))
         self.choose_button.setFlat(True)
@@ -415,7 +417,7 @@ class NewJobPanel(QWidget):
     def _choose_audio(self) -> None:
         name, _ = QFileDialog.getOpenFileName(
             self,
-            t("home.choose_audio.dialog_title"),
+            plain_title(t("home.choose_audio.dialog_title")),
             str(Path.home()),
             _file_filter(t("home.filter.audio"), sorted(AUDIO_SUFFIXES)),
         )
@@ -430,14 +432,37 @@ class NewJobPanel(QWidget):
     def set_audio(self, path: Path) -> None:
         """Set the chosen audio file; used by the dialog, and by drops."""
         self._audio = path
-        self.drop_label.setText(f"{path.name}\n{path_text(path.parent)}")
-        self.drop_label.setToolTip(str(path))
+        self.drop_label.setToolTip(path_text(path))
+        self._show_audio_lines()
         self._refresh()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802 — Qt's name
+        if watched is self.drop_label and event.type() in (QEvent.Type.Resize, QEvent.Type.Show):
+            self._show_audio_lines()
+        return super().eventFilter(watched, event)
+
+    def _show_audio_lines(self) -> None:
+        """The chosen file's name and folder, each elided in the middle to fit the label.
+
+        The plain text is elided and only then wrapped by ``path_text``: an
+        ellipsis cut through the direction marks would leave the line
+        unisolated. A label not shown yet has no width of its own to fit, so
+        it keeps the whole lines until it is shown.
+        """
+        if self._audio is None:
+            return
+        name, folder = self._audio.name, str(self._audio.parent)
+        if self.drop_label.isVisible():
+            metrics = self.drop_label.fontMetrics()
+            width = self.drop_label.contentsRect().width()
+            name = metrics.elidedText(name, Qt.TextElideMode.ElideMiddle, width)
+            folder = metrics.elidedText(folder, Qt.TextElideMode.ElideMiddle, width)
+        self.drop_label.setText(f"{name}\n{path_text(folder)}")
 
     def _choose_quran_override(self) -> None:
         name, _ = QFileDialog.getOpenFileName(
             self,
-            t("home.quran_override.dialog_title"),
+            plain_title(t("home.quran_override.dialog_title")),
             str(QURAN_INPUT_DIR),
             _file_filter(t("home.filter.text"), [".txt"]),
         )
@@ -454,7 +479,7 @@ class NewJobPanel(QWidget):
 
     def _choose_output_dir(self) -> None:
         name = QFileDialog.getExistingDirectory(
-            self, t("home.output_dir.dialog_title"), str(Path.home())
+            self, plain_title(t("home.output_dir.dialog_title")), str(Path.home())
         )
         if name:
             self.set_output_dir(Path(name))

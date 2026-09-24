@@ -67,6 +67,27 @@ def test_the_report_ends_with_a_verdict() -> None:
     assert "fix it" in report
 
 
+def test_a_release_check_that_fails_does_not_claim_rendering_is_broken() -> None:
+    """Without playback, Qt's Arabic or an Arabic font the app still renders; the build
+    is only unfit to ship, and whoever reads the report should be told that."""
+    for name in ("Playback", "Window translation", "Arabic interface font", "Transcription"):
+        report = format_report([CheckResult(name, Status.FAIL, "missing", "fix it")])
+        assert report.rstrip().endswith("Not ready for release: 1 problem(s) above."), name
+        assert "Cannot render" not in report
+
+
+def test_a_render_check_that_fails_says_so_whatever_else_fails() -> None:
+    results = [
+        CheckResult("Arabic shaping", Status.FAIL, "no raqm", "install it"),
+        CheckResult("Playback", Status.FAIL, "missing", "fix it"),
+    ]
+    assert (
+        format_report(results)
+        .rstrip()
+        .endswith("Cannot render yet: 2 problem(s) above must be fixed.")
+    )
+
+
 def test_a_warning_is_not_a_blocker() -> None:
     results = [CheckResult("A", Status.WARN, "not built yet", "build it")]
     assert not results[0].blocking
@@ -229,3 +250,160 @@ class TestTranscriptionCheck:
         result = preflight._transcription()
 
         assert "report it" in (result.remedy or "").lower()
+
+
+class TestWhatThePackagedAppMustDo:
+    """Playback, Qt's Arabic translation and an Arabic interface font.
+
+    Each is a separate file a frozen build can leave behind while every module
+    still imports, so each is exercised rather than imported. A developer's
+    checkout is only told; a release (``--doctor --release``, the CI gate) fails.
+    """
+
+    def test_playback_loads_a_short_recording(self, qt_app) -> None:
+        result = preflight._playback(release=True)
+        assert result.status == Status.OK, result
+        assert "FFmpeg" in result.detail or "backend" in result.detail
+
+    def test_playback_names_the_backend_it_loaded_through(self, qt_app) -> None:
+        """What is on disk is not what plays: Qt falls back when the one asked for fails."""
+        result = preflight._playback(release=False)
+        assert result.status == Status.OK, result
+        assert "through the FFmpeg backend" in result.detail
+        assert "plugins on disk: FFmpeg" in result.detail
+
+    def test_the_loaded_plugin_is_found_in_this_process(self, qt_app) -> None:
+        preflight._load_test_recording()
+        assert preflight._media_backends_loaded() == ["FFmpeg"]
+
+    def test_a_release_that_fell_back_to_another_backend_fails(self, qt_app, monkeypatch) -> None:
+        """Qt 6.11 loads an "alternative backend" when the forced one will not load, and
+        the recording plays; only the loaded plugin shows FFmpeg was left behind."""
+        monkeypatch.setenv("QT_MEDIA_BACKEND", "ffmpeg")
+        monkeypatch.setattr(preflight, "_load_test_recording", lambda: (True, "0.50 s"))
+        monkeypatch.setattr(
+            preflight, "_media_backends_loaded", lambda: ["Windows Media Foundation"]
+        )
+        result = preflight._playback(release=True)
+        assert result.status == Status.FAIL
+        assert "not through the FFmpeg backend" in result.detail
+        assert "Windows Media Foundation" in result.detail
+        assert preflight._playback(release=False).status == Status.WARN
+
+    def test_a_release_that_loaded_a_second_backend_too_fails(self, qt_app, monkeypatch) -> None:
+        """Two loaded means the one asked for was tried and something else took over."""
+        monkeypatch.setenv("QT_MEDIA_BACKEND", "ffmpeg")
+        monkeypatch.setattr(preflight, "_load_test_recording", lambda: (True, "0.50 s"))
+        monkeypatch.setattr(
+            preflight, "_media_backends_loaded", lambda: ["FFmpeg", "Windows Media Foundation"]
+        )
+        assert preflight._playback(release=True).status == Status.FAIL
+
+    def test_a_release_that_cannot_tell_its_backend_fails(self, qt_app, monkeypatch) -> None:
+        monkeypatch.setenv("QT_MEDIA_BACKEND", "ffmpeg")
+        monkeypatch.setattr(preflight, "_load_test_recording", lambda: (True, "0.50 s"))
+        monkeypatch.setattr(preflight, "_media_backends_loaded", lambda: None)
+        assert preflight._playback(release=True).status == Status.FAIL
+
+    def test_a_forced_backend_that_loaded_is_named_as_forced(self, qt_app, monkeypatch) -> None:
+        monkeypatch.setenv("QT_MEDIA_BACKEND", "ffmpeg")
+        monkeypatch.setattr(preflight, "_load_test_recording", lambda: (True, "0.50 s"))
+        monkeypatch.setattr(preflight, "_media_backends_loaded", lambda: ["FFmpeg"])
+        result = preflight._playback(release=True)
+        assert result.status == Status.OK
+        assert "through the FFmpeg backend, as QT_MEDIA_BACKEND asks;" in result.detail
+
+    def test_playback_missing_is_a_note_for_a_developer_and_a_failure_for_a_release(
+        self, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(
+            preflight,
+            "_import_multimedia",
+            lambda: (_ for _ in ()).throw(ImportError("no QtMultimedia")),
+        )
+        assert preflight._playback(release=False).status == Status.WARN
+        assert preflight._playback(release=True).status == Status.FAIL
+
+    def test_a_recording_that_never_loads_fails_a_release(self, qt_app, monkeypatch) -> None:
+        """The plugin missing looks like this: the module imports, the file will not load."""
+        monkeypatch.setattr(preflight, "_load_test_recording", lambda: (False, "InvalidMedia"))
+        result = preflight._playback(release=True)
+        assert result.status == Status.FAIL
+        assert "InvalidMedia" in result.detail
+        assert result.remedy
+
+    def test_the_arabic_window_translation_is_found(self) -> None:
+        assert preflight._qt_translation(release=True).status == Status.OK
+
+    def test_a_missing_translation_says_what_the_arabic_window_loses(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        monkeypatch.setattr(preflight, "_qt_translations_folder", lambda: str(tmp_path))
+        assert preflight._qt_translation(release=False).status == Status.WARN
+        result = preflight._qt_translation(release=True)
+        assert result.status == Status.FAIL
+        assert "English" in result.detail
+
+    def test_no_arabic_font_fails_a_release(self, monkeypatch) -> None:
+        monkeypatch.setattr(preflight, "arabic_ui_families", lambda: [])
+        assert preflight._arabic_ui_font(release=False).status == Status.WARN
+        result = preflight._arabic_ui_font(release=True)
+        assert result.status == Status.FAIL
+        assert "Noto Sans Arabic" in result.remedy
+
+    def test_an_arabic_font_is_named(self, monkeypatch) -> None:
+        monkeypatch.setattr(preflight, "arabic_ui_families", lambda: ["A", "B", "C"])
+        result = preflight._arabic_ui_font(release=True)
+        assert result.status == Status.OK
+        assert "A, B" in result.detail
+
+    def test_a_font_that_cannot_be_measured_is_not_passed(self, monkeypatch) -> None:
+        def cannot() -> list[str]:
+            raise preflight.CannotMeasureFonts("no display")
+
+        monkeypatch.setattr(preflight, "arabic_ui_families", cannot)
+        assert preflight._arabic_ui_font(release=False).status == Status.WARN
+        result = preflight._arabic_ui_font(release=True)
+        assert result.status == Status.FAIL
+        assert "no display" in result.detail
+
+    def test_the_bundled_quran_font_is_not_an_interface_font(self, qt_app) -> None:
+        """It has no Latin letters, so finding it must not count as having one."""
+        from PySide6.QtGui import QFontDatabase
+
+        from qurantext.config.paths import DEFAULT_FONT_PATH
+
+        font_id = QFontDatabase.addApplicationFont(str(DEFAULT_FONT_PATH))
+        assert font_id != -1
+        try:
+            quran = QFontDatabase.applicationFontFamilies(font_id)[0]
+            assert quran in QFontDatabase.families(QFontDatabase.WritingSystem.Arabic)
+            assert quran not in preflight.arabic_ui_families()
+        finally:
+            QFontDatabase.removeApplicationFont(font_id)
+
+    def test_release_checks_include_the_new_ones(self) -> None:
+        names = {r.name for r in run_checks(release=True)}
+        assert {"Playback", "Window translation", "Arabic interface font"} <= names
+
+    def test_a_headless_linux_doctor_draws_offscreen(self, monkeypatch) -> None:
+        """With no platform chosen, Qt would try a display a CI machine lacks, and abort."""
+        monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+        monkeypatch.setattr(preflight.sys, "platform", "linux")
+        monkeypatch.setattr(preflight, "_platform_plugin_found", lambda name: True)
+        assert preflight._doctor_platform() == (True, "offscreen")
+
+    def test_a_chosen_platform_is_left_alone(self, monkeypatch) -> None:
+        monkeypatch.setenv("QT_QPA_PLATFORM", "xcb")
+        assert preflight._doctor_platform() == (True, None)
+
+    def test_no_platform_plugin_means_no_window_application(self, monkeypatch) -> None:
+        monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+        monkeypatch.setattr(preflight.sys, "platform", "win32")
+        monkeypatch.setattr(preflight, "_platform_plugin_found", lambda name: False)
+        assert preflight._doctor_platform() == (False, None)
+
+    def test_the_platform_plugin_probe_finds_what_qt_ships(self) -> None:
+        pytest.importorskip("PySide6")
+        assert preflight._platform_plugin_found("offscreen")
+        assert not preflight._platform_plugin_found("no-such-platform")

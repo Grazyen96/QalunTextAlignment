@@ -15,12 +15,20 @@ search, a focused button would take Space as a click), and
 window as plain key presses — which is how they arrive before the window is
 active, as in an offscreen test. A key a shortcut consumes never becomes a key
 press, so nothing runs twice.
+
+On a layout that types other letters there (Arabic puts ج on the ``[`` key),
+the punctuation keys match no shortcut and arrive as key presses of that
+letter; ``keyPressEvent`` then reads which physical key it was from
+:data:`SCANCODE_KEYS`, so the shortcuts stay where the person's fingers learned
+them. That is only a fallback for a press nothing else took: a focused caption
+editor or table still receives the letter as the text it is.
 """
 
 from __future__ import annotations
 
 import copy
 import math
+import sys
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
@@ -46,7 +54,7 @@ from qurantext.core.coverage import speech_levels, uncovered_from_levels
 from qurantext.core.waveform import Peaks, load_or_compute_peaks, peaks_path_for
 from qurantext.gui import jobs as jobs_module
 from qurantext.gui.files import show_in_folder
-from qurantext.gui.i18n import path_text, t
+from qurantext.gui.i18n import path_text, plain_title, t
 from qurantext.gui.jobs import JobOutcome
 from qurantext.gui.review.background import BackgroundJobs
 from qurantext.gui.review.export_dialog import ExportDialog
@@ -63,7 +71,42 @@ from qurantext.gui.review.zoom_slider import ZoomSlider
 from qurantext.jobs.project import Project, job_settings
 from qurantext.utils.progress import CancelToken, ProgressEvent
 
-__all__ = ["ReviewWindow"]
+__all__ = ["SCANCODE_KEYS", "ReviewWindow"]
+
+#: The physical key behind each layout-dependent shortcut, by the code Qt reports
+#: for it (``nativeScanCode``; on macOS ``nativeVirtualKey``, the scan code is 0).
+#: Only the keys whose character moves between layouts: the letters and arrows
+#: the other shortcuts use are found by Qt itself (Ctrl+Z, Ctrl+Shift+Z and
+#: Ctrl+S through its Latin fallback for keys held with Ctrl).
+SCANCODE_KEYS: dict[str, dict[int, Qt.Key]] = {
+    # X11 and Wayland report XKB keycodes, which are the Linux evdev codes plus 8
+    # (linux/input-event-codes.h: KEY_LEFTBRACE 26, KEY_RIGHTBRACE 27,
+    # KEY_COMMA 51, KEY_DOT 52; xkeyboard-config keycodes/evdev: <AD11> = 34,
+    # <AD12> = 35, <AB08> = 59, <AB09> = 60).
+    "xkb": {
+        34: Qt.Key.Key_BracketLeft,
+        35: Qt.Key.Key_BracketRight,
+        59: Qt.Key.Key_Comma,
+        60: Qt.Key.Key_Period,
+    },
+    # Windows reports the PS/2 scan code set 1 make code (Microsoft's "Keyboard
+    # Scan Code Specification"; bits 16-23 of WM_KEYDOWN's lParam): [ 0x1A,
+    # ] 0x1B, , 0x33, . 0x34.
+    "windows": {
+        0x1A: Qt.Key.Key_BracketLeft,
+        0x1B: Qt.Key.Key_BracketRight,
+        0x33: Qt.Key.Key_Comma,
+        0x34: Qt.Key.Key_Period,
+    },
+    # macOS reports the virtual key code (HIToolbox Events.h: kVK_ANSI_LeftBracket
+    # 0x21, kVK_ANSI_RightBracket 0x1E, kVK_ANSI_Comma 0x2B, kVK_ANSI_Period 0x2F).
+    "macos": {
+        0x21: Qt.Key.Key_BracketLeft,
+        0x1E: Qt.Key.Key_BracketRight,
+        0x2B: Qt.Key.Key_Comma,
+        0x2F: Qt.Key.Key_Period,
+    },
+}
 
 #: The playhead poll while playing: often enough that the highlight looks continuous.
 _TICK_MS = 16
@@ -73,6 +116,25 @@ _COVERAGE_DEBOUNCE_MS = 1000
 _FINE_NUDGE_S = 0.01
 #: The timeline window shown on open, before the person zooms.
 _DEFAULT_SPAN_S = 20.0
+
+
+def _platform_family() -> str:
+    """Which of :data:`SCANCODE_KEYS`' tables this machine's key codes come from.
+
+    Every Unix other than macOS runs Qt on X11 or Wayland, both through XKB.
+    """
+    if sys.platform == "darwin":
+        return "macos"
+    if sys.platform == "win32":
+        return "windows"
+    return "xkb"
+
+
+def _physical_key(event: QKeyEvent) -> Qt.Key | None:
+    """The layout-dependent shortcut key *event*'s physical key is, if it is one."""
+    platform = _platform_family()
+    code = event.nativeVirtualKey() if platform == "macos" else event.nativeScanCode()
+    return SCANCODE_KEYS[platform].get(code)
 
 
 def _clock(seconds: float) -> str:
@@ -330,10 +392,33 @@ class ReviewWindow(QMainWindow):
         text = QKeySequence(QKeyCombination(modifiers, combination.key())).toString()
         action = self._keys.get(text)
         if action is None:
+            action = self._layout_action(event, modifiers)
+        if action is None:
             super().keyPressEvent(event)
             return
         action()
         event.accept()
+
+    def _layout_action(
+        self, event: QKeyEvent, modifiers: Qt.KeyboardModifier
+    ) -> Callable[[], None] | None:
+        """The shortcut on the physical key of a press that typed a non-Latin letter.
+
+        Only for a press that typed something outside ASCII: an ASCII character a
+        Latin layout puts on one of these keys (``;`` on AZERTY's ``,`` key) keeps
+        meaning itself, while a non-ASCII one (German ``ü`` on the ``[`` key) is
+        read by its place like an Arabic letter. With Ctrl, Alt or Meta held Qt
+        already finds the Latin key, so only a plain or shifted press is read.
+        """
+        typed = event.text()
+        if not typed or typed.isascii():
+            return None
+        if modifiers & ~Qt.KeyboardModifier.ShiftModifier:
+            return None
+        key = _physical_key(event)
+        if key is None:
+            return None
+        return self._keys.get(QKeySequence(QKeyCombination(modifiers, key)).toString())
 
     # -- playback -------------------------------------------------------------
 
@@ -543,7 +628,7 @@ class ReviewWindow(QMainWindow):
             session.project.review.get("state") != "reviewed" and editable
         )
         title = t("review.title", name=self._audio.stem)
-        self.setWindowTitle(f"{title} *" if session.dirty else title)
+        self.setWindowTitle(plain_title(f"{title} *" if session.dirty else title))
         self._show_selection(self.strip.selected)
 
     def _show_selection(self, ref: WordRef | None) -> None:
@@ -658,7 +743,7 @@ class ReviewWindow(QMainWindow):
         """Say the render is ready, with a button to reveal it (the tests replace this)."""
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Information)
-        box.setWindowTitle(t("review.render"))
+        box.setWindowTitle(plain_title(t("review.render")))
         box.setText(t("render.done", path=path_text(outcome.video)))
         show_button = box.addButton(t("render.show"), QMessageBox.ButtonRole.ActionRole)
         box.addButton(QMessageBox.StandardButton.Ok)
@@ -671,7 +756,7 @@ class ReviewWindow(QMainWindow):
         icon = QMessageBox.Icon.Warning if kind == "failed" else QMessageBox.Icon.Information
         box = QMessageBox(self)
         box.setIcon(icon)
-        box.setWindowTitle(t("review.render"))
+        box.setWindowTitle(plain_title(t("review.render")))
         box.setText(text)
         box.exec()
 
@@ -694,7 +779,11 @@ class ReviewWindow(QMainWindow):
         try:
             path = self.session.save()
         except (OSError, ValueError) as error:
-            QMessageBox.warning(self, t("review.save"), t("review.save_failed", details=str(error)))
+            QMessageBox.warning(
+                self,
+                plain_title(t("review.save")),
+                t("review.save_failed", details=str(error)),
+            )
             return False
         self._sync_state()
         self.saved.emit(path)
@@ -704,7 +793,7 @@ class ReviewWindow(QMainWindow):
         """Ask what to do with unsaved changes: ``"save"``, ``"discard"`` or ``"cancel"``."""
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Question)
-        box.setWindowTitle(t("review.discard_title"))
+        box.setWindowTitle(plain_title(t("review.discard_title")))
         box.setText(t("review.discard_text"))
         buttons = QMessageBox.StandardButton
         box.setStandardButtons(buttons.Save | buttons.Discard | buttons.Cancel)

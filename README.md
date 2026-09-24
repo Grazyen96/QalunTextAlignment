@@ -117,6 +117,20 @@ word strip and the time fields keep time running left to right, and numbers
 stay Western digits in both. The Arabic text is a draft awaiting review by a
 native speaker.
 
+**Where settings live.** The window's settings (the language, the last choices
+on the form, hidden jobs and job output folders) are kept where Qt keeps
+settings for an app named Qalun:
+
+| System | Where |
+|---|---|
+| Linux | `~/.config/Qalun/Qalun.conf` |
+| Windows | the registry key `HKEY_CURRENT_USER\Software\Qalun\Qalun` |
+| macOS | `~/Library/Preferences/com.qalun.Qalun.plist` |
+
+Deleting it resets the window to how it was on the first run. Nothing on disk
+is touched: hidden jobs come back into the list, and jobs written to a folder of
+their own drop out of it until a new job uses that folder again.
+
 Qt is an optional dependency, so the command line installs without it. Running
 `qalun` without it prints one line telling you what to install.
 
