@@ -285,3 +285,17 @@ def test_the_counted_strings_agree_with_their_number_in_arabic() -> None:
         assert tn("export.done", 12, names="a.srt") == f"كُتب {_FSI}12{_PDI} ملفًا: {_FSI}a.srt{_PDI}"
     finally:
         set_language("en")
+
+
+def test_a_path_is_one_left_to_right_run_whose_folders_keep_their_order() -> None:
+    """LRI…PDI keeps the path left to right; an LRM after each separator keeps two
+    Arabic folder names from merging into one right-to-left run across the "/"."""
+    lrm = "\u200e"
+    assert i18n.path_text("/home/k/a.mp4") == f"{_LRI}/{lrm}home/{lrm}k/{lrm}a.mp4{_PDI}"
+    assert i18n.path_text(Path("rel")) == f"{_LRI}rel{_PDI}"
+    assert i18n.path_text("C:\\Videos\\a.mp4") == (f"{_LRI}C:\\{lrm}Videos\\{lrm}a.mp4{_PDI}")
+    set_language("ar")
+    try:
+        assert i18n.path_text("/a") == f"{_LRI}/{lrm}a{_PDI}", "the same in every language"
+    finally:
+        set_language("en")

@@ -10,7 +10,7 @@ from PySide6.QtGui import QDropEvent
 
 from qurantext.gui.home.job_list import JobListPanel
 from qurantext.gui.home.new_job import NewJobPanel
-from qurantext.gui.i18n import t
+from qurantext.gui.i18n import path_text, t
 from qurantext.gui.jobs import JobSpec
 from qurantext.gui.prefs import Prefs
 from qurantext.jobs.catalog import DAMAGED
@@ -496,7 +496,7 @@ def test_a_quran_override_that_exists_wins_over_the_default(qt_app, prefs, store
 
     assert panel.spec().quran == QURAN_FILE.resolve()
     assert panel.quran_label.text() == t(
-        "home.quran_override.custom", path=str(QURAN_FILE.resolve())
+        "home.quran_override.custom", path=path_text(QURAN_FILE.resolve())
     )
 
 

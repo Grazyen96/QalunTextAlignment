@@ -27,6 +27,7 @@ __all__ = [
     "current_language",
     "is_rtl",
     "ltr",
+    "path_text",
     "plural_category",
     "set_language",
     "t",
@@ -41,7 +42,7 @@ RTL_LANGUAGES = frozenset({"ar"})
 #: Each language by its own name, for the language menu; never translated.
 LANGUAGE_NAMES = {"en": "English", "ar": "العربية"}
 
-_FSI, _LRI, _PDI = "\u2068", "\u2066", "\u2069"
+_FSI, _LRI, _PDI, _LRM = "\u2068", "\u2066", "\u2069", "\u200e"
 
 STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
     "en": {
@@ -544,3 +545,16 @@ def time_span(start: float, end: float, *, digits: int = 2, sep: str = "–") ->
 def ltr(text: str) -> str:
     """*text* forced left to right inside right-to-left surroundings (a table cell of times)."""
     return f"{_LRI}{text}{_PDI}" if is_rtl() else text
+
+
+def path_text(path: object) -> str:
+    """*path* as one left-to-right run whose folders keep their order, in any language.
+
+    An isolate alone is not enough: inside it, two Arabic folder names with a
+    "/" between them merge into one right-to-left run and swap places
+    ("/home/k/فيديو/تلاوة.mp4" read as ".../تلاوة/فيديو"). An LRM after each
+    separator ends every folder's run at its separator. The same in every
+    language, since an English sentence can hold an Arabic folder too.
+    """
+    text = "".join(c + _LRM if c in "/\\" else c for c in str(path))
+    return f"{_LRI}{text}{_PDI}"

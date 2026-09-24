@@ -35,7 +35,7 @@ from qurantext.gui import i18n
 from qurantext.gui.files import show_in_folder
 from qurantext.gui.home.job_list import JobListPanel
 from qurantext.gui.home.new_job import NewJobPanel
-from qurantext.gui.i18n import t, tn
+from qurantext.gui.i18n import path_text, t, tn
 from qurantext.gui.jobs import JobOutcome, JobSpec, match_path_for, run_matching, run_render
 from qurantext.gui.language import apply_language
 from qurantext.gui.prefs import Prefs
@@ -264,7 +264,7 @@ class MainWindow(QMainWindow):
         outcome = finished.outcome
         if outcome is not None and outcome.video is not None:
             # Rendered right away: the person chose to skip the review.
-            self._ending = t("home.finished.rendered", path=str(outcome.video))
+            self._ending = t("home.finished.rendered", path=path_text(outcome.video))
             return
         problem = self._show_review(project_path)
         self._ending = problem or tn("home.finished.matched", len(project.cards))
@@ -397,7 +397,7 @@ class MainWindow(QMainWindow):
     def _review_saved(self, path: Path) -> None:
         self.job_list.refresh()
         if self._cancel is None:  # while a job runs, the status line is its progress
-            self.new_job.show_status(t("main.saved", path=path))
+            self.new_job.show_status(t("main.saved", path=path_text(path)))
 
     def _forget_review(self, project_path: Path, window: ReviewWindow) -> None:
         """Let a closed review window go, unless another has taken its place."""

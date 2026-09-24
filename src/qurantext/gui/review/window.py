@@ -46,7 +46,7 @@ from qurantext.core.coverage import speech_levels, uncovered_from_levels
 from qurantext.core.waveform import Peaks, load_or_compute_peaks, peaks_path_for
 from qurantext.gui import jobs as jobs_module
 from qurantext.gui.files import show_in_folder
-from qurantext.gui.i18n import t
+from qurantext.gui.i18n import path_text, t
 from qurantext.gui.jobs import JobOutcome
 from qurantext.gui.review.background import BackgroundJobs
 from qurantext.gui.review.export_dialog import ExportDialog
@@ -175,7 +175,7 @@ class ReviewWindow(QMainWindow):
             self._start_reads()
         else:
             self.waveform.set_missing()
-            self.warnings.add_notice(t("review.audio_missing", path=str(self._audio)))
+            self.warnings.add_notice(t("review.audio_missing", path=path_text(self._audio)))
         self._sync_state()
         self._show_time(self.player.position(), force=True)
 
@@ -659,7 +659,7 @@ class ReviewWindow(QMainWindow):
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Information)
         box.setWindowTitle(t("review.render"))
-        box.setText(t("render.done", path=outcome.video))
+        box.setText(t("render.done", path=path_text(outcome.video)))
         show_button = box.addButton(t("render.show"), QMessageBox.ButtonRole.ActionRole)
         box.addButton(QMessageBox.StandardButton.Ok)
         box.exec()

@@ -8,6 +8,7 @@ takes the application's direction when it is made); the autouse fixture in
 from __future__ import annotations
 
 import json
+import shutil
 from collections.abc import Iterator
 
 import pytest
@@ -246,6 +247,55 @@ def test_the_pipeline_s_english_never_reaches_the_arabic_status_line(
     text = main.new_job.status_label.text()
     assert text == i18n.t(f"job.stage.{stage}")
     assert not re.search("[A-Za-z]", text), text
+
+
+@pytest.mark.parametrize("language", ["en", "ar"])
+def test_a_path_s_folders_read_left_to_right_in_either_language(qt_app, language) -> None:
+    """Two Arabic folder names must not swap places, in an English or an Arabic sentence."""
+    from tests.bidi_helpers import left_to_right
+
+    i18n.set_language(language)
+    path = "/home/k/دروس/تلاوة.mp4"
+    parts = ["home", "k/", "دروس", "تلاوة", "mp4"]
+    for key in (
+        "main.saved",
+        "home.finished.rendered",
+        "render.done",
+        "home.output_dir.custom",
+        "home.quran_override.custom",
+        "review.audio_missing",
+    ):
+        line = i18n.t(key, path=i18n.path_text(path))
+        assert left_to_right(line, parts, rtl=language == "ar") == parts, (key, line)
+
+
+def test_the_windows_show_every_path_through_path_text(
+    qt_app, tmp_path, store, no_default_job_dirs, review_window
+) -> None:
+    """The call sites use the helper, not ``str(path)``."""
+    from qurantext.gui.main_window import MainWindow
+
+    folder = tmp_path / "فيديو"
+    folder.mkdir()
+    quran = folder / "quran.txt"
+    shutil.copyfile(QURAN_FILE, quran)
+    prefs = _prefs(tmp_path)
+    prefs.quran_override = quran
+    panel = NewJobPanel(prefs, quran_default=QURAN_FILE, db_path=store)
+    assert i18n.path_text(quran.resolve()) in panel.quran_label.text()
+    panel.set_output_dir(folder)
+    assert i18n.path_text(folder) in panel.output_label.text()
+    audio = folder / "تلاوة.mp3"
+    audio.touch()
+    panel.set_audio(audio)
+    assert panel.drop_label.text().splitlines()[1] == i18n.path_text(folder)
+
+    main = MainWindow(prefs=_prefs(tmp_path))
+    main._review_saved(audio)
+    assert i18n.path_text(audio) in main.new_job.status_label.text()
+
+    missing = review_window._audio
+    assert any(i18n.path_text(missing) in notice for notice in review_window.warnings._notices)
 
 
 def test_a_job_row_isolates_each_part_of_its_detail_line(

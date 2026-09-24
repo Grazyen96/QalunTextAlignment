@@ -814,7 +814,7 @@ def test_render_right_away_also_renders_and_skips_the_review(
     assert rendered == [tmp_path / "jobs" / "a_recitation.qalun.json"]
     assert reviews == [], "render right away skips the review"
     assert home.new_job.status_label.text() == module.t(
-        "home.finished.rendered", path=str(tmp_path / "a.mp4")
+        "home.finished.rendered", path=module.path_text(tmp_path / "a.mp4")
     )
 
 

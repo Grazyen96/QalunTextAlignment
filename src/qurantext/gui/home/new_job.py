@@ -37,7 +37,7 @@ from qurantext.config.paths import QURAN_DB_PATH, QURAN_INPUT_DIR
 from qurantext.config.settings import VIDEO_PRESETS
 from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.data.quran_db import ensure_quran_db, list_surahs
-from qurantext.gui.i18n import t, tn
+from qurantext.gui.i18n import path_text, t, tn
 from qurantext.gui.jobs import JobSpec
 from qurantext.gui.prefs import Prefs
 from qurantext.jobs.project import SUBTITLE_CHOICES
@@ -430,7 +430,7 @@ class NewJobPanel(QWidget):
     def set_audio(self, path: Path) -> None:
         """Set the chosen audio file; used by the dialog, and by drops."""
         self._audio = path
-        self.drop_label.setText(f"{path.name}\n{path.parent}")
+        self.drop_label.setText(f"{path.name}\n{path_text(path.parent)}")
         self.drop_label.setToolTip(str(path))
         self._refresh()
 
@@ -469,7 +469,7 @@ class NewJobPanel(QWidget):
     def _update_quran_label(self) -> None:
         override = self._usable_override()
         if override is not None:
-            self.quran_label.setText(t("home.quran_override.custom", path=str(override)))
+            self.quran_label.setText(t("home.quran_override.custom", path=path_text(override)))
         elif self._quran_default is not None:
             self.quran_label.setText(t("home.quran_override.default"))
         else:
@@ -477,7 +477,7 @@ class NewJobPanel(QWidget):
 
     def _update_output_dir_label(self) -> None:
         if self._output_dir is not None:
-            self.output_label.setText(t("home.output_dir.custom", path=str(self._output_dir)))
+            self.output_label.setText(t("home.output_dir.custom", path=path_text(self._output_dir)))
         else:
             self.output_label.setText(t("home.output_dir.default"))
 
