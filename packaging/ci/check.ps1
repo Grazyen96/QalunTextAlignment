@@ -3,6 +3,9 @@
 # PATH is stripped on purpose. Someone who downloads an app and double-clicks it
 # has put nothing on PATH, so anything the app can only find there it cannot find
 # at all.
+#
+# --release makes playback, Qt's Arabic translation and an Arabic interface font
+# blocking: a developer's checkout is only told about them, a release must have them.
 $env:PATH = "$env:SystemRoot\system32;$env:SystemRoot"
 
 # Start-Process rather than `& app --doctor`, because the app is built windowed
@@ -13,7 +16,7 @@ $env:PATH = "$env:SystemRoot\system32;$env:SystemRoot"
 # hands back the real code.
 $out = "doctor-out.txt"
 $err = "doctor-err.txt"
-$proc = Start-Process -FilePath "dist\qalun\qalun.exe" -ArgumentList "--doctor" `
+$proc = Start-Process -FilePath "dist\qalun\qalun.exe" -ArgumentList "--doctor","--release" `
   -Wait -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
 $code = $proc.ExitCode
 

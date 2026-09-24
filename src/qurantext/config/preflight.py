@@ -13,6 +13,12 @@ deep inside a job:
   there fails at the encode rather than at startup.
 * **The store and the font.** Both resolve differently from a checkout than from
   an installed copy.
+* **Playback, Qt's Arabic translation and an Arabic interface font.** Each is a
+  separate file a frozen build can leave behind while every module still imports,
+  so each is exercised here rather than imported. A developer's checkout is only
+  told about them; ``run_checks(release=True)`` (``qalun --doctor --release``, the
+  build gate) fails on them, because a release without them is broken in Arabic
+  or cannot play the recording under review.
 
 Each check answers three questions: is it usable, what exactly is wrong, and
 what should the person do. The last one is the point — "libraqm missing" is not
@@ -21,9 +27,13 @@ an instruction.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+import tempfile
+import wave
 from dataclasses import dataclass
+from pathlib import Path
 
 from qurantext.config.fribidi import fribidi_names
 from qurantext.config.paths import (
@@ -36,7 +46,14 @@ from qurantext.config.paths import (
 )
 from qurantext.core.video_common import require_binary
 
-__all__ = ["CheckResult", "Status", "format_report", "run_checks"]
+__all__ = [
+    "CannotMeasureFonts",
+    "CheckResult",
+    "Status",
+    "arabic_ui_families",
+    "format_report",
+    "run_checks",
+]
 
 
 class Status:
@@ -261,8 +278,363 @@ def _transcription() -> CheckResult:
     )
 
 
-def run_checks() -> list[CheckResult]:
-    """Every check, in the order a person would want to read them."""
+#: How long the playback check waits for Qt to report its test recording loaded.
+_PLAYBACK_TIMEOUT_MS = 5000
+
+#: The Qt application the checks made for themselves, held so it outlives them.
+_doctor_app: object | None = None
+
+#: The platform plugin a window application uses where there is a real one to use.
+_NATIVE_PLATFORMS = {"win32": "windows", "darwin": "cocoa"}
+
+#: Qt multimedia plugin file stems, and the backend each one is.
+_MEDIA_BACKENDS = {
+    "ffmpeg": "FFmpeg",
+    "darwin": "AVFoundation",
+    "windows": "Windows Media Foundation",
+    "gstreamer": "GStreamer",
+}
+
+
+class CannotMeasureFonts(RuntimeError):
+    """This process has no Qt window application and cannot safely make one.
+
+    Qt only lists fonts through a window application (``QGuiApplication``), and
+    making one without a platform plugin to back it aborts the whole process
+    rather than raising — so the checks say they could not tell instead.
+    """
+
+
+def _frozen() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
+
+def _strict(release: bool) -> str:
+    """What a missing capability is: a note in a checkout, a failure in a release."""
+    return Status.FAIL if release else Status.WARN
+
+
+def _platform_plugin_found(name: str) -> bool:
+    """Is Qt's platform plugin *name* on disk where Qt will look for it?
+
+    Asked before making a window application because Qt does not report a
+    missing platform plugin: it prints a message and aborts the process, and the
+    doctor would die without saying anything a person can act on.
+    """
+    import PySide6
+    from PySide6.QtCore import QCoreApplication
+
+    # Before an application exists Qt's own list lacks the executable's folder,
+    # which Qt also searches once one does; and a frozen build keeps the plugins
+    # inside its copy of the PySide6 package. Look everywhere Qt will.
+    roots = [
+        *QCoreApplication.libraryPaths(),
+        str(Path(PySide6.__file__).parent / "Qt" / "plugins"),
+        str(Path(sys.executable).parent),
+    ]
+    folders = [Path(root) / "platforms" for root in roots]
+    if extra := os.environ.get("QT_QPA_PLATFORM_PLUGIN_PATH"):
+        folders.append(Path(extra))
+    return any(any(folder.glob(f"*q{name}.*")) for folder in folders if folder.is_dir())
+
+
+def _doctor_platform() -> tuple[bool, str | None]:
+    """Can the checks make a window application, and on which platform plugin?
+
+    Returns whether one can be made and the platform to ask for (None for Qt's
+    own choice). A platform someone chose with ``QT_QPA_PLATFORM`` is theirs.
+    Otherwise Linux (and any other Unix) draws offscreen: its font list comes from
+    fontconfig either way, and the build gate runs there with no display, where
+    Qt's default (xcb) aborts the process. Windows and macOS use their native
+    plugin, which is what their font list comes from.
+    """
+    if os.environ.get("QT_QPA_PLATFORM"):
+        return True, None
+    native = _NATIVE_PLATFORMS.get(sys.platform)
+    name = native or "offscreen"
+    if not _platform_plugin_found(name):
+        return False, None
+    return True, None if native else "offscreen"
+
+
+def _qt_application(*, window: bool):
+    """This process's Qt application, made for the checks only when there is none.
+
+    The window and the tests already have a ``QApplication``, and that one is
+    used. ``--doctor`` has none, so one is made — a ``QApplication`` when a
+    platform plugin can back it, so that a window or a test started later in the
+    same process can still use it; otherwise a ``QCoreApplication``, which is
+    enough to load media but not to list fonts. Returns None when *window* is
+    asked for and cannot be had.
+    """
+    global _doctor_app
+    from PySide6.QtCore import QCoreApplication
+
+    app = QCoreApplication.instance()
+    if app is not None:
+        return app
+    usable, platform = _doctor_platform()
+    if usable:
+        from PySide6.QtWidgets import QApplication
+
+        _doctor_app = QApplication(["qalun", *(["-platform", platform] if platform else [])])
+    elif window:
+        return None
+    else:
+        _doctor_app = QCoreApplication(["qalun"])
+    return _doctor_app
+
+
+def _import_multimedia():
+    from PySide6 import QtMultimedia  # optional part of Qt (PySide6-Addons)
+
+    return QtMultimedia
+
+
+def _load_test_recording() -> tuple[bool, str]:
+    """Load half a second of silence through ``QMediaPlayer``: (loaded, what happened).
+
+    Waits at most ``_PLAYBACK_TIMEOUT_MS`` for Qt to settle on loaded or invalid.
+    No audio output is attached: loading needs none, and CI machines have none.
+    """
+    multimedia = _import_multimedia()
+    from PySide6.QtCore import QEventLoop, QTimer, QUrl
+
+    _qt_application(window=False)
+    statuses = multimedia.QMediaPlayer.MediaStatus
+    settled = (statuses.LoadedMedia, statuses.InvalidMedia)
+    # ignore_cleanup_errors: on Windows a player that has not quite let go of the
+    # file would otherwise turn a passing check into a crash.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+        path = Path(folder) / "preflight.wav"
+        with wave.open(str(path), "wb") as out:
+            out.setnchannels(1)
+            out.setsampwidth(2)
+            out.setframerate(16000)
+            out.writeframes(bytes(2 * 8000))
+
+        player = multimedia.QMediaPlayer()
+        loop = QEventLoop()
+        timer = QTimer()
+        timer.setSingleShot(True)
+        timer.timeout.connect(loop.quit)
+
+        def on_status(status) -> None:
+            if status in settled:
+                loop.quit()
+
+        player.mediaStatusChanged.connect(on_status)
+        player.setSource(QUrl.fromLocalFile(str(path)))
+        if player.mediaStatus() not in settled:
+            timer.start(_PLAYBACK_TIMEOUT_MS)
+            loop.exec()
+            timer.stop()
+        status, duration_ms = player.mediaStatus(), player.duration()
+        error = player.errorString()
+        player.mediaStatusChanged.disconnect(on_status)
+        player.setSource(QUrl())  # let go of the file before its folder goes
+        del player
+
+    if status == statuses.LoadedMedia and duration_ms > 0:
+        return True, f"{duration_ms / 1000:.2f} s"
+    if status == statuses.LoadedMedia:
+        return False, "LoadedMedia with no duration"
+    if status not in settled:
+        return False, f"still {status.name} after {_PLAYBACK_TIMEOUT_MS // 1000} s"
+    return False, f"{status.name}: {error}" if error else status.name
+
+
+def _media_backend() -> str:
+    """Which multimedia backend Qt will use, named from the plugin files it would load."""
+    if chosen := os.environ.get("QT_MEDIA_BACKEND"):
+        return f"{chosen} backend (QT_MEDIA_BACKEND)"
+    from PySide6.QtCore import QCoreApplication
+
+    files = [
+        plugin.name.lower()
+        for path in QCoreApplication.libraryPaths()
+        if (Path(path) / "multimedia").is_dir()
+        for plugin in (Path(path) / "multimedia").iterdir()
+    ]
+    names = [label for stem, label in _MEDIA_BACKENDS.items() if any(stem in f for f in files)]
+    return f"{' / '.join(names)} backend" if names else "backend not named"
+
+
+def _playback(release: bool) -> CheckResult:
+    """Can this machine play the recording under review?
+
+    Loads a half-second WAV written on the spot through ``QMediaPlayer`` and waits
+    (bounded, 5 s) for Qt to report it loaded with a duration. Importing the module
+    is not enough: the FFmpeg multimedia plugin is a separate file a frozen build can
+    leave behind, and without it the module imports and every file fails to load.
+    Needs no sound device — CI machines have none — so audio outputs are only noted.
+    """
+    name = "Playback"
+    if _frozen():
+        remedy = (
+            "This is a packaging fault: the Qt multimedia plugin was not bundled. Please report it."
+        )
+    else:
+        remedy = "pip install -e '.[gui]' (PySide6-Addons carries Qt Multimedia)"
+    without = "the review window opens with playback disabled"
+    try:
+        loaded, what = _load_test_recording()
+    except ImportError as error:
+        return CheckResult(
+            name, _strict(release), f"Qt Multimedia will not import ({error}); {without}", remedy
+        )
+    except Exception as error:  # noqa: BLE001 - any failure to start is the same news
+        return CheckResult(
+            name, _strict(release), f"Qt Multimedia would not start ({error}); {without}", remedy
+        )
+    if not loaded:
+        return CheckResult(
+            name,
+            _strict(release),
+            f"a short test recording would not load ({what}); {without}",
+            remedy,
+        )
+    multimedia = _import_multimedia()
+    formats = len(
+        multimedia.QMediaFormat().supportedFileFormats(
+            multimedia.QMediaFormat.ConversionMode.Decode
+        )
+    )
+    outputs = len(multimedia.QMediaDevices.audioOutputs())
+    heard = f"{outputs} audio output(s)" if outputs else "no audio output (loading needs none)"
+    return CheckResult(
+        name,
+        Status.OK,
+        f"loaded a {what} test recording; {_media_backend()}, "
+        f"{formats} decodable format(s), {heard}",
+    )
+
+
+def _qt_translations_folder() -> str:
+    from PySide6.QtCore import QLibraryInfo
+
+    return QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
+
+
+def _qt_translation(release: bool) -> CheckResult:
+    """Will Qt's own buttons and dialogs be in Arabic in the Arabic window?
+
+    The window's words are ours, but OK/Cancel, the file dialog and the
+    right-click menus are Qt's, translated by ``qtbase_ar.qm`` in Qt's
+    translations folder — a data file a frozen build can leave out while
+    everything else works. Loaded here exactly as the window loads it.
+    """
+    name = "Window translation"
+    try:
+        from PySide6.QtCore import QTranslator
+
+        folder = _qt_translations_folder()
+    except ImportError as error:
+        return CheckResult(
+            name,
+            _strict(release),
+            f"Qt is not installed ({error})",
+            "pip install 'qurantext[gui]'",
+        )
+    if QTranslator().load("qtbase_ar", folder):
+        return CheckResult(name, Status.OK, f"qtbase_ar in {folder}")
+    if _frozen():
+        remedy = "This is a packaging fault: Qt's translations were not bundled. Please report it."
+    else:
+        remedy = "Reinstall PySide6, whose wheel carries Qt's translations: pip install -e '.[gui]'"
+    return CheckResult(
+        name,
+        _strict(release),
+        f"no qtbase_ar in {folder}: Qt's own buttons will stay English in the Arabic window",
+        remedy,
+    )
+
+
+def _quran_font_family() -> str | None:
+    """The family name of the bundled Quran font, read from the file without installing it."""
+    from PySide6.QtGui import QRawFont
+
+    if not DEFAULT_FONT_PATH.is_file():
+        return None
+    raw = QRawFont(str(DEFAULT_FONT_PATH), 12)
+    return raw.familyName() if raw.isValid() else None
+
+
+def arabic_ui_families() -> list[str]:
+    """The font families on this machine that can draw Arabic interface text.
+
+    Qt's list of families supporting the Arabic writing system, without the
+    bundled Quran font: it has Arabic letters but no Latin ones, so it can stand
+    in for Arabic but never be the interface font, and it is in the list whenever
+    the window has registered it (or someone installed it). Uses the running Qt
+    application, or makes one for the doctor (see ``_qt_application``).
+
+    Raises ``CannotMeasureFonts`` when this process has no window application and
+    cannot make one, and ``ImportError`` when Qt is not installed.
+    """
+    from PySide6.QtGui import QFontDatabase, QGuiApplication
+
+    app = _qt_application(window=True)
+    if app is None:
+        raise CannotMeasureFonts(
+            "no Qt platform plugin was found, so no window application can start to list fonts"
+        )
+    if not isinstance(app, QGuiApplication):
+        raise CannotMeasureFonts("this process runs Qt without a window, which cannot list fonts")
+    quran = _quran_font_family()
+    return [
+        family
+        for family in QFontDatabase.families(QFontDatabase.WritingSystem.Arabic)
+        if family != quran and not QFontDatabase.isPrivateFamily(family)
+    ]
+
+
+def _arabic_ui_font(release: bool) -> CheckResult:
+    """Can the Arabic window draw its words in a font meant for an interface?
+
+    A machine with no Arabic font shows the Arabic window as empty boxes; Qalun
+    then falls back to its bundled Quran font, which is legible but not meant for
+    interface text, so a release is checked on a machine that has a real one.
+    """
+    name = "Arabic interface font"
+    try:
+        families = arabic_ui_families()
+    except ImportError as error:
+        return CheckResult(
+            name,
+            _strict(release),
+            f"Qt is not installed ({error})",
+            "pip install 'qurantext[gui]'",
+        )
+    except CannotMeasureFonts as error:
+        if _frozen():
+            remedy = (
+                "This is a packaging fault: Qt's platform plugin was not bundled. Please report it."
+            )
+        else:
+            remedy = "Run the check where Qt can start, or set QT_QPA_PLATFORM=offscreen."
+        return CheckResult(name, _strict(release), f"cannot tell: {error}", remedy)
+    if families:
+        shown = ", ".join(families[:2])
+        more = f" and {len(families) - 2} more" if len(families) > 2 else ""
+        return CheckResult(name, Status.OK, f"{shown}{more}")
+    return CheckResult(
+        name,
+        _strict(release),
+        "no installed font can draw Arabic interface text",
+        "Install an Arabic font (for example Noto Sans Arabic); Qalun falls back to its "
+        "bundled Quran font for Arabic letters, which is legible but not meant for "
+        "interface text.",
+    )
+
+
+def run_checks(*, release: bool = False) -> list[CheckResult]:
+    """Every check, in the order a person would want to read them.
+
+    *release* makes playback, Qt's Arabic translation and an Arabic interface
+    font blocking: a developer's checkout is only told about them, a release
+    build (``qalun --doctor --release``, the CI gate) must have them.
+    """
     return [
         _arabic_shaping(),
         _ffmpeg_binary("ffmpeg"),
@@ -273,6 +645,9 @@ def run_checks() -> list[CheckResult]:
         _quran_store(),
         _writable_output(),
         _window(),
+        _playback(release),
+        _qt_translation(release),
+        _arabic_ui_font(release),
     ]
 
 

@@ -16,7 +16,7 @@ should not mean editing the build file three times in a row.
 | `collect-macos.sh` | macOS | the same, and make FFmpeg self-contained |
 | `collect-linux.sh` | Linux | the same |
 | `stage.sh` | all | copy `vendor/` in beside the built executable |
-| `check.sh` / `check.ps1` | all | run the built app's own `--doctor`, with PATH stripped |
+| `check.sh` / `check.ps1` | all | run the built app's own `--doctor --release`, with PATH stripped: render, transcribe, play audio, Qt's Arabic translation, an Arabic interface font |
 
 `vendor/` holds what the app needs at runtime but does not carry itself: FFmpeg,
 because nobody should have to install an encoder, and FriBiDi, because Pillow

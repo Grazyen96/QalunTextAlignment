@@ -104,3 +104,34 @@ def test_every_text_command_can_reach_a_console() -> None:
         branch = body.index(flag)
         following = body[branch : branch + 400]
         assert "_attach_console()" in following, f"{flag} would print nowhere on Windows"
+
+
+class TestDoctorRelease:
+    """The CI gate runs ``--doctor --release``: what a developer is told, a release fails on."""
+
+    @staticmethod
+    def _record(monkeypatch) -> list[bool]:
+        from qurantext.config import preflight
+
+        seen: list[bool] = []
+
+        def fake(*, release: bool = False):
+            seen.append(release)
+            return [preflight.CheckResult("A", preflight.Status.OK, "fine")]
+
+        monkeypatch.setattr(preflight, "run_checks", fake)
+        return seen
+
+    @pytest.fixture(autouse=True)
+    def _no_saved_report(self, entry, monkeypatch) -> None:
+        monkeypatch.setattr(entry, "_save_report", lambda report: None)
+
+    def test_release_is_strict(self, entry, monkeypatch, capsys) -> None:
+        seen = self._record(monkeypatch)
+        assert entry.main(["--doctor", "--release"]) == 0
+        assert seen == [True]
+
+    def test_plain_doctor_is_not(self, entry, monkeypatch, capsys) -> None:
+        seen = self._record(monkeypatch)
+        assert entry.main(["--doctor"]) == 0
+        assert seen == [False]
