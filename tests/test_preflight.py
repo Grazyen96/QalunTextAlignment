@@ -244,6 +244,45 @@ class TestWhatThePackagedAppMustDo:
         assert result.status == Status.OK, result
         assert "FFmpeg" in result.detail or "backend" in result.detail
 
+    def test_playback_names_the_backend_it_loaded_through(self, qt_app) -> None:
+        """What is on disk is not what plays: Qt falls back when the one asked for fails."""
+        result = preflight._playback(release=False)
+        assert result.status == Status.OK, result
+        assert "through the FFmpeg backend" in result.detail
+        assert "plugins on disk: FFmpeg" in result.detail
+
+    def test_the_loaded_plugin_is_found_in_this_process(self, qt_app) -> None:
+        preflight._load_test_recording()
+        assert preflight._media_backends_loaded() == ["FFmpeg"]
+
+    def test_a_release_that_fell_back_to_another_backend_fails(self, qt_app, monkeypatch) -> None:
+        """Qt 6.11 loads an "alternative backend" when the forced one will not load, and
+        the recording plays; only the loaded plugin shows FFmpeg was left behind."""
+        monkeypatch.setenv("QT_MEDIA_BACKEND", "ffmpeg")
+        monkeypatch.setattr(preflight, "_load_test_recording", lambda: (True, "0.50 s"))
+        monkeypatch.setattr(
+            preflight, "_media_backends_loaded", lambda: ["Windows Media Foundation"]
+        )
+        result = preflight._playback(release=True)
+        assert result.status == Status.FAIL
+        assert "not through the FFmpeg backend" in result.detail
+        assert "Windows Media Foundation" in result.detail
+        assert preflight._playback(release=False).status == Status.WARN
+
+    def test_a_release_that_cannot_tell_its_backend_fails(self, qt_app, monkeypatch) -> None:
+        monkeypatch.setenv("QT_MEDIA_BACKEND", "ffmpeg")
+        monkeypatch.setattr(preflight, "_load_test_recording", lambda: (True, "0.50 s"))
+        monkeypatch.setattr(preflight, "_media_backends_loaded", lambda: None)
+        assert preflight._playback(release=True).status == Status.FAIL
+
+    def test_a_forced_backend_that_loaded_is_named_as_forced(self, qt_app, monkeypatch) -> None:
+        monkeypatch.setenv("QT_MEDIA_BACKEND", "ffmpeg")
+        monkeypatch.setattr(preflight, "_load_test_recording", lambda: (True, "0.50 s"))
+        monkeypatch.setattr(preflight, "_media_backends_loaded", lambda: ["FFmpeg"])
+        result = preflight._playback(release=True)
+        assert result.status == Status.OK
+        assert "through the FFmpeg backend, as QT_MEDIA_BACKEND asks;" in result.detail
+
     def test_playback_missing_is_a_note_for_a_developer_and_a_failure_for_a_release(
         self, monkeypatch
     ) -> None:

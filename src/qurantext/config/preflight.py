@@ -52,6 +52,7 @@ __all__ = [
     "Status",
     "arabic_ui_families",
     "format_report",
+    "prepare_doctor_process",
     "run_checks",
 ]
 
@@ -444,10 +445,8 @@ def _load_test_recording() -> tuple[bool, str]:
     return False, f"{status.name}: {error}" if error else status.name
 
 
-def _media_backend() -> str:
-    """Which multimedia backend Qt will use, named from the plugin files it would load."""
-    if chosen := os.environ.get("QT_MEDIA_BACKEND"):
-        return f"{chosen} backend (QT_MEDIA_BACKEND)"
+def _media_plugins() -> list[str]:
+    """The multimedia backends whose plugin files are where Qt looks, by name."""
     from PySide6.QtCore import QCoreApplication
 
     files = [
@@ -456,8 +455,81 @@ def _media_backend() -> str:
         if (Path(path) / "multimedia").is_dir()
         for plugin in (Path(path) / "multimedia").iterdir()
     ]
-    names = [label for stem, label in _MEDIA_BACKENDS.items() if any(stem in f for f in files)]
-    return f"{' / '.join(names)} backend" if names else "backend not named"
+    return [label for stem, label in _MEDIA_BACKENDS.items() if any(stem in f for f in files)]
+
+
+def _loaded_library_names() -> set[str]:
+    """The file names of the shared libraries this process has loaded, lower-cased.
+
+    Asked of the system rather than of Qt, which has no public way to say which
+    multimedia backend it chose.
+    """
+    import ctypes
+
+    if sys.platform == "win32":
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32")
+        psapi = ctypes.WinDLL("psapi")
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        kernel32.GetCurrentProcess.argtypes = []
+        psapi.EnumProcessModules.restype = wintypes.BOOL
+        psapi.EnumProcessModules.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.HMODULE),
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        psapi.GetModuleFileNameExW.restype = wintypes.DWORD
+        psapi.GetModuleFileNameExW.argtypes = [
+            wintypes.HANDLE,
+            wintypes.HMODULE,
+            wintypes.LPWSTR,
+            wintypes.DWORD,
+        ]
+        process = kernel32.GetCurrentProcess()
+        modules = (wintypes.HMODULE * 4096)()
+        needed = wintypes.DWORD()
+        if not psapi.EnumProcessModules(
+            process, modules, ctypes.sizeof(modules), ctypes.byref(needed)
+        ):
+            raise ctypes.WinError()
+        count = min(needed.value // ctypes.sizeof(wintypes.HMODULE), len(modules))
+        buffer = ctypes.create_unicode_buffer(32768)
+        found = set()
+        for module in modules[:count]:
+            if psapi.GetModuleFileNameExW(process, module, buffer, len(buffer)):
+                found.add(Path(buffer.value).name.lower())
+        return found
+    if sys.platform == "darwin":
+        system = ctypes.CDLL(None)
+        system._dyld_image_count.restype = ctypes.c_uint32
+        system._dyld_get_image_name.restype = ctypes.c_char_p
+        system._dyld_get_image_name.argtypes = [ctypes.c_uint32]
+        return {
+            Path(os.fsdecode(image)).name.lower()
+            for index in range(system._dyld_image_count())
+            if (image := system._dyld_get_image_name(index))
+        }
+    with open("/proc/self/maps", encoding="utf-8", errors="replace") as maps:
+        return {Path(line.split()[-1]).name.lower() for line in maps if "/" in line}
+
+
+def _media_backends_loaded() -> list[str] | None:
+    """The multimedia backends whose plugin this process has loaded; None if it cannot tell.
+
+    What is on disk, or asked for in ``QT_MEDIA_BACKEND``, is not proof of what
+    plays: when the backend asked for will not load, Qt 6.11 loads "an
+    alternative backend" and the test recording plays through that. A Windows
+    build that lost its FFmpeg plugin would pass on Windows Media Foundation,
+    which cannot decode Opus. The library Qt actually loaded is the proof.
+    """
+    try:
+        names = _loaded_library_names()
+    except Exception:  # noqa: BLE001 - any failure to ask means the same: cannot tell
+        return None
+    plugins = [name for name in names if "mediaplugin" in name]
+    return [label for stem, label in _MEDIA_BACKENDS.items() if any(stem in n for n in plugins)]
 
 
 def _playback(release: bool) -> CheckResult:
@@ -494,6 +566,25 @@ def _playback(release: bool) -> CheckResult:
             f"a short test recording would not load ({what}); {without}",
             remedy,
         )
+    forced = os.environ.get("QT_MEDIA_BACKEND", "")
+    in_use = _media_backends_loaded()
+    on_disk = f"plugins on disk: {', '.join(_media_plugins()) or 'none named'}"
+    if forced:
+        wanted = _MEDIA_BACKENDS.get(forced.lower(), forced)
+        if not in_use or wanted not in in_use:
+            got = ", ".join(in_use) if in_use else "cannot tell which"
+            return CheckResult(
+                name,
+                _strict(release),
+                f"the test recording loaded, but not through the {wanted} backend "
+                f"QT_MEDIA_BACKEND asks for (loaded: {got}; {on_disk})",
+                remedy,
+            )
+    if in_use:
+        through = f"through the {' / '.join(in_use)} backend"
+        through += ", as QT_MEDIA_BACKEND asks" if forced else ""
+    else:
+        through = "backend in use unknown"
     multimedia = _import_multimedia()
     formats = len(
         multimedia.QMediaFormat().supportedFileFormats(
@@ -505,7 +596,7 @@ def _playback(release: bool) -> CheckResult:
     return CheckResult(
         name,
         Status.OK,
-        f"loaded a {what} test recording; {_media_backend()}, "
+        f"loaded a {what} test recording {through}; {on_disk}; "
         f"{formats} decodable format(s), {heard}",
     )
 
@@ -626,6 +717,28 @@ def _arabic_ui_font(release: bool) -> CheckResult:
         "bundled Quran font for Arabic letters, which is legible but not meant for "
         "interface text.",
     )
+
+
+#: Qt logging rules for the doctor: the FFmpeg plugin prints the test recording's
+#: stream details to stderr, noise in the report a person sends.
+_DOCTOR_LOGGING_RULES = "qt.multimedia.ffmpeg*=false"
+
+
+def prepare_doctor_process(*, release: bool = False) -> None:
+    """Set, in this process's environment, what Qt reads once when it starts.
+
+    Called by ``--doctor`` before the checks, so before anything imports Qt; a
+    process that already runs Qt is not changed by it. *release* asks Qt for the
+    FFmpeg multimedia backend (unless someone already chose one): Windows and
+    macOS ship a native backend beside it, and the gate must prove FFmpeg, not
+    whichever backend loaded. Logging rules already set are kept.
+    """
+    if release:
+        os.environ.setdefault("QT_MEDIA_BACKEND", "ffmpeg")
+    rules = os.environ.get("QT_LOGGING_RULES", "")
+    if _DOCTOR_LOGGING_RULES not in rules.split(";"):
+        rules = f"{rules};{_DOCTOR_LOGGING_RULES}" if rules else _DOCTOR_LOGGING_RULES
+    os.environ["QT_LOGGING_RULES"] = rules
 
 
 def run_checks(*, release: bool = False) -> list[CheckResult]:

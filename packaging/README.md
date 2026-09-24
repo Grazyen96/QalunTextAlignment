@@ -32,6 +32,14 @@ qalun --doctor          what works on this machine, and what to do about the res
 qalun --cli <command>   any command-line subcommand
 ```
 
+To test playback and fonts, the doctor starts a Qt application of its own (offscreen on
+Linux, the native one on Windows and macOS), so it can take a few seconds. An exported
+`QT_QPA_PLATFORM` is honoured: over SSH with `QT_QPA_PLATFORM=xcb` and no display, Qt
+aborts the doctor instead of letting it report, so unset it or set it to `offscreen`.
+The doctor keeps the FFmpeg plugin's own log out of its report (`QT_LOGGING_RULES`), and
+`--doctor --release` asks Qt for the FFmpeg multimedia backend (`QT_MEDIA_BACKEND`) and
+fails unless the test recording played through it.
+
 ## Per platform
 
 | | Windows | Ubuntu | macOS |

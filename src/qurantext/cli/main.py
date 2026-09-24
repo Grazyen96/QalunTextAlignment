@@ -15,7 +15,7 @@ from qurantext.config.paths import (
     WHISPERX_TRANSCRIPTS_OUTPUT_DIR,
     resolve_quran_path,
 )
-from qurantext.config.preflight import Status, format_report, run_checks
+from qurantext.config.preflight import Status, format_report, prepare_doctor_process, run_checks
 from qurantext.config.settings import VIDEO_PRESETS, get_settings
 from qurantext.core.coverage import find_uncovered_speech
 from qurantext.core.subtitles import SUBTITLE_FORMATS
@@ -223,6 +223,7 @@ def _run_check_timing(args: argparse.Namespace) -> int:
 
 def _run_doctor(args: argparse.Namespace) -> int:
     """Report whether this machine can render, and what to do if not."""
+    prepare_doctor_process()
     results = run_checks()
     print(format_report(results))
     return 1 if any(r.status == Status.FAIL for r in results) else 0

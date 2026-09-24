@@ -16,6 +16,9 @@ Work top to bottom; stop at the first item that fails and fix it before going on
 - [ ] Actions → **Build the app** → **Run workflow**, on the commit you mean to tag.
 - [ ] Every platform's gate step (**Check the built app can render**, which runs
       `--doctor --release`) passes on Windows, macOS and Linux.
+- [ ] In each platform's gate log, the Playback line says `through the FFmpeg backend,
+      as QT_MEDIA_BACKEND asks`. Windows and macOS also ship a native backend, and only
+      this line shows the recording did not play through that one instead.
 - [ ] Record the Windows and macOS zip sizes (on the run's summary page) in the Size
       table in `packaging/README.md`. Compare each with that platform's zip from the last
       build before playback was added (an older workflow run or Release). If it grew far more than 30–40 MB, stop and find
