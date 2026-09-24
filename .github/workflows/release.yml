@@ -96,17 +96,7 @@ jobs:
 
       - name: Package
         shell: bash
-        run: |
-          mkdir -p out
-          if [ -d "dist/Qalun.app" ]; then
-            ditto -c -k --keepParent "dist/Qalun.app" "out/${{ matrix.artifact }}.zip"
-          else
-            python -c "
-          import shutil
-          shutil.make_archive('out/${{ matrix.artifact }}', 'zip', 'dist', 'qalun')
-          "
-          fi
-          ls -la out
+        run: bash packaging/ci/package.sh ${{ matrix.artifact }}
 
       - uses: actions/upload-artifact@v4
         with:
