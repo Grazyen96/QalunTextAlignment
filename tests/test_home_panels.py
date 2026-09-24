@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QMimeData, QPointF, QSettings, Qt, QUrl
@@ -580,3 +581,24 @@ def test_an_arabic_file_name_does_not_turn_the_running_row_around(qt_app, prefs)
     panel = JobListPanel(prefs)
     panel.set_running("تلاوة.m4a", "Starting…")
     assert _running_text(panel) == "\u2068تلاوة.m4a\u2069 — Starting…"
+
+
+def test_a_long_audio_path_is_elided_to_one_line_with_the_full_path_as_tooltip(
+    qt_app, prefs, store
+) -> None:
+    """The drop zone has a fixed height: a wrapped path would be clipped, not shown."""
+    panel = _panel(prefs, store)
+    # Twelve folders, not one name twelve times as long: no file system takes a 264-byte name.
+    deep = Path("/tmp", *["very-long-folder-name"] * 12, "تلاوة.mp3")
+    panel.set_audio(deep)
+    label = panel.drop_label
+    panel.resize(700, 600)
+    panel.show()
+    qt_app.processEvents()
+    metrics = label.fontMetrics()
+    for line in label.text().split("\n"):
+        assert metrics.horizontalAdvance(line) <= label.width()
+    assert label.toolTip() == path_text(deep), "the whole path, kept in its order"
+    assert "…" in label.text()
+    folder_line = label.text().split("\n")[1]
+    assert folder_line.startswith("\u2066") and folder_line.endswith("\u2069"), "still isolated"
