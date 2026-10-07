@@ -17,6 +17,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -96,23 +97,28 @@ class ExportDialog(QDialog):
         layout.addWidget(self._video_radio)
         layout.addWidget(self._audio_radio)
 
-        self._go_button = QPushButton(t("export.go"))
-        self._go_button.clicked.connect(self.export)
-        layout.addWidget(self._go_button)
-
         self._result_label = QLabel()
         self._result_label.setWordWrap(True)
         self._result_label.setVisible(False)
         layout.addWidget(self._result_label)
 
-        self._show_button = QPushButton(t("export.show"))
+        self.buttons = QDialogButtonBox()
+        self._show_button = self.buttons.addButton(
+            t("export.show"), QDialogButtonBox.ButtonRole.ActionRole
+        )
         self._show_button.setVisible(False)
         self._show_button.clicked.connect(self._show_written)
-        layout.addWidget(self._show_button)
-
-        self.close_button = QPushButton(t("export.close"))
+        self._go_button = self.buttons.addButton(
+            t("export.go"), QDialogButtonBox.ButtonRole.AcceptRole
+        )
+        self._go_button.setDefault(True)
+        self.close_button = self.buttons.addButton(
+            t("export.close"), QDialogButtonBox.ButtonRole.RejectRole
+        )
+        layout.addWidget(self.buttons)
+        # Export writes and stays open to say what it wrote; only Close leaves.
+        self._go_button.clicked.connect(self.export)
         self.close_button.clicked.connect(self.accept)
-        layout.addWidget(self.close_button)
 
     def _set_defaults(self) -> None:
         self._format_boxes[_DEFAULT_FORMAT].setChecked(True)
@@ -121,7 +127,7 @@ class ExportDialog(QDialog):
         render = project.render or {}
         video = render.get("video")
         folder = Path(video).parent if video else VIDEOS_OUTPUT_DIR
-        self._folder_field.setText(str(folder))
+        self._set_folder(str(folder))
         self._name_field.setText(Path(project.audio).stem)
 
         available = self.video_timeline_available()
@@ -155,7 +161,7 @@ class ExportDialog(QDialog):
             box.setChecked(name in chosen)
 
     def set_destination(self, folder: Path, stem: str) -> None:
-        self._folder_field.setText(str(folder))
+        self._set_folder(str(folder))
         self._name_field.setText(stem)
 
     # -- actions ------------------------------------------------------------------
@@ -165,7 +171,13 @@ class ExportDialog(QDialog):
             self, plain_title(t("export.choose")), self._folder_field.text()
         )
         if chosen:
-            self._folder_field.setText(chosen)
+            self._set_folder(chosen)
+
+    def _set_folder(self, folder: str) -> None:
+        """Show the path from its start, with the whole of it on hover."""
+        self._folder_field.setText(folder)
+        self._folder_field.setCursorPosition(0)
+        self._folder_field.setToolTip(folder)
 
     def export(self) -> list[Path]:
         """Save unsaved edits, then write the chosen formats; ``[]`` on a shown error.

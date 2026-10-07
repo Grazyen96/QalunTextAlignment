@@ -446,6 +446,33 @@ def test_export_rejects_a_blank_file_name_inline(qt_app, tmp_path) -> None:
     assert dialog._result_label.text() == t("export.no_name")
 
 
+def test_export_is_the_dialogs_default_button(qt_app, tmp_path) -> None:
+    from PySide6.QtWidgets import QDialogButtonBox
+
+    from qurantext.gui.review.export_dialog import ExportDialog
+    from qurantext.gui.review.session import ReviewSession
+
+    dialog = ExportDialog(ReviewSession(_project(tmp_path)))
+    assert dialog._go_button.isDefault()
+    assert isinstance(dialog.buttons, QDialogButtonBox)
+    assert dialog.buttons.buttonRole(dialog._go_button) == QDialogButtonBox.ButtonRole.AcceptRole
+    assert dialog.buttons.buttonRole(dialog.close_button) == QDialogButtonBox.ButtonRole.RejectRole
+    assert dialog._show_button.isHidden()
+    layout = dialog.layout()
+    assert layout.indexOf(dialog._result_label) < layout.indexOf(dialog.buttons)
+
+
+def test_the_folder_field_shows_the_start_of_the_path(qt_app, tmp_path) -> None:
+    from qurantext.gui.review.export_dialog import ExportDialog
+    from qurantext.gui.review.session import ReviewSession
+
+    dialog = ExportDialog(ReviewSession(_project(tmp_path)))
+    deep = tmp_path / ("a-rather-long-folder-name-" * 6)
+    dialog.set_destination(deep, "take")
+    assert dialog._folder_field.cursorPosition() == 0
+    assert dialog._folder_field.toolTip() == str(deep)
+
+
 def test_export_shows_a_save_failure_inline_instead_of_raising(qt_app, tmp_path) -> None:
     from qurantext.gui.review.export_dialog import ExportDialog
     from qurantext.gui.review.session import CARD, ReviewSession, WordRef

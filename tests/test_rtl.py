@@ -124,7 +124,9 @@ def _texts(root: QWidget) -> Iterator[str]:
     """Every word *root* shows a person: titles, labels, buttons, tips, items, headers."""
     yield root.windowTitle()
     for widget in [root, *root.findChildren(QWidget)]:
-        yield widget.toolTip()
+        # A field's tip that repeats its contents (a folder path) is data, like the contents.
+        if not (isinstance(widget, QLineEdit) and widget.toolTip() == widget.text()):
+            yield widget.toolTip()
         if isinstance(widget, QLabel):
             yield widget.text()
         if isinstance(widget, QAbstractButton):
