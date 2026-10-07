@@ -211,8 +211,22 @@ def test_more_options_points_the_way_arabic_reads(
 
 
 #: The Latin words the Arabic table itself keeps: the app's name, subtitle
-#: formats, a key name, the package to install, and "English" in the language menu.
-_LATIN_THE_TABLE_KEEPS = {"Qalun", "SRT", "VTT", "ASS", "Ctrl", "Z", "PySide6", "Addons", "English"}
+#: formats, key names, the package to install, and "English" in the language menu.
+_LATIN_THE_TABLE_KEEPS = {
+    "Qalun",
+    "SRT",
+    "VTT",
+    "ASS",
+    "Ctrl",
+    "Shift",
+    "Z",
+    "PySide6",
+    "Addons",
+    "English",
+}
+#: The letters of the key caps Qt itself writes into a tip (Save's Ctrl+S): a
+#: key's letter is what is printed on it, in either language.
+_KEY_CAPS = {"S"}
 _LATIN_WORD = re.compile(r"[A-Za-z][A-Za-z0-9]*")
 
 
@@ -293,7 +307,7 @@ def test_no_english_is_left_in_the_arabic_windows(
 
     fixture_words = set(_LATIN_WORD.findall(str(tmp_path)))
     fixture_words |= {"jobs", "lesson", "m4a", "recitation", "missing", "mp3", "m", "Hello"}
-    allowed = _LATIN_THE_TABLE_KEEPS | fixture_words
+    allowed = _LATIN_THE_TABLE_KEEPS | _KEY_CAPS | fixture_words
     roots = (main, review_window, review_window._make_export_dialog(), lecture_review_window)
     for root in roots:
         shown = [*_shown(root), *(text for menu in menus for text in menu)]

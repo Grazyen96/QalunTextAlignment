@@ -199,9 +199,13 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.discard_title": "Save your corrections?",
         "review.discard_text": "This review has changes that are not saved.",
         "review.shortcuts": (
-            "Space plays · ←/→ step words · [ and ] set start/end at the playhead · "
-            ", and . nudge · Ctrl-drag an edge to part two words · Ctrl+Z undoes"
+            "Space plays · ←/→ step words · [ ] set start/end at the playhead · "
+            ", . nudge 50 ms (Shift: 10 ms) · Shift-drag ripples the later words · "
+            "Ctrl-drag an edge to part two words · Ctrl+Z undoes"
         ),
+        "review.tip": "{action} ({keys})",
+        "review.tip_fine": "{action} ({keys}; with Shift: 10 ms)",
+        "review.key_space": "Space",
         "export.title": "Export subtitles",
         "export.formats": "Formats",
         "export.folder": "Folder",
@@ -409,10 +413,14 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.discard_text": "في هذه المراجعة تغييرات غير محفوظة.",
         "review.shortcuts": (
             "المسافة للتشغيل · \u2066←/→\u2069 للتنقل بين الكلمات · "
-            "\u2066[\u2069 للبداية و\u2066]\u2069 للنهاية عند مؤشر التشغيل · "
-            "\u2066,\u2069 و\u2066.\u2069 للإزاحة الدقيقة · "
+            "\u2066[ ]\u2069 للبداية/النهاية عند مؤشر التشغيل · "
+            "\u2066, .\u2069 للإزاحة 50 م.ث (مع Shift: 10 م.ث) · "
+            "اسحب مع Shift لإزاحة الكلمات التالية · "
             "اسحب حافة مع Ctrl لفصل كلمتين · Ctrl+Z للتراجع"
         ),
+        "review.tip": "\u200f{action} ({keys})",
+        "review.tip_fine": "{action} ({keys}؛ مع Shift: 10 م.ث)",
+        "review.key_space": "المسافة",
         "export.title": "تصدير الترجمة النصية",
         "export.formats": "الصيغ",
         "export.folder": "المجلد",

@@ -11,6 +11,11 @@ The renderer itself (``core.frame_renderer``) is unaware of the GUI: it takes
 plain dicts and returns a BGR numpy array, the same shape a render job would
 hand to OpenCV. This widget is the only place that array becomes a
 :class:`QPixmap`.
+
+The preset size is what the widget asks for, not what it insists on: in a
+small window it gives way down to half that, and renders the frame at the
+largest size of the preset's shape that fits, so the frame never spills out of
+the widget and the rows under it keep their room.
 """
 
 from __future__ import annotations
@@ -19,8 +24,8 @@ import time
 
 import numpy as np
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtWidgets import QLabel, QWidget
+from PySide6.QtGui import QImage, QPixmap, QResizeEvent
+from PySide6.QtWidgets import QLabel, QSizePolicy, QWidget
 
 from qurantext.config.paths import DEFAULT_FONT_PATH
 from qurantext.core.frame_renderer import (
@@ -57,12 +62,34 @@ class FrameView(QLabel):
         self._last_render_at: float | None = None
         self._placeholder_revision: int | None = None
         self._placeholder: tuple[str, str] = (DEFAULT_PLACEHOLDER_TITLE, "")
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self.setMinimumSize(self._width // 2, self._height // 2)
+        self.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+        #: The time last asked for, so a resize can redraw the same moment.
+        self._last_t = 0.0
 
     def sizeHint(self) -> QSize:  # noqa: D102 - Qt override, documented by the class
         return QSize(self._width, self._height)
 
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt override
+        """Half the preset size: as far as the frame gives way to a small window."""
+        return QSize(self._width // 2, self._height // 2)
+
+    def _render_size(self) -> tuple[int, int]:
+        """The largest frame of the preset's shape that fits the widget, never above the preset size."""
+        width = min(self._width, max(1, self.width()))
+        height = min(self._height, max(1, self.height()))
+        scale = min(width / self._width, height / self._height)
+        return max(1, int(self._width * scale)), max(1, int(self._height * scale))
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 - Qt override
+        """Redraw the same moment at the new size, so the frame always fits the widget."""
+        super().resizeEvent(event)
+        self.show_at(self._last_t, force=True)
+
     def show_at(self, t: float, *, force: bool = False) -> None:
         """Render the frame at *t*, skipping it if throttled and not *force*."""
+        self._last_t = t
         now = time.monotonic()
         if (
             not force
@@ -80,8 +107,7 @@ class FrameView(QLabel):
             frame = render_frame_pillow(
                 t,
                 card,
-                self._width,
-                self._height,
+                *self._render_size(),
                 DEFAULT_FONT_PATH,
                 caption_text=caption_text,
                 caption_word_timings=caption_word_timings,

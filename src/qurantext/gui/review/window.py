@@ -33,7 +33,7 @@ from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QKeyCombination, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QKeyCombination, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QKeyEvent, QKeySequence, QShortcut, QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -116,6 +117,9 @@ _COVERAGE_DEBOUNCE_MS = 1000
 _FINE_NUDGE_S = 0.01
 #: The timeline window shown on open, before the person zooms.
 _DEFAULT_SPAN_S = 20.0
+#: The least height the segment list keeps, in pixels: its header and a few rows,
+#: so a small window shrinks the frame above it instead of the rows away.
+_LIST_MIN_HEIGHT = 150
 
 
 def _platform_family() -> str:
@@ -217,6 +221,7 @@ class ReviewWindow(QMainWindow):
         self._build()
         self._wire()
         self._bind_keys()
+        self._set_tips()
 
         self._timer = QTimer(self)
         self._timer.setInterval(_TICK_MS)
@@ -288,20 +293,33 @@ class ReviewWindow(QMainWindow):
         body_row.addLayout(self._build_timeline(), 1)
 
         self.segment_list = SegmentList(self.session)
+        self.segment_list.setMinimumHeight(_LIST_MIN_HEIGHT)
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.addWidget(body)
         splitter.addWidget(self.segment_list)
+        # Neither pane can be dragged away, and extra height goes to the list's rows.
+        splitter.setChildrenCollapsible(False)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        self._splitter = splitter
         column.addWidget(splitter, 1)
 
-        self.statusBar().addWidget(QLabel(t("review.shortcuts")))
+        self.hint_label = QLabel()
+        self.hint_label.setToolTip(t("review.shortcuts"))
+        # Takes whatever width the bar has, and elides to it (see _elide_hint).
+        self.hint_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.hint_label.installEventFilter(self)
+        self.statusBar().addWidget(self.hint_label, 1)
         self.setCentralWidget(central)
 
     def _build_timeline(self) -> QVBoxLayout:
         right = QVBoxLayout()
 
         zoom_row = QHBoxLayout()
-        zoom_row.addWidget(QLabel(t("review.zoom")))
+        self.zoom_label = QLabel(t("review.zoom"))
         self.zoom_slider = ZoomSlider(self.viewport, self.player.position)
+        self.zoom_label.setBuddy(self.zoom_slider)
+        zoom_row.addWidget(self.zoom_label)
         zoom_row.addWidget(self.zoom_slider, 1)
         right.addLayout(zoom_row)
 
@@ -347,6 +365,8 @@ class ReviewWindow(QMainWindow):
         self.strip.selection_changed.connect(self._show_selection)
         self.strip.edited.connect(self._after_edit)
         self.segment_list.seek_requested.connect(self.seek)
+        # Remove is offered only while a row is selected.
+        self.segment_list.itemSelectionChanged.connect(self._sync_state)
         # Connected after the list's own handler, so the caption text is already in the session.
         self.segment_list.itemChanged.connect(self._after_caption_edit)
         self.play_button.clicked.connect(self.toggle_play)
@@ -385,6 +405,43 @@ class ReviewWindow(QMainWindow):
         # ambiguous. Other layouts put these characters elsewhere and may differ.
         self._keys["Shift+>"] = self._keys["Shift+."]
         self._keys["Shift+<"] = self._keys["Shift+,"]
+
+    def _set_tips(self) -> None:
+        """Say each button's shortcut on the button itself, where a person hovers to learn it."""
+        native = QKeySequence.SequenceFormat.NativeText
+        tips = (
+            (self.save_button, "Ctrl+S"),
+            (self.undo_button, "Ctrl+Z"),
+            (self.redo_button, "Ctrl+Shift+Z"),
+        )
+        for button, keys in tips:
+            shown = QKeySequence(keys).toString(native)
+            button.setToolTip(t("review.tip", action=button.text(), keys=shown))
+        self.play_button.setToolTip(self._play_tip())
+        bar = self.selection_bar
+        bar.minus_button.setToolTip(t("review.tip_fine", action=bar.minus_button.text(), keys=","))
+        bar.plus_button.setToolTip(t("review.tip_fine", action=bar.plus_button.text(), keys="."))
+
+    def _play_tip(self) -> str:
+        """The play button's tip for its current action.
+
+        Space is named from the table, not by Qt: Qt's own Arabic translation
+        leaves that key's name in English.
+        """
+        return t("review.tip", action=self.play_button.text(), keys=t("review.key_space"))
+
+    def _elide_hint(self) -> None:
+        """Fit the shortcut line to the status bar; the tooltip keeps the whole of it."""
+        full = t("review.shortcuts")
+        metrics = self.hint_label.fontMetrics()
+        self.hint_label.setText(
+            metrics.elidedText(full, Qt.TextElideMode.ElideRight, self.hint_label.width())
+        )
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802 - Qt override
+        if watched is self.hint_label and event.type() in (QEvent.Type.Resize, QEvent.Type.Show):
+            self._elide_hint()
+        return super().eventFilter(watched, event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 - Qt override
         combination = event.keyCombination()
@@ -459,6 +516,10 @@ class ReviewWindow(QMainWindow):
 
     def _on_playing_changed(self, playing: bool) -> None:
         self.play_button.setText(t("review.pause") if playing else t("review.play"))
+        if self.player.available:
+            # The tip names the button's action, which just changed; without a
+            # player the tip is the reason instead, and stays so.
+            self.play_button.setToolTip(self._play_tip())
         if playing:
             self._timer.start()
         else:
@@ -623,7 +684,7 @@ class ReviewWindow(QMainWindow):
         self.save_button.setEnabled(session.dirty and editable)
         self.undo_button.setEnabled(session.can_undo and editable)
         self.redo_button.setEnabled(session.can_redo and editable)
-        self.remove_button.setEnabled(editable)
+        self.remove_button.setEnabled(editable and bool(self.segment_list.selectedIndexes()))
         self.reviewed_button.setEnabled(
             session.project.review.get("state") != "reviewed" and editable
         )
