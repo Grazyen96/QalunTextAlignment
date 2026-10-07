@@ -967,3 +967,110 @@ def test_a_long_audio_path_is_elided_to_one_line_with_the_full_path_as_tooltip(
     assert "…" in label.text()
     folder_line = label.text().split("\n")[1]
     assert folder_line.startswith("\u2066") and folder_line.endswith("\u2069"), "still isolated"
+
+
+def _audio_mime(tmp_path):
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(tmp_path / "take.mp3"))])
+    return mime
+
+
+def test_the_drop_zone_lights_up_while_a_drag_is_over_it_and_not_after(
+    qt_app, prefs, store, tmp_path
+) -> None:
+    from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent
+
+    panel = _panel(prefs, store)
+    mime = _audio_mime(tmp_path)  # the event does not own it: keep it alive
+    enter = QDragEnterEvent(
+        QPointF(10, 10).toPoint(),
+        Qt.DropAction.CopyAction,
+        mime,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    qt_app.sendEvent(panel, enter)
+    assert panel.drop_zone.property("dragOver") is True
+    qt_app.sendEvent(panel, QDragLeaveEvent())
+    assert panel.drop_zone.property("dragOver") is False
+
+
+def test_a_drop_puts_the_zone_back_to_normal(qt_app, prefs, store, tmp_path) -> None:
+    from PySide6.QtGui import QDragEnterEvent
+
+    panel = _panel(prefs, store)
+    mime = _audio_mime(tmp_path)
+    qt_app.sendEvent(
+        panel,
+        QDragEnterEvent(
+            QPointF(10, 10).toPoint(),
+            Qt.DropAction.CopyAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        ),
+    )
+    qt_app.sendEvent(
+        panel,
+        QDropEvent(
+            QPointF(10, 10),
+            Qt.DropAction.CopyAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        ),
+    )
+    assert panel.audio_path == tmp_path / "take.mp3"
+    assert panel.drop_zone.property("dragOver") is False
+
+
+def test_the_progress_bar_leaves_the_words_to_the_status_line(qt_app, prefs, store) -> None:
+    panel = _panel(prefs, store)
+    assert not panel.progress_bar.isTextVisible()
+
+
+def test_the_range_labels_name_their_spin_boxes(qt_app, prefs, store) -> None:
+    panel = _panel(prefs, store)
+    assert panel.range_from_label.buddy() is panel.from_spin
+    assert panel.range_to_label.buddy() is panel.to_spin
+
+
+def test_the_more_options_are_labelled_rows_that_hide_together(qt_app, prefs, store) -> None:
+    panel = _panel(prefs, store)
+    form = panel.more_form
+    labels = {
+        form.labelForField(panel.quran_row).text(): panel.quran_row,
+        form.labelForField(panel.output_row).text(): panel.output_row,
+        form.labelForField(panel.subtitles_row).text(): panel.subtitles_row,
+        form.labelForField(panel.formats_widget).text(): panel.formats_widget,
+    }
+    assert set(labels) == {
+        t("home.quran_text"),
+        t("home.output_dir"),
+        t("home.subtitles"),
+        t("home.formats"),
+    }
+    panel.subtitle_buttons["burn"].setChecked(True)
+    assert panel.formats_widget.isHidden()
+    assert form.labelForField(panel.formats_widget).isHidden()
+    panel.subtitle_buttons["both"].setChecked(True)
+    assert not panel.formats_widget.isHidden()
+    assert not form.labelForField(panel.formats_widget).isHidden()
+
+
+def test_the_value_texts_no_longer_repeat_their_labels(qt_app, prefs, store) -> None:
+    panel = _panel(prefs, store)
+    assert panel.quran_label.text() == t("home.quran_override.default")
+    assert ":" not in t("home.quran_override.default")
+    assert ":" not in t("home.output_dir.default")
+
+
+def test_the_two_forms_share_one_label_column(qt_app, prefs, store) -> None:
+    panel = _panel(prefs, store)
+    panel.more_button.setChecked(True)
+    panel.resize(800, 700)
+    panel.show()
+    spin(50)
+    upper = panel.surah_box.x()
+    lower = panel.quran_row.x()
+    assert abs(upper - lower) <= 2

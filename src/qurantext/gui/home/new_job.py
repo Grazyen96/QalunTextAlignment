@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, Qt, Signal
-from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDropEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -136,9 +136,13 @@ class NewJobPanel(QWidget):
         self.drop_zone = QFrame()
         self.drop_zone.setObjectName("dropZone")
         self.drop_zone.setFixedHeight(_DROP_ZONE_HEIGHT)
+        # While an accepted drag is over it, the zone says "let go here".
         self.drop_zone.setStyleSheet(
             "QFrame#dropZone { border: 2px dashed palette(mid); border-radius: 6px; }"
+            ' QFrame#dropZone[dragOver="true"] { border: 2px solid palette(highlight);'
+            " background: palette(alternate-base); }"
         )
+        self.drop_zone.setProperty("dragOver", False)
         drop_layout = QVBoxLayout(self.drop_zone)
         drop_layout.setContentsMargins(12, 8, 12, 8)
         drop_layout.setSpacing(4)
@@ -181,6 +185,7 @@ class NewJobPanel(QWidget):
 
         form_widget = QWidget()
         form = QFormLayout(form_widget)
+        self._form = form
         form.setContentsMargins(0, 0, 0, 0)
         self.surah_box = QComboBox()
         self.surah_box.currentIndexChanged.connect(self._surah_changed)
@@ -194,9 +199,14 @@ class NewJobPanel(QWidget):
         self.to_spin.setMinimum(1)
         self.from_spin.valueChanged.connect(self._range_changed)
         self.to_spin.valueChanged.connect(self._range_changed)
-        range_row.addWidget(QLabel(t("home.range_from")))
+        # Buddies, so a screen reader names each spin box by its "from"/"to".
+        self.range_from_label = QLabel(t("home.range_from"))
+        self.range_from_label.setBuddy(self.from_spin)
+        self.range_to_label = QLabel(t("home.range_to"))
+        self.range_to_label.setBuddy(self.to_spin)
+        range_row.addWidget(self.range_from_label)
         range_row.addWidget(self.from_spin)
-        range_row.addWidget(QLabel(t("home.range_to")))
+        range_row.addWidget(self.range_to_label)
         range_row.addWidget(self.to_spin)
         range_row.addStretch(1)
         self.range_widget = QWidget()
@@ -219,11 +229,15 @@ class NewJobPanel(QWidget):
         self.more_button.toggled.connect(self._toggle_more_options)
         layout.addWidget(self.more_button)
 
+        # Labelled rows like the form above, so each choice says what it is
+        # and its value text need not repeat it.
         self.more_group = QWidget()
-        more_layout = QVBoxLayout(self.more_group)
-        more_layout.setContentsMargins(0, 0, 0, 0)
+        self.more_form = QFormLayout(self.more_group)
+        self.more_form.setContentsMargins(0, 0, 0, 0)
 
-        quran_row = QHBoxLayout()
+        self.quran_row = QWidget()
+        quran_row = QHBoxLayout(self.quran_row)
+        quran_row.setContentsMargins(0, 0, 0, 0)
         self.quran_label = QLabel()
         self.quran_label.setWordWrap(True)
         quran_row.addWidget(self.quran_label, 1)
@@ -233,9 +247,11 @@ class NewJobPanel(QWidget):
         self.quran_reset_button = QPushButton(t("home.quran_override.reset"))
         self.quran_reset_button.clicked.connect(lambda: self.set_quran(None))
         quran_row.addWidget(self.quran_reset_button)
-        more_layout.addLayout(quran_row)
+        self.more_form.addRow(t("home.quran_text"), self.quran_row)
 
-        output_row = QHBoxLayout()
+        self.output_row = QWidget()
+        output_row = QHBoxLayout(self.output_row)
+        output_row.setContentsMargins(0, 0, 0, 0)
         self.output_label = QLabel()
         self.output_label.setWordWrap(True)
         output_row.addWidget(self.output_label, 1)
@@ -245,9 +261,11 @@ class NewJobPanel(QWidget):
         self.output_reset_button = QPushButton(t("home.output_dir.reset"))
         self.output_reset_button.clicked.connect(lambda: self.set_output_dir(None))
         output_row.addWidget(self.output_reset_button)
-        more_layout.addLayout(output_row)
+        self.more_form.addRow(t("home.output_dir"), self.output_row)
 
-        subtitles_row = QHBoxLayout()
+        self.subtitles_row = QWidget()
+        subtitles_row = QHBoxLayout(self.subtitles_row)
+        subtitles_row.setContentsMargins(0, 0, 0, 0)
         self._subtitles_group = QButtonGroup(self)
         self._subtitles_group.setExclusive(True)
         for value in SUBTITLE_CHOICES:
@@ -256,7 +274,7 @@ class NewJobPanel(QWidget):
             self._subtitles_group.addButton(button)
             subtitles_row.addWidget(button)
         subtitles_row.addStretch(1)
-        more_layout.addLayout(subtitles_row)
+        self.more_form.addRow(t("home.subtitles"), self.subtitles_row)
         self._subtitles_group.buttonToggled.connect(self._subtitles_changed)
 
         self.formats_widget = QWidget()
@@ -268,11 +286,11 @@ class NewJobPanel(QWidget):
             self.format_boxes[fmt] = box
             formats_row.addWidget(box)
         formats_row.addStretch(1)
-        more_layout.addWidget(self.formats_widget)
+        self.more_form.addRow(t("home.formats"), self.formats_widget)
 
         self.render_right_away_box = QCheckBox(t("home.render_right_away"))
         self.render_right_away_box.toggled.connect(self._render_right_away_changed)
-        more_layout.addWidget(self.render_right_away_box)
+        self.more_form.addRow(self.render_right_away_box)  # spans both columns
 
         layout.addWidget(self.more_group)
 
@@ -294,6 +312,9 @@ class NewJobPanel(QWidget):
         layout.addLayout(buttons_row)
 
         self.progress_bar = QProgressBar()
+        # The status line under it says what is happening; a percentage
+        # beside the bar would only say it twice.
+        self.progress_bar.setTextVisible(False)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setVisible(False)
         layout.addWidget(self.progress_bar)
@@ -304,6 +325,23 @@ class NewJobPanel(QWidget):
         layout.addWidget(self.status_label)
         # Spare height goes below the form, so the controls stay together at the top.
         layout.addStretch(1)
+        self._align_label_columns()
+
+    def _align_label_columns(self) -> None:
+        """Give the two forms one label column, so "More options" lines up with the form above.
+
+        Two QFormLayouts size their label columns independently; the wider
+        of the two sets the width of every label in both.
+        """
+        labels = []
+        for form in (self._form, self.more_form):
+            for row in range(form.rowCount()):
+                item = form.itemAt(row, QFormLayout.ItemRole.LabelRole)
+                if item is not None and item.widget() is not None:
+                    labels.append(item.widget())
+        widest = max((label.sizeHint().width() for label in labels), default=0)
+        for label in labels:
+            label.setMinimumWidth(widest)
 
     def _apply_prefs(self) -> None:
         """Set every control from ``prefs``, once, after the widgets exist."""
@@ -407,12 +445,25 @@ class NewJobPanel(QWidget):
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 — Qt's name
         if _first_audio(event.mimeData().urls()) is not None:
             event.acceptProposedAction()
+            self._set_drag_over(True)
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:  # noqa: N802 — Qt's name
+        self._set_drag_over(False)
+        super().dragLeaveEvent(event)
 
     def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802 — Qt's name
+        self._set_drag_over(False)
         path = _first_audio(event.mimeData().urls())
         if path is not None:
             self.set_audio(path)
             event.acceptProposedAction()
+
+    def _set_drag_over(self, over: bool) -> None:
+        """Light the zone while an accepted drag is over it; the stylesheet reads the property."""
+        self.drop_zone.setProperty("dragOver", over)
+        style = self.drop_zone.style()
+        style.unpolish(self.drop_zone)
+        style.polish(self.drop_zone)
 
     def _choose_audio(self) -> None:
         name, _ = QFileDialog.getOpenFileName(
@@ -587,7 +638,12 @@ class NewJobPanel(QWidget):
         self._refresh()
 
     def _set_formats_visibility(self, subtitles: str) -> None:
-        self.formats_widget.setVisible(subtitles in ("sidecar", "both"))
+        """Show the file formats, and their label, only when there are files to write."""
+        shown = subtitles in ("sidecar", "both")
+        self.formats_widget.setVisible(shown)
+        label = self.more_form.labelForField(self.formats_widget)
+        if label is not None:
+            label.setVisible(shown)
 
     def _formats_changed(self) -> None:
         chosen = tuple(fmt for fmt in SUBTITLE_FORMATS if self.format_boxes[fmt].isChecked())
