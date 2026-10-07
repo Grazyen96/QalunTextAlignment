@@ -15,6 +15,7 @@ pytest.importorskip("PySide6", reason="the window needs Qt: pip install 'qurante
 from PySide6.QtCore import QMimeData, QPointF, QSettings, Qt, QUrl
 from PySide6.QtGui import QDropEvent
 
+from qurantext.gui.colors import warning_color
 from qurantext.gui.home import job_list as job_list_module
 from qurantext.gui.home.job_list import JobListPanel
 from qurantext.gui.home.new_job import NewJobPanel
@@ -213,8 +214,6 @@ def test_double_clicking_a_damaged_row_emits_its_error(qt_app, prefs) -> None:
 
 def test_a_row_that_needs_attention_is_amber_and_bold(qt_app, prefs) -> None:
     """Colour alone is not enough (and was never shown): the status is bold too."""
-    from qurantext.gui.home import job_list as module
-
     jobs_dir = prefs.job_dirs[0]
     _save(jobs_dir, "pending")
     reviewed = Project(audio=jobs_dir / "calm.m4a", mode="recitation", cards=[_card()])
@@ -231,14 +230,97 @@ def test_a_row_that_needs_attention_is_amber_and_bold(qt_app, prefs) -> None:
         rows[row.name_label.text()] = row.detail_label
 
     pending = rows["pending"]
-    assert pending.palette().color(pending.foregroundRole()) == module._WARNING_COLOR
+    assert pending.palette().color(pending.foregroundRole()) == warning_color(pending.palette())
     assert pending.font().bold()
     assert rows["broken"].font().bold()
 
     calm = rows["calm"]
-    assert calm.palette().color(calm.foregroundRole()) != module._WARNING_COLOR
+    assert calm.palette().color(calm.foregroundRole()) != warning_color(calm.palette())
     assert not calm.font().bold()
     panel.close()
+
+
+def _two_jobs(prefs):
+    folder = prefs.job_dirs[0]
+    for name in ("first", "second"):
+        matches = folder / f"{name}_recitation.json"
+        matches.write_text('{"matches": [], "meta": {"mode": "recitation"}}', encoding="utf-8")
+        save_project(
+            Project(audio=folder / f"{name}.mp3", cards=[_card()], matches=matches),
+            folder / f"{name}_recitation.qalun.json",
+        )
+
+
+def test_the_action_buttons_wait_for_a_current_row(qt_app, prefs) -> None:
+    _two_jobs(prefs)
+    panel = _listed(prefs)
+    for button in (panel.open_button, panel.reveal_button, panel.remove_button):
+        assert not button.isEnabled()
+    panel.list.setCurrentRow(0)
+    for button in (panel.open_button, panel.reveal_button, panel.remove_button):
+        assert button.isEnabled()
+
+
+def test_the_open_button_opens_the_current_row(qt_app, prefs) -> None:
+    _two_jobs(prefs)
+    panel = _listed(prefs)
+    opened = []
+    panel.open_requested.connect(opened.append)
+    panel.list.setCurrentRow(1)
+    panel.open_button.click()
+    assert opened == [panel.list.item(1).data(Qt.ItemDataRole.UserRole).project]
+
+
+def test_the_remove_button_hides_the_current_row(qt_app, prefs) -> None:
+    _two_jobs(prefs)
+    panel = _listed(prefs)
+    gone = panel.list.item(0).data(Qt.ItemDataRole.UserRole).project
+    panel.list.setCurrentRow(0)
+    panel.remove_button.click()
+    wait_until_listed(panel)
+    assert panel.list.count() == 1
+    assert gone.resolve() in prefs.hidden_jobs
+    assert not panel.remove_button.isEnabled()
+
+
+def test_the_reveal_button_asks_to_show_the_current_row(qt_app, prefs) -> None:
+    _two_jobs(prefs)
+    panel = _listed(prefs)
+    shown = []
+    panel.reveal_requested.connect(shown.append)
+    panel.list.setCurrentRow(0)
+    panel.reveal_button.click()
+    assert shown == [panel.list.item(0).data(Qt.ItemDataRole.UserRole).project]
+
+
+def test_the_action_buttons_sit_under_the_list_and_are_named(qt_app, prefs) -> None:
+    panel = _listed(prefs)
+    layout = panel.layout()
+    assert layout.indexOf(panel.actions_row) > layout.indexOf(panel.list)
+    assert panel.open_button.text() == t("home.open")
+    assert panel.reveal_button.text() == t("home.show_in_folder")
+    assert panel.remove_button.text() == t("home.remove_from_list")
+
+
+def test_a_row_built_on_a_dark_palette_gets_the_dark_amber(qt_app, prefs) -> None:
+    from PySide6.QtGui import QColor, QPalette
+
+    from qurantext.gui import colors
+
+    _two_jobs(prefs)
+    dark = QPalette()
+    dark.setColor(QPalette.ColorRole.Window, QColor(53, 53, 53))
+    dark.setColor(QPalette.ColorRole.Base, QColor(35, 35, 35))
+    before = qt_app.palette()
+    qt_app.setPalette(dark)
+    try:
+        panel = _listed(prefs)
+        row = panel.list.itemWidget(panel.list.item(0))
+        shown = row.detail_label.palette().color(row.detail_label.foregroundRole())
+        assert shown == colors.warning_color(dark)
+        assert shown != colors.warning_color(before)
+    finally:
+        qt_app.setPalette(before)
 
 
 def test_refresh_keeps_the_running_row(qt_app, prefs) -> None:

@@ -24,7 +24,7 @@ from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QPoint, Qt, Signal
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from qurantext.gui.colors import warning_color
 from qurantext.gui.i18n import t, tn
 from qurantext.gui.prefs import Prefs
 from qurantext.gui.review.background import BackgroundJobs
@@ -56,12 +57,6 @@ from qurantext.utils.progress import CancelToken, JobCancelled
 __all__ = ["JobListPanel"]
 
 _log = logging.getLogger(__name__)
-
-#: A fixed amber, not a palette role: it must read as "needs attention" against
-#: both a light and a dark window background, and it already does this job for
-#: gaps and edited words in the review window (see ``review/waveform_view.py``
-#: and ``review/word_strip.py``) — reusing it keeps the two windows consistent.
-_WARNING_COLOR = QColor(239, 159, 39)
 
 _STATUS_KEYS = {
     NEEDS_REVIEW: "home.status.needs_review",
@@ -139,6 +134,25 @@ class JobListPanel(QWidget):
         self.empty_label.setWordWrap(True)
         layout.addWidget(self.empty_label)
 
+        # The actions a row offers, where a person can see them: the context
+        # menu and double-click stay, but nothing told anyone they were there,
+        # and a keyboard user could reach neither.
+        self.actions_row = QWidget()
+        actions = QHBoxLayout(self.actions_row)
+        actions.setContentsMargins(0, 0, 0, 0)
+        self.open_button = QPushButton(t("home.open"))
+        self.reveal_button = QPushButton(t("home.show_in_folder"))
+        self.remove_button = QPushButton(t("home.remove_from_list"))
+        for button in (self.open_button, self.reveal_button, self.remove_button):
+            actions.addWidget(button)
+        actions.addStretch(1)
+        layout.addWidget(self.actions_row)
+        self.open_button.clicked.connect(self._open_current)
+        self.reveal_button.clicked.connect(self._reveal_current)
+        self.remove_button.clicked.connect(self._remove_current)
+        self.list.currentItemChanged.connect(lambda *_: self._update_actions())
+        self._update_actions()
+
         self.refresh()
 
     # -- filling ----------------------------------------------------------------
@@ -199,6 +213,7 @@ class JobListPanel(QWidget):
             for entry in listing.entries:
                 self._add_entry(entry)
         self._show_running_row()
+        self._update_actions()  # a rebuilt list has no current item
         self.refreshed.emit()
 
     def _on_list_failed(self, generation: int, message: str) -> None:
@@ -293,6 +308,32 @@ class JobListPanel(QWidget):
             self.damaged_activated.emit(entry.error or t("home.status.damaged"))
             return
         self.open_requested.emit(entry.project)
+
+    def _current_entry(self) -> JobEntry | None:
+        item = self.list.currentItem()
+        entry = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+        return entry if isinstance(entry, JobEntry) else None
+
+    def _update_actions(self) -> None:
+        """Offer the buttons only for a job row: the running row has no file to act on."""
+        has_job = self._current_entry() is not None
+        for button in (self.open_button, self.reveal_button, self.remove_button):
+            button.setEnabled(has_job)
+
+    def _open_current(self) -> None:
+        item = self.list.currentItem()
+        if item is not None:
+            self._on_activated(item)
+
+    def _reveal_current(self) -> None:
+        entry = self._current_entry()
+        if entry is not None:
+            self.reveal(entry.project)
+
+    def _remove_current(self) -> None:
+        entry = self._current_entry()
+        if entry is not None:
+            self.remove_from_list(entry.project)
 
     def _on_context_menu(self, pos: QPoint) -> None:
         item = self.list.itemAt(pos)
@@ -411,10 +452,13 @@ class _JobRow(QWidget):
         if entry.status in _WARNING_STATUSES:
             # Inside the list's viewport a label inherits its Base background
             # and so paints with Text, not WindowText; pin the role so the
-            # colour set on it is the one drawn, wherever the row ends up.
+            # colour set on it is the one drawn, wherever the row ends up. The
+            # amber has no palette role of its own, so its shade is picked for
+            # the palette the row paints on: one amber was unreadable on a
+            # light list (see ``gui/colors.py``).
             self.detail_label.setForegroundRole(QPalette.ColorRole.Text)
             palette = self.detail_label.palette()
-            palette.setColor(QPalette.ColorRole.Text, _WARNING_COLOR)
+            palette.setColor(QPalette.ColorRole.Text, warning_color(self.palette()))
             self.detail_label.setPalette(palette)
         if entry.status in _ATTENTION_STATUSES:
             attention_font = self.detail_label.font()

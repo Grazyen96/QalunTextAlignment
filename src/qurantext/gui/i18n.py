@@ -64,6 +64,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         # The name is isolated here too: an Arabic file name leading the line
         # would otherwise lay it out right to left.
         "home.running_row": "\u2068{name}\u2069 — {progress}",
+        "home.open": "Open",
         "home.show_in_folder": "Show in folder",
         "home.remove_from_list": "Remove from list",
         "home.empty": "Your jobs appear here once you start one.",
@@ -255,6 +256,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         # would be laid out left to right with the mode on the left.
         "home.row_detail": "\u200f{mode} · {scope} · {status}",
         "home.running_row": "\u200f{name} — {progress}",
+        "home.open": "افتح",
         "home.show_in_folder": "اعرض في المجلد",
         "home.remove_from_list": "أزِل من القائمة",
         "home.empty": "تظهر مهامك هنا بعد أن تبدأ أول مهمة.",
