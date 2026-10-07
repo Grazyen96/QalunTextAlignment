@@ -82,6 +82,8 @@ class ExportDialog(QDialog):
         form = QFormLayout()
         folder_row = QHBoxLayout()
         self._folder_field = QLineEdit()
+        # A typed path shows on hover too; _set_folder also puts the cursor at the start.
+        self._folder_field.textChanged.connect(self._folder_field.setToolTip)
         self._choose_button = QPushButton(t("export.choose"))
         self._choose_button.clicked.connect(self._choose_folder)
         folder_row.addWidget(self._folder_field, 1)
@@ -102,7 +104,10 @@ class ExportDialog(QDialog):
         self._result_label.setVisible(False)
         layout.addWidget(self._result_label)
 
-        self.buttons = QDialogButtonBox()
+        # Parented from the start, so setDefault below reaches the dialog: a parentless box
+        # leaves the dialog without a main default, and showing it then makes the first
+        # auto-default button (Choose…) the default instead.
+        self.buttons = QDialogButtonBox(self)
         self._show_button = self.buttons.addButton(
             t("export.show"), QDialogButtonBox.ButtonRole.ActionRole
         )

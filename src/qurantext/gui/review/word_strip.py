@@ -354,4 +354,26 @@ class WordStrip(QWidget):
         except IndexError:
             return
         x = self._viewport.x_for(tw.start if edge == "start" else tw.end, width)
-        painter.fillRect(QRectF(x - 1.5, 0.0, 3.0, float(height)), palette.highlight())
+        bar = QRectF(x - 1.5, 0.0, 3.0, float(height))
+        if not self._on_selected_box(x, width):
+            painter.fillRect(bar, palette.highlight())
+            return
+        # The selected box is itself filled with the highlight, so a highlight bar
+        # vanished on its edges, the ones grabbed most; outlined so the half that
+        # falls outside the box shows on the window too.
+        painter.fillRect(bar, palette.highlightedText())
+        painter.setPen(QPen(palette.windowText().color(), 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(bar)
+
+    def _on_selected_box(self, x: float, width: int) -> bool:
+        """Whether an edge at *x* touches the selected word's box."""
+        if self._selected is None:
+            return False
+        try:
+            selected = self._session.word(self._selected)
+        except IndexError:
+            return False
+        x0 = self._viewport.x_for(selected.start, width)
+        x1 = self._viewport.x_for(selected.end, width)
+        return x0 - 1.5 <= x <= x1 + 1.5

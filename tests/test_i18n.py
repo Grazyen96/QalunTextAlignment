@@ -256,8 +256,6 @@ def test_arabic_plural_keys_have_every_category() -> None:
 def test_arabic_differs_from_english_where_it_should() -> None:
     """A copied English string is a missed translation; only codes and symbols may match."""
     same_ok = {"format.srt", "format.vtt", "format.ass", "app.title"}
-    # A bare path beside its row's label: nothing in it to translate.
-    same_ok |= {"home.quran_override.custom", "home.output_dir.custom"}
     for key, text in i18n.STRINGS["en"].items():
         if key in same_ok or isinstance(text, dict):
             continue

@@ -57,5 +57,10 @@ def test_the_playhead_red_reads_as_a_mark_on_the_window(palette) -> None:
     assert contrast(playhead_color(palette), palette.color(QPalette.ColorRole.Window)) >= 3.0
 
 
+def test_the_playhead_red_keeps_text_contrast_on_a_light_window() -> None:
+    # Spec item 2 asks for 4.5:1 on a light palette; today's margin is thin (4.66:1).
+    assert contrast(playhead_color(LIGHT), LIGHT.color(QPalette.ColorRole.Window)) >= 4.5
+
+
 def test_the_light_palette_gets_a_darker_amber_than_the_dark_one() -> None:
     assert warning_color(LIGHT).lightness() < warning_color(DARK).lightness()

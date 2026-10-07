@@ -358,8 +358,9 @@ class ReviewWindow(QMainWindow):
         self.strip.selection_changed.connect(self._show_selection)
         self.strip.edited.connect(self._after_edit)
         self.segment_list.seek_requested.connect(self.seek)
-        # Remove is offered only while a row is selected.
-        self.segment_list.itemSelectionChanged.connect(self._sync_state)
+        # Remove is offered only while a row is selected. Only the button: a full _sync_state
+        # here would mark a removal as seen before _drop_stale_selection could act on it.
+        self.segment_list.itemSelectionChanged.connect(self._update_remove_button)
         # Connected after the list's own handler, so the caption text is already in the session.
         self.segment_list.itemChanged.connect(self._after_caption_edit)
         self.play_button.clicked.connect(self.toggle_play)
@@ -677,13 +678,19 @@ class ReviewWindow(QMainWindow):
         self.save_button.setEnabled(session.dirty and editable)
         self.undo_button.setEnabled(session.can_undo and editable)
         self.redo_button.setEnabled(session.can_redo and editable)
-        self.remove_button.setEnabled(editable and bool(self.segment_list.selectedIndexes()))
+        self._update_remove_button()
         self.reviewed_button.setEnabled(
             session.project.review.get("state") != "reviewed" and editable
         )
         title = t("review.title", name=self._audio.stem)
         self.setWindowTitle(plain_title(f"{title} *" if session.dirty else title))
         self._show_selection(self.strip.selected)
+
+    def _update_remove_button(self) -> None:
+        """Offer Remove only for a selected row, and never during a render."""
+        self.remove_button.setEnabled(
+            not self._rendering and bool(self.segment_list.selectedIndexes())
+        )
 
     def _show_selection(self, ref: WordRef | None) -> None:
         self.selection_bar.show_word(self.session.word(ref) if ref is not None else None)

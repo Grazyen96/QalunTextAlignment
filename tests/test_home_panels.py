@@ -280,7 +280,9 @@ def test_the_remove_button_hides_the_current_row(qt_app, prefs) -> None:
     wait_until_listed(panel)
     assert panel.list.count() == 1
     assert gone.resolve() in prefs.hidden_jobs
-    assert not panel.remove_button.isEnabled()
+    # The next row takes the removed one's place, so the buttons stay on.
+    assert panel.list.currentRow() == 0
+    assert panel.remove_button.isEnabled()
 
 
 def test_the_reveal_button_asks_to_show_the_current_row(qt_app, prefs) -> None:
@@ -321,6 +323,64 @@ def test_a_row_built_on_a_dark_palette_gets_the_dark_amber(qt_app, prefs) -> Non
         assert shown != colors.warning_color(before)
     finally:
         qt_app.setPalette(before)
+
+
+def test_rows_on_screen_take_the_new_amber_when_the_theme_switches(qt_app, prefs) -> None:
+    from PySide6.QtGui import QColor, QPalette
+
+    from qurantext.gui import colors
+
+    _two_jobs(prefs)
+    before = qt_app.palette()
+    light = QPalette()
+    light.setColor(QPalette.ColorRole.Window, QColor(239, 239, 239))
+    light.setColor(QPalette.ColorRole.Base, QColor(255, 255, 255))
+    dark = QPalette()
+    dark.setColor(QPalette.ColorRole.Window, QColor(53, 53, 53))
+    dark.setColor(QPalette.ColorRole.Base, QColor(35, 35, 35))
+    qt_app.setPalette(light)
+    try:
+        panel = _listed(prefs)
+        panel.show()
+        row = panel.list.itemWidget(panel.list.item(0))
+        label = row.detail_label
+        assert label.palette().color(label.foregroundRole()) == colors.warning_color(light)
+        qt_app.setPalette(dark)
+        spin(0)
+        assert label.palette().color(label.foregroundRole()) == colors.warning_color(dark)
+        panel.close()
+    finally:
+        qt_app.setPalette(before)
+
+
+def test_a_selected_row_draws_its_lines_in_the_highlighted_text(qt_app, prefs) -> None:
+    from PySide6.QtGui import QPalette
+
+    _two_jobs(prefs)
+    panel = _listed(prefs)
+    panel.show()
+    row = panel.list.itemWidget(panel.list.item(0))
+    on_highlight = row.palette().color(QPalette.ColorRole.HighlightedText)
+    panel.list.setCurrentRow(0)
+    for label in (row.name_label, row.detail_label):
+        assert label.palette().color(label.foregroundRole()) == on_highlight
+    assert row.detail_label.font().bold()  # the cue that is not a colour stays
+    panel.list.setCurrentRow(1)
+    shown = row.detail_label.palette().color(row.detail_label.foregroundRole())
+    assert shown == warning_color(row.palette())
+    panel.close()
+
+
+def test_a_refresh_keeps_the_current_row_and_its_buttons(qt_app, prefs) -> None:
+    _two_jobs(prefs)
+    panel = _listed(prefs)
+    panel.list.setCurrentRow(1)
+    kept = panel.list.item(1).data(Qt.ItemDataRole.UserRole).project
+    panel.refresh()
+    wait_until_listed(panel)
+    assert panel.list.currentItem().data(Qt.ItemDataRole.UserRole).project == kept
+    for button in (panel.open_button, panel.reveal_button, panel.remove_button):
+        assert button.isEnabled()
 
 
 def test_refresh_keeps_the_running_row(qt_app, prefs) -> None:

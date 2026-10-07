@@ -453,13 +453,29 @@ def test_export_is_the_dialogs_default_button(qt_app, tmp_path) -> None:
     from qurantext.gui.review.session import ReviewSession
 
     dialog = ExportDialog(ReviewSession(_project(tmp_path)))
+    # Showing the dialog is what used to hand the default to Choose…, so check it shown.
+    dialog.show()
+    _spin(0)
     assert dialog._go_button.isDefault()
+    assert not dialog._choose_button.isDefault()
     assert isinstance(dialog.buttons, QDialogButtonBox)
     assert dialog.buttons.buttonRole(dialog._go_button) == QDialogButtonBox.ButtonRole.AcceptRole
     assert dialog.buttons.buttonRole(dialog.close_button) == QDialogButtonBox.ButtonRole.RejectRole
     assert dialog._show_button.isHidden()
     layout = dialog.layout()
     assert layout.indexOf(dialog._result_label) < layout.indexOf(dialog.buttons)
+
+    # Return in the name field presses Export, not Choose…; record instead of writing.
+    pressed: list[str] = []
+    dialog._go_button.clicked.disconnect(dialog.export)
+    dialog._go_button.clicked.connect(lambda: pressed.append("export"))
+    dialog._choose_button.clicked.disconnect(dialog._choose_folder)
+    dialog._choose_button.clicked.connect(lambda: pressed.append("choose"))
+    dialog._name_field.setFocus()
+    QTest.keyClick(dialog._name_field, Qt.Key.Key_Return)
+    _spin(0)
+    assert pressed == ["export"]
+    dialog.hide()
 
 
 def test_the_folder_field_shows_the_start_of_the_path(qt_app, tmp_path) -> None:
@@ -471,6 +487,9 @@ def test_the_folder_field_shows_the_start_of_the_path(qt_app, tmp_path) -> None:
     dialog.set_destination(deep, "take")
     assert dialog._folder_field.cursorPosition() == 0
     assert dialog._folder_field.toolTip() == str(deep)
+    typed = str(tmp_path / "typed-by-hand")
+    dialog._folder_field.setText(typed)
+    assert dialog._folder_field.toolTip() == typed
 
 
 def test_export_shows_a_save_failure_inline_instead_of_raising(qt_app, tmp_path) -> None:
@@ -872,7 +891,7 @@ def test_discard_puts_the_saved_state_back(qt_app, tmp_path, monkeypatch) -> Non
     assert window.session.words()[0].end == 2.0
 
 
-def _three_cue_window(tmp_path):
+def _three_cue_window(tmp_path, words=("one", "two", "three")):
     from qurantext.gui.review.window import ReviewWindow
     from qurantext.jobs.project import CaptionCue
 
@@ -884,9 +903,9 @@ def _three_cue_window(tmp_path):
     project = Project(
         audio=tmp_path / "missing.mp3",
         mode="lecture",
-        captions=[cue(0.0, "one"), cue(2.0, "two"), cue(4.0, "three")],
+        captions=[cue(2.0 * index, word) for index, word in enumerate(words)],
     )
-    player = FakePlayer(duration=6.0, now=_Now())
+    player = FakePlayer(duration=2.0 * len(words), now=_Now())
     window = ReviewWindow(project, player=player)
     window.resize(1100, 800)
     return window, player
@@ -921,6 +940,45 @@ def test_removing_an_earlier_caption_drops_the_strip_selection(qt_app, tmp_path)
     QTest.keyClick(window, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
     assert len(window.session.project.captions) == 3
     assert window.strip.selected is None
+
+
+def test_removing_several_rows_drops_a_strip_selection_that_would_name_another_word(
+    qt_app, tmp_path
+) -> None:
+    from PySide6.QtCore import QItemSelectionModel
+
+    from qurantext.gui.review.session import CAPTION, WordRef
+
+    window, _ = _three_cue_window(tmp_path, words=("zero", "one", "two", "three"))
+    window.show()
+    window.strip.select(WordRef(CAPTION, 1, 0))
+    window.segment_list.selectRow(0)
+    model = window.segment_list.selectionModel()
+    flags = QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows
+    model.select(window.segment_list.model().index(3, 0), flags)
+    window.remove_button.click()
+    assert [cue.text for cue in window.session.project.captions] == ["one", "two"]
+    # Index 1 now names "two": a nudge would retime a word nobody picked.
+    assert window.strip.selected is None
+
+
+def test_removing_the_selected_last_row_raises_nothing_in_a_slot(
+    qt_app, tmp_path, monkeypatch
+) -> None:
+    import sys
+
+    from qurantext.gui.review.session import CAPTION, WordRef
+
+    raised: list[BaseException] = []
+    monkeypatch.setattr(sys, "excepthook", lambda _type, value, _tb: raised.append(value))
+    window, _ = _three_cue_window(tmp_path)
+    window.show()
+    window.strip.select(WordRef(CAPTION, 2, 0))
+    window.segment_list.selectRow(2)
+    window.remove_button.click()
+    assert len(window.session.project.captions) == 2
+    assert window.strip.selected is None
+    assert raised == []
 
 
 def test_without_playback_the_strip_says_so_briefly_and_the_button_has_the_details(

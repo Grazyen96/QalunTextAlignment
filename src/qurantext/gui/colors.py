@@ -7,7 +7,8 @@ palette and one for a dark palette, and a widget asks for it with the
 palette it paints on — so a theme switched while the app runs gets the right
 shade on the next paint. The light shades were measured against Qt's light
 window (239) and base (255), the dark ones against Fusion's dark window (53)
-and base (35): every amber ≥ 4.5:1 as text, every red ≥ 3:1 as a mark.
+and base (35): every amber ≥ 4.5:1 as text, every red ≥ 3:1 as a mark, and
+the light red ≥ 4.5:1 on the light window.
 """
 
 from __future__ import annotations

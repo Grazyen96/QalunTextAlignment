@@ -254,6 +254,22 @@ def test_the_edge_under_the_pointer_is_highlighted_until_the_pointer_leaves(qt_a
     assert strip.hovered_edge is None
 
 
+def test_the_edge_handle_shows_on_the_selected_word(qt_app) -> None:
+    from PySide6.QtGui import QPalette
+
+    session, strip = _strip(qt_app)
+    strip.show()
+    first = session.words()[0]
+    strip.select(first.ref)
+    x_end = strip._viewport.x_for(first.end, strip.width())
+    QTest.mouseMove(strip, QPoint(int(x_end), strip.height() // 2))
+    assert strip.hovered_edge == ("end", first.ref)
+    image = strip.grab().toImage()
+    highlight = strip.palette().color(QPalette.ColorRole.Highlight)
+    for x in (int(x_end) - 1, int(x_end)):
+        assert image.pixelColor(x, strip.height() // 2) != highlight
+
+
 def test_the_playhead_red_comes_from_the_palette(qt_app) -> None:
     from qurantext.gui.review import waveform_view, word_strip
 
