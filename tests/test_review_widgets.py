@@ -224,6 +224,44 @@ def test_losing_focus_mid_drag_closes_the_gesture(qt_app) -> None:
     container.close()
 
 
+def test_an_edge_is_grabbed_from_eight_pixels_away(qt_app) -> None:
+    session, strip = _strip(qt_app)
+    first = session.words()[0]
+    x_end = strip._viewport.x_for(first.end, strip.width())
+    assert strip._hit_test(x_end - 7) == ("end", first.ref)
+    assert strip._hit_test(x_end + 7)[0] in ("end", "start")
+    assert strip.EDGE_PX == 8
+
+
+def test_the_strip_is_tall_enough_to_hit(qt_app) -> None:
+    _, strip = _strip(qt_app)
+    assert strip.sizeHint().height() == 44
+
+
+def test_the_edge_under_the_pointer_is_highlighted_until_the_pointer_leaves(qt_app) -> None:
+    from PySide6.QtCore import QEvent
+
+    session, strip = _strip(qt_app)
+    strip.show()
+    first = session.words()[0]
+    x_end = strip._viewport.x_for(first.end, strip.width())
+    QTest.mouseMove(strip, QPoint(int(x_end), strip.height() // 2))
+    assert strip.hovered_edge == ("end", first.ref)
+    QTest.mouseMove(strip, QPoint(int(x_end) + 40, strip.height() // 2))
+    assert strip.hovered_edge is None
+    QTest.mouseMove(strip, QPoint(int(x_end), strip.height() // 2))
+    qt_app.sendEvent(strip, QEvent(QEvent.Type.Leave))
+    assert strip.hovered_edge is None
+
+
+def test_the_playhead_red_comes_from_the_palette(qt_app) -> None:
+    from qurantext.gui.review import waveform_view, word_strip
+
+    assert not hasattr(waveform_view, "_PLAYHEAD_COLOR")
+    assert not hasattr(word_strip, "_PLAYHEAD_OUTLINE")
+    assert not hasattr(word_strip, "_EDITED_DOT")
+
+
 def test_a_selection_that_no_longer_exists_is_dropped(qt_app) -> None:
     session, strip = _strip(qt_app)
     strip.select(session.words()[2].ref)

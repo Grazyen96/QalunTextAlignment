@@ -18,9 +18,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
-    QColor,
     QFocusEvent,
     QFontMetrics,
     QHideEvent,
@@ -31,13 +30,11 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QWidget
 
+from qurantext.gui.colors import playhead_color, warning_color
 from qurantext.gui.review.session import ReviewSession, TimelineWord, WordRef
 from qurantext.gui.review.viewport import Viewport
 
 __all__ = ["WordStrip"]
-
-_PLAYHEAD_OUTLINE = QColor(226, 75, 74)
-_EDITED_DOT = QColor(239, 159, 39)
 
 #: Below this box width, skip text layout entirely and draw only the box —
 #: at deep zoom-out on a long lecture, thousands of boxes are only a
@@ -73,7 +70,7 @@ class WordStrip(QWidget):
     """Paints ``session.words()`` against a shared :class:`Viewport`; edits by dragging."""
 
     #: How close (in pixels) a press or the pointer must be to count as "on an edge".
-    EDGE_PX = 5
+    EDGE_PX = 8
 
     selection_changed = Signal(object)
     seek_requested = Signal(float)
@@ -97,10 +94,11 @@ class WordStrip(QWidget):
         self._last_edge = "end"
         self._playhead = 0.0
         self._drag: _EdgeDrag | _RippleDrag | None = None
+        self._hover: tuple[str, WordRef] | None = None
         viewport.changed.connect(self.update)
 
     def sizeHint(self) -> QSize:  # noqa: D102 - Qt override, documented by the class
-        return QSize(600, 34)
+        return QSize(600, 44)
 
     @property
     def selected(self) -> WordRef | None:
@@ -115,6 +113,11 @@ class WordStrip(QWidget):
         selection changes.
         """
         return self._last_edge
+
+    @property
+    def hovered_edge(self) -> tuple[str, WordRef] | None:
+        """The edge under the pointer, ``("start"|"end", ref)``, drawn as a handle; else None."""
+        return self._hover
 
     def select(self, ref: WordRef | None) -> None:
         """Select *ref* (or clear the selection with ``None``) and repaint."""
@@ -223,6 +226,10 @@ class WordStrip(QWidget):
                 self.setCursor(Qt.CursorShape.SizeHorCursor)
             else:
                 self.unsetCursor()
+            hover = hit if hit is not None and hit[0] in ("start", "end") else None
+            if hover != self._hover:
+                self._hover = hover
+                self.update()
             return
         # Each move is applied from the state the drag began in (the session
         # restores it), so the result depends only on where the pointer is now.
@@ -270,11 +277,18 @@ class WordStrip(QWidget):
         self._finish_drag()
         super().hideEvent(event)
 
-    # Not leaveEvent or a changeEvent/ActivationChange override: during a
-    # grab the pointer may legitimately leave the widget and come back, and
-    # ActivationChange is only ever delivered to a top-level widget anyway —
-    # dead code here. focusOutEvent (above) covers the window losing
-    # activation instead, now that a press gives the strip real focus.
+    # Neither leaveEvent nor a changeEvent/ActivationChange override ends a
+    # drag: during a grab the pointer may legitimately leave the widget and
+    # come back, and ActivationChange is only ever delivered to a top-level
+    # widget anyway — dead code here. focusOutEvent (above) covers the window
+    # losing activation instead, now that a press gives the strip real focus.
+
+    def leaveEvent(self, event: QEvent) -> None:  # noqa: N802 - Qt override
+        """Drop the hover handle: an edge the pointer left is no longer the one it would grab."""
+        if self._hover is not None:
+            self._hover = None
+            self.update()
+        super().leaveEvent(event)
 
     # -- painting ---------------------------------------------------------------
 
@@ -295,6 +309,11 @@ class WordStrip(QWidget):
                 box_width = max(2.0, x1 - x0)
                 rect = QRectF(x0, 2.0, box_width, height - 4.0)
                 self._paint_word(painter, metrics, rect, tw, tw.ref == playhead_ref, palette)
+            handle = self._hover
+            if isinstance(self._drag, _EdgeDrag):
+                handle = (self._drag.edge, self._drag.ref)
+            if handle is not None:
+                self._paint_handle(painter, handle, width, height, palette)
         finally:
             painter.end()
 
@@ -303,7 +322,7 @@ class WordStrip(QWidget):
         if selected:
             painter.fillRect(rect, palette.highlight())
 
-        border_pen = QPen(_PLAYHEAD_OUTLINE if is_under_playhead else palette.mid().color())
+        border_pen = QPen(playhead_color(palette) if is_under_playhead else palette.mid().color())
         border_pen.setWidth(2 if is_under_playhead else 1)
         painter.setPen(border_pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -324,8 +343,15 @@ class WordStrip(QWidget):
         painter.drawText(rect, int(Qt.AlignmentFlag.AlignCenter), elided)
 
         if tw.edited:
-            radius = 2.5
-            center = QPointF(rect.right() - radius - 2, rect.top() + radius + 2)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(_EDITED_DOT)
-            painter.drawEllipse(center, radius, radius)
+            bar = QRectF(rect.left() + 1, rect.top() + 1, max(1.0, rect.width() - 2), 3.0)
+            painter.fillRect(bar, warning_color(palette))
+
+    def _paint_handle(self, painter, handle, width, height, palette) -> None:
+        """A 3 px bar on the edge the pointer can grab, so the target is seen before it is felt."""
+        edge, ref = handle
+        try:
+            tw = self._session.word(ref)
+        except IndexError:
+            return
+        x = self._viewport.x_for(tw.start if edge == "start" else tw.end, width)
+        painter.fillRect(QRectF(x - 1.5, 0.0, 3.0, float(height)), palette.highlight())
