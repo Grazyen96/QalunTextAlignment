@@ -25,6 +25,7 @@ __all__ = [
     "LANGUAGE_NAMES",
     "RTL_LANGUAGES",
     "STRINGS",
+    "clock",
     "current_language",
     "is_rtl",
     "ltr",
@@ -64,6 +65,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         # The name is isolated here too: an Arabic file name leading the line
         # would otherwise lay it out right to left.
         "home.running_row": "\u2068{name}\u2069 — {progress}",
+        "home.open": "Open",
         "home.show_in_folder": "Show in folder",
         "home.remove_from_list": "Remove from list",
         "home.empty": "Your jobs appear here once you start one.",
@@ -91,12 +93,16 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "home.more": "More options",
         "home.quran_missing": "Choose the Quran text file first",
         "home.quran_store_error": "Could not read the Quran store: {details}",
-        "home.quran_override.default": "Quran text: the certified text that ships with Qalun",
-        "home.quran_override.custom": "Quran text: {path}",
+        "home.quran_text": "Quran text",
+        "home.output_dir": "Output folder",
+        "home.subtitles": "Subtitles",
+        "home.formats": "Files",
+        "home.quran_override.default": "The certified text that ships with Qalun",
+        "home.quran_override.custom": "{path}",
         "home.quran_override.reset": "Use the shipped text",
         "home.quran_override.dialog_title": "Choose the Quran text file",
-        "home.output_dir.default": "Output folder: the default location",
-        "home.output_dir.custom": "Output folder: {path}",
+        "home.output_dir.default": "The default location",
+        "home.output_dir.custom": "{path}",
         "home.output_dir.reset": "Default",
         "home.output_dir.dialog_title": "Choose the output folder",
         "home.subtitles.burn": "In the picture",
@@ -157,7 +163,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "segments.ref": "Ayah",
         "segments.time": "Time",
         "segments.text": "Text",
-        "segments.retimed": "Retimed",
+        "segments.retimed": "Retimed words",
         "segments.speech": "Speech",
         "segments.locked": "Quran text is read from the store and cannot be edited here.",
         "review.title": "Review — {name}",
@@ -179,12 +185,12 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.no_selection": "Select a word to retime it",
         # The word is isolated here too: a Quran word leading the line would
         # otherwise lay it out right to left and reverse the two times.
-        "review.selected": "\u2068{word}\u2069  {span} s",
+        "review.selected": "\u2068{word}\u2069  {span}",
         "review.gaps": {
             "one": "{count} stretch of speech has no word:",
             "other": "{count} stretches of speech have no word:",
         },
-        "review.gap": "{duration:.1f} s at {span} s",
+        "review.gap": "{duration:.1f} s at {span}",
         "review.jump": "Jump",
         "review.covered": "Every stretch of speech is covered by a word.",
         "review.checking": "Checking the recording for speech with no word…",
@@ -194,9 +200,13 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.discard_title": "Save your corrections?",
         "review.discard_text": "This review has changes that are not saved.",
         "review.shortcuts": (
-            "Space plays · ←/→ step words · [ and ] set start/end at the playhead · "
-            ", and . nudge · Ctrl-drag an edge to part two words · Ctrl+Z undoes"
+            "Space plays · ←/→ step words · [ ] set start/end at the playhead · "
+            ", . nudge 50 ms (Shift: 10 ms) · Shift-drag ripples the later words · "
+            "Ctrl-drag an edge to part two words · Ctrl+Z undoes"
         ),
+        "review.tip": "{action} ({keys})",
+        "review.tip_fine": "{action} ({keys}; with Shift: 10 ms)",
+        "review.key_space": "Space",
         "export.title": "Export subtitles",
         "export.formats": "Formats",
         "export.folder": "Folder",
@@ -255,6 +265,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         # would be laid out left to right with the mode on the left.
         "home.row_detail": "\u200f{mode} · {scope} · {status}",
         "home.running_row": "\u200f{name} — {progress}",
+        "home.open": "افتح",
         "home.show_in_folder": "اعرض في المجلد",
         "home.remove_from_list": "أزِل من القائمة",
         "home.empty": "تظهر مهامك هنا بعد أن تبدأ أول مهمة.",
@@ -286,12 +297,16 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "home.more": "خيارات أخرى",
         "home.quran_missing": "اختر ملف نص القرآن أولًا",
         "home.quran_store_error": "تعذّرت قراءة قاعدة بيانات القرآن: {details}",
-        "home.quran_override.default": "نص القرآن: النص الموثَّق المرفق مع Qalun",
-        "home.quran_override.custom": "نص القرآن: {path}",
+        "home.quran_text": "نص القرآن",
+        "home.output_dir": "مجلد الحفظ",
+        "home.subtitles": "الترجمة النصية",
+        "home.formats": "الملفات",
+        "home.quran_override.default": "النص الموثَّق المرفق مع Qalun",
+        "home.quran_override.custom": "\u200f{path}",
         "home.quran_override.reset": "استخدم النص المرفق",
         "home.quran_override.dialog_title": "اختر ملف نص القرآن",
-        "home.output_dir.default": "مجلد الحفظ: الموضع الافتراضي",
-        "home.output_dir.custom": "مجلد الحفظ: {path}",
+        "home.output_dir.default": "الموضع الافتراضي",
+        "home.output_dir.custom": "\u200f{path}",
         "home.output_dir.reset": "الافتراضي",
         "home.output_dir.dialog_title": "اختر مجلد الحفظ",
         "home.subtitles.burn": "مدمجة في الصورة",
@@ -352,7 +367,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "segments.ref": "الآية",
         "segments.time": "الوقت",
         "segments.text": "النص",
-        "segments.retimed": "أُعيد توقيتها",
+        "segments.retimed": "كلمات أُعيد توقيتها",
         "segments.speech": "كلام",
         "segments.locked": "يُقرأ نص القرآن من قاعدة البيانات ولا يمكن تعديله هنا.",
         "review.title": "مراجعة — {name}",
@@ -372,7 +387,8 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.minus": "\u2066−50\u2069 م.ث",
         "review.plus": "\u2066+50\u2069 م.ث",
         "review.no_selection": "اختر كلمة لتعديل توقيتها",
-        "review.selected": "{word}  {span} ث",
+        # Only values: the RLM lays the line out right to left, word first.
+        "review.selected": "\u200f{word}  {span}",
         "review.gaps": {
             "zero": "لا مقاطع كلام لا تغطيها أي كلمة:",
             "one": "مقطع كلام واحد لا تغطيه أي كلمة:",
@@ -381,7 +397,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
             "many": "{count} مقطع كلام لا تغطيه أي كلمة:",
             "other": "{count} مقطع كلام لا تغطيه أي كلمة:",
         },
-        "review.gap": "{duration:.1f} ث عند {span} ث",
+        "review.gap": "{duration:.1f} ث عند {span}",
         "review.jump": "انتقل",
         "review.covered": "كل مقاطع الكلام تغطيها كلمات.",
         "review.checking": "جارٍ فحص التسجيل بحثًا عن كلام لا تغطيه أي كلمة…",
@@ -399,10 +415,14 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.discard_text": "في هذه المراجعة تغييرات غير محفوظة.",
         "review.shortcuts": (
             "المسافة للتشغيل · \u2066←/→\u2069 للتنقل بين الكلمات · "
-            "\u2066[\u2069 للبداية و\u2066]\u2069 للنهاية عند مؤشر التشغيل · "
-            "\u2066,\u2069 و\u2066.\u2069 للإزاحة الدقيقة · "
+            "\u2066[ ]\u2069 للبداية/النهاية عند مؤشر التشغيل · "
+            "\u2066, .\u2069 للإزاحة 50 م.ث (مع Shift: 10 م.ث) · "
+            "اسحب مع Shift لإزاحة الكلمات التالية · "
             "اسحب حافة مع Ctrl لفصل كلمتين · Ctrl+Z للتراجع"
         ),
+        "review.tip": "\u200f{action} ({keys})",
+        "review.tip_fine": "{action} ({keys}؛ مع Shift: 10 م.ث)",
+        "review.key_space": "المسافة",
         "export.title": "تصدير الترجمة النصية",
         "export.formats": "الصيغ",
         "export.folder": "المجلد",
@@ -542,9 +562,22 @@ def tn(key: str, count: int, **fmt: object) -> str:
     return _format(text, {"count": count, **fmt})
 
 
+def clock(seconds: float, *, digits: int = 2) -> str:
+    """*seconds* as ``mm:ss.cc`` (``digits`` fraction digits), rounded once.
+
+    One rounding of the whole value, so 59.999 reads ``01:00.00`` and never
+    ``00:60.00``; a negative time reads as zero.
+    """
+    scale = 10**digits
+    units = max(0, int(round(seconds * scale)))
+    minutes, rest = divmod(units, 60 * scale)
+    whole, fraction = divmod(rest, scale)
+    return f"{minutes:02d}:{whole:02d}.{fraction:0{digits}d}"
+
+
 def time_span(start: float, end: float, *, digits: int = 2, sep: str = "–") -> str:
     """Two times as one value, so a sentence in any language keeps them in order."""
-    return f"{start:.{digits}f}{sep}{end:.{digits}f}"
+    return f"{clock(start, digits=digits)}{sep}{clock(end, digits=digits)}"
 
 
 def ltr(text: str) -> str:

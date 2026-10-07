@@ -124,7 +124,9 @@ def _texts(root: QWidget) -> Iterator[str]:
     """Every word *root* shows a person: titles, labels, buttons, tips, items, headers."""
     yield root.windowTitle()
     for widget in [root, *root.findChildren(QWidget)]:
-        yield widget.toolTip()
+        # A field's tip that repeats its contents (a folder path) is data, like the contents.
+        if not (isinstance(widget, QLineEdit) and widget.toolTip() == widget.text()):
+            yield widget.toolTip()
         if isinstance(widget, QLabel):
             yield widget.text()
         if isinstance(widget, QAbstractButton):
@@ -211,8 +213,22 @@ def test_more_options_points_the_way_arabic_reads(
 
 
 #: The Latin words the Arabic table itself keeps: the app's name, subtitle
-#: formats, a key name, the package to install, and "English" in the language menu.
-_LATIN_THE_TABLE_KEEPS = {"Qalun", "SRT", "VTT", "ASS", "Ctrl", "Z", "PySide6", "Addons", "English"}
+#: formats, key names, the package to install, and "English" in the language menu.
+_LATIN_THE_TABLE_KEEPS = {
+    "Qalun",
+    "SRT",
+    "VTT",
+    "ASS",
+    "Ctrl",
+    "Shift",
+    "Z",
+    "PySide6",
+    "Addons",
+    "English",
+}
+#: The letters of the key caps Qt itself writes into a tip (Save's Ctrl+S): a
+#: key's letter is what is printed on it, in either language.
+_KEY_CAPS = {"S"}
 _LATIN_WORD = re.compile(r"[A-Za-z][A-Za-z0-9]*")
 
 
@@ -293,7 +309,7 @@ def test_no_english_is_left_in_the_arabic_windows(
 
     fixture_words = set(_LATIN_WORD.findall(str(tmp_path)))
     fixture_words |= {"jobs", "lesson", "m4a", "recitation", "missing", "mp3", "m", "Hello"}
-    allowed = _LATIN_THE_TABLE_KEEPS | fixture_words
+    allowed = _LATIN_THE_TABLE_KEEPS | _KEY_CAPS | fixture_words
     roots = (main, review_window, review_window._make_export_dialog(), lecture_review_window)
     for root in roots:
         shown = [*_shown(root), *(text for menu in menus for text in menu)]
@@ -462,10 +478,9 @@ def test_the_selection_line_reads_word_then_times_in_order(qt_app) -> None:
 
     word = _AYAH_WORDS[0]
     line = i18n.t("review.selected", word=word, span=time_span(2.81, 4.03, sep=" \u2192 "))
-    assert left_to_right(line, [word, "2.81", "4.03", "ث"]) == [
-        "ث",
-        "2.81",
-        "4.03",
+    assert left_to_right(line, [word, "00:02.81", "00:04.03"]) == [
+        "00:02.81",
+        "00:04.03",
         word,
     ]
 
@@ -475,10 +490,10 @@ def test_a_gap_line_keeps_its_start_before_its_end(qt_app) -> None:
     from tests.bidi_helpers import left_to_right
 
     line = i18n.t("review.gap", duration=0.5, span=time_span(16.8, 23.0, digits=1))
-    # Read from the right: 0.5 s at 16.8–23.0 s; the range itself runs left to right.
-    assert left_to_right(line, ["0.5", "عند", "16.8", "23.0"]) == [
-        "16.8",
-        "23.0",
+    # Read from the right: 0.5 s at 00:16.8–00:23.0; the range itself runs left to right.
+    assert left_to_right(line, ["0.5", "عند", "00:16.8", "00:23.0"]) == [
+        "00:16.8",
+        "00:23.0",
         "عند",
         "0.5",
     ]

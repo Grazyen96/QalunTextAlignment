@@ -12,6 +12,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 
+from qurantext.gui.i18n import t  # noqa: E402
 from qurantext.gui.review.player import FakePlayer  # noqa: E402
 from qurantext.jobs.project import (  # noqa: E402
     Project,
@@ -31,10 +32,17 @@ def _no_window_outlives_its_test(qt_app):
     A window left shown can become the active one once a later test spins the
     event loop, and a ``QShortcut`` fires for the active window, so a later
     test's key clicks would edit the earlier test's window instead of its own.
+
+    It also lets go of any modifier a test's hand-made key press left held: Qt
+    keeps the last press's modifiers as the application's, and a later
+    ``selectRow`` reads a leftover Shift as "extend the selection" and selects
+    nothing.
     """
     yield
     from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QWidget
 
+    QTest.keyRelease(QWidget(), Qt.Key.Key_Shift)
     for widget in qt_app.topLevelWidgets():
         widget.hide()
         widget.deleteLater()
@@ -208,7 +216,7 @@ def test_gaps_are_listed_with_a_jump_and_rechecked_from_the_cached_levels(qt_app
     window, player, _ = _window(qt_app, tmp_path)
     window.show()
     window._on_levels(_levels_with_speech_between(4.0, 6.0))
-    assert "2.0 s at 4.0–6.0 s" in window.warnings.text()
+    assert "2.0 s at 00:04.0–00:06.0" in window.warnings.text()
     window.warnings.linkActivated.emit("4.000")
     assert player.position() == pytest.approx(4.0)
     assert window.time_label.text() == "00:04.00"
@@ -253,7 +261,7 @@ def test_a_card_with_no_word_timings_still_flags_its_loud_audio_as_uncovered(
     assert window.session.coverage_words() == []
 
     window._on_levels(_levels_with_speech_between(4.0, 6.0))
-    assert "2.0 s at 4.0–6.0 s" in window.warnings.text()
+    assert "2.0 s at 00:04.0–00:06.0" in window.warnings.text()
 
 
 def test_the_zoom_slider_runs_from_the_whole_recording_to_one_second(qt_app, tmp_path) -> None:
@@ -384,14 +392,11 @@ def test_remove_selected_deletes_the_row_and_undo_restores_it(qt_app, tmp_path) 
     assert len(window.session.project.cards) == 1
 
 
-def test_remove_with_nothing_selected_says_so_without_a_modal(qt_app, tmp_path) -> None:
+def test_remove_with_nothing_selected_is_not_offered(qt_app, tmp_path) -> None:
     window, _, _ = _window(qt_app, tmp_path)
     window.show()
     window.segment_list.clearSelection()
-    window.remove_button.click()
-    from qurantext.gui.i18n import t
-
-    assert window.statusBar().currentMessage() == t("review.remove_none")
+    assert not window.remove_button.isEnabled()
     assert len(window.session.project.cards) == 1
 
 
@@ -439,6 +444,52 @@ def test_export_rejects_a_blank_file_name_inline(qt_app, tmp_path) -> None:
     dialog.set_destination(tmp_path / "out", "  ")
     assert dialog.export() == []
     assert dialog._result_label.text() == t("export.no_name")
+
+
+def test_export_is_the_dialogs_default_button(qt_app, tmp_path) -> None:
+    from PySide6.QtWidgets import QDialogButtonBox
+
+    from qurantext.gui.review.export_dialog import ExportDialog
+    from qurantext.gui.review.session import ReviewSession
+
+    dialog = ExportDialog(ReviewSession(_project(tmp_path)))
+    # Showing the dialog is what used to hand the default to Choose…, so check it shown.
+    dialog.show()
+    _spin(0)
+    assert dialog._go_button.isDefault()
+    assert not dialog._choose_button.isDefault()
+    assert isinstance(dialog.buttons, QDialogButtonBox)
+    assert dialog.buttons.buttonRole(dialog._go_button) == QDialogButtonBox.ButtonRole.AcceptRole
+    assert dialog.buttons.buttonRole(dialog.close_button) == QDialogButtonBox.ButtonRole.RejectRole
+    assert dialog._show_button.isHidden()
+    layout = dialog.layout()
+    assert layout.indexOf(dialog._result_label) < layout.indexOf(dialog.buttons)
+
+    # Return in the name field presses Export, not Choose…; record instead of writing.
+    pressed: list[str] = []
+    dialog._go_button.clicked.disconnect(dialog.export)
+    dialog._go_button.clicked.connect(lambda: pressed.append("export"))
+    dialog._choose_button.clicked.disconnect(dialog._choose_folder)
+    dialog._choose_button.clicked.connect(lambda: pressed.append("choose"))
+    dialog._name_field.setFocus()
+    QTest.keyClick(dialog._name_field, Qt.Key.Key_Return)
+    _spin(0)
+    assert pressed == ["export"]
+    dialog.hide()
+
+
+def test_the_folder_field_shows_the_start_of_the_path(qt_app, tmp_path) -> None:
+    from qurantext.gui.review.export_dialog import ExportDialog
+    from qurantext.gui.review.session import ReviewSession
+
+    dialog = ExportDialog(ReviewSession(_project(tmp_path)))
+    deep = tmp_path / ("a-rather-long-folder-name-" * 6)
+    dialog.set_destination(deep, "take")
+    assert dialog._folder_field.cursorPosition() == 0
+    assert dialog._folder_field.toolTip() == str(deep)
+    typed = str(tmp_path / "typed-by-hand")
+    dialog._folder_field.setText(typed)
+    assert dialog._folder_field.toolTip() == typed
 
 
 def test_export_shows_a_save_failure_inline_instead_of_raising(qt_app, tmp_path) -> None:
@@ -597,6 +648,9 @@ def test_render_disables_editing_actions_until_done(qt_app, tmp_path, monkeypatc
         window, "_announce_render", lambda outcome: seen.setdefault("done", outcome)
     )
     assert window.session.can_undo
+    # A selected row, so the remove button's state is the render's doing, not the selection's.
+    window.segment_list.selectRow(0)
+    assert window.remove_button.isEnabled()
     window.render_requested.emit()
     assert not window.render_button.isEnabled()
     assert not window.undo_button.isEnabled()
@@ -837,7 +891,7 @@ def test_discard_puts_the_saved_state_back(qt_app, tmp_path, monkeypatch) -> Non
     assert window.session.words()[0].end == 2.0
 
 
-def _three_cue_window(tmp_path):
+def _three_cue_window(tmp_path, words=("one", "two", "three")):
     from qurantext.gui.review.window import ReviewWindow
     from qurantext.jobs.project import CaptionCue
 
@@ -849,25 +903,23 @@ def _three_cue_window(tmp_path):
     project = Project(
         audio=tmp_path / "missing.mp3",
         mode="lecture",
-        captions=[cue(0.0, "one"), cue(2.0, "two"), cue(4.0, "three")],
+        captions=[cue(2.0 * index, word) for index, word in enumerate(words)],
     )
-    player = FakePlayer(duration=6.0, now=_Now())
+    player = FakePlayer(duration=2.0 * len(words), now=_Now())
     window = ReviewWindow(project, player=player)
     window.resize(1100, 800)
     return window, player
 
 
 def test_playback_marks_rows_but_remove_only_takes_what_was_selected(qt_app, tmp_path) -> None:
-    from qurantext.gui.i18n import t
-
     window, player = _three_cue_window(tmp_path)
     window.show()
     for position in (0.5, 2.5, 4.5):
         player.seek(position)
         window._tick()
-    window.remove_button.click()
+    # The playhead's marks are not a selection, so there is nothing to remove.
+    assert not window.remove_button.isEnabled()
     assert len(window.session.project.captions) == 3
-    assert window.statusBar().currentMessage() == t("review.remove_none")
 
 
 def test_removing_an_earlier_caption_drops_the_strip_selection(qt_app, tmp_path) -> None:
@@ -888,6 +940,45 @@ def test_removing_an_earlier_caption_drops_the_strip_selection(qt_app, tmp_path)
     QTest.keyClick(window, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
     assert len(window.session.project.captions) == 3
     assert window.strip.selected is None
+
+
+def test_removing_several_rows_drops_a_strip_selection_that_would_name_another_word(
+    qt_app, tmp_path
+) -> None:
+    from PySide6.QtCore import QItemSelectionModel
+
+    from qurantext.gui.review.session import CAPTION, WordRef
+
+    window, _ = _three_cue_window(tmp_path, words=("zero", "one", "two", "three"))
+    window.show()
+    window.strip.select(WordRef(CAPTION, 1, 0))
+    window.segment_list.selectRow(0)
+    model = window.segment_list.selectionModel()
+    flags = QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows
+    model.select(window.segment_list.model().index(3, 0), flags)
+    window.remove_button.click()
+    assert [cue.text for cue in window.session.project.captions] == ["one", "two"]
+    # Index 1 now names "two": a nudge would retime a word nobody picked.
+    assert window.strip.selected is None
+
+
+def test_removing_the_selected_last_row_raises_nothing_in_a_slot(
+    qt_app, tmp_path, monkeypatch
+) -> None:
+    import sys
+
+    from qurantext.gui.review.session import CAPTION, WordRef
+
+    raised: list[BaseException] = []
+    monkeypatch.setattr(sys, "excepthook", lambda _type, value, _tb: raised.append(value))
+    window, _ = _three_cue_window(tmp_path)
+    window.show()
+    window.strip.select(WordRef(CAPTION, 2, 0))
+    window.segment_list.selectRow(2)
+    window.remove_button.click()
+    assert len(window.session.project.captions) == 2
+    assert window.strip.selected is None
+    assert raised == []
 
 
 def test_without_playback_the_strip_says_so_briefly_and_the_button_has_the_details(
@@ -927,7 +1018,7 @@ def test_the_strip_says_the_recording_is_being_checked_until_the_levels_arrive(
     assert t("review.checking") in window.warnings.text()
     window._on_levels(_levels_with_speech_between(4.0, 6.0))
     assert t("review.checking") not in window.warnings.text()
-    assert "2.0 s at 4.0–6.0 s" in window.warnings.text()
+    assert "2.0 s at 00:04.0–00:06.0" in window.warnings.text()
     assert _wait_for(lambda: window._jobs.active == 0, 10000)
 
 
@@ -1107,3 +1198,56 @@ def test_only_an_unmatched_non_latin_key_is_read_by_its_physical_place(
     )
     assert window.session.words()[0].end == 2.0
     assert not window.session.dirty
+
+
+def test_the_toolbar_and_transport_say_their_shortcuts(qt_app, tmp_path) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    assert "Ctrl+S" in window.save_button.toolTip()
+    assert "Ctrl+Z" in window.undo_button.toolTip()
+    assert "Ctrl+Shift+Z" in window.redo_button.toolTip()
+    assert "Space" in window.play_button.toolTip()
+    assert "," in window.selection_bar.minus_button.toolTip()
+    assert "." in window.selection_bar.plus_button.toolTip()
+    assert window.selection_bar.minus_button.toolTip() == t(
+        "review.tip_fine", action=t("review.minus"), keys=","
+    )
+
+
+def test_the_shortcut_hint_elides_to_the_window_and_keeps_its_full_text(qt_app, tmp_path) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    window.resize(window.minimumSizeHint())
+    window.show()
+    _spin(50)
+    label = window.hint_label
+    assert label.toolTip() == t("review.shortcuts")
+    assert label.fontMetrics().horizontalAdvance(label.text()) <= label.width()
+    assert label.text().endswith("…")
+    window.resize(2400, 800)
+    _spin(50)
+    assert window.hint_label.text() == t("review.shortcuts")
+
+
+def test_zoom_is_the_sliders_buddy(qt_app, tmp_path) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    assert window.zoom_label.buddy() is window.zoom_slider
+
+
+def test_remove_waits_for_a_selected_row(qt_app, tmp_path) -> None:
+    window, _ = _three_cue_window(tmp_path)
+    assert not window.remove_button.isEnabled()
+    window.segment_list.selectRow(1)
+    assert window.remove_button.isEnabled()
+    window.segment_list.clearSelection()
+    assert not window.remove_button.isEnabled()
+
+
+def test_a_small_window_keeps_rows_in_the_list_and_shrinks_the_frame(qt_app, tmp_path) -> None:
+    window, _ = _three_cue_window(tmp_path)
+    window.resize(1000, 640)
+    window.show()
+    _spin(100)
+    assert window.segment_list.height() >= 150
+    frame = window.frame_view
+    assert frame.height() < 480
+    assert frame.pixmap().height() <= frame.height()
+    assert frame.pixmap().width() <= frame.width()

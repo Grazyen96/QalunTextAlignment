@@ -15,6 +15,7 @@ pytest.importorskip("PySide6", reason="the window needs Qt: pip install 'qurante
 from PySide6.QtCore import QMimeData, QPointF, QSettings, Qt, QUrl
 from PySide6.QtGui import QDropEvent
 
+from qurantext.gui.colors import warning_color
 from qurantext.gui.home import job_list as job_list_module
 from qurantext.gui.home.job_list import JobListPanel
 from qurantext.gui.home.new_job import NewJobPanel
@@ -213,8 +214,6 @@ def test_double_clicking_a_damaged_row_emits_its_error(qt_app, prefs) -> None:
 
 def test_a_row_that_needs_attention_is_amber_and_bold(qt_app, prefs) -> None:
     """Colour alone is not enough (and was never shown): the status is bold too."""
-    from qurantext.gui.home import job_list as module
-
     jobs_dir = prefs.job_dirs[0]
     _save(jobs_dir, "pending")
     reviewed = Project(audio=jobs_dir / "calm.m4a", mode="recitation", cards=[_card()])
@@ -231,14 +230,157 @@ def test_a_row_that_needs_attention_is_amber_and_bold(qt_app, prefs) -> None:
         rows[row.name_label.text()] = row.detail_label
 
     pending = rows["pending"]
-    assert pending.palette().color(pending.foregroundRole()) == module._WARNING_COLOR
+    assert pending.palette().color(pending.foregroundRole()) == warning_color(pending.palette())
     assert pending.font().bold()
     assert rows["broken"].font().bold()
 
     calm = rows["calm"]
-    assert calm.palette().color(calm.foregroundRole()) != module._WARNING_COLOR
+    assert calm.palette().color(calm.foregroundRole()) != warning_color(calm.palette())
     assert not calm.font().bold()
     panel.close()
+
+
+def _two_jobs(prefs):
+    folder = prefs.job_dirs[0]
+    for name in ("first", "second"):
+        matches = folder / f"{name}_recitation.json"
+        matches.write_text('{"matches": [], "meta": {"mode": "recitation"}}', encoding="utf-8")
+        save_project(
+            Project(audio=folder / f"{name}.mp3", cards=[_card()], matches=matches),
+            folder / f"{name}_recitation.qalun.json",
+        )
+
+
+def test_the_action_buttons_wait_for_a_current_row(qt_app, prefs) -> None:
+    _two_jobs(prefs)
+    panel = _listed(prefs)
+    for button in (panel.open_button, panel.reveal_button, panel.remove_button):
+        assert not button.isEnabled()
+    panel.list.setCurrentRow(0)
+    for button in (panel.open_button, panel.reveal_button, panel.remove_button):
+        assert button.isEnabled()
+
+
+def test_the_open_button_opens_the_current_row(qt_app, prefs) -> None:
+    _two_jobs(prefs)
+    panel = _listed(prefs)
+    opened = []
+    panel.open_requested.connect(opened.append)
+    panel.list.setCurrentRow(1)
+    panel.open_button.click()
+    assert opened == [panel.list.item(1).data(Qt.ItemDataRole.UserRole).project]
+
+
+def test_the_remove_button_hides_the_current_row(qt_app, prefs) -> None:
+    _two_jobs(prefs)
+    panel = _listed(prefs)
+    gone = panel.list.item(0).data(Qt.ItemDataRole.UserRole).project
+    panel.list.setCurrentRow(0)
+    panel.remove_button.click()
+    wait_until_listed(panel)
+    assert panel.list.count() == 1
+    assert gone.resolve() in prefs.hidden_jobs
+    # The next row takes the removed one's place, so the buttons stay on.
+    assert panel.list.currentRow() == 0
+    assert panel.remove_button.isEnabled()
+
+
+def test_the_reveal_button_asks_to_show_the_current_row(qt_app, prefs) -> None:
+    _two_jobs(prefs)
+    panel = _listed(prefs)
+    shown = []
+    panel.reveal_requested.connect(shown.append)
+    panel.list.setCurrentRow(0)
+    panel.reveal_button.click()
+    assert shown == [panel.list.item(0).data(Qt.ItemDataRole.UserRole).project]
+
+
+def test_the_action_buttons_sit_under_the_list_and_are_named(qt_app, prefs) -> None:
+    panel = _listed(prefs)
+    layout = panel.layout()
+    assert layout.indexOf(panel.actions_row) > layout.indexOf(panel.list)
+    assert panel.open_button.text() == t("home.open")
+    assert panel.reveal_button.text() == t("home.show_in_folder")
+    assert panel.remove_button.text() == t("home.remove_from_list")
+
+
+def test_a_row_built_on_a_dark_palette_gets_the_dark_amber(qt_app, prefs) -> None:
+    from PySide6.QtGui import QColor, QPalette
+
+    from qurantext.gui import colors
+
+    _two_jobs(prefs)
+    dark = QPalette()
+    dark.setColor(QPalette.ColorRole.Window, QColor(53, 53, 53))
+    dark.setColor(QPalette.ColorRole.Base, QColor(35, 35, 35))
+    before = qt_app.palette()
+    qt_app.setPalette(dark)
+    try:
+        panel = _listed(prefs)
+        row = panel.list.itemWidget(panel.list.item(0))
+        shown = row.detail_label.palette().color(row.detail_label.foregroundRole())
+        assert shown == colors.warning_color(dark)
+        assert shown != colors.warning_color(before)
+    finally:
+        qt_app.setPalette(before)
+
+
+def test_rows_on_screen_take_the_new_amber_when_the_theme_switches(qt_app, prefs) -> None:
+    from PySide6.QtGui import QColor, QPalette
+
+    from qurantext.gui import colors
+
+    _two_jobs(prefs)
+    before = qt_app.palette()
+    light = QPalette()
+    light.setColor(QPalette.ColorRole.Window, QColor(239, 239, 239))
+    light.setColor(QPalette.ColorRole.Base, QColor(255, 255, 255))
+    dark = QPalette()
+    dark.setColor(QPalette.ColorRole.Window, QColor(53, 53, 53))
+    dark.setColor(QPalette.ColorRole.Base, QColor(35, 35, 35))
+    qt_app.setPalette(light)
+    try:
+        panel = _listed(prefs)
+        panel.show()
+        row = panel.list.itemWidget(panel.list.item(0))
+        label = row.detail_label
+        assert label.palette().color(label.foregroundRole()) == colors.warning_color(light)
+        qt_app.setPalette(dark)
+        spin(0)
+        assert label.palette().color(label.foregroundRole()) == colors.warning_color(dark)
+        panel.close()
+    finally:
+        qt_app.setPalette(before)
+
+
+def test_a_selected_row_draws_its_lines_in_the_highlighted_text(qt_app, prefs) -> None:
+    from PySide6.QtGui import QPalette
+
+    _two_jobs(prefs)
+    panel = _listed(prefs)
+    panel.show()
+    row = panel.list.itemWidget(panel.list.item(0))
+    on_highlight = row.palette().color(QPalette.ColorRole.HighlightedText)
+    panel.list.setCurrentRow(0)
+    for label in (row.name_label, row.detail_label):
+        assert label.palette().color(label.foregroundRole()) == on_highlight
+    assert row.detail_label.font().bold()  # the cue that is not a colour stays
+    panel.list.setCurrentRow(1)
+    shown = row.detail_label.palette().color(row.detail_label.foregroundRole())
+    assert shown == warning_color(row.palette())
+    panel.close()
+
+
+def test_a_refresh_keeps_the_current_row_and_its_buttons(qt_app, prefs) -> None:
+    _two_jobs(prefs)
+    panel = _listed(prefs)
+    panel.list.setCurrentRow(1)
+    kept = panel.list.item(1).data(Qt.ItemDataRole.UserRole).project
+    panel.refresh()
+    wait_until_listed(panel)
+    assert panel.list.currentItem().data(Qt.ItemDataRole.UserRole).project == kept
+    for button in (panel.open_button, panel.reveal_button, panel.remove_button):
+        assert button.isEnabled()
 
 
 def test_refresh_keeps_the_running_row(qt_app, prefs) -> None:
@@ -885,3 +1027,110 @@ def test_a_long_audio_path_is_elided_to_one_line_with_the_full_path_as_tooltip(
     assert "…" in label.text()
     folder_line = label.text().split("\n")[1]
     assert folder_line.startswith("\u2066") and folder_line.endswith("\u2069"), "still isolated"
+
+
+def _audio_mime(tmp_path):
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(tmp_path / "take.mp3"))])
+    return mime
+
+
+def test_the_drop_zone_lights_up_while_a_drag_is_over_it_and_not_after(
+    qt_app, prefs, store, tmp_path
+) -> None:
+    from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent
+
+    panel = _panel(prefs, store)
+    mime = _audio_mime(tmp_path)  # the event does not own it: keep it alive
+    enter = QDragEnterEvent(
+        QPointF(10, 10).toPoint(),
+        Qt.DropAction.CopyAction,
+        mime,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    qt_app.sendEvent(panel, enter)
+    assert panel.drop_zone.property("dragOver") is True
+    qt_app.sendEvent(panel, QDragLeaveEvent())
+    assert panel.drop_zone.property("dragOver") is False
+
+
+def test_a_drop_puts_the_zone_back_to_normal(qt_app, prefs, store, tmp_path) -> None:
+    from PySide6.QtGui import QDragEnterEvent
+
+    panel = _panel(prefs, store)
+    mime = _audio_mime(tmp_path)
+    qt_app.sendEvent(
+        panel,
+        QDragEnterEvent(
+            QPointF(10, 10).toPoint(),
+            Qt.DropAction.CopyAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        ),
+    )
+    qt_app.sendEvent(
+        panel,
+        QDropEvent(
+            QPointF(10, 10),
+            Qt.DropAction.CopyAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        ),
+    )
+    assert panel.audio_path == tmp_path / "take.mp3"
+    assert panel.drop_zone.property("dragOver") is False
+
+
+def test_the_progress_bar_leaves_the_words_to_the_status_line(qt_app, prefs, store) -> None:
+    panel = _panel(prefs, store)
+    assert not panel.progress_bar.isTextVisible()
+
+
+def test_the_range_labels_name_their_spin_boxes(qt_app, prefs, store) -> None:
+    panel = _panel(prefs, store)
+    assert panel.range_from_label.buddy() is panel.from_spin
+    assert panel.range_to_label.buddy() is panel.to_spin
+
+
+def test_the_more_options_are_labelled_rows_that_hide_together(qt_app, prefs, store) -> None:
+    panel = _panel(prefs, store)
+    form = panel.more_form
+    labels = {
+        form.labelForField(panel.quran_row).text(): panel.quran_row,
+        form.labelForField(panel.output_row).text(): panel.output_row,
+        form.labelForField(panel.subtitles_row).text(): panel.subtitles_row,
+        form.labelForField(panel.formats_widget).text(): panel.formats_widget,
+    }
+    assert set(labels) == {
+        t("home.quran_text"),
+        t("home.output_dir"),
+        t("home.subtitles"),
+        t("home.formats"),
+    }
+    panel.subtitle_buttons["burn"].setChecked(True)
+    assert panel.formats_widget.isHidden()
+    assert form.labelForField(panel.formats_widget).isHidden()
+    panel.subtitle_buttons["both"].setChecked(True)
+    assert not panel.formats_widget.isHidden()
+    assert not form.labelForField(panel.formats_widget).isHidden()
+
+
+def test_the_value_texts_no_longer_repeat_their_labels(qt_app, prefs, store) -> None:
+    panel = _panel(prefs, store)
+    assert panel.quran_label.text() == t("home.quran_override.default")
+    assert ":" not in t("home.quran_override.default")
+    assert ":" not in t("home.output_dir.default")
+
+
+def test_the_two_forms_share_one_label_column(qt_app, prefs, store) -> None:
+    panel = _panel(prefs, store)
+    panel.more_button.setChecked(True)
+    panel.resize(800, 700)
+    panel.show()
+    spin(50)
+    upper = panel.surah_box.x()
+    lower = panel.quran_row.x()
+    assert abs(upper - lower) <= 2

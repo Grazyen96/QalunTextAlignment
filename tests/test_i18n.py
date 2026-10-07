@@ -120,9 +120,9 @@ def _add_rtl_language(monkeypatch, key: str, text: str | dict[str, str]) -> None
 def test_values_are_isolated_only_in_a_right_to_left_language(monkeypatch) -> None:
     _add_rtl_language(monkeypatch, "test.gap", "gap {span} s")
     try:
-        assert t("test.gap", span=time_span(1.5, 2.25)) == "gap 1.50–2.25 s"
+        assert t("test.gap", span=time_span(1.5, 2.25)) == "gap 00:01.50–00:02.25 s"
         set_language("rtl_test")
-        assert t("test.gap", span=time_span(1.5, 2.25)) == f"gap {_FSI}1.50–2.25{_PDI} s"
+        assert t("test.gap", span=time_span(1.5, 2.25)) == f"gap {_FSI}00:01.50–00:02.25{_PDI} s"
         assert ltr("1.50") == f"{_LRI}1.50{_PDI}"
         assert is_rtl()
         assert not is_rtl("en")
@@ -151,9 +151,23 @@ def test_plural_counts_are_isolated_too(monkeypatch) -> None:
         set_language("en")
 
 
-def test_time_span_formats_one_value() -> None:
-    assert time_span(12.3, 15.2) == "12.30–15.20"
-    assert time_span(1.0, 2.0, digits=1, sep=" → ") == "1.0 → 2.0"
+def test_clock_formats_minutes_seconds_and_hundredths() -> None:
+    from qurantext.gui.i18n import clock
+
+    assert clock(0.0) == "00:00.00"
+    assert clock(96.57) == "01:36.57"
+    assert clock(59.999) == "01:00.00"
+    assert clock(59.994) == "00:59.99"
+    assert clock(16.8, digits=1) == "00:16.8"
+    assert clock(-1.0) == "00:00.00"
+
+
+def test_time_span_joins_two_clocks() -> None:
+    from qurantext.gui.i18n import time_span
+
+    assert time_span(0.11, 96.57) == "00:00.11–01:36.57"
+    assert time_span(16.8, 23.0, digits=1) == "00:16.8–00:23.0"
+    assert time_span(0.11, 1.42, sep=" → ") == "00:00.11 → 00:01.42"
 
 
 def test_language_names_cover_every_language() -> None:

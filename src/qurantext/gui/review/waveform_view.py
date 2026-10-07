@@ -15,13 +15,13 @@ from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPaintEvent
 from PySide6.QtWidgets import QWidget
 
 from qurantext.core.waveform import Peaks
+from qurantext.gui.colors import playhead_color
 from qurantext.gui.i18n import t
 from qurantext.gui.review.viewport import Viewport
 
 __all__ = ["WaveformView", "column_extremes"]
 
 _GAP_COLOR = QColor(239, 159, 39, 70)
-_PLAYHEAD_COLOR = QColor(226, 75, 74)
 
 
 class WaveformView(QWidget):
@@ -118,7 +118,7 @@ class WaveformView(QWidget):
                 painter.fillRect(int(x0), 0, max(1, int(x1 - x0)), height, _GAP_COLOR)
 
             playhead_x = self._viewport.x_for(self._playhead, width)
-            painter.setPen(_PLAYHEAD_COLOR)
+            painter.setPen(playhead_color(palette))
             painter.drawLine(int(playhead_x), 0, int(playhead_x), height)
         finally:
             painter.end()
