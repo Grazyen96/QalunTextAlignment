@@ -25,6 +25,7 @@ __all__ = [
     "LANGUAGE_NAMES",
     "RTL_LANGUAGES",
     "STRINGS",
+    "clock",
     "current_language",
     "is_rtl",
     "ltr",
@@ -162,7 +163,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "segments.ref": "Ayah",
         "segments.time": "Time",
         "segments.text": "Text",
-        "segments.retimed": "Retimed",
+        "segments.retimed": "Retimed words",
         "segments.speech": "Speech",
         "segments.locked": "Quran text is read from the store and cannot be edited here.",
         "review.title": "Review — {name}",
@@ -184,12 +185,12 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.no_selection": "Select a word to retime it",
         # The word is isolated here too: a Quran word leading the line would
         # otherwise lay it out right to left and reverse the two times.
-        "review.selected": "\u2068{word}\u2069  {span} s",
+        "review.selected": "\u2068{word}\u2069  {span}",
         "review.gaps": {
             "one": "{count} stretch of speech has no word:",
             "other": "{count} stretches of speech have no word:",
         },
-        "review.gap": "{duration:.1f} s at {span} s",
+        "review.gap": "{duration:.1f} s at {span}",
         "review.jump": "Jump",
         "review.covered": "Every stretch of speech is covered by a word.",
         "review.checking": "Checking the recording for speech with no word…",
@@ -366,7 +367,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "segments.ref": "الآية",
         "segments.time": "الوقت",
         "segments.text": "النص",
-        "segments.retimed": "أُعيد توقيتها",
+        "segments.retimed": "كلمات أُعيد توقيتها",
         "segments.speech": "كلام",
         "segments.locked": "يُقرأ نص القرآن من قاعدة البيانات ولا يمكن تعديله هنا.",
         "review.title": "مراجعة — {name}",
@@ -386,7 +387,8 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.minus": "\u2066−50\u2069 م.ث",
         "review.plus": "\u2066+50\u2069 م.ث",
         "review.no_selection": "اختر كلمة لتعديل توقيتها",
-        "review.selected": "{word}  {span} ث",
+        # Only values: the RLM lays the line out right to left, word first.
+        "review.selected": "\u200f{word}  {span}",
         "review.gaps": {
             "zero": "لا مقاطع كلام لا تغطيها أي كلمة:",
             "one": "مقطع كلام واحد لا تغطيه أي كلمة:",
@@ -395,7 +397,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
             "many": "{count} مقطع كلام لا تغطيه أي كلمة:",
             "other": "{count} مقطع كلام لا تغطيه أي كلمة:",
         },
-        "review.gap": "{duration:.1f} ث عند {span} ث",
+        "review.gap": "{duration:.1f} ث عند {span}",
         "review.jump": "انتقل",
         "review.covered": "كل مقاطع الكلام تغطيها كلمات.",
         "review.checking": "جارٍ فحص التسجيل بحثًا عن كلام لا تغطيه أي كلمة…",
@@ -560,9 +562,22 @@ def tn(key: str, count: int, **fmt: object) -> str:
     return _format(text, {"count": count, **fmt})
 
 
+def clock(seconds: float, *, digits: int = 2) -> str:
+    """*seconds* as ``mm:ss.cc`` (``digits`` fraction digits), rounded once.
+
+    One rounding of the whole value, so 59.999 reads ``01:00.00`` and never
+    ``00:60.00``; a negative time reads as zero.
+    """
+    scale = 10**digits
+    units = max(0, int(round(seconds * scale)))
+    minutes, rest = divmod(units, 60 * scale)
+    whole, fraction = divmod(rest, scale)
+    return f"{minutes:02d}:{whole:02d}.{fraction:0{digits}d}"
+
+
 def time_span(start: float, end: float, *, digits: int = 2, sep: str = "–") -> str:
     """Two times as one value, so a sentence in any language keeps them in order."""
-    return f"{start:.{digits}f}{sep}{end:.{digits}f}"
+    return f"{clock(start, digits=digits)}{sep}{clock(end, digits=digits)}"
 
 
 def ltr(text: str) -> str:

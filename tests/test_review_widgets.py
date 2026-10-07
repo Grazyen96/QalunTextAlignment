@@ -546,7 +546,7 @@ def test_the_warnings_strip_lists_five_gaps_then_counts_the_rest(qt_app) -> None
     assert strip.text().count("Jump") == 5
     assert "8 stretches of speech have no word:" in strip.text()
     assert "…and 3 more" in strip.text()
-    assert "0.5 s at 0.0–0.5 s" in strip.text()
+    assert "0.5 s at 00:00.0–00:00.5" in strip.text()
 
 
 def test_the_warnings_strip_counts_a_single_gap_in_the_singular(qt_app) -> None:
@@ -556,7 +556,7 @@ def test_the_warnings_strip_counts_a_single_gap_in_the_singular(qt_app) -> None:
     strip = WarningsStrip()
     strip.set_gaps([UncoveredSpeech(4.0, 6.0, -20.0)])
     assert "1 stretch of speech has no word:" in strip.text()
-    assert "2.0 s at 4.0–6.0 s" in strip.text()
+    assert "2.0 s at 00:04.0–00:06.0" in strip.text()
 
 
 def test_the_selection_bar_shows_the_span_as_one_value(qt_app) -> None:
@@ -568,8 +568,8 @@ def test_the_selection_bar_shows_the_span_as_one_value(qt_app) -> None:
         TimelineWord(ref=WordRef(CARD, 0, 0), text="ٱلۡحَمۡدُ", start=1.5, end=2.25, edited=False)
     )
     # The Quran word is isolated even in English: leading the line unisolated,
-    # it would lay the line out right to left and draw "2.25 → 1.50".
-    assert bar.label.text() == "\u2068ٱلۡحَمۡدُ\u2069  1.50 → 2.25 s"
+    # it would lay the line out right to left and draw "00:02.25 → 00:01.50".
+    assert bar.label.text() == "\u2068ٱلۡحَمۡدُ\u2069  00:01.50 → 00:02.25"
 
 
 def test_the_segment_list_shows_a_row_s_times_as_one_span(qt_app) -> None:
@@ -577,7 +577,7 @@ def test_the_segment_list_shows_a_row_s_times_as_one_span(qt_app) -> None:
 
     session, _ = _strip(qt_app)
     table = SegmentList(session)
-    assert table.item(0, 1).text() == "0.00–10.00"
+    assert table.item(0, 1).text() == "00:00.00–00:10.00"
 
 
 def test_the_warnings_strip_says_it_is_checking_until_the_first_result(qt_app) -> None:

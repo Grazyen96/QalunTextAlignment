@@ -55,7 +55,7 @@ from qurantext.core.coverage import speech_levels, uncovered_from_levels
 from qurantext.core.waveform import Peaks, load_or_compute_peaks, peaks_path_for
 from qurantext.gui import jobs as jobs_module
 from qurantext.gui.files import show_in_folder
-from qurantext.gui.i18n import path_text, plain_title, t
+from qurantext.gui.i18n import clock, path_text, plain_title, t
 from qurantext.gui.jobs import JobOutcome
 from qurantext.gui.review.background import BackgroundJobs
 from qurantext.gui.review.export_dialog import ExportDialog
@@ -139,13 +139,6 @@ def _physical_key(event: QKeyEvent) -> Qt.Key | None:
     platform = _platform_family()
     code = event.nativeVirtualKey() if platform == "macos" else event.nativeScanCode()
     return SCANCODE_KEYS[platform].get(code)
-
-
-def _clock(seconds: float) -> str:
-    """*seconds* as ``mm:ss.cc``, rounded once so 59.999 never reads as ``00:60.00``."""
-    centis = max(0, int(round(seconds * 100)))
-    minutes, rest = divmod(centis, 6000)
-    return f"{minutes:02d}:{rest // 100:02d}.{rest % 100:02d}"
 
 
 def _is_portrait(project: Project) -> bool:
@@ -332,7 +325,7 @@ class ReviewWindow(QMainWindow):
         self.play_button = QPushButton(t("review.play"))
         # The transport row mirrors (Play leads on the right in Arabic); the
         # clock is a time field and reads left to right, as time does.
-        self.time_label = QLabel(_clock(0.0))
+        self.time_label = QLabel(clock(0.0))
         self.time_label.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         self.rate_combo = QComboBox()
         for rate in RATES:
@@ -495,7 +488,7 @@ class ReviewWindow(QMainWindow):
         self.waveform.set_playhead(seconds)
         self.strip.set_playhead(seconds)
         self.viewport.follow(seconds)
-        self.time_label.setText(_clock(seconds))
+        self.time_label.setText(clock(seconds))
         self._highlight_segment(seconds, force=force)
         self.frame_view.show_at(seconds, force=force)
 

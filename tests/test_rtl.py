@@ -476,10 +476,9 @@ def test_the_selection_line_reads_word_then_times_in_order(qt_app) -> None:
 
     word = _AYAH_WORDS[0]
     line = i18n.t("review.selected", word=word, span=time_span(2.81, 4.03, sep=" \u2192 "))
-    assert left_to_right(line, [word, "2.81", "4.03", "ث"]) == [
-        "ث",
-        "2.81",
-        "4.03",
+    assert left_to_right(line, [word, "00:02.81", "00:04.03"]) == [
+        "00:02.81",
+        "00:04.03",
         word,
     ]
 
@@ -489,10 +488,10 @@ def test_a_gap_line_keeps_its_start_before_its_end(qt_app) -> None:
     from tests.bidi_helpers import left_to_right
 
     line = i18n.t("review.gap", duration=0.5, span=time_span(16.8, 23.0, digits=1))
-    # Read from the right: 0.5 s at 16.8–23.0 s; the range itself runs left to right.
-    assert left_to_right(line, ["0.5", "عند", "16.8", "23.0"]) == [
-        "16.8",
-        "23.0",
+    # Read from the right: 0.5 s at 00:16.8–00:23.0; the range itself runs left to right.
+    assert left_to_right(line, ["0.5", "عند", "00:16.8", "00:23.0"]) == [
+        "00:16.8",
+        "00:23.0",
         "عند",
         "0.5",
     ]
