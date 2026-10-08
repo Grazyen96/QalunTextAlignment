@@ -349,3 +349,37 @@ def test_the_export_renders_with_its_look(tmp_path, no_basmala, monkeypatch) -> 
     )
     assert seen["look"] == PRESETS["emerald"]
     assert result.render.look_warnings == ("image_unreadable",)
+
+
+def test_a_lecture_render_draws_only_the_studied_surah(tmp_path, no_basmala, monkeypatch) -> None:
+    """The quoted ayah stays in the caption track; only the card leaves it out."""
+    from qurantext.jobs import render as render_module
+    from qurantext.jobs.render import RenderRequest, render_video
+
+    audio, matches = build_job(tmp_path)
+    payload = json.loads(matches.read_text(encoding="utf-8"))
+    payload["meta"]["mode"] = "lecture"
+    matches.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    seen = {}
+
+    def capture(audio_path, matches_list, output_path, *args, **kwargs):
+        seen["cards"] = matches_list
+        output_path.write_bytes(b"")
+        return 1.0
+
+    monkeypatch.setattr(render_module, "render_frame_video", capture)
+    studied = dict(payload["matches"][0])
+    quote = dict(studied, surah_num=17, from_ayah=48, to_ayah=48, start_time=5.0, end_time=5.5)
+    render_video(
+        RenderRequest(
+            audio=audio,
+            matches=matches,
+            output=tmp_path / "v.mp4",
+            width=160,
+            height=120,
+            fps=8,
+            font_file=DEFAULT_FONT_PATH,
+            cards=(studied, quote),
+        )
+    )
+    assert [c["surah_num"] for c in seen["cards"]] == [25]

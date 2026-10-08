@@ -14,8 +14,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from qurantext.config.settings import DEFAULT_VIDEO_FONT_FILE, VIDEO_PRESETS, get_settings
+from qurantext.core.basmala import load_matches_meta
 from qurantext.core.looks import NIGHT_GOLD, Look
 from qurantext.core.video_common import (
+    cards_on_screen,
     get_audio_duration,
     load_caption_segments,
     load_matches,
@@ -89,7 +91,10 @@ def render_preview(request: PreviewRequest) -> PreviewResult:
     validate_input_file(font_file, "Font file")
 
     cards = sorted(
-        validated_matches(load_matches(matches_path), bridge_gaps=False),
+        cards_on_screen(
+            validated_matches(load_matches(matches_path), bridge_gaps=False),
+            load_matches_meta(matches_path).get("mode"),
+        ),
         key=lambda card: float(card["_start_time"]),
     )
     captions = load_caption_segments(matches_path)

@@ -88,6 +88,57 @@ def lecture_intro_lines(matches: list[dict[str, Any]]) -> tuple[str, str] | None
     return surah_name, line
 
 
+def _card_surah(card: dict[str, Any]) -> int | str | None:
+    surah_num = card.get("surah_num")
+    if isinstance(surah_num, int):
+        return surah_num
+    return str(card.get("surah_name") or "").strip() or None
+
+
+def _card_span(card: dict[str, Any]) -> tuple[float, float] | None:
+    try:
+        start = float(card.get("_start_time", card.get("start_time")))
+        end = float(card.get("_end_time", card.get("end_time")))
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(start) and math.isfinite(end)):
+        return None
+    return start, end
+
+
+def cards_on_screen(cards: list[dict[str, Any]], mode: str | None) -> list[dict[str, Any]]:
+    """The cards a video draws, out of every card detected for a job.
+
+    A lecture's card shows the surah it studies — the one heard for the most
+    time, a tie going to the one heard first. Ayat the speaker quotes from
+    another surah to explain it are left off the card, which keeps holding the
+    studied ayah through the quote; they still appear in the captions, which
+    carry everything said. Cards without a surah are kept. A recitation keeps
+    every card, since it states its own range and quotes nothing.
+
+    The export, the single-frame preview and the review window's live frame all
+    call this, so none of them shows a card the others leave out.
+    """
+    if str(mode or "").lower() != "lecture":
+        return list(cards)
+
+    heard: dict[int | str, float] = {}
+    first: dict[int | str, float] = {}
+    for card in cards:
+        surah = _card_surah(card)
+        span = _card_span(card)
+        if surah is None or span is None:
+            continue
+        start, end = span
+        heard[surah] = heard.get(surah, 0.0) + max(0.0, end - start)
+        first[surah] = min(first.get(surah, math.inf), start)
+    if len(heard) <= 1:
+        return list(cards)
+
+    studied = max(heard, key=lambda surah: (heard[surah], -first[surah]))
+    return [card for card in cards if _card_surah(card) in (None, studied)]
+
+
 def warn(message: str) -> None:
     print(f"WARNING: {message}", file=sys.stderr)
 

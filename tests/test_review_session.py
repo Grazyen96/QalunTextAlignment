@@ -594,3 +594,16 @@ def test_a_timing_gesture_that_ends_where_it_began_still_settles(session) -> Non
     session.begin_gesture()
     session.end_gesture()
     assert not session.dirty and not session.can_undo
+
+
+def test_the_live_frame_of_a_lecture_skips_a_quote_from_another_surah() -> None:
+    project = _lecture()
+    studied = project.cards[0]
+    project.cards.append(
+        dict(studied, surah_num=2, from_ayah=255, to_ayah=255, start_time=8.5, end_time=9.0)
+    )
+    session = ReviewSession(project)
+
+    card, _caption, _band = session.frame_inputs(8.7)
+    assert (card["surah_num"], card["from_ayah"]) == (1, 1)
+    assert len(session.project.cards) == 2, "the quote stays in the project, only off the card"

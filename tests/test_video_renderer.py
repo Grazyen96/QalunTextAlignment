@@ -1006,3 +1006,79 @@ def test_render_frame_pillow_draws_on_the_layer_it_is_handed() -> None:
     corner = np.array(ocean.image.convert("RGB"))[0, 0][::-1]  # the frame is BGR
     assert tuple(handed[0, 0]) == tuple(corner)
     assert tuple(handed[0, 0]) != tuple(looked_up[0, 0])
+
+
+def _card(surah, ayah, start, end, name=None):
+    return {
+        "surah_num": surah,
+        "surah_name": name or f"surah {surah}",
+        "from_ayah": ayah,
+        "to_ayah": ayah,
+        "start_time": start,
+        "end_time": end,
+    }
+
+
+def test_a_lecture_shows_only_the_surah_it_studies() -> None:
+    """A quote from another surah explains the ayah at hand; it is not the ayah at hand."""
+    from qurantext.core.video_common import cards_on_screen
+
+    cards = [
+        _card(17, 23, 0.0, 4.0),  # an opening quote, before the studied surah starts
+        _card(25, 7, 5.0, 15.0),
+        _card(17, 48, 16.0, 20.0),
+        _card(25, 8, 21.0, 30.0),
+    ]
+    assert [(c["surah_num"], c["from_ayah"]) for c in cards_on_screen(cards, "lecture")] == [
+        (25, 7),
+        (25, 8),
+    ]
+
+
+def test_the_studied_surah_is_the_one_with_the_most_time_not_the_most_cards() -> None:
+    from qurantext.core.video_common import cards_on_screen
+
+    cards = [
+        _card(2, 255, 0.0, 1.0),
+        _card(2, 256, 1.0, 2.0),
+        _card(2, 257, 2.0, 3.0),
+        _card(25, 7, 3.0, 20.0),
+    ]
+    assert [c["surah_num"] for c in cards_on_screen(cards, "lecture")] == [25]
+
+
+def test_a_tie_goes_to_the_surah_heard_first() -> None:
+    from qurantext.core.video_common import cards_on_screen
+
+    cards = [_card(25, 7, 0.0, 5.0), _card(17, 48, 5.0, 10.0)]
+    assert [c["surah_num"] for c in cards_on_screen(cards, "lecture")] == [25]
+
+
+def test_validated_cards_are_filtered_by_their_own_times() -> None:
+    from qurantext.core.video_common import cards_on_screen
+
+    cards = validated_matches(
+        [
+            dict(_card(25, 7, 0.0, 9.0), full_text="x"),
+            dict(_card(17, 48, 9.0, 10.0), full_text="y"),
+        ],
+        bridge_gaps=False,
+    )
+    assert [c["surah_num"] for c in cards_on_screen(cards, "lecture")] == [25]
+
+
+def test_cards_without_a_surah_are_kept() -> None:
+    from qurantext.core.video_common import cards_on_screen
+
+    preamble = {"kind": "preamble", "start_time": 0.0, "end_time": 2.0}
+    cards = [preamble, _card(25, 7, 2.0, 9.0), _card(17, 48, 9.0, 10.0)]
+    assert cards_on_screen(cards, "lecture") == cards[:2]
+
+
+def test_a_recitation_keeps_every_card() -> None:
+    """A recitation states its own range; nothing in it is a quotation."""
+    from qurantext.core.video_common import cards_on_screen
+
+    cards = [_card(25, 75, 0.0, 9.0), _card(26, 1, 9.0, 10.0)]
+    assert cards_on_screen(cards, "recitation") == cards
+    assert cards_on_screen(cards, None) == cards

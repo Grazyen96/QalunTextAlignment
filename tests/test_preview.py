@@ -256,3 +256,26 @@ def test_preview_reports_a_missing_background_image(tmp_path) -> None:
     )
     assert result.look_warnings == ("image_missing",)
     assert result.output.exists() and result.output.stat().st_size > 0
+
+
+def test_a_lecture_keeps_the_studied_ayah_up_through_a_quote_from_another_surah(tmp_path) -> None:
+    path = _matches(tmp_path, mode="lecture")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    quote = dict(
+        payload["matches"][0], surah_num=17, surah_name="الإسراء", from_ayah=48, to_ayah=48
+    )
+    quote.update(start_time=6.5, end_time=7.5)
+    payload["matches"].insert(1, quote)
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    result = render_preview(
+        PreviewRequest(
+            matches=path,
+            output=tmp_path / "p.png",
+            at=7.0,
+            width=240,
+            height=180,
+            font_file=DEFAULT_FONT_PATH,
+        )
+    )
+    assert result.card == "25:8", "the quote from al-Isra stays in the captions, not on the card"

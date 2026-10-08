@@ -19,7 +19,7 @@ from pathlib import Path
 
 from qurantext.config.settings import DEFAULT_VIDEO_FONT_FILE, VIDEO_PRESETS, get_settings
 from qurantext.core.ass_renderer import build_ass, render_ass_video, validate_font_name
-from qurantext.core.basmala import maybe_prepend_basmala
+from qurantext.core.basmala import load_matches_meta, maybe_prepend_basmala
 from qurantext.core.frame_renderer import (
     DEFAULT_PLACEHOLDER_TITLE,
     render_frame_video,
@@ -27,6 +27,7 @@ from qurantext.core.frame_renderer import (
 )
 from qurantext.core.looks import NIGHT_GOLD, Look
 from qurantext.core.video_common import (
+    cards_on_screen,
     get_audio_duration,
     load_caption_segments,
     load_matches,
@@ -151,6 +152,9 @@ def render_video(
         if request.cards is not None
         else load_matches(matches_path)
     )
+    # A lecture's card keeps to the surah it studies; quotes from elsewhere
+    # stay in the captions only.
+    matches = cards_on_screen(matches, load_matches_meta(matches_path).get("mode"))
     if not matches:
         warn(
             "No matches were found in the match JSON. Rendering a dark video with the "

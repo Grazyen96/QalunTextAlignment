@@ -32,7 +32,7 @@ from qurantext.core.timing_edit import (
     ripple,
     ripple_in_cards,
 )
-from qurantext.core.video_common import validated_matches
+from qurantext.core.video_common import cards_on_screen, validated_matches
 from qurantext.gui.i18n import t
 from qurantext.jobs.look_assets import project_look, set_project_look
 from qurantext.jobs.project import CaptionCue, Project, job_settings, save_project
@@ -359,7 +359,10 @@ class ReviewSession:
         return [{"start": tw.start, "end": tw.end} for tw in self.words()]
 
     def validated_cards(self) -> list[dict[str, Any]]:
-        """The cards as the frame renderer sees them: enriched, sorted by start time.
+        """The cards as the frame renderer draws them: enriched, sorted by start time.
+
+        A lecture's quotes from other surahs are left out, as the export leaves
+        them out (``core.video_common.cards_on_screen``).
 
         Cached per revision — ``frame_inputs`` is built from this, and a
         caller that also needs to mirror the renderer's own logic exactly
@@ -368,7 +371,10 @@ class ReviewSession:
         re-running ``validated_matches`` itself.
         """
         if self._validated is None or self._validated[0] != self._revision:
-            cards = validated_matches(copy.deepcopy(self.project.cards), bridge_gaps=False)
+            cards = cards_on_screen(
+                validated_matches(copy.deepcopy(self.project.cards), bridge_gaps=False),
+                self.project.mode,
+            )
             cards.sort(key=lambda card: float(card["_start_time"]))
             self._validated = (self._revision, cards)
         return self._validated[1]
