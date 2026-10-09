@@ -9,6 +9,7 @@ how to build it.
 | Prototype | Question it answered | Finding |
 |---|---|---|
 | `forced_alignment/` | Can a local CTC aligner time Quran recitation well enough to drive the word highlight? | [docs/findings/forced-alignment-prototype.md](../docs/findings/forced-alignment-prototype.md) — no, not across an elongation, and its confidence score does not reveal that |
+| `asr_bakeoff/` | Is there a local Arabic recogniser as good as cloud WhisperX? | [docs/findings/asr-bakeoff.md](../docs/findings/asr-bakeoff.md) — yes: NVIDIA FastConformer (RNNT) matches it on CPU at 40–50× real time; Cohere hallucinates on recitation |
 
 Delete a prototype once its finding is acted on and the code no longer adds
 anything to the written result.
