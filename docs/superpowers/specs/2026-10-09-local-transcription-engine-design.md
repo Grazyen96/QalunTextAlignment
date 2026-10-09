@@ -72,7 +72,7 @@ anything is built on it.
 | All four recitation clips: range and cards | identical to NeMo |
 | Lectures: studied ayat found | at least 54 of 72 (NeMo: 55) |
 | Word starts against NeMo, over all recitation words | median ≤ 20 ms, and at least 95% within 100 ms |
-| Word ends | each end is after its start, and no word overlaps the next |
+| Word ends | no end is before its start, and no word overlaps the next. An RNNT decoder can emit two words on the same frame, so "equal" must be allowed |
 
 int8 ships if it passes. Otherwise fp32 ships, and the download size in §2
 changes from about 120 MB to about 450 MB. If neither passes, work stops and
@@ -181,8 +181,10 @@ audio ──ffmpeg (bundled)──► 16 kHz mono float32, decoded incrementally
   downstream relies on it.
 - **Threads:** the recogniser uses `max(1, os.cpu_count() - 2)` threads. It is
   created once per job and dropped afterwards.
-- **Progress and cancel:** progress is reported as "window n of N", and cancel
-  is checked between batches.
+- **Progress and cancel:** progress is reported as minutes transcribed out of the
+  recording's length (read with the bundled ffprobe; the number of windows is
+  not known in advance while decoding streams). Cancel is checked between
+  blocks.
 - **Testability:** the recogniser is created by a factory the tests can
   replace, so all grouping and offset logic is tested without the model.
 
