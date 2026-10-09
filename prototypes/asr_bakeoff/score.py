@@ -146,12 +146,21 @@ def timing_agreement(a: list, b: list) -> dict | None:
         return None
     diffs = [abs(x[1] - y[1]) for x, y in pairs]
     return {
+        "paired": len(pairs),
         "words": f"{len(pairs)} paired of {len(a)} / {len(b)}",
         "median_ms": round(statistics.median(diffs) * 1000),
         "within_100ms": sum(d <= 0.1 for d in diffs),
         "within_500ms": sum(d <= 0.5 for d in diffs),
         "over_1s": [(w, round(t, 2), round(d, 2)) for (_, (w, t)), d in zip(pairs, diffs) if d > 1.0],
     }
+
+
+def end_violations(raw: dict) -> int:
+    """Words whose end is before their start, or after the next word's start."""
+    words = [w for s in raw["segments"] for w in s.get("words", [])]
+    bad = sum(1 for w in words if w["end"] < w["start"])
+    bad += sum(1 for a, b in zip(words, words[1:]) if a["end"] > b["start"] + 1e-6)
+    return bad
 
 
 engines = sorted(p.name for p in BAKE.iterdir() if p.is_dir() and not p.name.startswith(("venv", "hf")))
@@ -166,6 +175,7 @@ for clip, (mode, surah, first, last, _audio) in CLIPS.items():
         raw = json.loads(raw_path.read_text(encoding="utf-8"))
         match = run_matcher(mode, raw_path)
         row = {"meta": raw.get("bakeoff_meta", {}), "transcript_words": len(transcript_words(raw))}
+        row["end_violations"] = end_violations(raw)
         row["mentions"] = [
             (m["surah_num"], m["from_ayah"], m["to_ayah"], m["start_time"], round(m["confidence"], 2))
             for m in match["matches"]
@@ -179,16 +189,16 @@ for clip, (mode, surah, first, last, _audio) in CLIPS.items():
             row["unmatched_transcript_words"] = extra
             row["onsets"] = onsets(match)
         per_engine[eng] = row
-    if mode == "recitation" and BASELINE in per_engine:
-        base = per_engine[BASELINE]["onsets"]
-        for eng, row in per_engine.items():
-            if eng != BASELINE:
-                row["timing_vs_whisperx"] = timing_agreement(base, row["onsets"]) or "no common words"
-        if "nemo-rnnt" in per_engine and "cohere" in per_engine:
-            per_engine["cohere"]["timing_vs_nemo-rnnt"] = (
-                timing_agreement(per_engine["nemo-rnnt"]["onsets"], per_engine["cohere"]["onsets"])
-                or "no common words"
-            )
+    if mode == "recitation":
+        for ref in (BASELINE, "nemo-rnnt"):
+            if ref not in per_engine:
+                continue
+            for eng, row in per_engine.items():
+                if eng != ref:
+                    row[f"timing_vs_{ref}"] = (
+                        timing_agreement(per_engine[ref]["onsets"], row["onsets"])
+                        or "no common words"
+                    )
     for row in per_engine.values():
         row.pop("onsets", None)
     results[clip] = per_engine

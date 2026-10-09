@@ -8,6 +8,7 @@ engines, scoring each through the production matcher. The finding is in
 |---|---|---|
 | (none) | WhisperX on Replicate — the saved `*_whisperx_raw.json` files | WhisperX's own |
 | `run_nemo.py` | `nvidia/stt_ar_fastconformer_hybrid_large_pcd_v1.0`, RNNT or CTC decoder | the model's own |
+| `run_sherpa.py` | the same NVIDIA model through sherpa-onnx (`--model-dir` from `tools/export_local_model`) | the model's own token times, grouped into words |
 | `run_cohere.py` | `CohereLabs/cohere-transcribe-arabic-07-2026` | wav2vec2 forced alignment (WhisperX's Arabic aligner) |
 
 Every runner writes the WhisperX raw shape, so `score.py` runs
@@ -43,6 +44,9 @@ The Cohere model is gated: accept its terms on the Hugging Face model page, then
     # ... same for alFurqanCut.mp3 and lectures/الفرقان7-11-final.wav
 
     venv/bin/python prototypes/asr_bakeoff/score.py $BAKE   # project venv
+
+`gate.py $BAKE <engine>` checks an engine against spec §0 of the local
+transcription engine design (exit 0 = pass).
 
 `score.py --list` prints every clip with its audio path, for looping the
 runners over all 17 Al-Furqān recordings (`qurantext transcribe --audio … --output
