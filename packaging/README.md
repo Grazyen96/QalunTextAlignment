@@ -21,8 +21,8 @@ pyinstaller packaging/qalun.spec --noconfirm
 Verified on Linux: the bundle runs with no Python, no virtual environment and no
 repository present, builds the Quran store into the platform data directory,
 renders a video using the font from inside the bundle, and writes sidecar
-subtitles with the Arabic intact. About 275 MB, before FFmpeg and FriBiDi are
-copied in (see Size).
+subtitles with the Arabic intact, and transcribes on the computer with
+sherpa-onnx. About 317 MB, before FFmpeg and FriBiDi are copied in (see Size).
 
 The frozen app can diagnose itself, which matters because a packaged app that
 will not render is exactly when there is no Python to run anything else with:
@@ -106,6 +106,40 @@ libraries a second time (the zip unpacks to 446 MB). `packaging/ci/package.sh`
 keeps the links: the same after-bundle zips to 113 MB and unpacks to the 275 MB
 folder. The workflow uses it once its Package step is changed; see
 [ci/README.md](ci/README.md).
+
+### The local transcription engine
+
+sherpa-onnx and the ONNX Runtime inside it take about 42 MB of the bundle
+(`_internal/sherpa_onnx/` 37 MB, `_internal/sherpa_onnx.libs/` 5 MB, the ALSA
+library the wheel vendors). The speech model is not bundled: it downloads on
+first use (about 110 MB) into the cache folder. Measured on Linux, 10 Oct 2026,
+PyInstaller 6.22.3, sherpa-onnx 1.13.8, FFmpeg and FriBiDi not included, zips
+made with `zip -qry` as `package.sh` makes them:
+
+| | folder | zip |
+|---|---|---|
+| spec before this change | 312 MB | 120 MB |
+| after | 317 MB | 122 MB |
+| difference | 5 MB | 2 MB |
+| with FFmpeg and FriBiDi copied in | 470 MB | |
+
+The difference is small because PyInstaller already found most of the engine on
+its own: it follows the engine's import inside a function, and the Python
+extension's linked libraries (ONNX Runtime, ALSA). What the spec adds by naming
+it is sherpa-onnx's C and C++ API libraries, which the analysis cannot see, and
+the certainty that a release never depends on the analysis following a lazy
+import. Against the 275 MB of 24 Sep, the bundle has grown 42 MB, nearly all of
+it the engine.
+
+The spec also ships, beside the engine's binaries, the licences that have to
+travel with them: `sherpa_onnx/LICENSE` (Apache 2.0, from the wheel) and
+`sherpa_onnx/lib/onnxruntime-LICENSE` (MIT, kept in [licenses/](licenses/)
+because the wheel does not carry it), and `THIRD_PARTY_NOTICES.md` at the top of
+`_internal/`. And it ships certifi's `cacert.pem`, which the model download
+trusts alongside the system's certificates. Verified in the frozen app with the
+system's certificates hidden (`SSL_CERT_FILE` and `SSL_CERT_DIR` pointed at
+nothing): the download completes through certifi alone, and fails with
+`CERTIFICATE_VERIFY_FAILED` once certifi's file is removed too.
 
 Windows and macOS: record from the first release-workflow run after this change
 (the zip sizes on the run's summary page) — see

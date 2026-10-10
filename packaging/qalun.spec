@@ -24,21 +24,60 @@ What this has to get right, beyond the obvious:
   .dist-info unless told to. Without this the app renders perfectly and then
   fails at transcription with "No package metadata was found for replicate" —
   a failure that only appears once a job is already running.
+* **The local transcription engine.** sherpa-onnx's wheel carries native
+  libraries (its own and ONNX Runtime) that the import graph cannot see, and
+  the licences that have to travel with them. The speech model is not bundled:
+  it downloads on first use, over HTTPS, trusting certifi's bundle as well as
+  the system's, so certifi's cacert.pem travels too.
 * **FFmpeg.** Not bundled here, because the binary is large and its licensing
   depends on the build you choose. Ship one beside the executable and put that
   directory on PATH, or accept the system install. `doctor` reports which.
 """
 
+from importlib.metadata import distribution
 from pathlib import Path
 
-from PyInstaller.utils.hooks import copy_metadata
+from PyInstaller.utils.hooks import (
+    collect_data_files,
+    collect_dynamic_libs,
+    collect_submodules,
+    copy_metadata,
+)
 
 ROOT = Path(SPECPATH).parent
 
 datas = [
     # The bundled font, kept at the path qurantext.config.paths expects.
     (str(ROOT / "src" / "qurantext" / "assets"), "qurantext/assets"),
+    # Credits the speech model (CC BY 4.0) and the engine. Lands at the top of
+    # the bundle's data folder (_internal/, or Contents/Resources on macOS).
+    (str(ROOT / "THIRD_PARTY_NOTICES.md"), "."),
 ]
+
+# The local transcription engine. Its wheel carries native libraries
+# (sherpa-onnx's own and ONNX Runtime) that the import graph cannot see.
+sherpa_binaries = collect_dynamic_libs("sherpa_onnx")
+sherpa_hidden = collect_submodules("sherpa_onnx")
+
+# Their licences go beside them. sherpa-onnx (Apache 2.0) ships its own in the
+# wheel's metadata, taken from there so it always matches the version built.
+# ONNX Runtime (MIT) is inside sherpa_onnx/lib but its licence is not in the
+# wheel, so the repository keeps it; see packaging/licenses/README.md.
+_sherpa_licence = next(
+    (f for f in distribution("sherpa_onnx").files or () if f.name in ("LICENSE", "LICENSE.txt")),
+    None,
+)
+if _sherpa_licence is None:
+    raise SystemExit("qalun.spec: the installed sherpa-onnx carries no LICENSE to ship")
+datas += [
+    (str(_sherpa_licence.locate()), "sherpa_onnx"),
+    (str(ROOT / "packaging" / "licenses" / "onnxruntime-LICENSE"), "sherpa_onnx/lib"),
+]
+
+# The model download trusts certifi's bundle as well as the system's: a frozen
+# app's OpenSSL looks where the build machine kept its certificates, which a
+# Mac or another Linux does not have. certifi.where() must find cacert.pem.
+datas += collect_data_files("certifi")
 
 # replicate/__about__.py runs `version("replicate")` at import time, so the
 # package's metadata has to travel with it or the import raises. recursive=True
@@ -52,7 +91,7 @@ datas += copy_metadata("replicate", recursive=True)
 # shadows the one Qt ships, and the app hangs on startup before reaching a single
 # line of its own code. Note that no amount of collecting produces FriBiDi — it
 # is not in the wheel to collect. The build supplies that separately.
-binaries = []
+binaries = [*sherpa_binaries]
 
 a = Analysis(
     [str(ROOT / "packaging" / "entry.py")],
@@ -68,6 +107,8 @@ a = Analysis(
         # plugin), the libav*/libsw* it links from PySide6's Qt/lib, and
         # translations/qtmultimedia_*.qm. QtCore's hook brings qtbase_*.qm.
         "PySide6.QtMultimedia",
+        # The local engine is imported lazily, inside the engine's functions.
+        *sherpa_hidden,
     ],
     excludes=[
         # Nothing here is used, and each drags in a lot.

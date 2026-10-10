@@ -67,3 +67,32 @@ def test_requirements_txt_carries_every_core_dependency() -> None:
     lines = (root / "requirements.txt").read_text(encoding="utf-8").splitlines()
     pinned = {line.strip() for line in lines if line.strip() and not line.startswith("#")}
     assert set(core) == pinned
+
+
+def test_the_spec_collects_sherpa_onnx() -> None:
+    text = SPEC.read_text(encoding="utf-8")
+    assert 'collect_dynamic_libs("sherpa_onnx")' in text
+    assert 'collect_submodules("sherpa_onnx")' in text
+
+
+def test_the_spec_ships_the_third_party_notice() -> None:
+    assert "THIRD_PARTY_NOTICES.md" in SPEC.read_text(encoding="utf-8")
+
+
+def test_the_spec_ships_certifis_certificates() -> None:
+    """The model downloads over HTTPS, and a frozen app's OpenSSL looks for the
+    build machine's certificates, which a Mac or another Linux does not have.
+    certifi's bundle is the fallback, so its cacert.pem has to travel too."""
+    assert 'collect_data_files("certifi")' in SPEC.read_text(encoding="utf-8")
+
+
+def test_the_spec_ships_the_engine_licences_beside_its_binaries() -> None:
+    """sherpa-onnx (Apache 2.0) and the ONNX Runtime inside it (MIT) both ask for
+    their licence text to go wherever the binaries go. sherpa-onnx's wheel carries
+    its own; ONNX Runtime's does not reach the wheel, so the repository keeps it."""
+    text = SPEC.read_text(encoding="utf-8")
+    assert 'distribution("sherpa_onnx")' in text
+    assert "onnxruntime-LICENSE" in text
+    licence = SPEC.parent / "licenses" / "onnxruntime-LICENSE"
+    body = licence.read_text(encoding="utf-8")
+    assert "MIT License" in body and "Copyright (c) Microsoft Corporation" in body
