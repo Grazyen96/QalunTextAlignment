@@ -38,7 +38,8 @@ python3 -m pip install -r requirements.txt
 
 The runtime dependencies are NumPy, Pillow (built with libraqm, for Arabic
 shaping), certifi, the Replicate client (only used by the optional WhisperX
-engine) and **sherpa-onnx** (Apache 2.0), which runs the local speech model.
+engine) and **sherpa-onnx** (Apache 2.0, though its PyPI build also contains
+GPL-3.0 code; see [Licence](#licence)), which runs the local speech model.
 That model, NVIDIA's FastConformer Hybrid Large (Arabic),
 `stt_ar_fastconformer_hybrid_large_pcd_v1.0`, is not installed by pip: Qalun
 downloads it once, on first use (about 110 MB). It is licensed CC BY 4.0; the
@@ -62,6 +63,19 @@ Download the app for your system from the
 [Releases page](https://github.com/Grazyen96/QalunTextAlignment/releases),
 unzip it, and run **Qalun**. There is nothing to install: no Python, no FFmpeg,
 no Quran text file. Everything below is for working on the code.
+
+## System requirements
+
+- **Memory:** transcribing on this computer, the default, uses up to about
+  1.8 GB of RAM while it runs, however long the recording (about 1 GB for a
+  short clip). On a machine with 4 GB, close other large programs first; a long
+  lecture may otherwise run out of memory. WhisperX online, the optional engine,
+  transcribes elsewhere and needs none of it.
+- **Disk:** the speech model takes about 140 MB once installed. It downloads
+  once, on first use (about 110 MB), and needs about 270 MB free while it
+  unpacks.
+- **Internet:** once, for that first download; after that, transcription works
+  offline.
 
 ## Is this machine set up?
 
@@ -209,7 +223,11 @@ QURANTEXT_VIDEO_FPS=25
 
 `packaging/` builds a self-contained desktop app with PyInstaller. See
 [packaging/README.md](packaging/README.md) for the per-platform wrappers and
-the two mistakes that are easy to make.
+the two mistakes that are easy to make. Before a build is released, its gate
+runs the built app's `--doctor --release` and then a real local transcription
+inside it, after checking that the published speech model still matches the
+pin; see [the transcription gate](packaging/ci/README.md#the-transcription-gate)
+and [docs/release-checklist.md](docs/release-checklist.md).
 
 ## Project Layout
 
@@ -682,3 +700,26 @@ python3 -m pip install pytest ruff
 - If `generate-video --renderer frame` fails, install `Pillow` and `numpy`, check that FFmpeg is on your PATH, and use a valid `--font-file`.
 - If it fails with a libraqm error, your Pillow build cannot shape Arabic. Pillow's wheels need FriBiDi installed separately; install it and reinstall Pillow.
 - If matching confidence is low, increase `--head-words`, `--tail-words`, or `--search-range`, and confirm the Quran file matches the recitation riwaya.
+
+## Licence
+
+Qalun is free software, licensed under the GNU General Public License version 3
+only (GPL-3.0-only); the full text is in [LICENSE](LICENSE).
+
+Copyright (C) 2026 Khalil
+
+It comes with ABSOLUTELY NO WARRANTY, to the extent permitted by law. It is
+GPL-3.0 because the sherpa-onnx build the app bundles links espeak-ng
+(GPL-3.0-or-later) into the app's own process.
+
+The source is inside the download. Every app zip has, at its top, `LICENSE`,
+`THIRD_PARTY_NOTICES.md`, `qalun-source.zip` (the complete source of the commit
+the app was built from) and `third-party-sources/` (the exact source archives of
+the bundled GPL and LGPL components that are not Qalun's own: espeak-ng, and on
+Linux the ALSA library). The bundled components, the speech model and their
+licences are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+The licence does not cover the bundled Quran font (`qaloon.10.ttf`,
+`qaloon.10.woff2`) or the Quran text (`UthmanicQaloon1-Ver05.txt`). They are
+third-party works, their provenance and terms to be confirmed by the owner;
+see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

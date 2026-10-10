@@ -89,6 +89,44 @@ class TestTextCommands:
         assert entry._save_report("a report") is None
 
 
+class TestCliErrors:
+    """A windowed build turns an escaped error into PyInstaller's modal dialog,
+    which nobody closes on a build machine: the gate would wait out its bound
+    and the traceback would never reach the log."""
+
+    @staticmethod
+    def _failing_cli(monkeypatch) -> None:
+        import qurantext.cli.main as cli
+
+        def explode(argv=None) -> int:
+            raise RuntimeError("the model would not load")
+
+        monkeypatch.setattr(cli, "main", explode)
+
+    def test_with_somewhere_to_print_the_error_is_printed_and_fails(
+        self, entry, monkeypatch, tmp_path
+    ) -> None:
+        import sys
+
+        self._failing_cli(monkeypatch)
+        log = tmp_path / "stderr.txt"
+        with log.open("w", encoding="utf-8") as stream:
+            monkeypatch.setattr(sys, "stderr", stream)
+            assert entry.main(["--cli", "transcribe"]) == 1
+        text = log.read_text(encoding="utf-8")
+        assert "Traceback" in text
+        assert "RuntimeError: the model would not load" in text
+
+    def test_with_nowhere_to_print_the_error_still_escapes(self, entry, monkeypatch) -> None:
+        """A double-click has no stream, so the dialog is the only way to see it."""
+        import sys
+
+        self._failing_cli(monkeypatch)
+        monkeypatch.setattr(sys, "stderr", None)
+        with pytest.raises(RuntimeError, match="would not load"):
+            entry.main(["--cli", "transcribe"])
+
+
 def test_preload_runs_before_anything_imports_pillow(entry) -> None:
     """Ordering is the whole point: FriBiDi has to be in the process first."""
     source = ENTRY.read_text(encoding="utf-8")

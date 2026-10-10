@@ -96,6 +96,7 @@ QuranText is organized around a small number of stable layers:
 ## Developer Tooling
 
 - `tools/export_local_model/` exports and packages the local speech model for release; see its `README.md`.
+- `packaging/` builds the desktop app; `packaging/ci/` holds the release workflow's steps. The release gate runs the built app's `--doctor --release`, then checks the published speech model against the pin in `model_store.py` and transcribes a tone locally inside the built app; see [the transcription gate](../packaging/ci/README.md#the-transcription-gate).
 
 ## Extending The Project
 

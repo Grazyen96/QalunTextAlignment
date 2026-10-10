@@ -268,6 +268,44 @@ never aligned (no start/end) when counting end violations.
 
 The shipped engine (`qurantext transcribe --engine local`) passes the same gate on all 17 clips.
 
+## Licence finding (10 October 2026): the sherpa-onnx build contains espeak-ng
+
+**Found:** the PyPI build of sherpa-onnx 1.13.8, which the app bundles to run the
+model, is not Apache-2.0 and MIT only. It contains espeak-ng
+(GPL-3.0-or-later), which sherpa-onnx uses for text to speech, a feature Qalun
+does not use. The parity work above assumed an Apache-licensed runtime and did
+not check this.
+
+**How it was verified,** on Linux, in both the project's virtual environment and
+the built bundle (`dist/qalun/_internal/sherpa_onnx/lib/`):
+
+- `nm -D --defined-only _sherpa_onnx.cpython-312-x86_64-linux-gnu.so | grep -c ' espeak_'`
+  gives **50** in both: the extension the app imports defines and exports
+  `espeak_*` and `espeak_ng_*` functions (`espeak_Cancel`, `espeak_Char`,
+  `espeak_CompileDictionary`, ...).
+- `readelf -d` on it lists no espeak library among its `NEEDED` entries, so
+  espeak-ng is linked in statically, not loaded from elsewhere.
+- `libsherpa-onnx-c-api.so`, also in the bundle, contains espeak-ng code too.
+- The Windows and macOS wheels were not inspected. They offer the same
+  text-to-speech API, so they are expected to contain it as well.
+
+**Status: Resolved 2026-10-10: Qalun is licensed GPL-3.0-only; the source ships
+with each release.** The owner chose to release Qalun itself under GPL-3.0-only
+(Copyright (C) 2026 Khalil), with which espeak-ng's GPL-3.0-or-later is
+compatible. The repository stays private; instead, `packaging/ci/package.sh`
+puts `qalun-source.zip` (`git archive` of the commit built) inside every app
+zip, beside the app (decided 10 Oct 2026, after the source zip was first
+attached to the release beside the app zips), together with
+`third-party-sources/`: the exact espeak-ng archive sherpa-onnx 1.13.8 builds
+from (csukuangfj/espeak-ng at `ed530aa1…`) and, in the Linux zip, alsa-lib
+1.2.12, each pinned by URL and sha256 in `packaging/third-party-sources.txt`.
+sherpa-onnx is pinned exactly to 1.13.8. `LICENSE` (the
+full GPL-3.0 text) ships in the bundle and at the top of every zip, the
+package metadata says `GPL-3.0-only`, `THIRD_PARTY_NOTICES.md` opens with
+Qalun's own licence statement, and the doctor report names it. The sherpa-onnx
+build itself is unchanged; `docs/release-checklist.md` now checks that each
+app zip carries the source archives, `LICENSE` and `THIRD_PARTY_NOTICES.md`.
+
 ## What this changes
 
 1. **Make NVIDIA FastConformer (RNNT) a local transcription engine** behind

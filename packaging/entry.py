@@ -22,7 +22,10 @@ USAGE = """Qalun — turn Arabic audio into a subtitled video.
   qalun --doctor        check this machine can render, and say what to fix
   qalun --doctor --release
                         the same, failing on anything a release must have
-                        (playback, Qt's Arabic translation, an Arabic font)
+                        (playback, Qt's Arabic translation, an Arabic font,
+                        the Replicate client whatever the engine; the local
+                        engine's runtime blocks when it is the engine, as by
+                        default)
   qalun --cli ...       run a command-line subcommand, e.g. --cli preview --help
   qalun --version       print the version
 """
@@ -145,7 +148,21 @@ def main(argv: list[str] | None = None) -> int:
         _attach_console()
         from qurantext.cli.main import main as cli_main
 
-        return cli_main(args[1:])
+        try:
+            return cli_main(args[1:])
+        except Exception:
+            # The app is built windowed, and an error that escapes a windowed
+            # build opens PyInstaller's traceback dialog. On a build machine no
+            # one closes it, so the release gate waited out its 15 minutes and
+            # the traceback never reached the log. Where the output goes
+            # somewhere, print it there and fail instead; with nowhere to print,
+            # the dialog is still the only way anyone sees it.
+            if not _usable(sys.stderr):
+                raise
+            import traceback
+
+            traceback.print_exc()
+            return 1
 
     from qurantext.gui import main as gui_main
 

@@ -199,9 +199,11 @@ def test_not_enough_disk_space_is_said_before_downloading(cache, server, monkeyp
 
 
 def test_offline_names_the_way_out(cache, server) -> None:
+    """Offline, the way out is the connection; WhisperX online would need it too."""
     m = _manifest(server, url="http://127.0.0.1:9/nothing-listens-here")
-    with pytest.raises(ModelDownloadError, match="WhisperX online"):
+    with pytest.raises(ModelDownloadError, match="internet connection") as info:
         model_store.ensure_model(m)
+    assert "WhisperX" not in str(info.value)
 
 
 def _age(path, seconds: float) -> None:
@@ -424,6 +426,7 @@ def test_an_http_error_names_its_status_and_what_to_do(cache, server, status, ad
     with pytest.raises(ModelDownloadError, match=f"HTTP {status}") as info:
         model_store.ensure_model(_manifest(server))
     assert advice in str(info.value) and "WhisperX online" in str(info.value)
+    assert "`--engine whisperx` on the command line" in str(info.value)
     assert "internet connection" not in str(info.value)
     assert _left_in_models() == []
 

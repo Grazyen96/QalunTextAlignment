@@ -31,11 +31,12 @@ import numpy as np
 from qurantext.core.pause_cut import SAMPLE_RATE, PauseCutter
 from qurantext.core.token_words import tokens_to_words
 from qurantext.core.video_common import require_binary
-from qurantext.services.errors import LocalEngineError, ModelLoadError
+from qurantext.services.errors import WHISPERX_INSTEAD, LocalEngineError, ModelLoadError
 from qurantext.utils.progress import CancelToken, JobCancelled, ProgressCallback, report
 
 __all__ = [
     "DEFAULT_THREADS",
+    "PEAK_MEMORY_GB",
     "decode_pcm",
     "make_recognizer",
     "probe_duration",
@@ -43,6 +44,9 @@ __all__ = [
     "transcribe_local",
 ]
 
+#: The recogniser's peak working set in GB, measured (see the module docstring).
+#: The doctor and the README state it, so a small machine knows before a long job.
+PEAK_MEMORY_GB = 1.8
 #: Leave two cores to the window and the rest of the machine.
 DEFAULT_THREADS = max(1, (os.cpu_count() or 1) - 2)
 #: Windows recognised together. Part of what the parity gate approved: changing it
@@ -215,7 +219,7 @@ def transcribe_local(
             raise LocalEngineError(
                 f"The local model stopped while recognising {audio_path.name} at "
                 f"{_minutes(pending[0][0] / SAMPLE_RATE)} ({detail}). Close other programs "
-                "and start the job again, or choose WhisperX online."
+                f"and start the job again, or {WHISPERX_INSTEAD}."
             ) from error
 
     def run_batch() -> None:

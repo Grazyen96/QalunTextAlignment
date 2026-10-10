@@ -224,6 +224,31 @@ class TestEngineChoice:
         get_settings.cache_clear()
         assert result.engine == "whisperx"
 
+    def test_a_whisperx_run_says_it_is_transcribing_online(self, monkeypatch, tmp_path) -> None:
+        """Without a stage of its own, the window kept saying "Aligning…" for the
+        minutes the upload and transcription take; a cache hit has nothing to say."""
+        from qurantext.config.settings import get_settings
+        from qurantext.services import engine_whisperx, transcription
+
+        audio = tmp_path / "a.wav"
+        audio.write_bytes(b"RIFF....WAVE")
+        monkeypatch.setenv("QURANTEXT_CACHE_DIR", str(tmp_path / "cache"))
+        get_settings.cache_clear()
+        events: list = []
+
+        def run(*_a, **_k):
+            events.append("ran")
+            return {"segments": []}
+
+        monkeypatch.setattr(engine_whisperx, "run_whisperx", run)
+        transcription.transcribe_audio(audio, engine="whisperx", progress=events.append)
+        stages = [(e.stage, e.fraction) for e in events[:-1]]
+        assert stages == [("transcribe_online", None)] and events[-1] == "ran"
+        events.clear()
+        hit = transcription.transcribe_audio(audio, engine="whisperx", progress=events.append)
+        get_settings.cache_clear()
+        assert hit.from_cache and events == []
+
 
 def test_detection_passes_engine_progress_and_cancel(monkeypatch, tmp_path) -> None:
     from qurantext.config.paths import DEFAULT_QURAN_PATH
@@ -508,6 +533,7 @@ class TestLocalEngine:
             transcription.transcribe_audio(env.audio, engine="local")
         assert isinstance(caught.value, TranscriptionError)
         assert "--doctor" in str(caught.value) and "WhisperX online" in str(caught.value)
+        assert "`qurantext doctor` from the command line" in str(caught.value)
         assert env.calls["discard"] == 1 and env.calls["ensure"] == 2
         monkeypatch.setattr(env.engine_local, "transcribe_local", lambda *a, **k: {"segments": []})
         assert transcription.transcribe_audio(env.audio, engine="local").from_cache is False

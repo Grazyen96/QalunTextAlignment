@@ -152,7 +152,9 @@ It finds the local model, or downloads it.
   then gives up with `LocalEngineError`.
 - **Concurrency:** an in-process lock serialises `ensure_model`, so a second
   job waits for the first job's download instead of starting its own. A stale
-  `.part` file left by a crash is deleted when the next download starts.
+  `.part` file or half-unpacked folder left by a crash is deleted when a later
+  download starts, once it is more than an hour old (so a download still running
+  in another process is never touched).
 - **HTTP:** standard library only (`urllib.request`), with a 30 s connect
   timeout. A network failure becomes `ModelDownloadError`, worded for someone
   who is offline.
@@ -225,9 +227,13 @@ audio ──ffmpeg (bundled)──► 16 kHz mono float32, decoded incrementally
   library cannot load. **Informational** if the model is not downloaded yet
   ("downloads about 110 MB on first use"). Fine if it is present and its sizes
   match.
-- WhisperX: the existing token and `replicate` checks run only when WhisperX is
-  the configured engine. Otherwise they are reported as informational, never
-  as problems.
+- WhisperX: both engines are always listed, the configured one first. When
+  WhisperX is not the configured engine, its token is information only (a
+  missing token is never a problem). Under `--release` (the build gate) the
+  Replicate client's import is blocking whatever the engine, because the window
+  offers WhisperX (Phase 4 ruling).
+- Both lines state the local engine's peak memory (about 1.8 GB), as
+  information.
 
 **Licences:**
 - The app has no About or licences screen today, and this design does not add
@@ -246,7 +252,9 @@ audio ──ffmpeg (bundled)──► 16 kHz mono float32, decoded incrementally
 ## 5. Packaging and release
 
 - **Dependencies:** `sherpa-onnx` joins the core dependencies in
-  `pyproject.toml`, with its version pinned to a range phase 0 was tested with.
+  `pyproject.toml`, pinned exactly (`==1.13.8`) to the version phase 0 was
+  tested with: the third-party notices and the shipped third-party sources
+  describe that very build, and a test fails if the installed version differs.
   `replicate` stays.
 - **Bundle:** `packaging/qalun.spec` collects sherpa-onnx's native libraries
   and its onnxruntime. The bundle should grow by about 30–50 MB per platform,
@@ -263,6 +271,15 @@ audio ──ffmpeg (bundled)──► 16 kHz mono float32, decoded incrementally
 - **Docs:** `docs/architecture.md`, the README and
   `docs/release-checklist.md` describe both engines, the model download, and
   the new release step.
+- **Licence** (decided 10 Oct 2026, after the Phase 5 review found espeak-ng,
+  GPL-3.0-or-later, linked into the PyPI sherpa-onnx): Qalun is licensed
+  GPL-3.0-only. Amended in the final fix wave (user decision, the repository
+  stays private): every app zip carries, beside the app, `qalun-source.zip`
+  (`git archive` of the commit built) and `third-party-sources/`, the exact
+  source archives of the bundled GPL/LGPL components that are not Qalun's
+  (espeak-ng at the fork commit sherpa-onnx 1.13.8 builds; alsa-lib 1.2.12 in
+  the Linux zip), each pinned by URL and sha256 in
+  `packaging/third-party-sources.txt`, the build failing on a mismatch.
 
 ## 6. Testing
 

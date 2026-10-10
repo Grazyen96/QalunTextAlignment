@@ -29,6 +29,7 @@ Both return the WhisperX raw JSON shape, so nothing downstream changes. `service
 - Recogniser threads: `max(1, os.cpu_count() - 2)`.
 - No telemetry: the app sends nothing except the model download.
 - Model licence: CC-BY-4.0. Attribution goes in `THIRD_PARTY_NOTICES.md`, the doctor report, and the model release.
+- App licence (decided 2026-10-10, because the bundled sherpa-onnx links GPL-3.0 espeak-ng): Qalun is GPL-3.0-only, Copyright (C) 2026 Khalil. Amended in the final fix wave (user decision): every app zip carries `qalun-source.zip` (`git archive` of the commit built) and `third-party-sources/` (espeak-ng at the fork commit sherpa-onnx 1.13.8 builds; alsa-lib 1.2.12 in the Linux zip), pinned by URL and sha256; there is no separate source zip on the release.
 - Code style: ruff `B, E, F, I, UP, PLE2502`, line length 100, `ruff format`. Python files under `prototypes/` are excluded from ruff and CI.
 - Strings shown in the window go through `qurantext.gui.i18n.t()`, with both English and Arabic entries.
 - Commit messages end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.

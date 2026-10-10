@@ -3,20 +3,74 @@
 What a person has to check before tagging a release, because a machine here cannot.
 Work top to bottom; stop at the first item that fails and fix it before going on.
 
-## Once, before the first release that uses `package.sh`
+## Before the first release: blocking
 
-- [ ] In `.github/workflows/release.yml`, replace the whole `run:` block of the
-      **Package** step with `run: bash packaging/ci/package.sh ${{ matrix.artifact }}`.
-      This needs a token with the `workflow` scope, which is why it is not done in the
-      repository already (see `packaging/ci/README.md`). Until then the Linux zip stores
-      every symlinked library twice and unpacks to about 600 MB instead of about 430 MB
-      (both with FFmpeg).
+Each of these holds the first tag until it is done. Tick it once, with a note of
+what was decided; later releases only re-check it when the thing it names changes.
+
+- [ ] **Quran font and text: confirm their source and terms before the first tag.**
+      `src/qurantext/assets/fonts/qaloon.10.ttf`, `qaloon.10.woff2` and
+      `src/qurantext/assets/quran/UthmanicQaloon1-Ver05.txt` ship inside every app
+      zip, the Python package and `qalun-source.zip`. Their provenance is not
+      recorded, so `THIRD_PARTY_NOTICES.md`, the README, `pyproject.toml` and
+      `src/qurantext/assets/README.md` keep them out of Qalun's GPL statement as
+      "third-party works, provenance and terms to be confirmed by the owner". Find
+      out where each came from and on what terms it may be redistributed, with an
+      app and inside a source archive. Write the source and terms into the "Quran text and font"
+      section of `THIRD_PARTY_NOTICES.md` and into `src/qurantext/assets/README.md`.
+      If the terms do not allow redistribution, do not release until the files are
+      replaced.
+- [ ] **Licence review: source obligations for Qt (LGPL), FriBiDi (LGPL) and the GPL
+      FFmpeg build.** `THIRD_PARTY_NOTICES.md` names them, but only espeak-ng and
+      alsa-lib have their sources in the zips (`third-party-sources/`). The FFmpeg
+      programs are GPL builds fetched as "latest" (gyan.dev or BtbN on Windows,
+      Homebrew on macOS, johnvansickle.com or BtbN on Linux), so not even their
+      version is fixed; Qt (with the FFmpeg libraries PySide6 ships) and FriBiDi are
+      LGPL. On Linux the bundle also carries the build machine's system libraries.
+      The owner decides, with legal advice if needed, what each requires and how
+      the release meets it. Not resolved in the code.
+- [ ] **Public download location.** The app repository is private: its Releases page,
+      and every link to it (the UTM links and QR codes under Publish, and the
+      README's "Releases page"), answers 404 to anyone without access. Public
+      download links, and any UTM parameters or QR codes, must not point at the
+      private repository's release page. The owner decides a public download
+      location (for example a public releases-only repository, or a page with
+      analytics that serves the zips), and the Publish links below are changed to
+      it before anything is announced.
+- [ ] **A Windows account whose name is in Arabic.** The speech model lives under the
+      user's profile (`%LOCALAPPDATA%\qalun\…`), so for such a user its path is not
+      ASCII, and CI only runs as `runneradmin`. On a real Windows machine, set
+      `QURANTEXT_CACHE_DIR` to a folder whose name has Arabic letters (or use an
+      account named in Arabic), start the packaged app, and run a recitation job on
+      the default engine. The model must download, load and transcribe. If it fails
+      with "the speech runtime itself could not start", the fix is to load the
+      model from a short ASCII path.
+
+## Version
+
+- [ ] Set `__version__` in `src/qurantext/__init__.py` to the release's number (the
+      tag without its `v`) and commit it before tagging. It is the one place the
+      version is written: `pyproject.toml` reads it, `qalun --version` and the
+      doctor report's first line say it, and the **Package** step fails on a tag
+      that is not `v` followed by it.
 
 ## Build
 
 - [ ] Actions → **Build the app** → **Run workflow**, on the commit you mean to tag.
 - [ ] Every platform's gate step (**Check the built app can render**, which runs
-      `--doctor --release`) passes on Windows, macOS and Linux.
+      `--doctor --release` and then a local transcription) passes on Windows, macOS
+      and Linux.
+- [ ] In each platform's gate log, the transcription gate ends with `The built app
+      transcribed on this computer: ... for a 5 s tone.` It proves the speech model
+      loads and runs inside the app that ships. Before it, the line `The published
+      model matches the pin: ...` proves, cache or not, that the `qalun-models`
+      release still has the asset with the size and sha256 pinned in
+      `model_store.py`. If it says `matches the pin by size` instead, GitHub gave no
+      sha256 to compare; when the step **Keep the speech model between runs** found
+      no cache, the line `QALUN-CI-MODEL-DOWNLOAD ...` shows the run downloaded and
+      verified the asset itself. If the gate fails, it is usually a broken
+      `qalun-models` asset, a checksum in `model_store.py` that no longer matches it,
+      or a sherpa-onnx library missing from the bundle; see `packaging/ci/README.md`.
 - [ ] In each platform's gate log, the Playback line says `through the FFmpeg backend,
       as QT_MEDIA_BACKEND asks`. Windows and macOS also ship a native backend, and only
       this line shows the recording did not play through that one instead.
@@ -26,27 +80,49 @@ Work top to bottom; stop at the first item that fails and fix it before going on
       Multimedia entered the bundle, because PyInstaller follows the player's import on
       its own. There are no `v*` tags, so there is no Release to compare with, and
       workflow artifacts expire after 30 days. If no such run survives, compare with
-      Linux instead: Multimedia added 20 MB to the Linux zip, so expect about that. If a
-      zip grew far more than 30–40 MB, stop and find out why before releasing.
+      Linux instead. Since then each zip has grown by three things: Multimedia (about
+      20 MB on Linux), the speech engine (about 10 MB) and the sources now inside every
+      zip (about 20 MB, nearly all espeak-ng's 18 MB archive; alsa-lib adds 1 MB to
+      Linux only). So expect about 50 MB in all. If a zip grew far more than 60–70 MB,
+      stop and find out why before releasing.
+- [ ] Each zip has, at its top (beside `qalun.exe` or `qalun` in `qalun/`, and beside
+      `Qalun.app` in the macOS zip): `THIRD_PARTY_NOTICES.md`, `LICENSE`,
+      `qalun-source.zip` and `third-party-sources/`. Qalun is GPL-3.0-only because
+      the bundled sherpa-onnx links espeak-ng (GPL-3.0-or-later) into the app's
+      process (the "Licence finding" in `docs/findings/asr-bakeoff.md`), and the
+      repository is private, so the source travels inside every app zip:
+  - `qalun-source.zip` unzips to `qalun-source/` with `LICENSE` at its top, and its
+    `src/qurantext/__init__.py` says the version being released.
+  - `third-party-sources/` holds `espeak-ng-ed530aa1….zip` in every zip, and
+    `alsa-lib-1.2.12.tar.bz2` in the Linux zip only, with `SOURCES.txt`. The
+    **Package** step logs `matches the pin` for each; it fails on a sha256 that
+    does not match `packaging/third-party-sources.txt`.
 - [ ] Download `qalun-linux.zip` and unzip it with `unzip`. Check two things (the gate
       already checks that `libxcb-cursor.so.0` is in the bundle):
   - `find qalun -type l | wc -l` is not 0. If it is 0, the links were not kept: check
-    the Package step change above.
-  - `du -sm qalun` is about 430 MB, FFmpeg included. About 600 MB means the links were
-    followed and every linked library is stored twice.
+    that the **Package** step still runs `packaging/ci/package.sh`.
+  - `du -sm qalun` is about 490 MB, FFmpeg and the sources included (measured 10 Oct
+    2026). About 660 MB means the links were followed and every linked library is
+    stored twice.
 - [ ] Extract `qalun-linux.zip` once more with the desktop's own **Extract here** (or
       `unzip`), and start the app from that folder. Some extractors (Python's `zipfile`,
       a few minimal tools) write each stored link as a small text file, and the app then
       cannot find its Qt libraries. In the release notes, tell Linux users: "Extract with
       your file manager or `unzip`."
 
-## By ear, on Windows and Linux
+## By ear, on Windows, macOS and Linux
 
-This is the spec's §6 manual check.
+This is the spec's §6 manual check. Do it on all three: transcription now runs on
+the machine, and the CI gate only proves the model loads (a tone has no words), so
+this is the only place anyone hears each platform's build recognise speech.
 
 - [ ] Open the packaged app. Do not use a checkout.
-- [ ] Start a recitation job on `furquanTra7-11.mp3` (surah 25, ayat 7–11). It is in
-      `input/recitations/`, which is not in git.
+- [ ] Start a recitation job on `furquanTra7-11.mp3` (surah 25, ayat 7–11), on the
+      default engine (On this computer). It is in `input/recitations/`, which is not
+      in git. Check the words appear: the review must open on 25:7–11 with the
+      recited words in it (about 60 or more), not an empty or near-empty transcript.
+      On macOS (Apple silicon, its own ONNX Runtime build) this is the first time
+      anyone sees that build recognise speech.
 - [ ] In the review, play the recording. Find the late words at the end of 25:7, where
       speech runs uncovered from about 16.7 s to 24.2 s. Fix the rift by ear by rippling
       the late words.
@@ -84,7 +160,12 @@ This is the spec's §6 manual check.
   - the Cancel and Close forms
   - `review.save` used as a dialog title
   - `home.reading`
-  - the five `job.stage.*` lines
+  - the nine `job.stage.*` lines, among them `download`, `unpack`, `transcribe` and
+    `transcribe_online`
+  - the transcription choice and its progress: `home.engine`, `home.engine.local`,
+    `home.engine.whisperx`, `home.engine.no_token`, `home.engine.folded`,
+    `home.progress.downloading`, `home.progress.downloading_eta`,
+    `home.progress.transcribing` and `home.progress.transcribing_eta`
   - the video header: «الآيات 7 - 11» or «الآيات من 7 إلى 11»
 - [ ] Keep every direction mark: the U+2066…U+2069 isolates and the U+200F marks,
       written as `\u2066`-style escapes in the source. The tests fail if a key goes
@@ -95,13 +176,27 @@ This is the spec's §6 manual check.
 - [ ] Publishing a new speech model: follow `tools/export_local_model/README.md`. A new
       model is a new release asset. Never replace a release asset in place, because
       shipped apps pin the old one by size and checksum.
+- [ ] With a new model, change the sha256 in the key of the **Keep the speech model
+      between runs** step in `release.yml` to the new archive's (the tests fail until
+      it matches). This needs a token with the `workflow` scope.
+- [ ] When reading the model asset's download count as installs, remember CI: each
+      build that misses its cache downloads once per platform (up to three per run).
+      See `packaging/ci/README.md`.
 
 ## Publish
 
 - [ ] Tag the release and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`. The
-      workflow builds again and attaches the three zips to a Release.
+      workflow builds again and attaches the three app zips to a Release. There is no
+      separate source zip: each app zip carries `qalun-source.zip` and
+      `third-party-sources/`.
+- [ ] On the Release page, download each zip once more and check its top as under
+      Build: `LICENSE`, `THIRD_PARTY_NOTICES.md`, `qalun-source.zip` and
+      `third-party-sources/`. Wherever an app zip is posted besides (a website, a
+      download page), post the zip as built, never the app without them.
 - [ ] If the release is announced anywhere (a website, a post, a QR code on printed
-      material), link to the Release page with UTM parameters. Use one `utm_source` per
+      material), first settle the public download location (the blocking item at the
+      top): the link below is the private repository's and answers 404 to the public.
+      Then link to that public location with UTM parameters. Use one `utm_source` per
       channel, so downloads can be counted per channel:
       `https://github.com/Grazyen96/QalunTextAlignment/releases/latest?utm_source=<channel>&utm_medium=<post|print|qr>&utm_campaign=qalun-vX.Y.Z`.
       GitHub's own download counts for the release give the total. GitHub does not show
