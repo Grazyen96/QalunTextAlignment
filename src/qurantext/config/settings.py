@@ -65,7 +65,7 @@ DEFAULT_TIMING_BRIDGE_MAX_S = 0.6
 
 #: The transcription engines, by the names the CLI, env and window use.
 ENGINES = ("local", "whisperx")
-DEFAULT_TRANSCRIBE_ENGINE = "whisperx"
+DEFAULT_TRANSCRIBE_ENGINE = "local"
 
 DEFAULT_VIDEO_RENDERER = "frame"
 DEFAULT_VIDEO_WIDTH = 1280

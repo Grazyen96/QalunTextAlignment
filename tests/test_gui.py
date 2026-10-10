@@ -967,6 +967,31 @@ def test_the_model_download_says_its_own_stage_not_matching(qt_app, home, langua
         i18n.set_language("en")
 
 
+@pytest.mark.parametrize("language", ["en", "ar"])
+def test_local_transcription_says_its_own_stage_not_matching(qt_app, home, language) -> None:
+    """Recognising on this computer is the long step of a local job; it says so, with its ETA."""
+    from qurantext.gui import i18n
+    from qurantext.gui import main_window as module
+
+    i18n.set_language(language)
+    try:
+        status = home.new_job.status_label
+        matching = module.t("home.progress.matching", percent=40)
+        home._on_progress(ProgressEvent("transcribe", "Transcribing on this computer: 0:00"))
+        assert status.text() == module.t("job.stage.transcribe")
+        home._on_progress(
+            ProgressEvent("transcribe", "Transcribing: 4:00 of 10:00", fraction=0.4, eta_seconds=95)
+        )
+        assert status.text() == module.t(
+            "home.progress.transcribing_eta", percent=40, eta=module._minutes(95)
+        )
+        assert matching.split("—")[0].strip() not in status.text()
+        home._on_progress(ProgressEvent("transcribe", "Transcribed.", fraction=1.0, done=True))
+        assert status.text() == module.t("home.progress.transcribing", percent=100)
+    finally:
+        i18n.set_language("en")
+
+
 def test_the_download_sentence_says_the_pinned_size_rounded() -> None:
     from qurantext.gui import i18n
     from qurantext.services.model_store import LOCAL_MODEL

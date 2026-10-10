@@ -52,9 +52,15 @@ _JOB_LIST_WIDTH = 300
 _WINDOW_SIZE = (1024, 680)
 #: The stages the pipeline reports, each said in the window's words as
 #: ``job.stage.<stage>``; any other stage says ``job.stage.working``.
-_KNOWN_STAGES = frozenset({"download", "unpack", "detect", "match", "render", "export"})
+_KNOWN_STAGES = frozenset(
+    {"download", "unpack", "transcribe", "detect", "match", "render", "export"}
+)
 #: The percentage sentence of each stage that has its own; any other says "Matching".
-_PERCENT_KEYS = {"download": "home.progress.downloading", "render": "home.progress.rendering"}
+_PERCENT_KEYS = {
+    "download": "home.progress.downloading",
+    "transcribe": "home.progress.transcribing",
+    "render": "home.progress.rendering",
+}
 
 
 @dataclass(frozen=True, slots=True)
