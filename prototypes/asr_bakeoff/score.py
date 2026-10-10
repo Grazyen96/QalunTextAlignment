@@ -157,7 +157,8 @@ def timing_agreement(a: list, b: list) -> dict | None:
 
 def end_violations(raw: dict) -> int:
     """Words whose end is before their start, or after the next word's start."""
-    words = [w for s in raw["segments"] for w in s.get("words", [])]
+    # WhisperX leaves words it failed to align without times; only timed words can violate.
+    words = [w for s in raw["segments"] for w in s.get("words", []) if "start" in w and "end" in w]
     bad = sum(1 for w in words if w["end"] < w["start"])
     bad += sum(1 for a, b in zip(words, words[1:]) if a["end"] > b["start"] + 1e-6)
     return bad

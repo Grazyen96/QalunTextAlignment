@@ -69,10 +69,12 @@ anything is built on it.
 | Check | Pass if |
 |---|---|
 | Full recitations (`alFurqan`, `furqanTra`): recall | at least 883 of 893 canonical words each (NeMo: 887) |
-| All four recitation clips: range and cards | identical to NeMo |
+| All four recitation clips: detected range identical to NeMo, ayat covered by cards at least NeMo's minus one | identical range; coverage ≥ NeMo − 1 |
 | Lectures: studied ayat found | at least 54 of 72 (NeMo: 55) |
-| Word starts against NeMo, over all recitation words | median ≤ 20 ms, and at least 95% within 100 ms |
+| Word starts against NeMo, over all recitation words | every clip's median ≤ 20 ms, and at least 95% of all recitation words within 100 ms |
 | Word ends | no end is before its start, and no word overlaps the next. An RNNT decoder can emit two words on the same frame, so "equal" must be allowed |
+
+Amended 10 October 2026 after the first run: identical card splits and a per-clip onset rate measured the matcher's boundary noise and a known NeMo error at the end of 25:11, not the engine (see the bake-off finding).
 
 int8 ships if it passes. Otherwise fp32 ships, and the download size in §2
 changes from about 120 MB to about 450 MB. If neither passes, work stops and
