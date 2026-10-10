@@ -1883,3 +1883,38 @@ def test_the_running_row_names_the_stage_before_any_percentage(
         release.set()
         _spin_until(qt_app, lambda: home._cancel is None)
         _spin_until(qt_app, lambda: home._jobs.active == 0)
+
+
+def test_the_engine_choice_reaches_the_pipeline(tmp_path, monkeypatch) -> None:
+    from qurantext.gui import jobs as jobs_module
+
+    seen = {}
+
+    def fake_range(**kwargs):
+        seen.update(kwargs)
+        raise RuntimeError("stop")
+
+    monkeypatch.setattr(jobs_module, "run_recitation_range", fake_range)
+    with pytest.raises(RuntimeError, match="stop"):
+        jobs_module.run_matching(_spec(tmp_path, engine="whisperx"))
+    assert seen["engine"] == "whisperx"
+
+
+def test_the_engine_choice_reaches_detection_too(tmp_path, monkeypatch) -> None:
+    from qurantext.gui import jobs as jobs_module
+
+    seen = {}
+
+    def fake_detection(**kwargs):
+        seen.update(kwargs)
+        raise RuntimeError("stop")
+
+    monkeypatch.setattr(jobs_module, "run_detection", fake_detection)
+    spec = _spec(tmp_path, mode="lecture", surah_num=None, from_ayah=None, to_ayah=None)
+    with pytest.raises(RuntimeError, match="stop"):
+        jobs_module.run_matching(replace(spec, engine="whisperx"))
+    assert seen["engine"] == "whisperx"
+
+
+def test_a_spec_transcribes_locally_unless_told_otherwise(tmp_path) -> None:
+    assert _spec(tmp_path).engine == "local"

@@ -213,7 +213,8 @@ def test_more_options_points_the_way_arabic_reads(
 
 
 #: The Latin words the Arabic table itself keeps: the app's name, subtitle
-#: formats, key names, the package to install, and "English" in the language menu.
+#: formats, key names, the package to install, "English" in the language menu,
+#: and the online engine, its service and the setting and file its token goes in.
 _LATIN_THE_TABLE_KEEPS = {
     "Qalun",
     "SRT",
@@ -225,6 +226,12 @@ _LATIN_THE_TABLE_KEEPS = {
     "PySide6",
     "Addons",
     "English",
+    "WhisperX",
+    "Replicate",
+    "REPLICATE",
+    "API",
+    "TOKEN",
+    "env",
 }
 #: The letters of the key caps Qt itself writes into a tip (Save's Ctrl+S): a
 #: key's letter is what is printed on it, in either language.
@@ -527,3 +534,12 @@ def test_the_arabic_review_title_keeps_the_name_in_place_without_isolates(
     title = review_window.windowTitle()
     assert not any(c in title for c in "\u2066\u2067\u2068\u2069")
     assert title == "مراجعة — \u200emissing\u200e"
+
+
+def test_the_no_token_note_keeps_the_setting_and_the_file_name_whole(qt_app) -> None:
+    """``REPLICATE_API_TOKEN=…`` keeps its "=…" after the name, and ".env" its dot before."""
+    from tests.bidi_helpers import left_to_right
+
+    line = i18n.t("home.engine.no_token", folder=i18n.path_text("/home/k/دروس"))
+    parts = ["تشغيل", "دروس", "\u2066.", "env", "TOKEN", "=…", "لم"]
+    assert left_to_right(line, parts) == parts, line

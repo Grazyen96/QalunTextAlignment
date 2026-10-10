@@ -18,7 +18,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings
 
-from qurantext.config.settings import VIDEO_PRESETS
+from qurantext.config.settings import ENGINES, VIDEO_PRESETS
 from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.gui.i18n import LANGUAGES
 from qurantext.jobs.project import SUBTITLE_CHOICES
@@ -134,6 +134,18 @@ class Prefs:
     @subtitles.setter
     def subtitles(self, value: str) -> None:
         self._settings.setValue("subtitles", value)
+        self._settings.sync()
+
+    # -- transcription engine ----------------------------------------------------
+
+    @property
+    def engine(self) -> str:
+        value = self._settings.value("engine", "local")
+        return value if isinstance(value, str) and value in ENGINES else "local"
+
+    @engine.setter
+    def engine(self, value: str) -> None:
+        self._settings.setValue("engine", value)
         self._settings.sync()
 
     # -- formats ------------------------------------------------------------

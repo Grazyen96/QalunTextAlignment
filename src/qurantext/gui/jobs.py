@@ -59,6 +59,8 @@ class JobSpec:
     formats: tuple[str, ...] = ("srt",)
     #: Render as soon as matching finishes, skipping review. For jobs you trust.
     render_right_away: bool = False
+    #: "local" (this computer) or "whisperx" (Replicate). Never switched automatically.
+    engine: str = "local"
     output_dir: Path | None = None
 
     @property
@@ -193,6 +195,7 @@ def run_matching(
             from_ayah=spec.from_ayah,  # type: ignore[arg-type]
             to_ayah=spec.to_ayah,  # type: ignore[arg-type]
             audio=audio,
+            engine=spec.engine,
             echo=False,
             progress=progress,
             cancel=cancel,
@@ -204,6 +207,7 @@ def run_matching(
             output=match_path,
             mode=spec.mode,
             audio=audio,
+            engine=spec.engine,
             echo=False,
             progress=progress,
             cancel=cancel,
