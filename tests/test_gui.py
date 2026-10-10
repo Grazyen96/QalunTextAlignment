@@ -219,7 +219,7 @@ def test_matching_then_rendering_makes_the_video(tmp_path, monkeypatch) -> None:
             t += 0.5
     payload = {"segments": [{"words": words}]}
 
-    def fake_transcribe(audio_path, *, save_raw_to=None, model_ref=None):
+    def fake_transcribe(audio_path, save_raw_to=None, **_kwargs):
         if save_raw_to is not None:
             Path(save_raw_to).parent.mkdir(parents=True, exist_ok=True)
             Path(save_raw_to).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
@@ -277,6 +277,8 @@ def test_matching_then_rendering_makes_the_video(tmp_path, monkeypatch) -> None:
     get_settings.cache_clear()
 
     assert outcome.matches.exists()
+    meta = json.loads(outcome.matches.read_text(encoding="utf-8"))["meta"]
+    assert meta["transcription_engine"] == "whisperx"
     assert outcome.video is not None and outcome.video.exists()
     assert outcome.cards >= 1
     # The user watches both stages, not just the slow one.

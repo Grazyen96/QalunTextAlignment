@@ -247,3 +247,15 @@ class TestSecretDescription:
         from qurantext.config.settings import describe_secret
 
         assert describe_secret(None) == "no token at all"
+
+
+def test_transcription_engine_defaults_and_reads_the_environment(monkeypatch) -> None:
+    from qurantext.config.settings import DEFAULT_TRANSCRIBE_ENGINE, get_settings
+
+    monkeypatch.delenv("QURANTEXT_TRANSCRIBE_ENGINE", raising=False)
+    get_settings.cache_clear()
+    assert get_settings().transcription.engine == DEFAULT_TRANSCRIBE_ENGINE
+    monkeypatch.setenv("QURANTEXT_TRANSCRIBE_ENGINE", "local")
+    get_settings.cache_clear()
+    assert get_settings().transcription.engine == "local"
+    get_settings.cache_clear()

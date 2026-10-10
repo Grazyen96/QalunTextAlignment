@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from qurantext.services import transcription
-from qurantext.services.transcription import (
+from qurantext.services import engine_whisperx
+from qurantext.services.engine_whisperx import (
     WhisperXServiceError,
     _await_prediction_output,
     _transient_status,
@@ -44,7 +44,7 @@ def test_transient_status_detects_gateway_codes() -> None:
 
 
 def test_await_prediction_output_recovers_after_transient_502(monkeypatch) -> None:
-    monkeypatch.setattr(transcription.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(engine_whisperx.time, "sleep", lambda _s: None)
 
     prediction = _FakePrediction(
         statuses=["processing", "succeeded"],
@@ -56,7 +56,7 @@ def test_await_prediction_output_recovers_after_transient_502(monkeypatch) -> No
 
 
 def test_await_prediction_output_raises_on_failed_status(monkeypatch) -> None:
-    monkeypatch.setattr(transcription.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(engine_whisperx.time, "sleep", lambda _s: None)
 
     prediction = _FakePrediction(statuses=["failed"], error="model crashed")
     with pytest.raises(WhisperXServiceError, match="model crashed"):
@@ -64,7 +64,7 @@ def test_await_prediction_output_raises_on_failed_status(monkeypatch) -> None:
 
 
 def test_await_prediction_output_gives_up_after_persistent_gateway_errors(monkeypatch) -> None:
-    monkeypatch.setattr(transcription.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(engine_whisperx.time, "sleep", lambda _s: None)
 
     prediction = _FakePrediction(
         statuses=["processing"],
@@ -75,7 +75,7 @@ def test_await_prediction_output_gives_up_after_persistent_gateway_errors(monkey
 
 
 def test_await_prediction_output_propagates_non_transient_error(monkeypatch) -> None:
-    monkeypatch.setattr(transcription.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(engine_whisperx.time, "sleep", lambda _s: None)
 
     prediction = _FakePrediction(
         statuses=["processing"],
@@ -101,14 +101,14 @@ class TestRejectedToken:
 
     def _run(self, monkeypatch, tmp_path, token: str):
         import qurantext.config.settings as settings_module
-        from qurantext.services import transcription
+        from qurantext.services import engine_whisperx, transcription
 
         audio = tmp_path / "a.wav"
         audio.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfmt ")
         settings_module.get_settings.cache_clear()
         monkeypatch.setenv("REPLICATE_API_TOKEN", token)
         monkeypatch.setattr(
-            transcription,
+            engine_whisperx,
             "_create_prediction",
             lambda *a, **k: (_ for _ in ()).throw(self._Unauthenticated()),
         )
@@ -138,3 +138,217 @@ class TestRejectedToken:
         message = self._run(monkeypatch, tmp_path, "r8_a_token_that_is_wrong")
         assert "environment variable" in message
         assert ".env" in message
+
+
+def test_every_transcription_error_shares_one_base() -> None:
+    from qurantext.services.errors import (
+        LocalEngineError,
+        ModelDownloadError,
+        ModelLoadError,
+        TranscriptionError,
+        WhisperXServiceError,
+    )
+
+    for cls in (WhisperXServiceError, ModelDownloadError, LocalEngineError, ModelLoadError):
+        assert issubclass(cls, TranscriptionError)
+    assert issubclass(ModelLoadError, LocalEngineError)
+    assert issubclass(TranscriptionError, RuntimeError)
+
+
+def test_old_names_still_import_from_transcription() -> None:
+    from qurantext.services import errors, transcription
+
+    assert transcription.WhisperXServiceError is errors.WhisperXServiceError
+    assert transcription.WhisperXResult is transcription.TranscriptionResult
+
+
+def test_result_records_its_engine() -> None:
+    from qurantext.services.transcription import TranscriptionResult
+
+    result = TranscriptionResult(
+        output={},
+        audio_path="a",
+        raw_output_path=None,
+        model_ref="m",
+        segment_count=0,
+        word_count=0,
+    )
+    assert result.engine == "whisperx"
+    assert result.from_cache is False
+
+
+class TestEngineChoice:
+    def test_an_explicit_engine_wins_over_the_setting(self, monkeypatch) -> None:
+        from qurantext.config.settings import get_settings
+        from qurantext.services.transcription import resolve_engine
+
+        monkeypatch.setenv("QURANTEXT_TRANSCRIBE_ENGINE", "local")
+        get_settings.cache_clear()
+        assert resolve_engine("whisperx", get_settings()) == "whisperx"
+        assert resolve_engine(None, get_settings()) == "local"
+        get_settings.cache_clear()
+
+    def test_an_unknown_engine_names_the_choices(self, monkeypatch) -> None:
+        from qurantext.config.settings import get_settings
+        from qurantext.services.transcription import resolve_engine
+
+        with pytest.raises(ValueError, match="local.*whisperx"):
+            resolve_engine("cohere", get_settings())
+
+    def test_the_whisperx_cache_key_is_unchanged(self, monkeypatch, tmp_path) -> None:
+        """Existing cached transcripts must keep hitting after the engine seam."""
+        from qurantext.config.settings import get_settings
+        from qurantext.services import engine_whisperx
+
+        settings = get_settings()
+        assert engine_whisperx.cache_settings(settings, "m") == {
+            "model": "m",
+            **settings.whisperx.input_kwargs(),
+        }
+
+    def test_progress_and_cancel_are_accepted(self, monkeypatch, tmp_path) -> None:
+        from qurantext.config.settings import get_settings
+        from qurantext.services import engine_whisperx, transcription
+        from qurantext.utils.progress import CancelToken
+
+        audio = tmp_path / "a.wav"
+        audio.write_bytes(b"RIFF....WAVE")
+        monkeypatch.setenv("QURANTEXT_CACHE_DIR", str(tmp_path / "cache"))
+        get_settings.cache_clear()
+        monkeypatch.setattr(engine_whisperx, "run_whisperx", lambda *_a, **_k: {"segments": []})
+        result = transcription.transcribe_audio(
+            audio, engine="whisperx", progress=lambda _e: None, cancel=CancelToken()
+        )
+        get_settings.cache_clear()
+        assert result.engine == "whisperx"
+
+
+def test_detection_passes_engine_progress_and_cancel(monkeypatch, tmp_path) -> None:
+    from qurantext.config.paths import DEFAULT_QURAN_PATH
+    from qurantext.pipelines import detection
+    from qurantext.utils.progress import CancelToken
+
+    seen = {}
+
+    def fake(audio, **kwargs):
+        seen.update(kwargs)
+        raise RuntimeError("stop after the call")
+
+    monkeypatch.setattr(detection, "transcribe_audio", fake)
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"RIFF....WAVE")
+    token = CancelToken()
+    with pytest.raises(RuntimeError, match="stop after the call"):
+        detection.run_detection(
+            quran=DEFAULT_QURAN_PATH,
+            output=tmp_path / "m.json",
+            mode="lecture",
+            audio=audio,
+            echo=False,
+            engine="whisperx",
+            cancel=token,
+        )
+    assert seen["engine"] == "whisperx"
+    assert seen["cancel"] is token
+    assert "progress" in seen
+
+
+class TestEngineErrors:
+    def test_a_bad_environment_value_names_the_variable(self, monkeypatch) -> None:
+        from qurantext.config.settings import get_settings
+        from qurantext.services.transcription import resolve_engine
+
+        monkeypatch.setenv("QURANTEXT_TRANSCRIBE_ENGINE", "nemo")
+        get_settings.cache_clear()
+        with pytest.raises(ValueError, match="QURANTEXT_TRANSCRIBE_ENGINE.*nemo.*local, whisperx"):
+            resolve_engine(None, get_settings())
+        get_settings.cache_clear()
+
+    def test_a_blank_environment_value_means_the_default(self, monkeypatch) -> None:
+        from qurantext.config.settings import DEFAULT_TRANSCRIBE_ENGINE, get_settings
+
+        monkeypatch.setenv("QURANTEXT_TRANSCRIBE_ENGINE", "   ")
+        get_settings.cache_clear()
+        assert get_settings().transcription.engine == DEFAULT_TRANSCRIBE_ENGINE
+        get_settings.cache_clear()
+
+    def test_a_failed_raw_save_is_a_transcription_error(self, monkeypatch, tmp_path) -> None:
+        from qurantext.config.settings import get_settings
+        from qurantext.services import engine_whisperx, transcription
+        from qurantext.services.errors import TranscriptionError
+
+        audio = tmp_path / "a.wav"
+        audio.write_bytes(b"RIFF....WAVE")
+        monkeypatch.setenv("QURANTEXT_CACHE_DIR", str(tmp_path / "cache"))
+        get_settings.cache_clear()
+        monkeypatch.setattr(engine_whisperx, "run_whisperx", lambda *_a, **_k: {"segments": []})
+
+        def boom(*_a, **_k):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(transcription, "save_raw_output", boom)
+        with pytest.raises(TranscriptionError, match="saving raw output failed: disk full"):
+            transcription.transcribe_audio(
+                audio, engine="whisperx", save_raw_to=tmp_path / "r.json"
+            )
+        get_settings.cache_clear()
+
+
+def test_word_alignment_passes_engine_progress_and_cancel(monkeypatch, tmp_path) -> None:
+    from qurantext.config.paths import DEFAULT_QURAN_PATH
+    from qurantext.pipelines import recitation
+    from qurantext.utils.progress import CancelToken
+
+    seen = {}
+
+    def fake(audio, **kwargs):
+        seen.update(kwargs)
+        raise RuntimeError("stop after the call")
+
+    monkeypatch.setattr(recitation, "transcribe_audio", fake)
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"RIFF....WAVE")
+    token = CancelToken()
+
+    def on_progress(_event) -> None:
+        pass
+
+    with pytest.raises(RuntimeError, match="stop after the call"):
+        recitation.run_word_alignment(
+            DEFAULT_QURAN_PATH, audio, engine="local", progress=on_progress, cancel=token
+        )
+    assert seen["engine"] == "local"
+    assert seen["progress"] is on_progress
+    assert seen["cancel"] is token
+
+
+def test_recitation_range_passes_engine_progress_and_cancel(monkeypatch, tmp_path) -> None:
+    from qurantext.config.paths import DEFAULT_QURAN_PATH
+    from qurantext.pipelines import detection
+    from qurantext.utils.progress import CancelToken
+
+    seen = {}
+
+    def fake(audio, **kwargs):
+        seen.update(kwargs)
+        raise RuntimeError("stop after the call")
+
+    monkeypatch.setattr(detection, "transcribe_audio", fake)
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"RIFF....WAVE")
+    token = CancelToken()
+    with pytest.raises(RuntimeError, match="stop after the call"):
+        detection.run_recitation_range(
+            quran=DEFAULT_QURAN_PATH,
+            output=tmp_path / "m.json",
+            surah_num=1,
+            from_ayah=1,
+            to_ayah=2,
+            audio=audio,
+            echo=False,
+            engine="local",
+            cancel=token,
+        )
+    assert seen["engine"] == "local"
+    assert seen["cancel"] is token
+    assert "progress" in seen

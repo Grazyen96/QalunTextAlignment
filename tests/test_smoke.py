@@ -4,6 +4,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from qurantext.cli.main import build_parser
 
 
@@ -70,6 +72,8 @@ def test_package_and_root_detect_range_smoke(tmp_path: Path) -> None:
 
     package_result = json.loads(output.read_text(encoding="utf-8"))
     assert package_result["first_ayah"]["ayah_num"] == 1
+    # No transcription ran, so the file says no engine produced it.
+    assert package_result["meta"]["transcription_engine"] is None
 
     subprocess.run(
         [
@@ -88,3 +92,63 @@ def test_package_and_root_detect_range_smoke(tmp_path: Path) -> None:
 
     wrapper_result = json.loads(output.read_text(encoding="utf-8"))
     assert wrapper_result["last_ayah"]["ayah_num"] == 2
+
+
+def test_cli_offers_the_engine_choice(capsys) -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["transcribe", "--help"])
+    out = capsys.readouterr().out
+    assert "--engine" in out and "local" in out and "whisperx" in out
+
+
+@pytest.mark.parametrize(
+    ("argv", "target"),
+    [
+        (["transcribe", "--audio", "a.wav"], "transcribe_audio"),
+        (["word-align", "--audio", "a.wav"], "run_word_alignment"),
+        (["range-match", "--audio", "a.wav"], "run_detection"),
+        (["lecture-match", "--audio", "a.wav"], "run_detection"),
+        (["recitation-match", "--audio", "a.wav"], "run_detection"),
+        (
+            [
+                "recitation-match",
+                "--audio",
+                "a.wav",
+                "--surah-num",
+                "1",
+                "--from-ayah",
+                "1",
+                "--to-ayah",
+                "2",
+            ],
+            "run_recitation_range",
+        ),
+        (["run-all", "--audio", "a.wav", "--mode", "lecture"], "run_detection"),
+    ],
+)
+def test_the_cli_passes_the_engine_choice_down(monkeypatch, argv, target) -> None:
+    from qurantext.cli import main as cli_main
+    from qurantext.services.errors import TranscriptionError
+
+    seen = {}
+
+    def stub(*_args, **kwargs):
+        seen.update(kwargs)
+        raise TranscriptionError("stub reached")
+
+    for name in ("run_detection", "run_recitation_range", "run_word_alignment", "transcribe_audio"):
+        monkeypatch.setattr(cli_main, name, stub)
+
+    def run(args):
+        try:
+            return cli_main.main(args)
+        except SystemExit as exit_:  # `transcribe` reports its error this way
+            return exit_.code
+
+    assert run([*argv, "--engine", "local"]) not in (0, None)
+    assert seen["engine"] == "local"
+    seen.clear()
+    run(argv)
+    assert seen["engine"] is None
+    if target in ("transcribe_audio", "run_word_alignment"):
+        assert isinstance(seen["progress"], cli_main.ConsoleProgress)

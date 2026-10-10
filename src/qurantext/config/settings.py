@@ -63,6 +63,10 @@ DEFAULT_LECTURE_MATCHING = {
 DEFAULT_HIGHLIGHT_OFFSET_S = 0.0
 DEFAULT_TIMING_BRIDGE_MAX_S = 0.6
 
+#: The transcription engines, by the names the CLI, env and window use.
+ENGINES = ("local", "whisperx")
+DEFAULT_TRANSCRIBE_ENGINE = "whisperx"
+
 DEFAULT_VIDEO_RENDERER = "frame"
 DEFAULT_VIDEO_WIDTH = 1280
 DEFAULT_VIDEO_HEIGHT = 720
@@ -234,6 +238,14 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 @dataclass(frozen=True, slots=True)
+class TranscriptionSettings:
+    """Which engine transcribes. Validated where it is used, so a typo in the
+    environment names the choices instead of stopping the app at startup."""
+
+    engine: str
+
+
+@dataclass(frozen=True, slots=True)
 class WhisperXSettings:
     """Runtime configuration for WhisperX transcription."""
 
@@ -322,6 +334,7 @@ class AppSettings:
 
     replicate_api_token: str | None
     whisperx: WhisperXSettings
+    transcription: TranscriptionSettings
     range_matching: RangeMatchingSettings
     lecture_matching: LectureMatchingSettings
     alignment: AlignmentSettings
@@ -438,6 +451,12 @@ def get_settings() -> AppSettings:
     return AppSettings(
         replicate_api_token=clean_secret(os.getenv("REPLICATE_API_TOKEN")),
         whisperx=whisperx,
+        transcription=TranscriptionSettings(
+            engine=_env_str("QURANTEXT_TRANSCRIBE_ENGINE", DEFAULT_TRANSCRIBE_ENGINE)
+            .strip()
+            .lower()
+            or DEFAULT_TRANSCRIBE_ENGINE
+        ),
         range_matching=range_matching,
         lecture_matching=lecture_matching,
         alignment=alignment,

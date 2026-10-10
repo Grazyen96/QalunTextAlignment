@@ -249,7 +249,7 @@ def build_warnings(
 
     if len(words) < 20:
         warnings.append(
-            f"Only {len(words)} word(s) in WhisperX output — transcript may be empty, too short, or corrupt."
+            f"Only {len(words)} word(s) in the transcript — transcript may be empty, too short, or corrupt."
         )
 
     if first_conf < low_conf:
