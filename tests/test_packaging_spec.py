@@ -141,3 +141,60 @@ def test_the_spec_ships_the_libasound_licence_where_the_wheel_vendors_it() -> No
     notice = (SPEC.parents[1] / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
     assert "libasound" in notice and "Linux builds only" in notice
     assert "Lesser General Public License" in notice
+
+
+ROOT = SPEC.parents[1]
+
+
+def test_qalun_is_licensed_gpl_3_0_only() -> None:
+    """The bundled sherpa-onnx links espeak-ng (GPL-3.0-or-later) into the app's own
+    process, so Qalun is released under GPL-3.0-only: the full, unmodified text at the
+    root, the licence in the package metadata, and the statement first in the notice."""
+    licence = (ROOT / "LICENSE").read_text(encoding="utf-8")
+    assert licence.split("\n", 2)[:2] == [
+        " " * 20 + "GNU GENERAL PUBLIC LICENSE",
+        " " * 23 + "Version 3, 29 June 2007",
+    ]
+    assert "END OF TERMS AND CONDITIONS" in licence
+    notice = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    own = notice.split("\n## ", 2)[1]
+    assert own.startswith("Qalun")
+    for phrase in ("GPL-3.0-only", "Copyright (C) 2026 Khalil", "WITHOUT ANY WARRANTY"):
+        assert phrase in own, phrase
+    assert "qalun-source-" in own
+    section = notice.split("## sherpa-onnx", 1)[1].split("\n## ", 1)[0]
+    assert "compatible" in section
+    tomllib = pytest.importorskip("tomllib")
+    with (ROOT / "pyproject.toml").open("rb") as handle:
+        project = tomllib.load(handle)["project"]
+    assert project["license"] == "GPL-3.0-only"
+    assert "LICENSE" in project["license-files"]
+
+
+def test_the_spec_ships_qaluns_licence() -> None:
+    assert '(str(ROOT / "LICENSE"), ".")' in SPEC.read_text(encoding="utf-8")
+
+
+def test_the_spec_ships_onnx_runtimes_third_party_notices() -> None:
+    """ONNX Runtime embeds protobuf, abseil, flatbuffers, ONNX, Eigen and more, whose
+    licences want their notices reproduced with the binary. ONNX Runtime collects them
+    in ThirdPartyNotices.txt, which the sherpa-onnx wheel does not carry."""
+    text = SPEC.read_text(encoding="utf-8")
+    assert '"onnxruntime-ThirdPartyNotices.txt"), "sherpa_onnx/lib"' in text
+    body = (SPEC.parent / "licenses" / "onnxruntime-ThirdPartyNotices.txt").read_text(
+        encoding="utf-8"
+    )
+    assert body.startswith("THIRD PARTY SOFTWARE NOTICES AND INFORMATION")
+    assert "protobuf" in body.lower() and "abseil" in body.lower()
+    readme = (SPEC.parent / "licenses" / "README.md").read_text(encoding="utf-8")
+    url = "https://github.com/microsoft/onnxruntime/blob/v1.28.2/ThirdPartyNotices.txt"
+    assert url in readme
+    notice = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    assert "_internal/sherpa_onnx/lib/onnxruntime-ThirdPartyNotices.txt" in notice
+
+
+def test_the_release_checklist_checks_for_the_source_and_the_licence() -> None:
+    """The GPL question is settled; what a release must now carry is checked by hand."""
+    checklist = (ROOT / "docs" / "release-checklist.md").read_text(encoding="utf-8")
+    assert "Do not tag\n      a release" not in checklist
+    assert "qalun-source-*.zip" in checklist and "LICENSE" in checklist

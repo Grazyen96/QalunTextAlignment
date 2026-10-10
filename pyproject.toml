@@ -1,5 +1,6 @@
 [build-system]
-requires = ["setuptools>=68"]
+# 77 is the first that reads an SPDX `license` string and `license-files`.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +8,10 @@ name = "qurantext"
 version = "0.1.0"
 description = "Quran alignment, matching, transcription, and rendering workflows."
 readme = "README.md"
+# GPL-3.0 because the bundled sherpa-onnx links espeak-ng (GPL-3.0) into the app's
+# process. See THIRD_PARTY_NOTICES.md and the "Licence finding" in docs/findings/asr-bakeoff.md.
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = [
   "numpy>=1.24,<3",

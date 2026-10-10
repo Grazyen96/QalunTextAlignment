@@ -3,14 +3,17 @@
 What a person has to check before tagging a release, because a machine here cannot.
 Work top to bottom; stop at the first item that fails and fix it before going on.
 
-## Blocking
+## Licence
 
-- [ ] **Licence: the bundled sherpa-onnx contains GPL-3.0 code (espeak-ng). Do not tag
-      a release until this is resolved** (see the "Licence finding" in
-      `docs/findings/asr-bakeoff.md`). The PyPI build of sherpa-onnx 1.13.8 links
-      espeak-ng (GPL-3.0-or-later) statically into the extension the app loads.
-      `THIRD_PARTY_NOTICES.md` says so; how to resolve it is the owner's decision,
-      still pending.
+- [ ] The release carries `qalun-source-*.zip`, `LICENSE` and `THIRD_PARTY_NOTICES.md`.
+      Qalun is GPL-3.0-only because the bundled sherpa-onnx links espeak-ng
+      (GPL-3.0-or-later) into the app's process (the "Licence finding" in
+      `docs/findings/asr-bakeoff.md`), so each release must carry the complete
+      source of the tagged commit. On the release page, check that
+      `qalun-source-<tag>.zip` is attached beside the three app zips (the Linux job's
+      **Package** step writes it), and that it unzips to `qalun-source/` with
+      `LICENSE` at its top. Each app zip has `LICENSE` and `THIRD_PARTY_NOTICES.md`
+      at its top (see the item under Build).
 
 ## Build
 
@@ -40,8 +43,8 @@ Work top to bottom; stop at the first item that fails and fix it before going on
       workflow artifacts expire after 30 days. If no such run survives, compare with
       Linux instead: Multimedia added 20 MB to the Linux zip, so expect about that. If a
       zip grew far more than 30–40 MB, stop and find out why before releasing.
-- [ ] Each zip has `THIRD_PARTY_NOTICES.md` at its top: beside `qalun.exe` or `qalun`
-      in `qalun/`, and beside `Qalun.app` in the macOS zip.
+- [ ] Each zip has `THIRD_PARTY_NOTICES.md` and `LICENSE` at its top: beside
+      `qalun.exe` or `qalun` in `qalun/`, and beside `Qalun.app` in the macOS zip.
 - [ ] Download `qalun-linux.zip` and unzip it with `unzip`. Check two things (the gate
       already checks that `libxcb-cursor.so.0` is in the bundle):
   - `find qalun -type l | wc -l` is not 0. If it is 0, the links were not kept: check

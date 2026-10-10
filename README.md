@@ -38,7 +38,8 @@ python3 -m pip install -r requirements.txt
 
 The runtime dependencies are NumPy, Pillow (built with libraqm, for Arabic
 shaping), certifi, the Replicate client (only used by the optional WhisperX
-engine) and **sherpa-onnx** (Apache 2.0), which runs the local speech model.
+engine) and **sherpa-onnx** (Apache 2.0, though its PyPI build also contains
+GPL-3.0 code; see [Licence](#licence)), which runs the local speech model.
 That model, NVIDIA's FastConformer Hybrid Large (Arabic),
 `stt_ar_fastconformer_hybrid_large_pcd_v1.0`, is not installed by pip: Qalun
 downloads it once, on first use (about 110 MB). It is licensed CC BY 4.0; the
@@ -686,3 +687,19 @@ python3 -m pip install pytest ruff
 - If `generate-video --renderer frame` fails, install `Pillow` and `numpy`, check that FFmpeg is on your PATH, and use a valid `--font-file`.
 - If it fails with a libraqm error, your Pillow build cannot shape Arabic. Pillow's wheels need FriBiDi installed separately; install it and reinstall Pillow.
 - If matching confidence is low, increase `--head-words`, `--tail-words`, or `--search-range`, and confirm the Quran file matches the recitation riwaya.
+
+## Licence
+
+Qalun is free software, licensed under the GNU General Public License version 3
+only (GPL-3.0-only); the full text is in [LICENSE](LICENSE).
+
+Copyright (C) 2026 Khalil
+
+It comes with ABSOLUTELY NO WARRANTY, to the extent permitted by law. It is
+GPL-3.0 because the sherpa-onnx build the app bundles links espeak-ng
+(GPL-3.0-or-later) into the app's own process.
+
+Each GitHub release carries `qalun-source-<tag>.zip` beside the app zips: the
+complete source of the tagged commit. Every app zip has `LICENSE` and
+`THIRD_PARTY_NOTICES.md` at its top. The bundled components, the speech model
+and their licences are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

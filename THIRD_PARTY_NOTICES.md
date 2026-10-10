@@ -1,5 +1,29 @@
 # Third-party notices
 
+## Qalun
+
+Qalun is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License, version 3 only (GPL-3.0-only), as
+published by the Free Software Foundation. The full text is in `LICENSE`, at
+the top of the release zip and in the app's folder.
+
+Copyright (C) 2026 Khalil
+
+Qalun is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
+details.
+
+**Source.** Each release on GitHub carries `qalun-source-<tag>.zip` beside the
+app zips: the complete source of the commit the release was built from,
+including the build scripts (`packaging/`). Each component below links to its
+own source.
+
+Each component listed below is under a licence compatible with GPL-3.0:
+GPL-3.0-or-later, LGPL-2.1, Apache 2.0, MIT, BSD 3-Clause or MPL-2.0. The
+speech model is not part of the app: it is data, downloaded on first use, under
+CC BY 4.0.
+
 ## Speech recognition model
 
 Qalun transcribes on your computer with **NVIDIA FastConformer Hybrid Large
@@ -32,7 +56,12 @@ licence.
   `_sherpa_onnx` (the Python extension the app loads) and into
   `libsherpa-onnx-c-api`. Found in the Linux build; the Windows and macOS builds
   of the same version offer the same text-to-speech functions and are expected
-  to contain it too.
+  to contain it too. This is compatible with Qalun's licence: Qalun is
+  GPL-3.0-only, and GPL-3.0-or-later code may be combined with it and
+  distributed under GPL-3.0. The GPL-3.0 text is `LICENSE`. The source of this
+  sherpa-onnx build, espeak-ng included, is sherpa-onnx's v1.13.8 release,
+  https://github.com/k2-fsa/sherpa-onnx/tree/v1.13.8, and its source
+  distribution on PyPI, https://pypi.org/project/sherpa-onnx/1.13.8/#files.
 
 **MIT License:**
 
@@ -41,7 +70,9 @@ licence.
   `onnxruntime.dll`). Its licence text is in the app's folder, at
   `_internal/sherpa_onnx/lib/onnxruntime-LICENSE`. ONNX Runtime itself contains
   third-party code (among others protobuf, abseil, flatbuffers, ONNX and Eigen),
-  whose licences and notices ONNX Runtime lists in its `ThirdPartyNotices.txt`:
+  whose licences and notices ONNX Runtime lists in its `ThirdPartyNotices.txt`.
+  That file is in the app's folder, at
+  `_internal/sherpa_onnx/lib/onnxruntime-ThirdPartyNotices.txt`, copied from
   https://github.com/microsoft/onnxruntime/blob/v1.28.2/ThirdPartyNotices.txt
 - **piper-phonemize**, https://github.com/rhasspy/piper-phonemize (text to
   speech, unused by Qalun).

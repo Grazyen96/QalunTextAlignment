@@ -16,9 +16,15 @@ the wheels the binaries come from do not carry them.
   it, so Linux builds only. Copied verbatim from
   https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt (fetched 10 Oct 2026).
 
-ONNX Runtime's `ThirdPartyNotices.txt` (the notices for the code inside ONNX
-Runtime) is not in the sherpa-onnx wheel either, and is not kept here yet:
-`THIRD_PARTY_NOTICES.md` links the copy for the bundled version, 1.28.2.
+- `onnxruntime-ThirdPartyNotices.txt`: the notices for the third-party code
+  inside ONNX Runtime (protobuf, abseil, flatbuffers, ONNX, Eigen and others),
+  which their licences ask to reproduce with the binary. Not in the sherpa-onnx
+  wheel either; shipped beside `onnxruntime-LICENSE`. Copied verbatim from
+  https://github.com/microsoft/onnxruntime/blob/v1.28.2/ThirdPartyNotices.txt
+  (fetched 10 Oct 2026). 1.28.2 is the ONNX Runtime the sherpa-onnx 1.13.8 wheel
+  bundles: its `libonnxruntime.so` defines its symbols under the version
+  `VERS_1.28.2` (`nm -D --defined-only ... | grep VERS`). Fetch it again from
+  the matching tag whenever the sherpa-onnx pin moves.
 
 sherpa-onnx's own licence (Apache 2.0) is not here: its wheel carries it, and the
 spec takes it from the installed distribution so it always matches the version built.

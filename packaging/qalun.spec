@@ -52,6 +52,8 @@ datas = [
     # Credits the speech model (CC BY 4.0) and the engine. Lands at the top of
     # the bundle's data folder (_internal/, or Contents/Resources on macOS).
     (str(ROOT / "THIRD_PARTY_NOTICES.md"), "."),
+    # Qalun's own licence, GPL-3.0-only, the full text, in the same place.
+    (str(ROOT / "LICENSE"), "."),
 ]
 
 # The local transcription engine. Its wheel carries native libraries
@@ -61,8 +63,9 @@ sherpa_hidden = collect_submodules("sherpa_onnx")
 
 # Their licences go beside them. sherpa-onnx (Apache 2.0) ships its own in the
 # wheel's metadata, taken from there so it always matches the version built.
-# ONNX Runtime (MIT) is inside sherpa_onnx/lib but its licence is not in the
-# wheel, so the repository keeps it; see packaging/licenses/README.md.
+# ONNX Runtime (MIT) is inside sherpa_onnx/lib but neither its licence nor the
+# notices for the code inside it (ThirdPartyNotices.txt) are in the wheel, so the
+# repository keeps both; see packaging/licenses/README.md.
 _sherpa_licence = next(
     (f for f in distribution("sherpa_onnx").files or () if f.name in ("LICENSE", "LICENSE.txt")),
     None,
@@ -72,6 +75,7 @@ if _sherpa_licence is None:
 datas += [
     (str(_sherpa_licence.locate()), "sherpa_onnx"),
     (str(ROOT / "packaging" / "licenses" / "onnxruntime-LICENSE"), "sherpa_onnx/lib"),
+    (str(ROOT / "packaging" / "licenses" / "onnxruntime-ThirdPartyNotices.txt"), "sherpa_onnx/lib"),
 ]
 # The Linux wheel also vendors ALSA's libasound (LGPL-2.1) into sherpa_onnx.libs/,
 # linked dynamically. Its licence goes beside it; the other wheels carry none.

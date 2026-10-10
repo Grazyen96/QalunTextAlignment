@@ -55,12 +55,19 @@ if TYPE_CHECKING:
 __all__ = [
     "CannotMeasureFonts",
     "CheckResult",
+    "LICENCE",
     "Status",
     "arabic_ui_families",
     "format_report",
     "prepare_doctor_process",
     "run_checks",
 ]
+
+
+#: Qalun's own licence, named in the report. Information only: it is not a check and
+#: never blocks. GPL-3.0 because the bundled sherpa-onnx links espeak-ng (GPL-3.0) into
+#: the app's process; see THIRD_PARTY_NOTICES.md.
+LICENCE = "GPL-3.0-only, Copyright (C) 2026 Khalil"
 
 
 class Status:
@@ -974,6 +981,7 @@ def format_report(results: list[CheckResult], *, release: bool = False) -> str:
         f"Qalun on {sys.platform}",
         f"  running from {'a checkout' if checkout_root() else 'an installed copy'}",
         f"  app data in {user_data_dir()}",
+        f"  licensed {LICENCE}; see LICENSE and THIRD_PARTY_NOTICES.md",
         "",
     ]
     width = max(len(r.name) for r in results)

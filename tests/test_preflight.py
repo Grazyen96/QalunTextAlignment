@@ -67,6 +67,17 @@ def test_the_report_ends_with_a_verdict() -> None:
     assert "fix it" in report
 
 
+def test_the_report_names_qaluns_licence_without_judging_it() -> None:
+    """Qalun is GPL-3.0-only; the report says so on one line. It is not a check, so it
+    can never block, and the verdict is unchanged."""
+    report = format_report([CheckResult("A", Status.OK, "fine")])
+    licence = [line for line in report.splitlines() if "GPL-3.0-only" in line]
+    assert licence == [
+        "  licensed GPL-3.0-only, Copyright (C) 2026 Khalil; see LICENSE and THIRD_PARTY_NOTICES.md"
+    ]
+    assert report.rstrip().endswith("Ready to render.")
+
+
 def test_a_release_check_that_fails_does_not_claim_rendering_is_broken() -> None:
     """Without playback, Qt's Arabic or an Arabic font the app still renders; the build
     is only unfit to ship, and whoever reads the report should be told that."""

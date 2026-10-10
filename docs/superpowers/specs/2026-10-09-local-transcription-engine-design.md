@@ -263,6 +263,10 @@ audio ──ffmpeg (bundled)──► 16 kHz mono float32, decoded incrementally
 - **Docs:** `docs/architecture.md`, the README and
   `docs/release-checklist.md` describe both engines, the model download, and
   the new release step.
+- **Licence** (decided 10 Oct 2026, after the Phase 5 review found espeak-ng,
+  GPL-3.0-or-later, linked into the PyPI sherpa-onnx): Qalun is licensed
+  GPL-3.0-only, and every release attaches `qalun-source-<tag>.zip`, the source
+  of the tagged commit, beside the app zips.
 
 ## 6. Testing
 

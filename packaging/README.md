@@ -132,10 +132,11 @@ it the engine.
 
 The spec also ships, beside the engine's binaries, the licences that have to
 travel with them: `sherpa_onnx/LICENSE` (Apache 2.0, from the wheel) and
-`sherpa_onnx/lib/onnxruntime-LICENSE` (MIT, kept in [licenses/](licenses/)
-because the wheel does not carry it), and `THIRD_PARTY_NOTICES.md` at the top of
-`_internal/`. And it ships certifi's `cacert.pem`, which the model download
-trusts alongside the system's certificates. Verified in the frozen app with the
+`sherpa_onnx/lib/onnxruntime-LICENSE` (MIT) with ONNX Runtime's
+`onnxruntime-ThirdPartyNotices.txt` beside it (both kept in [licenses/](licenses/)
+because the wheel does not carry them), and `THIRD_PARTY_NOTICES.md` and Qalun's
+own `LICENSE` at the top of `_internal/`. And it ships certifi's `cacert.pem`,
+which the model download trusts alongside the system's certificates. Verified in the frozen app with the
 system's certificates hidden (`SSL_CERT_FILE` and `SSL_CERT_DIR` pointed at
 nothing): the download completes through certifi alone, and fails with
 `CERTIFICATE_VERIFY_FAILED` once certifi's file is removed too.
@@ -143,9 +144,10 @@ nothing): the download completes through certifi alone, and fails with
 The PyPI build of sherpa-onnx is not Apache/MIT only: it links espeak-ng
 (GPL-3.0-or-later), for its text to speech, statically into the extension the
 app loads. `THIRD_PARTY_NOTICES.md` names it and the other components inside the
-build. Releasing is blocked until the owner decides how to resolve it; see
-[docs/release-checklist.md](../docs/release-checklist.md) and the "Licence
-finding" in [docs/findings/asr-bakeoff.md](../docs/findings/asr-bakeoff.md).
+build. That is why Qalun itself is licensed GPL-3.0-only (`LICENSE`), and why
+`package.sh` writes, on the Linux job, `qalun-source-<tag or commit>.zip`, the
+source of the commit built, which the release attaches beside the app zips. See
+the "Licence finding" in [docs/findings/asr-bakeoff.md](../docs/findings/asr-bakeoff.md).
 
 **ONNX Runtime telemetry (Windows): not verified on the binary.** Qalun collects no
 usage data: the app opens a connection only to download the speech model and,

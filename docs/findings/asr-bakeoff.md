@@ -289,10 +289,17 @@ the built bundle (`dist/qalun/_internal/sherpa_onnx/lib/`):
 - The Windows and macOS wheels were not inspected. They offer the same
   text-to-speech API, so they are expected to contain it as well.
 
-**Status: a decision is pending.** `THIRD_PARTY_NOTICES.md` now states that
-the bundled build includes espeak-ng under GPL-3.0-or-later, and the first item
-of `docs/release-checklist.md` blocks any release until the owner has decided
-how to resolve it. Nothing about the build has changed.
+**Status: Resolved 2026-10-10: Qalun is licensed GPL-3.0-only; the source ships
+with each release.** The owner chose to release Qalun itself under GPL-3.0-only
+(Copyright (C) 2026 Khalil), with which espeak-ng's GPL-3.0-or-later is
+compatible. The repository stays private; instead, the Linux job's
+`packaging/ci/package.sh` writes `qalun-source-<tag>.zip` (`git archive` of the
+tagged commit), which the release attaches beside the app zips. `LICENSE` (the
+full GPL-3.0 text) ships in the bundle and at the top of every zip, the
+package metadata says `GPL-3.0-only`, `THIRD_PARTY_NOTICES.md` opens with
+Qalun's own licence statement, and the doctor report names it. The sherpa-onnx
+build itself is unchanged; `docs/release-checklist.md` now checks that each
+release carries the source archive, `LICENSE` and `THIRD_PARTY_NOTICES.md`.
 
 ## What this changes
 
