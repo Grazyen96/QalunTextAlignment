@@ -111,7 +111,9 @@ def test_transcribe_uses_the_cache_instead_of_the_network(tmp_path, audio, monke
     transcription.store_cached(key, payload)
 
     monkeypatch.setattr(engine_whisperx, "_create_prediction", fake_create)
-    result = transcription.transcribe_audio(audio, save_raw_to=tmp_path / "raw.json")
+    result = transcription.transcribe_audio(
+        audio, save_raw_to=tmp_path / "raw.json", engine="whisperx"
+    )
     get_settings.cache_clear()
 
     assert calls["n"] == 0, "a cache hit must not call out"
@@ -142,7 +144,7 @@ def test_use_cache_false_forces_a_fresh_call(tmp_path, audio, monkeypatch) -> No
 
     monkeypatch.setattr(engine_whisperx, "_create_prediction", fake_create)
     with pytest.raises(transcription.WhisperXServiceError):
-        transcription.transcribe_audio(audio, use_cache=False)
+        transcription.transcribe_audio(audio, use_cache=False, engine="whisperx")
     get_settings.cache_clear()
 
     assert reached["n"] == 1, "use_cache=False must bypass the hit"

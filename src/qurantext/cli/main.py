@@ -365,7 +365,7 @@ def _run_generate_video(args: argparse.Namespace) -> int:
 
 
 def _run_all(args: argparse.Namespace) -> int:
-    # Pre-flight: reject incompatible flags BEFORE running any (billed) work.
+    # Pre-flight: reject incompatible flags BEFORE running any slow work (billed, with WhisperX).
     if args.render_video and args.mode == "range":
         raise SystemExit("--render-video is only supported for lecture or recitation workflows.")
     _resolve_preset(args)

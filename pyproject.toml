@@ -16,6 +16,9 @@ dependencies = [
   "replicate>=1.0,<2",
   # Trusted certificates for the speech model's download: a frozen app cannot rely on the system's.
   "certifi>=2023",
+  # The local transcription engine (NVIDIA FastConformer Arabic through ONNX).
+  # Pinned to the release the parity gate passed with: docs/findings/asr-bakeoff.md.
+  "sherpa-onnx~=1.13.8",
 ]
 
 [project.optional-dependencies]

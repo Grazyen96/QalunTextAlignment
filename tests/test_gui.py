@@ -230,6 +230,7 @@ def test_matching_then_rendering_makes_the_video(tmp_path, monkeypatch) -> None:
             model_ref="stub",
             segment_count=1,
             word_count=len(words),
+            engine="local",  # explicit, and not the field's default: the meta must carry it
         )
 
     monkeypatch.setattr(detection, "transcribe_audio", fake_transcribe)
@@ -278,7 +279,7 @@ def test_matching_then_rendering_makes_the_video(tmp_path, monkeypatch) -> None:
 
     assert outcome.matches.exists()
     meta = json.loads(outcome.matches.read_text(encoding="utf-8"))["meta"]
-    assert meta["transcription_engine"] == "whisperx"
+    assert meta["transcription_engine"] == "local"
     assert outcome.video is not None and outcome.video.exists()
     assert outcome.cards >= 1
     # The user watches both stages, not just the slow one.
@@ -963,6 +964,39 @@ def test_the_model_download_says_its_own_stage_not_matching(qt_app, home, langua
         assert status.text() == module.t("job.stage.detect")
         home._on_progress(ProgressEvent("detect", "x", fraction=0.12))
         assert status.text() == matching
+    finally:
+        i18n.set_language("en")
+
+
+@pytest.mark.parametrize("language", ["en", "ar"])
+def test_local_transcription_says_its_own_stage_not_matching(qt_app, home, language) -> None:
+    """Recognising on this computer is the long step of a local job; it says so, with its ETA."""
+    from qurantext.gui import i18n
+    from qurantext.gui import main_window as module
+
+    i18n.set_language(language)
+    try:
+        status = home.new_job.status_label
+        matching = module.t("home.progress.matching", percent=40)
+        # The events engine_local.transcribe_local sends: first the stage, before the model loads.
+        home._on_progress(ProgressEvent("transcribe", "Transcribing on this computer..."))
+        assert status.text() == module.t("job.stage.transcribe")
+        home._on_progress(
+            ProgressEvent(
+                "transcribe",
+                "Transcribing on this computer: 4:00 of 10:00",
+                fraction=0.4,
+                eta_seconds=95,
+            )
+        )
+        assert status.text() == module.t(
+            "home.progress.transcribing_eta", percent=40, eta=module._minutes(95)
+        )
+        assert matching.split("—")[0].strip() not in status.text()
+        home._on_progress(
+            ProgressEvent("transcribe", "Transcribed on this computer.", fraction=1.0, done=True)
+        )
+        assert status.text() == module.t("home.progress.transcribing", percent=100)
     finally:
         i18n.set_language("en")
 

@@ -117,9 +117,18 @@ def transcribe_audio(
     settings = get_settings()
     resolved_engine = resolve_engine(engine, settings)
     if resolved_engine == "local":
-        from qurantext.services.errors import LocalEngineError
+        from qurantext.services import model_store
 
-        raise LocalEngineError("The local engine is not part of this build yet.")
+        manifest = model_store.LOCAL_MODEL
+        return _transcribe_cached(
+            audio_file_path,
+            key_settings={"engine": "local", "model": manifest.ref, "manifest": manifest.digest()},
+            model_ref=manifest.ref,
+            engine="local",
+            run=lambda: _run_local(audio_file_path, progress, cancel),
+            save_raw_to=save_raw_to,
+            use_cache=use_cache,
+        )
     resolved_model_ref = model_ref or settings.whisperx.model_ref or DEFAULT_MODEL_REF
     key_settings = engine_whisperx.cache_settings(settings, resolved_model_ref)
     return _transcribe_cached(
@@ -131,6 +140,73 @@ def transcribe_audio(
         save_raw_to=save_raw_to,
         use_cache=use_cache,
     )
+
+
+#: Manifests whose installed files this process has checked against their checksums.
+_VERIFIED: set[str] = set()
+
+
+def _run_local(
+    audio_file_path: Path, progress: ProgressCallback | None, cancel: CancelToken | None
+) -> dict:
+    """Run the local engine, re-downloading the model once if its files are damaged.
+
+    Before the first load in a process, every model file is checked against its
+    pinned checksum (about 0.2 s): some damage makes sherpa-onnx end the whole
+    process instead of raising, so it has to be caught before loading.
+    """
+    from qurantext.services import engine_local, model_store
+    from qurantext.services.errors import LocalEngineError, ModelLoadError
+
+    problem = engine_local.runtime_problem()
+    if problem is not None:
+        raise LocalEngineError(
+            f"The speech runtime (sherpa-onnx) is missing or could not start: {problem}\n"
+            "Reinstall Qalun, or choose WhisperX online. Run `qalun --doctor` to see what "
+            "is missing."
+        )
+    manifest = model_store.LOCAL_MODEL
+    model_dir = model_store.ensure_model(manifest, progress=progress, cancel=cancel)
+    digest = manifest.digest()
+    if digest not in _VERIFIED:
+        if not model_store.verify_installed(manifest):
+            model_store.discard(manifest)
+            model_dir = model_store.ensure_model(manifest, progress=progress, cancel=cancel)
+        _VERIFIED.add(digest)
+    try:
+        return engine_local.transcribe_local(
+            audio_file_path, model_dir, progress=progress, cancel=cancel
+        )
+    except ModelLoadError as error:
+        if model_store.verify_installed(manifest):
+            raise LocalEngineError(
+                f"{error}\nThe model's files are intact, so the speech runtime itself "
+                "could not start. Run `qalun --doctor` to see what is missing."
+            ) from error
+        model_store.discard(manifest)
+        model_dir = model_store.ensure_model(manifest, progress=progress, cancel=cancel)
+    try:
+        return engine_local.transcribe_local(
+            audio_file_path, model_dir, progress=progress, cancel=cancel
+        )
+    except ModelLoadError as error:
+        raise LocalEngineError(
+            f"{error}\nThe speech model was downloaded again and checked, and it still "
+            "could not be loaded, so the speech runtime itself could not start. Run "
+            "`qalun --doctor` to see what is missing, or choose WhisperX online."
+        ) from error
+
+
+def _save_raw(output: Any, save_raw_to: str | PathLike[str] | None) -> str | None:
+    """Save the raw output when asked; a failure is a :class:`TranscriptionError`."""
+    if save_raw_to is None:
+        return None
+    try:
+        return save_raw_output(output, save_raw_to)
+    except Exception as error:
+        raise TranscriptionError(
+            f"Transcription succeeded, but saving raw output failed: {error}"
+        ) from error
 
 
 def _transcribe_cached(
@@ -148,9 +224,7 @@ def _transcribe_cached(
     if key is not None:
         cached = load_cached(key)
         if cached is not None:
-            raw_output_path = (
-                save_raw_output(cached, save_raw_to) if save_raw_to is not None else None
-            )
+            raw_output_path = _save_raw(cached, save_raw_to)
             return TranscriptionResult(
                 output=cached,
                 audio_path=str(audio_file_path),
@@ -166,14 +240,7 @@ def _transcribe_cached(
 
     if key is not None:
         store_cached(key, _normalize_output_for_json(output))
-    raw_output_path: str | None = None
-    if save_raw_to is not None:
-        try:
-            raw_output_path = save_raw_output(output, save_raw_to)
-        except Exception as error:
-            raise TranscriptionError(
-                f"Transcription succeeded, but saving raw output failed: {error}"
-            ) from error
+    raw_output_path = _save_raw(output, save_raw_to)
     return TranscriptionResult(
         output=_normalize_output_for_json(output),
         audio_path=str(audio_file_path),

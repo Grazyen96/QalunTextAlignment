@@ -191,7 +191,14 @@ audio ──ffmpeg (bundled)──► 16 kHz mono float32, decoded incrementally
   the bake-off found word confidence does not mark errors, and nothing
   downstream relies on it.
 - **Threads:** the recogniser uses `max(1, os.cpu_count() - 2)` threads. It is
-  created once per job and dropped afterwards.
+  created once per job and dropped afterwards. It recognises four windows per
+  batch, and its working set peaks at about 1.8 GB of RAM and plateaus there
+  (measured: 0.9 GB on a 97 s clip, 1.7 GB on a 12-minute lecture, 1.8 GB on
+  82 minutes). The batch size is fixed, not a tuning knob: each window is padded
+  to its batch's longest, so another batch size changes transcripts (one window
+  per batch peaked at 0.7 GB but changed 66 of 982 words and ran 2.3x slower).
+  Four is what the parity gate approved; changing it needs the gate run again.
+  The doctor (Task 4.3) and the README (Task 4.4) state the 1.8 GB figure.
 - **Progress and cancel:** progress is reported as minutes transcribed out of the
   recording's length (read with the bundled ffprobe; the number of windows is
   not known in advance while decoding streams). Cancel is checked between
