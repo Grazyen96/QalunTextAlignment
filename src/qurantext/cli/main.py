@@ -16,7 +16,12 @@ from qurantext.config.paths import (
     resolve_quran_path,
 )
 from qurantext.config.preflight import Status, format_report, prepare_doctor_process, run_checks
-from qurantext.config.settings import ENGINES, VIDEO_PRESETS, get_settings
+from qurantext.config.settings import (
+    DEFAULT_TRANSCRIBE_ENGINE,
+    ENGINES,
+    VIDEO_PRESETS,
+    get_settings,
+)
 from qurantext.core.coverage import find_uncovered_speech
 from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.data.citation_index import DEFAULT_NGRAM_N
@@ -48,7 +53,7 @@ def _add_engine_argument(parser: argparse.ArgumentParser) -> None:
         choices=ENGINES,
         default=None,
         help="Transcription engine: 'local' runs on this computer, 'whisperx' uploads "
-        "to Replicate. Defaults to QURANTEXT_TRANSCRIBE_ENGINE, else the built-in default.",
+        f"to Replicate. Defaults to QURANTEXT_TRANSCRIBE_ENGINE, else '{DEFAULT_TRANSCRIBE_ENGINE}'.",
     )
 
 
@@ -65,6 +70,7 @@ def _run_word_align(args: argparse.Namespace) -> int:
         output_paths=output_paths,
         whisperx_output=whisperx_output,
         engine=args.engine,
+        progress=ConsoleProgress(),
     )
     print(f"Saved alignment JSON to {result.output_paths.alignment_json}")
     print(f"Saved manual-check JSON to {result.output_paths.manual_check_json}")
@@ -136,6 +142,7 @@ def _run_transcribe(args: argparse.Namespace) -> int:
             save_raw_to=output_path,
             use_cache=not args.no_cache,
             engine=args.engine,
+            progress=ConsoleProgress(),
         )
     except (FileNotFoundError, TranscriptionError) as error:
         raise SystemExit(str(error)) from error
@@ -475,7 +482,7 @@ def build_parser() -> argparse.ArgumentParser:
     word_align_parser.add_argument("--audio", required=True, help="Path to the audio file.")
     word_align_parser.add_argument(
         "--whisperx-json",
-        help="Optional path to a saved WhisperX JSON response. Skips the API call when provided.",
+        help="Optional path to a saved WhisperX JSON response. Skips transcription when provided.",
     )
     word_align_parser.add_argument(
         "--output-dir",
@@ -527,7 +534,7 @@ def build_parser() -> argparse.ArgumentParser:
         )
         source_group.add_argument(
             "--audio",
-            help="Path to an audio file to transcribe with WhisperX via Replicate.",
+            help="Path to an audio file to transcribe (see --engine).",
         )
         subparser.add_argument("--output", help="Explicit path for the output JSON.")
         subparser.add_argument(
@@ -576,7 +583,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     transcribe_parser = subparsers.add_parser(
         "transcribe",
-        help="Run WhisperX transcription and save the raw JSON output.",
+        help="Transcribe audio (see --engine) and save the raw JSON output.",
     )
     transcribe_parser.add_argument("--audio", required=True, help="Path to the audio file.")
     transcribe_parser.add_argument(
@@ -863,7 +870,8 @@ def main(argv: list[str] | None = None) -> int:
         json.JSONDecodeError,
     ) as error:
         # TranscriptionError (and so WhisperXServiceError) is a RuntimeError;
-        # json.JSONDecodeError is a ValueError — both are covered. SystemExit (used for pre-flight guards)
-        # is not an Exception, so it propagates with its own message/exit code.
+        # json.JSONDecodeError is a ValueError — both are covered. SystemExit
+        # (used for pre-flight guards) is not an Exception, so it propagates
+        # with its own message/exit code.
         print(f"ERROR: {error}", file=sys.stderr)
         return 1

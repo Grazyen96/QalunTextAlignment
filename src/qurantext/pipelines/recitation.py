@@ -12,6 +12,7 @@ from qurantext.core.quran_parser import read_quran_text
 from qurantext.io.readers import extract_alignment_words
 from qurantext.io.writers import write_json, write_word_srt
 from qurantext.services.transcription import transcribe_audio
+from qurantext.utils.progress import CancelToken, ProgressCallback
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +60,8 @@ def run_word_alignment(
     whisperx_output: dict | list | None = None,
     model_ref: str | None = None,
     engine: str | None = None,
+    progress: ProgressCallback | None = None,
+    cancel: CancelToken | None = None,
 ) -> RecitationAlignmentResult:
     """Run the word-level recitation alignment workflow."""
     ensure_required_directories()
@@ -84,6 +87,8 @@ def run_word_alignment(
             save_raw_to=resolved_output_paths.raw_output_json,
             model_ref=model_ref,
             engine=engine,
+            progress=progress,
+            cancel=cancel,
         )
         raw_output = transcription.output
 

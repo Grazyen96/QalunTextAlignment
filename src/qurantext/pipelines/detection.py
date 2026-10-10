@@ -207,7 +207,7 @@ def run_recitation_range(
         transcription_engine = None
     else:
         assert audio is not None
-        label = ENGINE_LABELS[resolve_engine(engine, get_settings())]
+        label = ENGINE_LABELS[resolve_engine(engine, settings)]
         emit(f"[2/3] Transcribing audio with {label}: {audio}")
         service_result = transcribe_audio(
             audio,
@@ -225,7 +225,7 @@ def run_recitation_range(
 
     words = extract_matching_words(wx_data)
     if not words:
-        raise ValueError("No word tokens extracted from WhisperX output.")
+        raise ValueError("The transcript contains no words.")
 
     if cancel is not None:
         cancel.raise_if_cancelled("detect")
@@ -379,7 +379,7 @@ def run_detection(
         whisperx_segment_count = count_whisperx_segments(wx_data)
     else:
         assert audio is not None
-        label = ENGINE_LABELS[resolve_engine(engine, get_settings())]
+        label = ENGINE_LABELS[resolve_engine(engine, settings)]
         emit(f"[2/4] Transcribing audio with {label}: {audio}")
         service_result = transcribe_audio(
             audio,
@@ -396,14 +396,14 @@ def run_detection(
         transcription_engine = service_result.engine
         whisperx_segment_count = service_result.segment_count
         emit(
-            f"      {'Reused the cached transcript' if service_result.from_cache else 'WhisperX raw JSON saved'}"
+            f"      {'Reused the cached transcript' if service_result.from_cache else 'Saved the raw transcript'}"
             f" → {service_result.raw_output_path}"
             f" ({service_result.segment_count} segments, {service_result.word_count} words)."
         )
 
     words = extract_matching_words(wx_data)
     if not words:
-        raise ValueError("No word tokens extracted from WhisperX output.")
+        raise ValueError("The transcript contains no words.")
     duration = words[-1]["end"] - words[0]["start"]
     emit(
         f"      {len(words)} word tokens extracted ({duration:.1f}s, "

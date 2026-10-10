@@ -251,3 +251,104 @@ def test_detection_passes_engine_progress_and_cancel(monkeypatch, tmp_path) -> N
     assert seen["engine"] == "whisperx"
     assert seen["cancel"] is token
     assert "progress" in seen
+
+
+class TestEngineErrors:
+    def test_a_bad_environment_value_names_the_variable(self, monkeypatch) -> None:
+        from qurantext.config.settings import get_settings
+        from qurantext.services.transcription import resolve_engine
+
+        monkeypatch.setenv("QURANTEXT_TRANSCRIBE_ENGINE", "nemo")
+        get_settings.cache_clear()
+        with pytest.raises(ValueError, match="QURANTEXT_TRANSCRIBE_ENGINE.*nemo.*local, whisperx"):
+            resolve_engine(None, get_settings())
+        get_settings.cache_clear()
+
+    def test_a_blank_environment_value_means_the_default(self, monkeypatch) -> None:
+        from qurantext.config.settings import DEFAULT_TRANSCRIBE_ENGINE, get_settings
+
+        monkeypatch.setenv("QURANTEXT_TRANSCRIBE_ENGINE", "   ")
+        get_settings.cache_clear()
+        assert get_settings().transcription.engine == DEFAULT_TRANSCRIBE_ENGINE
+        get_settings.cache_clear()
+
+    def test_a_failed_raw_save_is_a_transcription_error(self, monkeypatch, tmp_path) -> None:
+        from qurantext.config.settings import get_settings
+        from qurantext.services import engine_whisperx, transcription
+        from qurantext.services.errors import TranscriptionError
+
+        audio = tmp_path / "a.wav"
+        audio.write_bytes(b"RIFF....WAVE")
+        monkeypatch.setenv("QURANTEXT_CACHE_DIR", str(tmp_path / "cache"))
+        get_settings.cache_clear()
+        monkeypatch.setattr(engine_whisperx, "run_whisperx", lambda *_a, **_k: {"segments": []})
+
+        def boom(*_a, **_k):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(transcription, "save_raw_output", boom)
+        with pytest.raises(TranscriptionError, match="saving raw output failed: disk full"):
+            transcription.transcribe_audio(
+                audio, engine="whisperx", save_raw_to=tmp_path / "r.json"
+            )
+        get_settings.cache_clear()
+
+
+def test_word_alignment_passes_engine_progress_and_cancel(monkeypatch, tmp_path) -> None:
+    from qurantext.config.paths import DEFAULT_QURAN_PATH
+    from qurantext.pipelines import recitation
+    from qurantext.utils.progress import CancelToken
+
+    seen = {}
+
+    def fake(audio, **kwargs):
+        seen.update(kwargs)
+        raise RuntimeError("stop after the call")
+
+    monkeypatch.setattr(recitation, "transcribe_audio", fake)
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"RIFF....WAVE")
+    token = CancelToken()
+
+    def on_progress(_event) -> None:
+        pass
+
+    with pytest.raises(RuntimeError, match="stop after the call"):
+        recitation.run_word_alignment(
+            DEFAULT_QURAN_PATH, audio, engine="local", progress=on_progress, cancel=token
+        )
+    assert seen["engine"] == "local"
+    assert seen["progress"] is on_progress
+    assert seen["cancel"] is token
+
+
+def test_recitation_range_passes_engine_progress_and_cancel(monkeypatch, tmp_path) -> None:
+    from qurantext.config.paths import DEFAULT_QURAN_PATH
+    from qurantext.pipelines import detection
+    from qurantext.utils.progress import CancelToken
+
+    seen = {}
+
+    def fake(audio, **kwargs):
+        seen.update(kwargs)
+        raise RuntimeError("stop after the call")
+
+    monkeypatch.setattr(detection, "transcribe_audio", fake)
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"RIFF....WAVE")
+    token = CancelToken()
+    with pytest.raises(RuntimeError, match="stop after the call"):
+        detection.run_recitation_range(
+            quran=DEFAULT_QURAN_PATH,
+            output=tmp_path / "m.json",
+            surah_num=1,
+            from_ayah=1,
+            to_ayah=2,
+            audio=audio,
+            echo=False,
+            engine="local",
+            cancel=token,
+        )
+    assert seen["engine"] == "local"
+    assert seen["cancel"] is token
+    assert "progress" in seen

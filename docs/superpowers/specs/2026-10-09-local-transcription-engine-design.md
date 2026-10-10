@@ -109,7 +109,9 @@ def transcribe_audio(
 - **Errors:** a new `TranscriptionError(RuntimeError)` base class.
   `WhisperXServiceError`, `ModelDownloadError` and `LocalEngineError` subclass
   it. Existing `except WhisperXServiceError` clauses keep catching what they
-  catch today, and the CLI and GUI catch `TranscriptionError`.
+  catch today, apart from a failure to save the raw output, which is now a
+  plain `TranscriptionError` (it has nothing to do with the service). The CLI
+  and GUI catch `TranscriptionError`.
 - **Cache key:** the WhisperX key is left byte-for-byte as it is today, so
   existing cached transcripts still hit. The local key is
   `{"engine": "local", "model": <id@version>, "manifest": <manifest sha256>}`.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
@@ -12,6 +13,17 @@ from qurantext.services.errors import TranscriptionError, WhisperXServiceError
 from qurantext.services.transcript_cache import cache_key, load_cached, store_cached
 from qurantext.utils.progress import CancelToken, ProgressCallback
 
+__all__ = [
+    "ENGINE_LABELS",
+    "TranscriptionError",
+    "TranscriptionResult",
+    "WhisperXResult",
+    "WhisperXServiceError",
+    "resolve_engine",
+    "save_raw_output",
+    "transcribe_audio",
+]
+
 #: How progress lines and messages name each engine.
 ENGINE_LABELS = {"local": "the local model", "whisperx": "WhisperX on Replicate"}
 
@@ -20,18 +32,11 @@ def resolve_engine(engine: str | None, settings: AppSettings) -> str:
     """The engine to use: the explicit choice, else the setting."""
     value = (engine or settings.transcription.engine or "").strip().lower()
     if value not in ENGINES:
-        raise ValueError(f"Unknown transcription engine {value!r}; choose 'local' or 'whisperx'.")
+        choices = ", ".join(ENGINES)
+        if engine:
+            raise ValueError(f"Unknown transcription engine {value!r}; choose one of: {choices}.")
+        raise ValueError(f"QURANTEXT_TRANSCRIBE_ENGINE is {value!r}; choose one of: {choices}.")
     return value
-
-
-__all__ = [
-    "TranscriptionError",
-    "TranscriptionResult",
-    "WhisperXResult",
-    "WhisperXServiceError",
-    "save_raw_output",
-    "transcribe_audio",
-]
 
 
 @dataclass(slots=True)
@@ -134,7 +139,7 @@ def _transcribe_cached(
     key_settings: dict[str, Any],
     model_ref: str,
     engine: str,
-    run,
+    run: Callable[[], Any],
     save_raw_to: str | PathLike[str] | None,
     use_cache: bool,
 ) -> TranscriptionResult:

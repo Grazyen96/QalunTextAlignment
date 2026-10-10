@@ -455,6 +455,7 @@ def get_settings() -> AppSettings:
             engine=_env_str("QURANTEXT_TRANSCRIBE_ENGINE", DEFAULT_TRANSCRIBE_ENGINE)
             .strip()
             .lower()
+            or DEFAULT_TRANSCRIBE_ENGINE
         ),
         range_matching=range_matching,
         lecture_matching=lecture_matching,

@@ -277,6 +277,8 @@ def test_matching_then_rendering_makes_the_video(tmp_path, monkeypatch) -> None:
     get_settings.cache_clear()
 
     assert outcome.matches.exists()
+    meta = json.loads(outcome.matches.read_text(encoding="utf-8"))["meta"]
+    assert meta["transcription_engine"] == "whisperx"
     assert outcome.video is not None and outcome.video.exists()
     assert outcome.cards >= 1
     # The user watches both stages, not just the slow one.
