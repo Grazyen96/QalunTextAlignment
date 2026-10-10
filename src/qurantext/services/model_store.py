@@ -27,6 +27,7 @@ from qurantext.services.errors import ModelDownloadError
 from qurantext.utils.progress import CancelToken, JobCancelled, ProgressCallback, report
 
 __all__ = [
+    "LOCAL_MODEL",
     "ModelFile",
     "ModelManifest",
     "discard",
@@ -220,3 +221,42 @@ def _install(manifest: ModelManifest, part: Path) -> Path:
         return target
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+#: The model the local engine runs. Pinned: produced by
+#: tools/export_local_model/package.py, published as release model-v1 of the
+#: public Grazyen96/qalun-models repo. Never edit by hand; re-run the tool.
+LOCAL_MODEL = ModelManifest(
+    model_id="nvidia/stt_ar_fastconformer_hybrid_large_pcd_v1.0",
+    version="int8-1",
+    url="https://github.com/Grazyen96/qalun-models/releases/download/model-v1/stt_ar_fastconformer_hybrid_large_pcd_v1.0-int8-1.tar.bz2",
+    archive_size=108151682,
+    archive_sha256="bc9956a0f6485a797545b1240d63c43fb05f92a5c1ce0d5fb9818f31a4592d01",
+    files=(
+        ModelFile(
+            "encoder.onnx",
+            131113685,
+            "891c7b36e01d6a0da1c14e3507b4bb7084b7753f9fc2f26736471d5af26bfded",
+        ),
+        ModelFile(
+            "decoder.onnx",
+            3955864,
+            "ebfe9bc355b9c591331c54ad5f84eac9d6af187ffca407e2dd19e4af8255f87b",
+        ),
+        ModelFile(
+            "joiner.onnx",
+            1408181,
+            "a0397fa92f0e361e92237de874dfdbe0093c5034873525388e391aac08b5500b",
+        ),
+        ModelFile(
+            "tokens.txt",
+            12858,
+            "9b938381a19a69bb279cdcfc299419f25a049ea1de192e0d10317274a0f20074",
+        ),
+        ModelFile(
+            "NOTICE.md",
+            582,
+            "2df87de3c00dbecf15de3dd0a2472e4ad67083ebc419d07b398ca35cbe59b3b0",
+        ),
+    ),
+)

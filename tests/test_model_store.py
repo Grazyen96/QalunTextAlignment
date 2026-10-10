@@ -221,3 +221,17 @@ def test_the_manifest_digest_changes_with_any_field(server) -> None:
     assert a.digest() != replace(a, url=a.url + "?x").digest()
     assert a.ref == "test/model@t-1"
     assert a.folder_name == "test--model-t-1"
+
+
+def test_the_shipped_model_is_pinned_to_the_public_release() -> None:
+    m = model_store.LOCAL_MODEL
+    assert m.model_id == "nvidia/stt_ar_fastconformer_hybrid_large_pcd_v1.0"
+    assert m.url.startswith("https://github.com/Grazyen96/qalun-models/releases/download/model-v1/")
+    assert {f.name for f in m.files} == {
+        "encoder.onnx",
+        "decoder.onnx",
+        "joiner.onnx",
+        "tokens.txt",
+        "NOTICE.md",
+    }
+    assert all(len(f.sha256) == 64 for f in m.files) and len(m.archive_sha256) == 64
