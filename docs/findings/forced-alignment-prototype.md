@@ -3,6 +3,12 @@
 **Date:** 13 September 2026
 **Plan item:** Phase 2, B6a — prototype forced alignment before committing to it
 
+> **Update, 8 October 2026:** the disputed 25:7 passage is a **repeat**. The
+> reciter says "لولا أنزل إليه ملك" twice (9.2–13.2 s and 14.4–18.3 s). The
+> recogniser kept the first copy and this aligner the second. See
+> [asr-bakeoff.md](asr-bakeoff.md). Point 2 below is therefore not a dropout
+> defect: the "gap" is the repeat.
+
 **Decision: do not move recitation timing onto a generic CTC forced aligner on
 this evidence. The disagreement that matters cannot be settled without a
 qualified listener, which is itself the result: alignment QA has to be a human
