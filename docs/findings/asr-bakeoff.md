@@ -266,6 +266,8 @@ never aligned (no start/end) when counting end violations.
 
 **Shipping: int8 (108 MB archive).**
 
+The shipped engine (`qurantext transcribe --engine local`) passes the same gate on all 17 clips.
+
 ## What this changes
 
 1. **Make NVIDIA FastConformer (RNNT) a local transcription engine** behind
