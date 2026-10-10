@@ -5,7 +5,7 @@
 Qalun is free software: you can redistribute it and/or modify it under the
 terms of the GNU General Public License, version 3 only (GPL-3.0-only), as
 published by the Free Software Foundation. The full text is in `LICENSE`, at
-the top of the release zip and in the app's folder.
+the top of the app zip and in the app's folder.
 
 Copyright (C) 2026 Khalil
 
@@ -14,15 +14,44 @@ WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
 FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
 details.
 
-**Source.** Each release on GitHub carries `qalun-source-<tag>.zip` beside the
-app zips: the complete source of the commit the release was built from,
-including the build scripts (`packaging/`). Each component below links to its
-own source.
+This licence covers Qalun's own code. It does not cover the bundled Quran font
+and Quran text (see "Quran text and font" below), nor the components listed
+after them, each of which is under its own licence.
 
-Each component listed below is under a licence compatible with GPL-3.0:
-GPL-3.0-or-later, LGPL-2.1, Apache 2.0, MIT, BSD 3-Clause or MPL-2.0. The
+**Source.** The source is inside the download. Every app zip carries, at its
+top, beside `LICENSE` and this file:
+
+- `qalun-source.zip`: the complete source of the commit the app was built from,
+  including the build scripts (`packaging/`);
+- `third-party-sources/`: the exact source archives of the GPL and LGPL
+  components below that are not Qalun's own (espeak-ng in every zip, and the
+  ALSA library in the Linux zip), with `SOURCES.txt` listing where each came
+  from and its sha256. The build downloads them, checks each against the sha256
+  pinned in `packaging/third-party-sources.txt`, and fails on a mismatch.
+
+Each component listed below is under a licence compatible with GPL-3.0. The
 speech model is not part of the app: it is data, downloaded on first use, under
 CC BY 4.0.
+
+**Where the files named below are.** On Windows and Linux, inside the app's
+folder `qalun/`, under `_internal/`. On macOS, inside `Qalun.app`: licence texts
+and other data under `Qalun.app/Contents/Resources/` (for example
+`Contents/Resources/sherpa_onnx/LICENSE` where this file says
+`_internal/sherpa_onnx/LICENSE`), and the libraries under
+`Qalun.app/Contents/Frameworks/`.
+
+## Quran text and font
+
+These files ship inside the app, the Python package and `qalun-source.zip`:
+
+- `qurantext/assets/fonts/qaloon.10.ttf` and `qaloon.10.woff2`: the Qalun
+  Quran font;
+- `qurantext/assets/quran/UthmanicQaloon1-Ver05.txt`: the Quran text in the
+  Qalun riwaya.
+
+They are third-party works and are **not** licensed under the GPL by Qalun's
+licence statement above. Their provenance and terms are to be confirmed by the
+owner, and will be stated here.
 
 ## Speech recognition model
 
@@ -50,16 +79,24 @@ licence.
 
 **GNU General Public License version 3 or later (GPL-3.0-or-later):**
 
-- **espeak-ng**, https://github.com/espeak-ng/espeak-ng, including its
-  `ucd-tools` library. sherpa-onnx uses it for text to speech, which Qalun does
-  not use, but the PyPI build of sherpa-onnx links it statically into
-  `_sherpa_onnx` (the Python extension the app loads) and into
-  `libsherpa-onnx-c-api`. Found in the Linux build; the Windows and macOS builds
-  of the same version offer the same text-to-speech functions and are expected
-  to contain it too. This is compatible with Qalun's licence: Qalun is
-  GPL-3.0-only, and GPL-3.0-or-later code may be combined with it and
-  distributed under GPL-3.0. The GPL-3.0 text is `LICENSE`. The source of this
-  sherpa-onnx build, espeak-ng included, is sherpa-onnx's v1.13.8 release,
+- **espeak-ng**, including its `ucd-tools` library. sherpa-onnx uses it for
+  text to speech, which Qalun does not use, but the PyPI build of sherpa-onnx
+  links it statically into `_sherpa_onnx` (the Python extension the app loads)
+  and into `libsherpa-onnx-c-api`. Found in the Linux build; the Windows and
+  macOS builds of the same version offer the same text-to-speech functions and
+  are expected to contain it too. This is compatible with Qalun's licence:
+  Qalun is GPL-3.0-only, and GPL-3.0-or-later code may be combined with it and
+  distributed under GPL-3.0. The GPL-3.0 text is `LICENSE`.
+
+  The code compiled is not upstream espeak-ng but a fork of it: sherpa-onnx
+  v1.13.8 builds espeak-ng from
+  https://github.com/csukuangfj/espeak-ng (itself a fork of
+  https://github.com/rhasspy/espeak-ng) at commit
+  `ed530aa113046142eb5115cf2fc9157854d0ffe1`, the archive
+  `espeak-ng-ed530aa113046142eb5115cf2fc9157854d0ffe1.zip` with sha256
+  `e4e262cbe34f7fe21f91f1ba3397f2728e1f30eafbae7853f2b753a9ed13f0dd`, as its
+  `cmake/espeak-ng-for-piper.cmake` pins it. **That archive is in every app
+  zip, at `third-party-sources/`.** sherpa-onnx's own source for this version is
   https://github.com/k2-fsa/sherpa-onnx/tree/v1.13.8, and its source
   distribution on PyPI, https://pypi.org/project/sherpa-onnx/1.13.8/#files.
 
@@ -88,9 +125,31 @@ licence.
   https://www.openfst.org
 - **simple-sentencepiece**, https://github.com/pkufool/simple-sentencepiece
 
+**Mozilla Public License 2.0 (MPL-2.0):**
+
+- **Eigen**, https://gitlab.com/libeigen/eigen, compiled into sherpa-onnx's C
+  API library (`libsherpa-onnx-c-api`), which ships with the app but which it
+  does not load. Its source is at that
+  address; the MPL-2.0 text is https://mozilla.org/MPL/2.0/
+
 **BSD 3-Clause License:**
 
 - **pybind11**, https://github.com/pybind/pybind11
+- **kissfft**, https://github.com/mborgerding/kissfft, compiled into the same C
+  API library.
+
+## ALSA library (Linux builds only)
+
+The Linux build includes `libasound` from alsa-lib 1.2.12,
+https://github.com/alsa-project/alsa-lib, GNU Lesser General Public License
+version 2.1. sherpa-onnx's Linux package builds it from tag `v1.2.12` and
+brings it, and the app links it dynamically, so it can be replaced with another
+build of the same library. The licence text is in the app's folder, at
+`_internal/sherpa_onnx.libs/libasound-LGPL-2.1.txt`. **Its source is in the
+Linux app zip, at `third-party-sources/alsa-lib-1.2.12.tar.bz2`**, the alsa
+project's release archive of that version
+(https://www.alsa-project.org/files/pub/lib/alsa-lib-1.2.12.tar.bz2, sha256
+`4868cd908627279da5a634f468701625be8cc251d84262c7e5b6a218391ad0d2`).
 
 ## certifi
 
@@ -99,11 +158,46 @@ uses its certificate bundle (`cacert.pem`) to check the speech model's download.
 The licence text is in the app's folder, at
 `_internal/certifi-<version>.dist-info/licenses/LICENSE`.
 
-## ALSA library (Linux builds only)
+## The rest of the app
 
-The Linux build includes `libasound` from alsa-lib,
-https://github.com/alsa-project/alsa-lib, GNU Lesser General Public License
-version 2.1. sherpa-onnx's Linux package brings it, and the app links it
-dynamically, so it can be replaced with another build of the same library. The
-licence text is in the app's folder, at
-`_internal/sherpa_onnx.libs/libasound-LGPL-2.1.txt`.
+The app is built with PyInstaller from the following, each bundled in the app's
+folder.
+
+- **Python** 3.12, https://www.python.org, the interpreter and its standard
+  library, Python Software Foundation License (PSF-2.0). Python links further
+  libraries, each under its own permissive licence (among them OpenSSL, Apache
+  2.0; libffi, MIT; zlib; bzip2; XZ; SQLite, public domain; Expat, MIT).
+- **PyInstaller's bootloader**, https://pyinstaller.org, the start-up code of
+  the `qalun` executable: GPL-2.0-or-later with PyInstaller's bootloader
+  exception, which allows it to be distributed with any program.
+- **Qt 6** through **PySide6** and **Shiboken6**, https://www.qt.io and
+  https://wiki.qt.io/Qt_for_Python, GNU Lesser General Public License version 3
+  (LGPL-3.0), linked dynamically (`_internal/PySide6/`). Qt itself contains
+  third-party code listed at https://doc.qt.io/qt-6/licenses-used-in-qt.html;
+  its playback uses the FFmpeg libraries PySide6 ships (LGPL builds).
+- **Pillow**, https://github.com/python-pillow/Pillow, the HPND licence
+  (Historical Permission Notice and Disclaimer). Its package brings its own
+  image and text libraries (among them libjpeg-turbo, libpng, libtiff, libwebp,
+  OpenJPEG, Little CMS, FreeType, HarfBuzz and raqm), whose licences Pillow
+  lists in its `LICENSE`.
+- **NumPy**, https://numpy.org, BSD 3-Clause License. Its package brings
+  OpenBLAS (BSD 3-Clause) and, on Linux, the GCC Fortran runtime
+  (`libgfortran`, GPL-3.0-or-later with the GCC Runtime Library Exception);
+  NumPy lists them in its `LICENSE.txt`.
+- **FriBiDi**, https://github.com/fribidi/fribidi, GNU Lesser General Public
+  License version 2.1 or later, loaded by Pillow at runtime to shape Arabic
+  (`fribidi-0.dll`, `libfribidi.dylib` or `libfribidi.so.0` beside the
+  executable). The build copies it from MSYS2 (Windows), Homebrew (macOS) or
+  Ubuntu (Linux).
+- **FFmpeg**, https://ffmpeg.org, the `ffmpeg` and `ffprobe` programs beside
+  the executable, which Qalun runs as separate programs to read audio and write
+  video. These are GPL builds (GNU General Public License, version 2 or later or
+  3 or later depending on the build), taken from gyan.dev or BtbN (Windows),
+  Homebrew (macOS) and johnvansickle.com or BtbN (Linux).
+- **The Replicate client** (Apache 2.0), used only by the optional WhisperX
+  engine, with httpx, httpcore and idna (BSD 3-Clause), anyio, h11, pydantic,
+  pydantic-core, annotated-types and typing-inspection (MIT), typing-extensions
+  (PSF-2.0) and packaging (Apache 2.0 or BSD 2-Clause), and **PyYAML** (MIT).
+- On Linux, the build machine's system libraries that Qt and the other
+  libraries link (among them GLib, GTK, ICU, PulseAudio, libsndfile and the X11
+  and xcb libraries), each under its distribution's licence.

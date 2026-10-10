@@ -126,18 +126,36 @@ if [ -z "$curl" ]; then
   echo "The transcription gate failed: no curl on PATH to check the published model with." >&2
   exit 1
 fi
-# GITHUB_TOKEN when the step passes one; otherwise anonymous, which is plenty
-# for one call per run. The token never reaches the log.
+# GITHUB_TOKEN, which the workflow passes to the gate steps: anonymous calls are
+# limited to 60 an hour per address, and hosted runners (macOS above all) share
+# their addresses with other people's jobs. Without one the call is anonymous.
+# The token never reaches the log.
 auth=()
 token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
 if [ -n "$token" ]; then
   auth=(-H "Authorization: Bearer $token")
 fi
 release_json="$work/release.json"
-if ! "$curl" -fsSL --retry 3 --max-time 60 -H "Accept: application/vnd.github+json" \
-  ${auth[@]+"${auth[@]}"} -o "$release_json" "$pin_api"; then
-  echo "The transcription gate failed: could not read release $pin_tag from $pin_api." >&2
-  echo "Usually: the release or its repository is gone, renamed or private." >&2
+# The HTTP status is kept so the failure can name its cause.
+status="$("$curl" -sSL --retry 3 --max-time 60 -H "Accept: application/vnd.github+json" \
+  ${auth[@]+"${auth[@]}"} -w '%{http_code}' -o "$release_json" "$pin_api")" || status="${status:-000}"
+status="${status//[^0-9]/}"
+if [ "$status" != 200 ]; then
+  echo "The transcription gate failed: could not read release $pin_tag from $pin_api" \
+    "(HTTP ${status:-000})." >&2
+  case "$status" in
+    403 | 429)
+      echo "GitHub refused the call: usually its API rate limit, which an anonymous call" \
+        "shares with every job on the same address. The workflow passes GITHUB_TOKEN to" \
+        "this step; check it still does, then run the job again." >&2
+      ;;
+    404 | 410)
+      echo "The release or its repository is gone, renamed or private." >&2
+      ;;
+    000 | "")
+      echo "GitHub could not be reached; run the job again." >&2
+      ;;
+  esac
   exit 1
 fi
 if ! "$python" - "$release_json" "$pin_name" "$pin_size" "$pin_sha256" "$pin_tag" <<'PY'; then

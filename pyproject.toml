@@ -5,11 +5,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qurantext"
-version = "0.1.0"
+# The version is written in one place, src/qurantext/__init__.py; a tag build
+# fails unless the tag is v<that version> (packaging/ci/package.sh).
+dynamic = ["version"]
 description = "Quran alignment, matching, transcription, and rendering workflows."
 readme = "README.md"
 # GPL-3.0 because the bundled sherpa-onnx links espeak-ng (GPL-3.0) into the app's
 # process. See THIRD_PARTY_NOTICES.md and the "Licence finding" in docs/findings/asr-bakeoff.md.
+# Not covered: the package data's Quran font (assets/fonts/qaloon.10.ttf and
+# qaloon.10.woff2) and Quran text (assets/quran/UthmanicQaloon1-Ver05.txt) are
+# third-party works, their provenance and terms to be confirmed by the owner; see
+# src/qurantext/assets/README.md and THIRD_PARTY_NOTICES.md.
 license = "GPL-3.0-only"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
@@ -22,8 +28,11 @@ dependencies = [
   # Trusted certificates for the speech model's download: a frozen app cannot rely on the system's.
   "certifi>=2023",
   # The local transcription engine (NVIDIA FastConformer Arabic through ONNX).
-  # Pinned to the release the parity gate passed with: docs/findings/asr-bakeoff.md.
-  "sherpa-onnx~=1.13.8",
+  # Pinned exactly to the release the parity gate passed with
+  # (docs/findings/asr-bakeoff.md). THIRD_PARTY_NOTICES.md, packaging/licenses/ and
+  # packaging/third-party-sources.txt describe this very build, so moving the pin
+  # means updating them; tests/test_packaging_spec.py fails until they agree.
+  "sherpa-onnx==1.13.8",
 ]
 
 [project.optional-dependencies]
@@ -47,6 +56,9 @@ qalun = "qurantext.gui:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+
+[tool.setuptools.dynamic]
+version = {attr = "qurantext.__version__"}
 
 # The renderer's default font must travel with the wheel. Without this the wheel
 # is Python files only, and the font path resolves into the Python installation.

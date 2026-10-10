@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from qurantext import __version__
 from qurantext.config.fribidi import fribidi_names
 from qurantext.config.paths import (
     DEFAULT_FONT_PATH,
@@ -387,19 +388,21 @@ def _local_engine_check(*, offer_whisperx: bool = True) -> CheckResult:
             f"the speech runtime (sherpa-onnx) did not load: {problem}",
             remedy,
         )
+    # Information, not a check: a long job on a small machine can run out of memory.
+    memory = f"; transcribing uses up to about {engine_local.PEAK_MEMORY_GB} GB of memory"
     if not model_store.is_installed(manifest):
         return CheckResult(
             _TRANSCRIPTION,
             Status.WARN,
             f"{_ON_THIS_COMPUTER}{credit}; the model downloads once, on first "
-            f"use (about {manifest.download_mb} MB), into {model_store.models_dir()}",
+            f"use (about {manifest.download_mb} MB), into {model_store.models_dir()}{memory}",
             "Nothing to do: the first transcription downloads it. It needs an internet "
             "connection that one time.",
         )
     return CheckResult(
         _TRANSCRIPTION,
         Status.OK,
-        f"{_ON_THIS_COMPUTER}{credit}, installed in {model_store.model_dir(manifest)}",
+        f"{_ON_THIS_COMPUTER}{credit}, installed in {model_store.model_dir(manifest)}{memory}",
     )
 
 
@@ -978,7 +981,7 @@ def format_report(results: list[CheckResult], *, release: bool = False) -> str:
     """
     marks = {Status.OK: "ok  ", Status.WARN: "note", Status.FAIL: "FAIL"}
     lines = [
-        f"Qalun on {sys.platform}",
+        f"Qalun {__version__} on {sys.platform}",
         f"  running from {'a checkout' if checkout_root() else 'an installed copy'}",
         f"  app data in {user_data_dir()}",
         f"  licensed {LICENCE}; see LICENSE and THIRD_PARTY_NOTICES.md",

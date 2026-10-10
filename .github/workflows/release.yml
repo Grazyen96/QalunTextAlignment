@@ -100,11 +100,15 @@ jobs:
       # from a Linux build.
       - name: Check the built app can render (Unix)
         if: runner.os != 'Windows'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: bash packaging/ci/check.sh
 
       - name: Check the built app can render (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: packaging/ci/check.ps1
 
       - name: Package

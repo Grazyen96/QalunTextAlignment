@@ -161,7 +161,7 @@ def test_qalun_is_licensed_gpl_3_0_only() -> None:
     assert own.startswith("Qalun")
     for phrase in ("GPL-3.0-only", "Copyright (C) 2026 Khalil", "WITHOUT ANY WARRANTY"):
         assert phrase in own, phrase
-    assert "qalun-source-" in own
+    assert "qalun-source.zip" in own and "third-party-sources/" in own
     section = notice.split("## sherpa-onnx", 1)[1].split("\n## ", 1)[0]
     assert "compatible" in section
     tomllib = pytest.importorskip("tomllib")
@@ -197,4 +197,94 @@ def test_the_release_checklist_checks_for_the_source_and_the_licence() -> None:
     """The GPL question is settled; what a release must now carry is checked by hand."""
     checklist = (ROOT / "docs" / "release-checklist.md").read_text(encoding="utf-8")
     assert "Do not tag\n      a release" not in checklist
-    assert "qalun-source-*.zip" in checklist and "LICENSE" in checklist
+    assert "qalun-source.zip" in checklist and "third-party-sources/" in checklist
+    assert "LICENSE" in checklist
+
+
+def _sherpa_onnx_pin() -> str:
+    """The one sherpa-onnx version the build may use, read from pyproject.toml."""
+    tomllib = pytest.importorskip("tomllib")
+    with (ROOT / "pyproject.toml").open("rb") as handle:
+        core = tomllib.load(handle)["project"]["dependencies"]
+    pins = [dep for dep in core if dep.startswith("sherpa-onnx")]
+    assert len(pins) == 1 and pins[0].startswith("sherpa-onnx=="), pins
+    return pins[0].removeprefix("sherpa-onnx==")
+
+
+def test_the_installed_sherpa_onnx_is_the_build_the_notices_describe() -> None:
+    """The notice, the shipped licence files and the pinned third-party sources all
+    describe one sherpa-onnx build. An open range let a new release slip in under
+    them unnoticed, so the pin is exact, and this fails the moment the installed
+    version, the pin and the texts disagree."""
+    from importlib.metadata import version
+
+    pin = _sherpa_onnx_pin()
+    assert f"sherpa-onnx=={pin}" in (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    assert version("sherpa_onnx") == pin, (
+        f"sherpa-onnx {version('sherpa_onnx')} is installed but the pin and the notices say "
+        f"{pin}: reinstall with `pip install -e .`, or move the pin and update "
+        "THIRD_PARTY_NOTICES.md, packaging/licenses/ and packaging/third-party-sources.txt"
+    )
+    notice = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    section = notice.split("## sherpa-onnx", 1)[1].split("\n## ", 1)[0]
+    assert f"version {pin} as published on PyPI" in section
+    assert f"sherpa-onnx\n  v{pin} builds espeak-ng" in section
+    assert f"/sherpa-onnx/tree/v{pin}" in section
+    readme = (SPEC.parent / "licenses" / "README.md").read_text(encoding="utf-8")
+    assert f"sherpa-onnx {pin}" in readme
+    sources = (SPEC.parent / "third-party-sources.txt").read_text(encoding="utf-8")
+    assert f"sherpa-onnx v{pin}" in sources and f"sherpa-onnx {pin}" in sources
+
+
+def test_the_version_is_written_down_once() -> None:
+    """pyproject.toml reads the version from the package, which `qalun --version` and
+    the doctor report say; package.sh holds a tag build to it."""
+    tomllib = pytest.importorskip("tomllib")
+    with (ROOT / "pyproject.toml").open("rb") as handle:
+        config = tomllib.load(handle)
+    assert "version" not in config["project"]
+    assert "version" in config["project"]["dynamic"]
+    assert config["tool"]["setuptools"]["dynamic"]["version"] == {"attr": "qurantext.__version__"}
+    package = (SPEC.parent / "ci" / "package.sh").read_text(encoding="utf-8")
+    assert "src/qurantext/__init__.py" in package and "GITHUB_REF_NAME" in package
+
+
+def test_the_quran_font_and_text_are_kept_out_of_the_gpl_statement() -> None:
+    """Their provenance and terms are not known yet, so nothing may present them as
+    Qalun's own GPL-3.0 code, and the release waits until the owner confirms them."""
+    files = ("qaloon.10.ttf", "qaloon.10.woff2", "UthmanicQaloon1-Ver05.txt")
+    phrase = "to be confirmed by the owner"
+    notice = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    section = " ".join(notice.split("## Quran text and font", 1)[1].split("\n## ", 1)[0].split())
+    assert "**not** licensed under the GPL" in section and phrase in section
+    for path in (
+        ROOT / "README.md",
+        ROOT / "src" / "qurantext" / "assets" / "README.md",
+        ROOT / "pyproject.toml",
+    ):
+        text = " ".join(path.read_text(encoding="utf-8").split())
+        assert phrase in text, path
+        for name in files:
+            assert name in text, (path, name)
+    for name in files:
+        assert name in section
+    checklist = (ROOT / "docs" / "release-checklist.md").read_text(encoding="utf-8")
+    assert "UthmanicQaloon1-Ver05.txt" in checklist and "qaloon.10" in checklist
+
+
+def test_the_release_checklist_holds_the_first_tag_on_what_code_cannot_settle() -> None:
+    """The owner's open decisions, and the checks only a person on a real machine can
+    make, are written where the person releasing works through them."""
+    checklist = (ROOT / "docs" / "release-checklist.md").read_text(encoding="utf-8")
+    flat = " ".join(checklist.split())
+    blocking = flat.split("## Before the first release: blocking", 1)[1].split(" ## ", 1)[0]
+    assert "confirm their source and terms before the first tag" in blocking
+    assert (
+        "Licence review: source obligations for Qt (LGPL), FriBiDi (LGPL) and the GPL "
+        "FFmpeg build" in blocking
+    )
+    assert "must not point at the private repository's release page" in blocking
+    assert "Arabic letters" in blocking
+    assert "## By ear, on Windows, macOS and Linux" in checklist
+    assert "Check the words appear" in flat
+    assert "__version__" in flat

@@ -85,10 +85,10 @@ def _published(**changes: object) -> dict[str, object]:
     return {"tag_name": "model-v1", "assets": [other, asset]}
 
 
-def _fake_curl(tmp_path: Path, release: dict[str, object] | None) -> Path:
-    """A folder holding a curl that answers with *release* (or fails, for None) and
-    records the URL it was asked for, using only bash builtins, so no test reaches
-    the network."""
+def _fake_curl(tmp_path: Path, release: dict[str, object] | None, status: int = 200) -> Path:
+    """A folder holding a curl that answers with *release* and HTTP *status* (or
+    cannot connect, for None) and records the URL it was asked for, using only bash
+    builtins, so no test reaches the network."""
     tools = tmp_path / "fake-curl"
     tools.mkdir(exist_ok=True)
     answer = tmp_path / "release-answer.json"
@@ -102,14 +102,16 @@ out=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -o) out="$2"; shift ;;
+    -w) shift ;;
     -H) echo "header: $2" >> {calls}; shift ;;
     *) url="$1" ;;
   esac
   shift
 done
 echo "url: $url" >> {calls}
-[ -f {answer} ] || exit 22
+if [ ! -f {answer} ]; then printf 000; exit 7; fi
 printf '%s' "$(<{answer})" > "$out"
+printf {status}
 """,
         encoding="utf-8",
     )
@@ -122,6 +124,7 @@ def _gate(
     *,
     release: dict[str, object] | None = None,
     api_fails: bool = False,
+    api_status: int = 200,
     script: Path = SCRIPT,
     **env: str,
 ) -> subprocess.CompletedProcess[str]:
@@ -137,7 +140,7 @@ def _gate(
             "GH_TOKEN",
         )
     }
-    curl = _fake_curl(tmp_path, None if api_fails else (release or _published()))
+    curl = _fake_curl(tmp_path, None if api_fails else (release or _published()), api_status)
     path = env.pop("PATH", inherited.get("PATH", ""))
     return subprocess.run(
         ["bash", str(script)],
@@ -380,7 +383,40 @@ def test_a_release_that_cannot_be_read_fails_the_gate(tmp_path: Path) -> None:
     result = _transcription_gate(tmp_path, api_fails=True)
     assert result.returncode == 1
     assert "could not read release model-v1" in result.stderr
+    assert "(HTTP 000)" in result.stderr and "could not be reached" in result.stderr
     assert not (tmp_path / "transcribed").exists()
+
+
+@pytest.mark.parametrize(
+    ("status", "cause"),
+    [
+        (403, "usually its API rate limit"),
+        (429, "usually its API rate limit"),
+        (404, "gone, renamed or private"),
+        (500, "(HTTP 500)"),
+    ],
+)
+def test_a_refused_call_names_its_cause(tmp_path: Path, status: int, cause: str) -> None:
+    """A rate limit (403/429) is not a missing release (404): the message says which,
+    so nobody goes looking for a deleted model when GitHub only throttled the call."""
+    result = _transcription_gate(tmp_path, api_status=status)
+    assert result.returncode == 1
+    assert "could not read release model-v1 from" in result.stderr
+    assert cause in result.stderr
+    assert ("rate limit" in result.stderr) == (status in (403, 429))
+    assert not (tmp_path / "transcribed").exists()
+
+
+def test_the_workflow_gives_both_gate_steps_its_token() -> None:
+    """Anonymous calls share 60 an hour with every job on the runner's address."""
+    workflow = (SCRIPT.parents[2] / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8"
+    )
+    steps = workflow.split("- name: Check the built app can render")[1:]
+    assert len(steps) == 2
+    for step in steps:
+        step = step.split("\n      - ", 1)[0]
+        assert "GITHUB_TOKEN: ${{ github.token }}" in step
 
 
 def test_a_github_token_is_used_when_there_is_one_and_never_printed(tmp_path: Path) -> None:

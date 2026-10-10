@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 from qurantext.config.paths import user_cache_dir
-from qurantext.services.errors import ModelDownloadError
+from qurantext.services.errors import WHISPERX_INSTEAD, ModelDownloadError
 from qurantext.utils.progress import CancelToken, JobCancelled, ProgressCallback, report
 
 __all__ = [
@@ -182,7 +182,7 @@ def _clear_stale(manifest: ModelManifest, root: Path) -> None:
 def _folder_error(root: Path, error: OSError) -> ModelDownloadError:
     return ModelDownloadError(
         f"The speech model's folder {root} could not be prepared ({error}). Check that "
-        "it can be written to, then start the job again, or choose WhisperX online."
+        f"it can be written to, then start the job again, or {WHISPERX_INSTEAD}."
     )
 
 
@@ -331,19 +331,17 @@ def _download(
             advice = "Start the job again later"
         raise ModelDownloadError(
             f"The speech model could not be downloaded: its address answered HTTP "
-            f"{error.code} ({error.reason}). {advice}, or choose WhisperX online."
+            f"{error.code} ({error.reason}). {advice}, or {WHISPERX_INSTEAD}."
         ) from error
     except (urllib.error.URLError, http.client.HTTPException, OSError) as error:
         raise ModelDownloadError(
             "The speech model is downloaded once, on first use, and that download "
-            f"failed ({error}). Check the internet connection and start the job again, "
-            "or choose WhisperX online."
+            f"failed ({error}). Check the internet connection and start the job again."
         ) from error
     if done < size:
         raise ModelDownloadError(
             f"The speech model's download was interrupted after {_mb(done)} of "
-            f"{_mb(size)}. Check the internet connection and start the job again, or "
-            "choose WhisperX online."
+            f"{_mb(size)}. Check the internet connection and start the job again."
         )
     if digest.hexdigest() != manifest.archive_sha256:
         raise _damaged("its checksum does not match")
@@ -365,8 +363,8 @@ def _check_length(manifest: ModelManifest, header: str | None) -> None:
 def _wrong_file(manifest: ModelManifest, got: str) -> ModelDownloadError:
     return ModelDownloadError(
         f"The speech model's address sent a different file ({got} instead of the pinned "
-        f"{manifest.archive_size:,}), so it was not kept. Update Qalun, or choose "
-        "WhisperX online."
+        f"{manifest.archive_size:,}), so it was not kept. Update Qalun, or "
+        f"{WHISPERX_INSTEAD}."
     )
 
 

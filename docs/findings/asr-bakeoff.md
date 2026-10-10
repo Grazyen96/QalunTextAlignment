@@ -292,14 +292,19 @@ the built bundle (`dist/qalun/_internal/sherpa_onnx/lib/`):
 **Status: Resolved 2026-10-10: Qalun is licensed GPL-3.0-only; the source ships
 with each release.** The owner chose to release Qalun itself under GPL-3.0-only
 (Copyright (C) 2026 Khalil), with which espeak-ng's GPL-3.0-or-later is
-compatible. The repository stays private; instead, the Linux job's
-`packaging/ci/package.sh` writes `qalun-source-<tag>.zip` (`git archive` of the
-tagged commit), which the release attaches beside the app zips. `LICENSE` (the
+compatible. The repository stays private; instead, `packaging/ci/package.sh`
+puts `qalun-source.zip` (`git archive` of the commit built) inside every app
+zip, beside the app (decided 10 Oct 2026, after the source zip was first
+attached to the release beside the app zips), together with
+`third-party-sources/`: the exact espeak-ng archive sherpa-onnx 1.13.8 builds
+from (csukuangfj/espeak-ng at `ed530aa1…`) and, in the Linux zip, alsa-lib
+1.2.12, each pinned by URL and sha256 in `packaging/third-party-sources.txt`.
+sherpa-onnx is pinned exactly to 1.13.8. `LICENSE` (the
 full GPL-3.0 text) ships in the bundle and at the top of every zip, the
 package metadata says `GPL-3.0-only`, `THIRD_PARTY_NOTICES.md` opens with
 Qalun's own licence statement, and the doctor report names it. The sherpa-onnx
 build itself is unchanged; `docs/release-checklist.md` now checks that each
-release carries the source archive, `LICENSE` and `THIRD_PARTY_NOTICES.md`.
+app zip carries the source archives, `LICENSE` and `THIRD_PARTY_NOTICES.md`.
 
 ## What this changes
 

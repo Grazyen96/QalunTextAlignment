@@ -67,6 +67,14 @@ def test_the_report_ends_with_a_verdict() -> None:
     assert "fix it" in report
 
 
+def test_the_report_says_which_version_it_is_about() -> None:
+    """The report is the file people are asked to send, so it names the version."""
+    from qurantext import __version__
+
+    report = format_report([CheckResult("A", Status.OK, "fine")])
+    assert report.splitlines()[0] == f"Qalun {__version__} on {sys.platform}"
+
+
 def test_the_report_names_qaluns_licence_without_judging_it() -> None:
     """Qalun is GPL-3.0-only; the report says so on one line. It is not a check, so it
     can never block, and the verdict is unchanged."""
@@ -598,6 +606,27 @@ class TestTranscriptionEngineChoice:
         assert result.status == Status.WARN
         assert "first use" in result.detail
         assert f"about {model_store.LOCAL_MODEL.download_mb} MB" in result.detail
+
+    def test_local_states_the_memory_transcription_needs(
+        self, engine, local_ready, monkeypatch
+    ) -> None:
+        """A long job on a small machine can run out of memory, and on Linux the window
+        then simply vanishes, so the doctor says what it takes, as information only,
+        installed or not, and for the optional line too."""
+        from qurantext.services import engine_local, model_store
+
+        memory = f"up to about {engine_local.PEAK_MEMORY_GB} GB of memory"
+        assert engine_local.PEAK_MEMORY_GB == 1.8
+        engine("local")
+        installed = _lines(preflight._transcription())[self.CONFIGURED]
+        assert installed.status == Status.OK and memory in installed.detail
+        monkeypatch.setattr(model_store, "is_installed", lambda m: False)
+        missing = _lines(preflight._transcription())[self.CONFIGURED]
+        assert missing.status == Status.WARN and memory in missing.detail
+        engine("whisperx")
+        monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_secret_value_1234")
+        optional = _lines(preflight._transcription())[self.LOCAL]
+        assert optional.status == Status.OK and memory in optional.detail
 
     def test_local_names_the_model_and_its_licence(self, engine, local_ready) -> None:
         engine("local")

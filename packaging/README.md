@@ -145,8 +145,11 @@ The PyPI build of sherpa-onnx is not Apache/MIT only: it links espeak-ng
 (GPL-3.0-or-later), for its text to speech, statically into the extension the
 app loads. `THIRD_PARTY_NOTICES.md` names it and the other components inside the
 build. That is why Qalun itself is licensed GPL-3.0-only (`LICENSE`), and why
-`package.sh` writes, on the Linux job, `qalun-source-<tag or commit>.zip`, the
-source of the commit built, which the release attaches beside the app zips. See
+`package.sh` puts in every app zip, beside the app, `qalun-source.zip` (the
+source of the commit built) and `third-party-sources/` (the exact espeak-ng
+source sherpa-onnx 1.13.8 builds from, and alsa-lib 1.2.12 in the Linux zip,
+pinned by URL and sha256 in [third-party-sources.txt](third-party-sources.txt)).
+They add about 20 MB to each zip, nearly all of it espeak-ng's 18 MB archive. See
 the "Licence finding" in [docs/findings/asr-bakeoff.md](../docs/findings/asr-bakeoff.md).
 
 **ONNX Runtime telemetry (Windows): not verified on the binary.** Qalun collects no

@@ -1,0 +1,22 @@
+# The corresponding sources of the GPL and LGPL code the app bundles, shipped
+# inside every app zip under third-party-sources/ (THIRD_PARTY_NOTICES.md points
+# there). packaging/ci/package.sh downloads each one at build time, refuses it
+# unless its sha256 is the one written here, and puts it in the zips of the
+# platforms named in the first column ("all", or one of linux, macos, windows).
+#
+# Each archive is the exact source the bundled binary was built from, so it
+# changes only when the sherpa-onnx pin in pyproject.toml moves. When it does,
+# read the new version's cmake/espeak-ng-for-piper.cmake (URL and SHA256) and
+# its Linux wheel workflow (the alsa-lib tag it clones), then download each
+# archive once and write its sha256 here.
+#
+# platform  file  sha256  url
+
+# espeak-ng (GPL-3.0-or-later): the fork and commit sherpa-onnx v1.13.8 builds
+# from, pinned in its cmake/espeak-ng-for-piper.cmake with this same sha256.
+all	espeak-ng-ed530aa113046142eb5115cf2fc9157854d0ffe1.zip	e4e262cbe34f7fe21f91f1ba3397f2728e1f30eafbae7853f2b753a9ed13f0dd	https://github.com/csukuangfj/espeak-ng/archive/ed530aa113046142eb5115cf2fc9157854d0ffe1.zip
+
+# alsa-lib (LGPL-2.1-or-later), Linux only: sherpa-onnx 1.13.8's Linux wheel
+# builds it from tag v1.2.12 and vendors it as sherpa_onnx.libs/libasound-*.so.
+# This is the alsa project's own release archive of that tag.
+linux	alsa-lib-1.2.12.tar.bz2	4868cd908627279da5a634f468701625be8cc251d84262c7e5b6a218391ad0d2	https://www.alsa-project.org/files/pub/lib/alsa-lib-1.2.12.tar.bz2

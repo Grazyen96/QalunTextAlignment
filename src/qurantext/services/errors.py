@@ -3,12 +3,24 @@
 from __future__ import annotations
 
 __all__ = [
+    "RUN_THE_DOCTOR",
+    "WHISPERX_INSTEAD",
     "LocalEngineError",
     "ModelDownloadError",
     "ModelLoadError",
     "TranscriptionError",
     "WhisperXServiceError",
 ]
+
+
+#: How to run the doctor, for every reader: `qalun --doctor` is the packaged app's;
+#: from a checkout or a pip install, `qalun` opens the window and ignores it.
+RUN_THE_DOCTOR = (
+    "To see what is missing, run the doctor: `qalun --doctor` for the app, "
+    "`qurantext doctor` from the command line."
+)
+#: The other engine, named so a command-line user can choose it too.
+WHISPERX_INSTEAD = "choose WhisperX online (`--engine whisperx` on the command line)"
 
 
 class TranscriptionError(RuntimeError):

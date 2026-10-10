@@ -28,3 +28,11 @@ the wheels the binaries come from do not carry them.
 
 sherpa-onnx's own licence (Apache 2.0) is not here: its wheel carries it, and the
 spec takes it from the installed distribution so it always matches the version built.
+
+The licence texts are not the whole obligation for the GPL and LGPL code: its
+source has to travel with the app too. `packaging/third-party-sources.txt` pins
+those source archives (espeak-ng for every platform, alsa-lib for Linux) by URL
+and sha256, and `packaging/ci/package.sh` puts them in every app zip under
+`third-party-sources/`. sherpa-onnx is pinned exactly (`sherpa-onnx==1.13.8` in
+`pyproject.toml`), so these files and that list always describe the build that
+ships; `tests/test_packaging_spec.py` fails if the installed version differs.

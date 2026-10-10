@@ -64,6 +64,19 @@ Download the app for your system from the
 unzip it, and run **Qalun**. There is nothing to install: no Python, no FFmpeg,
 no Quran text file. Everything below is for working on the code.
 
+## System requirements
+
+- **Memory:** transcribing on this computer, the default, uses up to about
+  1.8 GB of RAM while it runs, however long the recording (about 1 GB for a
+  short clip). On a machine with 4 GB, close other large programs first; a long
+  lecture may otherwise run out of memory. WhisperX online, the optional engine,
+  transcribes elsewhere and needs none of it.
+- **Disk:** the speech model takes about 140 MB once installed. It downloads
+  once, on first use (about 110 MB), and needs about 270 MB free while it
+  unpacks.
+- **Internet:** once, for that first download; after that, transcription works
+  offline.
+
 ## Is this machine set up?
 
 ```bash
@@ -699,7 +712,14 @@ It comes with ABSOLUTELY NO WARRANTY, to the extent permitted by law. It is
 GPL-3.0 because the sherpa-onnx build the app bundles links espeak-ng
 (GPL-3.0-or-later) into the app's own process.
 
-Each GitHub release carries `qalun-source-<tag>.zip` beside the app zips: the
-complete source of the tagged commit. Every app zip has `LICENSE` and
-`THIRD_PARTY_NOTICES.md` at its top. The bundled components, the speech model
-and their licences are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+The source is inside the download. Every app zip has, at its top, `LICENSE`,
+`THIRD_PARTY_NOTICES.md`, `qalun-source.zip` (the complete source of the commit
+the app was built from) and `third-party-sources/` (the exact source archives of
+the bundled GPL and LGPL components that are not Qalun's own: espeak-ng, and on
+Linux the ALSA library). The bundled components, the speech model and their
+licences are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+The licence does not cover the bundled Quran font (`qaloon.10.ttf`,
+`qaloon.10.woff2`) or the Quran text (`UthmanicQaloon1-Ver05.txt`). They are
+third-party works, their provenance and terms to be confirmed by the owner;
+see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

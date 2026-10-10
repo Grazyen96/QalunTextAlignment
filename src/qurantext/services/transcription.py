@@ -19,9 +19,14 @@ from typing import Any
 from qurantext.config.settings import DEFAULT_MODEL_REF, ENGINES, AppSettings, get_settings
 from qurantext.io.writers import write_json
 from qurantext.services import engine_whisperx
-from qurantext.services.errors import TranscriptionError, WhisperXServiceError
+from qurantext.services.errors import (
+    RUN_THE_DOCTOR,
+    WHISPERX_INSTEAD,
+    TranscriptionError,
+    WhisperXServiceError,
+)
 from qurantext.services.transcript_cache import cache_key, load_cached, store_cached
-from qurantext.utils.progress import CancelToken, ProgressCallback
+from qurantext.utils.progress import CancelToken, ProgressCallback, report
 
 __all__ = [
     "ENGINE_LABELS",
@@ -146,10 +151,22 @@ def transcribe_audio(
         key_settings=key_settings,
         model_ref=resolved_model_ref,
         engine="whisperx",
-        run=lambda: engine_whisperx.run_whisperx(audio_file_path, settings, resolved_model_ref),
+        run=lambda: _run_whisperx(audio_file_path, settings, resolved_model_ref, progress),
         save_raw_to=save_raw_to,
         use_cache=use_cache,
     )
+
+
+def _run_whisperx(
+    audio_file_path: Path,
+    settings: AppSettings,
+    model_ref: str,
+    progress: ProgressCallback | None,
+) -> Any:
+    """Run WhisperX on Replicate, saying so first: the upload and the transcription
+    take minutes, and the window's sentence would otherwise still be the stage before."""
+    report(progress, "transcribe_online", "Transcribing with WhisperX online...")
+    return engine_whisperx.run_whisperx(audio_file_path, settings, model_ref)
 
 
 #: Manifests whose installed files this process has checked against their checksums.
@@ -172,8 +189,7 @@ def _run_local(
     if problem is not None:
         raise LocalEngineError(
             f"The speech runtime (sherpa-onnx) is missing or could not start: {problem}\n"
-            "Reinstall Qalun, or choose WhisperX online. Run `qalun --doctor` to see what "
-            "is missing."
+            f"Reinstall Qalun, or {WHISPERX_INSTEAD}. {RUN_THE_DOCTOR}"
         )
     manifest = model_store.LOCAL_MODEL
     model_dir = model_store.ensure_model(manifest, progress=progress, cancel=cancel)
@@ -191,7 +207,7 @@ def _run_local(
         if model_store.verify_installed(manifest):
             raise LocalEngineError(
                 f"{error}\nThe model's files are intact, so the speech runtime itself "
-                "could not start. Run `qalun --doctor` to see what is missing."
+                f"could not start. {RUN_THE_DOCTOR}"
             ) from error
         model_store.discard(manifest)
         model_dir = model_store.ensure_model(manifest, progress=progress, cancel=cancel)
@@ -202,8 +218,8 @@ def _run_local(
     except ModelLoadError as error:
         raise LocalEngineError(
             f"{error}\nThe speech model was downloaded again and checked, and it still "
-            "could not be loaded, so the speech runtime itself could not start. Run "
-            "`qalun --doctor` to see what is missing, or choose WhisperX online."
+            "could not be loaded, so the speech runtime itself could not start. "
+            f"{RUN_THE_DOCTOR} Until then, you can {WHISPERX_INSTEAD}."
         ) from error
 
 

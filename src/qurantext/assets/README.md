@@ -17,3 +17,13 @@ The Quran text ships for more than convenience. The parser expects this file's
 exact conventions, and the ayah numbering has to be the Madani counting the rest
 of the data assumes, so "bring your own text" is a way to get subtly wrong
 output rather than an obvious failure.
+
+## Licence: not Qalun's
+
+The font (`fonts/qaloon.10.ttf`, `fonts/qaloon.10.woff2`) and the Quran text
+(`quran/UthmanicQaloon1-Ver05.txt`) are third-party works. Qalun's own licence,
+GPL-3.0-only, does not cover them, even though they ship inside the package,
+the app and its source zip. Their provenance and terms are to be confirmed by
+the owner; until then `THIRD_PARTY_NOTICES.md` says so, and the release
+checklist holds the first release until they are confirmed and written down
+there.

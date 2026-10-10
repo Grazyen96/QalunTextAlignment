@@ -18,7 +18,7 @@ should not mean editing the build file three times in a row.
 | `stage.sh` | all | copy `vendor/` in beside the built executable |
 | `check.sh` / `check.ps1` | all | run the built app's own `--doctor --release`, with PATH stripped and `QURANTEXT_TRANSCRIBE_ENGINE=local`: render, the local engine's runtime (sherpa-onnx), the Replicate client (blocking whatever the engine, because the window offers WhisperX), play audio (through FFmpeg), Qt's Arabic translation, an Arabic interface font. Killed and failed after 180 s. On Linux, also fail when the bundle has no `libxcb-cursor.so.0`, which the doctor, drawing offscreen, cannot notice. When all that passes, run `check-transcription.sh` |
 | `check-transcription.sh` | all (Git's bash on Windows) | check through GitHub's API that the published model asset still has the size and sha256 pinned in `model_store.py`, then transcribe a 5 s tone inside the built app with `--cli transcribe --engine local --no-cache`, PATH stripped, and fail unless the transcript has a `segments` list. Killed and failed after 900 s. See below |
-| `package.sh <artifact>` | all | zip the app into `out/<artifact>.zip`: `ditto` on macOS, `zip -ry` on Linux so symlinks stay symlinks, Python's `make_archive` on Windows. `THIRD_PARTY_NOTICES.md` and `LICENSE` go at the top: beside the executable in `qalun/`, and beside `Qalun.app` on macOS. On Linux only, also write `out/qalun-source-<tag or commit>.zip`, `git archive` of the commit built (Qalun is GPL-3.0-only, so each release carries its source); fails outside a git checkout |
+| `package.sh <artifact>` | all | zip the app into `out/<artifact>.zip`: `ditto` on macOS, `zip -ry` on Linux so symlinks stay symlinks, Python's `make_archive` on Windows. At the top of every zip (beside the executable in `qalun/`, and beside `Qalun.app` on macOS): `THIRD_PARTY_NOTICES.md`, `LICENSE`, `qalun-source.zip` (`git archive` of the commit built: Qalun is GPL-3.0-only and the repository is private, so every app zip carries its own source; fails outside a git checkout) and `third-party-sources/` (the GPL/LGPL sources pinned in `packaging/third-party-sources.txt`, downloaded with `curl` and refused unless the sha256 matches; kept in `.ci-cache/third-party-sources` or `QALUN_SOURCES_CACHE`). On a tag build, fail unless the tag is `v` + `__version__` from `src/qurantext/__init__.py` |
 
 `vendor/` holds what the app needs at runtime but does not carry itself: FFmpeg,
 because nobody should have to install an encoder, and FriBiDi, because Pillow
@@ -56,9 +56,15 @@ with the pinned file name, the pinned size and, when the API gives a `digest`, t
 pinned sha256. Reading release metadata does not add to the asset's download
 count. The expected values come from `LOCAL_MODEL` in `model_store.py`, read with
 the runner's Python, so they are written down in one place; a test checks that the
-script does not repeat them. The call uses `GITHUB_TOKEN` when the environment has
-one and is anonymous otherwise (one call per platform per run, well inside
-GitHub's anonymous limit); the workflow passes no token today. The cache itself
+script does not repeat them. The call uses `GITHUB_TOKEN`, which the workflow
+passes to both gate steps (`${{ github.token }}`, scoped to this repository, so
+it cannot see another repository's private releases), and is anonymous without
+one. Anonymous calls are limited to 60 an hour per address, and GitHub's hosted
+runners, macOS above all, share their addresses with other jobs, so an anonymous
+gate can be refused for someone else's traffic. When the call fails, the gate
+names the cause from the HTTP status: 403 or 429 is the rate limit, 404 a release
+or repository that is gone, renamed or private, and no status at all a network
+failure. The cache itself
 only ever holds a folder that a previous run downloaded and verified, because a
 cache is saved only when the job succeeds.
 
