@@ -37,3 +37,14 @@ def test_the_linux_build_machine_gets_the_libraries_qt_links() -> None:
     text = COLLECT_LINUX.read_text(encoding="utf-8")
     for package in ("libpulse0", "libegl1", "libxcb-cursor0", "libxkbcommon-x11-0"):
         assert package in text, package
+
+
+def test_the_third_party_notice_credits_the_speech_model() -> None:
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[1] / "THIRD_PARTY_NOTICES.md").read_text(
+        encoding="utf-8"
+    )
+    assert "stt_ar_fastconformer_hybrid_large_pcd_v1.0" in text
+    assert "CC BY 4.0" in text
+    assert "sherpa-onnx" in text and "Apache" in text

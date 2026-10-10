@@ -90,6 +90,12 @@ This is the spec's §6 manual check.
       written as `\u2066`-style escapes in the source. The tests fail if a key goes
       missing.
 
+## Speech model
+
+- [ ] Publishing a new speech model: follow `tools/export_local_model/README.md`. A new
+      model is a new release asset. Never replace a release asset in place, because
+      shipped apps pin the old one by size and checksum.
+
 ## Publish
 
 - [ ] Tag the release and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`. The

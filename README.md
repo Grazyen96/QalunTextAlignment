@@ -2,7 +2,7 @@
 
 QuranText helps you take Arabic audio or existing WhisperX transcripts and do four main things:
 
-1. **Transcribe audio** with WhisperX.
+1. **Transcribe audio** on this computer with a local speech model (WhisperX on Replicate is optional).
 2. **Detect a recitation range** by finding the first and last ayah in a recitation.
 3. **Detect Quran mentions inside lecture audio** and return timestamped spans.
 4. **Render timestamped Quran videos** from lecture or recitation match results.
@@ -166,13 +166,15 @@ python3 -m qurantext ...
 
 ## Environment
 
-Create a local `.env` or `.env.local` file from `.env.example` and set your Replicate token when using WhisperX transcription:
+Transcription runs on this computer by default, so no token is needed for it. Only the optional WhisperX engine on Replicate needs one. Create a `.env` or `.env.local` file from `.env.example` and set your Replicate token there:
 
 ```env
 REPLICATE_API_TOKEN=
 ```
 
-If you are **only matching from an existing WhisperX JSON file**, you do **not** need the Replicate token.
+The `.env` files are read from the checkout root when you run from source, and from the user data folder when you run the packaged app.
+
+You do **not** need the Replicate token for the local engine, or when matching from an existing WhisperX JSON file.
 
 Common runtime defaults can also be overridden from the environment. Examples:
 
@@ -204,7 +206,7 @@ src/qurantext/
   core/                Quran parsing, matching, lecture matching, shared video helpers, and renderer modules
   io/                  JSON/transcript readers and writers
   pipelines/           End-to-end workflows
-  services/            External service integrations such as WhisperX
+  services/            Transcription engines (local model, WhisperX on Replicate) and the model store
   utils/               Small generic helpers
 input/
   quran/
@@ -255,7 +257,7 @@ output/
 ## Choose The Right Workflow
 
 ### `transcribe`
-Use when you only want raw WhisperX JSON.
+Use when you only want a raw transcript (WhisperX-shaped JSON).
 
 ### `range-match`
 Use when you want:
@@ -382,14 +384,18 @@ Show CLI help:
 python3 -m qurantext --help
 ```
 
-### 1. Transcribe audio with WhisperX
+### 1. Transcribe audio
 
 ```bash
 python3 -m qurantext transcribe \
   --audio input/lectures/example.mp3
 ```
 
-This writes raw WhisperX JSON to the configured transcripts output directory unless `--output` is provided.
+Transcription runs on this computer by default. The first time, Qalun downloads the speech model once (about 110 MB). Its licence is in `THIRD_PARTY_NOTICES.md`.
+
+To use WhisperX on Replicate instead, pass `--engine whisperx` or set `QURANTEXT_TRANSCRIBE_ENGINE=whisperx`. That needs `REPLICATE_API_TOKEN`.
+
+This writes raw transcript JSON to the configured transcripts output directory unless `--output` is provided.
 
 ### 2. Detect the first and last ayah in a recitation
 
@@ -656,7 +662,7 @@ python3 -m pip install pytest ruff
 ## Troubleshooting
 
 - If `python3 -m qurantext ...` fails with `No module named qurantext`, either install the package with `python3 -m pip install -e .` or run with `PYTHONPATH=src`.
-- If transcription fails, verify `REPLICATE_API_TOKEN` in `.env`, `.env.local`, or your shell environment.
+- If transcription with `--engine whisperx` fails, verify `REPLICATE_API_TOKEN` in `.env`, `.env.local`, or your shell environment. The local engine needs no token, only the one-time model download.
 - If you already have a WhisperX transcript, use `--whisperx-json` instead of `--audio` to skip retranscription.
 - If `generate-video --renderer ass` fails, confirm your FFmpeg build has `libass` support and that the font name exists on the system.
 - If `generate-video --renderer frame` fails, install `Pillow` and `numpy`, check that FFmpeg is on your PATH, and use a valid `--font-file`.
