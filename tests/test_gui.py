@@ -931,6 +931,51 @@ def test_the_status_line_says_each_stage_in_the_window_s_words(qt_app, home) -> 
     assert status.text() == module.t("home.progress.rendering", percent=40)
 
 
+@pytest.mark.parametrize("language", ["en", "ar"])
+def test_the_model_download_says_its_own_stage_not_matching(qt_app, home, language) -> None:
+    """The first local job downloads the model inside the matching stage; it says so."""
+    from qurantext.gui import i18n
+    from qurantext.gui import main_window as module
+
+    i18n.set_language(language)
+    try:
+        status = home.new_job.status_label
+        matching = module.t("home.progress.matching", percent=12)
+        home._on_progress(
+            ProgressEvent("detect", module.t("job.progress.detecting"), translated=True)
+        )
+        # The store's first event carries no fraction, so the stage's sentence shows.
+        home._on_progress(ProgressEvent("download", "Downloading the speech model, once..."))
+        assert status.text() == module.t("job.stage.download")
+        home._on_progress(
+            ProgressEvent("download", "12 MB of 108 MB", fraction=0.12, eta_seconds=95)
+        )
+        assert status.text() == module.t(
+            "home.progress.downloading_eta", percent=12, eta=module._minutes(95)
+        )
+        assert matching.split("—")[0].strip() not in status.text()
+        home._on_progress(ProgressEvent("download", "Downloaded.", fraction=1.0, done=True))
+        assert status.text() == module.t("home.progress.downloading", percent=100)
+        home._on_progress(ProgressEvent("unpack", "Unpacking and checking the speech model..."))
+        assert status.text() == module.t("job.stage.unpack")
+        # Back to matching: its own sentence again, then its own percentage.
+        home._on_progress(ProgressEvent("detect", "[2/3] Aligning 12 ayat..."))
+        assert status.text() == module.t("job.stage.detect")
+        home._on_progress(ProgressEvent("detect", "x", fraction=0.12))
+        assert status.text() == matching
+    finally:
+        i18n.set_language("en")
+
+
+def test_the_download_sentence_says_the_pinned_size_rounded() -> None:
+    from qurantext.gui import i18n
+    from qurantext.services.model_store import LOCAL_MODEL
+
+    assert LOCAL_MODEL.download_mb == 110
+    assert "(about 110 MB)" in i18n.STRINGS["en"]["job.stage.download"]
+    assert "(نحو 110 ميغابايت)" in i18n.STRINGS["ar"]["job.stage.download"]
+
+
 def test_the_window_s_own_progress_sentences_are_shown_as_they_are(qt_app, home) -> None:
     """``gui/jobs.py`` marks what it already said in the window's language, and it stays up."""
     from qurantext.gui import main_window as module

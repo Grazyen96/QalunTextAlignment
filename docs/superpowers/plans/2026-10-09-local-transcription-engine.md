@@ -2771,7 +2771,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - [ ] **Step 1: Write the slow test** (`tests/test_local_engine_slow.py`)
 
 ```python
-"""The real model on a real recitation. Opt-in: downloads ~120 MB once and runs ~10 s.
+"""The real model on a real recitation. Opt-in: downloads ~110 MB once and runs ~10 s.
 
     QURANTEXT_SLOW_TESTS=1 venv/bin/python -m pytest tests/test_local_engine_slow.py
 """
@@ -2955,7 +2955,7 @@ Expected: FAIL.
 `i18n.py`: add to the English table:
 
 ```python
-        "job.stage.download": "Downloading the speech model, once (about 120 MB)…",
+        "job.stage.download": "Downloading the speech model, once (about 110 MB)…",
         "job.stage.transcribe": "Transcribing on this computer…",
         "home.engine": "Transcription:",
         "home.engine.local": "On this computer",
@@ -2966,7 +2966,7 @@ Expected: FAIL.
 and to the Arabic table:
 
 ```python
-        "job.stage.download": "جارٍ تنزيل نموذج التعرّف على الكلام، مرة واحدة فقط (نحو 120 ميغابايت)…",
+        "job.stage.download": "جارٍ تنزيل نموذج التعرّف على الكلام، مرة واحدة فقط (نحو 110 ميغابايت)…",
         "job.stage.transcribe": "جارٍ تفريغ الصوت على هذا الحاسوب…",
         "home.engine": "التفريغ:",
         "home.engine.local": "على هذا الحاسوب",
@@ -3314,7 +3314,7 @@ If Task 0.3 chose fp32, delete the quantisation sentence.
 
 - [ ] **Step 3: Update the docs**
 
-- `README.md`: in the "Transcribe audio" section, say that transcription runs on this computer by default (one model download of about 120 MB on first use), and that `--engine whisperx` or `QURANTEXT_TRANSCRIBE_ENGINE=whisperx` uses Replicate, which needs `REPLICATE_API_TOKEN`. In the `.env` section, say the token is needed **only** for WhisperX. In the layout listing, describe `services/` as "transcription engines (local model, WhisperX on Replicate) and the model store".
+- `README.md`: in the "Transcribe audio" section, say that transcription runs on this computer by default (one model download of about 110 MB on first use), and that `--engine whisperx` or `QURANTEXT_TRANSCRIBE_ENGINE=whisperx` uses Replicate, which needs `REPLICATE_API_TOKEN`. In the `.env` section, say the token is needed **only** for WhisperX. In the layout listing, describe `services/` as "transcription engines (local model, WhisperX on Replicate) and the model store".
 - `docs/architecture.md`: under `services`, replace the `transcription.py` line with one line each for `transcription.py` (the entry point, cache, engine choice), `engine_local.py`, `engine_whisperx.py`, `model_store.py` and `errors.py`. Under `core`, add `pause_cut.py` and `token_words.py`. In the data-flow steps, change "Load or transcribe WhisperX output" to "Load a saved transcript, or transcribe (local model by default, or WhisperX)".
 - `docs/release-checklist.md`: add a step, "Publishing a new speech model: `tools/export_local_model/README.md`. Never replace a release asset in place."
 
@@ -3429,7 +3429,7 @@ It runs inside the frozen app on each OS. A tone is generated with the FFmpeg th
           python -c "import json; d=json.load(open('gate-tone.json')); assert 'segments' in d, d"
 ```
 
-Set `QALUN_EXE` the same way the existing gate step locates the frozen executable on each OS; copy that expression from the step above. If FFmpeg is only beside the frozen executable, call that copy. The job's timeout must allow the about 120 MB download.
+Set `QALUN_EXE` the same way the existing gate step locates the frozen executable on each OS; copy that expression from the step above. If FFmpeg is only beside the frozen executable, call that copy. The job's timeout must allow the about 110 MB download.
 
 - [ ] **Step 2: Document the step** in `packaging/ci/README.md` and the release checklist: what it proves, and that a failure here usually means a broken `qalun-models` asset, a changed checksum, or a missing sherpa-onnx library in the bundle.
 

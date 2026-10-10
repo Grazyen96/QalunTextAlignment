@@ -20,6 +20,8 @@ from __future__ import annotations
 import string
 import unicodedata
 
+from qurantext.services.model_store import LOCAL_MODEL
+
 __all__ = [
     "LANGUAGES",
     "LANGUAGE_NAMES",
@@ -47,6 +49,10 @@ LANGUAGE_NAMES = {"en": "English", "ar": "العربية"}
 
 _FSI, _LRI, _PDI, _LRM = "\u2068", "\u2066", "\u2069", "\u200e"
 _RLI, _RLM = "\u2067", "\u200f"
+
+#: The speech model's download, rounded for people ("about 110 MB"); read from
+#: the pinned model so a new one never leaves an old figure behind.
+_MODEL_MB = LOCAL_MODEL.download_mb
 
 STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
     "en": {
@@ -124,6 +130,8 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "job.progress.kept": "Kept your earlier corrections in {name}",
         # What the status line says while a stage runs; the pipeline's own
         # messages are English log lines and are never shown.
+        "job.stage.download": f"Downloading the speech model, once (about {_MODEL_MB} MB)…",
+        "job.stage.unpack": "Unpacking and checking the speech model…",
         "job.stage.detect": "Matching the recording to the Quran text…",
         "job.stage.match": "Looking for Quran citations in the lecture…",
         "job.stage.render": "Rendering the video…",
@@ -134,6 +142,8 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "home.progress.stopping": "Stopping…",
         "home.progress.matching": "Matching — {percent}%",
         "home.progress.matching_eta": "Matching — {percent}%, about {eta} left",
+        "home.progress.downloading": "Downloading the speech model — {percent}%",
+        "home.progress.downloading_eta": "Downloading the speech model — {percent}%, about {eta} left",
         "home.progress.rendering": "Rendering — {percent}%",
         "home.progress.rendering_eta": "Rendering — {percent}%, about {eta} left",
         "home.eta.seconds": "{seconds}s",
@@ -326,6 +336,8 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "job.progress.aligning": "جارٍ مطابقة التلاوة مع الآيات التي اخترتها…",
         "job.progress.detecting": "جارٍ البحث عن القرآن في التسجيل…",
         "job.progress.kept": "أُبقيت تصحيحاتك السابقة في {name}",
+        "job.stage.download": f"جارٍ تنزيل نموذج التعرّف على الكلام، مرة واحدة فقط (نحو {_MODEL_MB} ميغابايت)…",
+        "job.stage.unpack": "جارٍ فكّ نموذج التعرّف على الكلام والتحقق منه…",
         "job.stage.detect": "جارٍ مطابقة التسجيل مع نص القرآن…",
         "job.stage.match": "جارٍ البحث عن الاستشهادات القرآنية في المحاضرة…",
         "job.stage.render": "جارٍ إخراج الفيديو…",
@@ -336,6 +348,8 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "home.progress.stopping": "جارٍ الإيقاف…",
         "home.progress.matching": "المطابقة — \u2066{percent}%\u2069",
         "home.progress.matching_eta": "المطابقة — \u2066{percent}%\u2069، يتبقى نحو {eta}",
+        "home.progress.downloading": "تنزيل نموذج التعرّف على الكلام — \u2066{percent}%\u2069",
+        "home.progress.downloading_eta": "تنزيل نموذج التعرّف على الكلام — \u2066{percent}%\u2069، يتبقى نحو {eta}",
         "home.progress.rendering": "إخراج الفيديو — \u2066{percent}%\u2069",
         "home.progress.rendering_eta": "إخراج الفيديو — \u2066{percent}%\u2069، يتبقى نحو {eta}",
         "home.eta.seconds": "{seconds} ث",

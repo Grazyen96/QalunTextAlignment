@@ -210,13 +210,13 @@ audio ──ffmpeg (bundled)──► 16 kHz mono float32, decoded incrementally
   with where to put the token, before Start. Start stays enabled, because a
   token can be added outside the app and settings are read at startup.
 - First-run download progress appears in the job's existing progress line, as
-  a stage: "Downloading the speech model, once (about 120 MB)".
+  a stage: "Downloading the speech model, once (about 110 MB)".
 - Both languages: new `i18n` keys in English and Arabic.
 
 **Doctor** (`config/preflight.py`, `_transcription()`):
 - Local engine: **blocking** if `sherpa_onnx` cannot be imported, or its native
   library cannot load. **Informational** if the model is not downloaded yet
-  ("downloads about 120 MB on first use"). Fine if it is present and its sizes
+  ("downloads about 110 MB on first use"). Fine if it is present and its sizes
   match.
 - WhisperX: the existing token and `replicate` checks run only when WhisperX is
   the configured engine. Otherwise they are reported as informational, never
