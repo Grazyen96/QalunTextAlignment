@@ -175,3 +175,49 @@ def test_result_records_its_engine() -> None:
     )
     assert result.engine == "whisperx"
     assert result.from_cache is False
+
+
+class TestEngineChoice:
+    def test_an_explicit_engine_wins_over_the_setting(self, monkeypatch) -> None:
+        from qurantext.config.settings import get_settings
+        from qurantext.services.transcription import resolve_engine
+
+        monkeypatch.setenv("QURANTEXT_TRANSCRIBE_ENGINE", "local")
+        get_settings.cache_clear()
+        assert resolve_engine("whisperx", get_settings()) == "whisperx"
+        assert resolve_engine(None, get_settings()) == "local"
+        get_settings.cache_clear()
+
+    def test_an_unknown_engine_names_the_choices(self, monkeypatch) -> None:
+        from qurantext.config.settings import get_settings
+        from qurantext.services.transcription import resolve_engine
+
+        with pytest.raises(ValueError, match="local.*whisperx"):
+            resolve_engine("cohere", get_settings())
+
+    def test_the_whisperx_cache_key_is_unchanged(self, monkeypatch, tmp_path) -> None:
+        """Existing cached transcripts must keep hitting after the engine seam."""
+        from qurantext.config.settings import get_settings
+        from qurantext.services import engine_whisperx
+
+        settings = get_settings()
+        assert engine_whisperx.cache_settings(settings, "m") == {
+            "model": "m",
+            **settings.whisperx.input_kwargs(),
+        }
+
+    def test_progress_and_cancel_are_accepted(self, monkeypatch, tmp_path) -> None:
+        from qurantext.config.settings import get_settings
+        from qurantext.services import engine_whisperx, transcription
+        from qurantext.utils.progress import CancelToken
+
+        audio = tmp_path / "a.wav"
+        audio.write_bytes(b"RIFF....WAVE")
+        monkeypatch.setenv("QURANTEXT_CACHE_DIR", str(tmp_path / "cache"))
+        get_settings.cache_clear()
+        monkeypatch.setattr(engine_whisperx, "run_whisperx", lambda *_a, **_k: {"segments": []})
+        result = transcription.transcribe_audio(
+            audio, engine="whisperx", progress=lambda _e: None, cancel=CancelToken()
+        )
+        get_settings.cache_clear()
+        assert result.engine == "whisperx"

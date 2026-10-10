@@ -5,11 +5,24 @@ from os import PathLike
 from pathlib import Path
 from typing import Any
 
-from qurantext.config.settings import DEFAULT_MODEL_REF, get_settings
+from qurantext.config.settings import DEFAULT_MODEL_REF, ENGINES, AppSettings, get_settings
 from qurantext.io.writers import write_json
 from qurantext.services import engine_whisperx
 from qurantext.services.errors import TranscriptionError, WhisperXServiceError
 from qurantext.services.transcript_cache import cache_key, load_cached, store_cached
+from qurantext.utils.progress import CancelToken, ProgressCallback
+
+#: How progress lines and messages name each engine.
+ENGINE_LABELS = {"local": "the local model", "whisperx": "WhisperX on Replicate"}
+
+
+def resolve_engine(engine: str | None, settings: AppSettings) -> str:
+    """The engine to use: the explicit choice, else the setting."""
+    value = (engine or settings.transcription.engine or "").strip().lower()
+    if value not in ENGINES:
+        raise ValueError(f"Unknown transcription engine {value!r}; choose 'local' or 'whisperx'.")
+    return value
+
 
 __all__ = [
     "TranscriptionError",
@@ -81,8 +94,11 @@ def transcribe_audio(
     save_raw_to: str | PathLike[str] | None = None,
     model_ref: str | None = None,
     use_cache: bool = True,
+    engine: str | None = None,
+    progress: ProgressCallback | None = None,
+    cancel: CancelToken | None = None,
 ) -> TranscriptionResult:
-    """Transcribe an audio file with WhisperX on Replicate.
+    """Transcribe an audio file with the chosen engine (see :func:`resolve_engine`).
 
     The same audio with the same settings always gives the same transcript, so
     the result is cached against the audio's content. A repeat run — correcting
@@ -94,6 +110,11 @@ def transcribe_audio(
         raise FileNotFoundError(f"Audio file not found: {audio_file_path}")
 
     settings = get_settings()
+    resolved_engine = resolve_engine(engine, settings)
+    if resolved_engine == "local":
+        from qurantext.services.errors import LocalEngineError
+
+        raise LocalEngineError("The local engine is not part of this build yet.")
     resolved_model_ref = model_ref or settings.whisperx.model_ref or DEFAULT_MODEL_REF
     key_settings = engine_whisperx.cache_settings(settings, resolved_model_ref)
     return _transcribe_cached(

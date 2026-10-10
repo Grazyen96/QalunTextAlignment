@@ -17,6 +17,7 @@ from .paths import (
 )
 from .settings import (
     AppSettings,
+    TranscriptionSettings,
     WhisperXSettings,
     clean_secret,
     describe_secret,
@@ -39,6 +40,7 @@ __all__ = [
     "RECITATION_MATCHING_OUTPUT_DIR",
     "VIDEOS_OUTPUT_DIR",
     "WHISPERX_TRANSCRIPTS_OUTPUT_DIR",
+    "TranscriptionSettings",
     "WhisperXSettings",
     "get_settings",
     "clean_secret",
