@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from qurantext.config.paths import QURAN_DB_PATH, QURAN_INPUT_DIR
-from qurantext.config.settings import VIDEO_PRESETS
+from qurantext.config.settings import ENGINES, VIDEO_PRESETS, env_dir, get_settings
 from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.data.quran_db import ensure_quran_db, list_surahs
 from qurantext.gui.i18n import path_text, plain_title, t, tn
@@ -263,6 +263,27 @@ class NewJobPanel(QWidget):
         output_row.addWidget(self.output_reset_button)
         self.more_form.addRow(t("home.output_dir"), self.output_row)
 
+        self.engine_row = QWidget()
+        engine_row = QVBoxLayout(self.engine_row)
+        engine_row.setContentsMargins(0, 0, 0, 0)
+        choices = QHBoxLayout()
+        self._engine_group = QButtonGroup(self)
+        self._engine_group.setExclusive(True)
+        self.engine_buttons: dict[str, QRadioButton] = {}
+        for value in ENGINES:
+            button = QRadioButton(t(f"home.engine.{value}"))
+            self.engine_buttons[value] = button
+            self._engine_group.addButton(button)
+            choices.addWidget(button)
+        choices.addStretch(1)
+        engine_row.addLayout(choices)
+        self.no_token_label = QLabel()
+        self.no_token_label.setWordWrap(True)
+        self.no_token_label.setVisible(False)
+        engine_row.addWidget(self.no_token_label)
+        self.more_form.addRow(t("home.engine"), self.engine_row)
+        self._engine_group.buttonToggled.connect(self._engine_changed)
+
         self.subtitles_row = QWidget()
         subtitles_row = QHBoxLayout(self.subtitles_row)
         subtitles_row.setContentsMargins(0, 0, 0, 0)
@@ -357,6 +378,9 @@ class NewJobPanel(QWidget):
         chosen = set(self._prefs.formats)
         for fmt, box in self.format_boxes.items():
             box.setChecked(fmt in chosen)
+
+        self.engine_buttons[self._prefs.engine].setChecked(True)
+        self._show_token_note(self._prefs.engine)
 
         self.render_right_away_box.setChecked(self._prefs.render_right_away)
 
@@ -637,6 +661,25 @@ class NewJobPanel(QWidget):
         self._set_formats_visibility(value)
         self._refresh()
 
+    def _current_engine(self) -> str:
+        for value, button in self.engine_buttons.items():
+            if button.isChecked():
+                return value
+        return "local"
+
+    def _engine_changed(self) -> None:
+        value = self._current_engine()
+        self._prefs.engine = value
+        self._show_token_note(value)
+        self._refresh()
+
+    def _show_token_note(self, engine: str) -> None:
+        """Say before Start, not after a failed upload, that WhisperX has no token."""
+        missing = engine == "whisperx" and not get_settings().replicate_api_token
+        if missing:
+            self.no_token_label.setText(t("home.engine.no_token", folder=path_text(env_dir())))
+        self.no_token_label.setVisible(missing)
+
     def _set_formats_visibility(self, subtitles: str) -> None:
         """Show the file formats, and their label, only when there are files to write."""
         shown = subtitles in ("sidecar", "both")
@@ -672,6 +715,7 @@ class NewJobPanel(QWidget):
             subtitles=self._current_subtitles(),
             formats=formats,
             render_right_away=self.render_right_away_box.isChecked(),
+            engine=self._current_engine(),
             output_dir=self._output_dir,
         )
 
@@ -701,6 +745,7 @@ class NewJobPanel(QWidget):
             self.quran_reset_button,
             self.output_choose_button,
             self.output_reset_button,
+            *self.engine_buttons.values(),
             *self.subtitle_buttons.values(),
             *self.format_boxes.values(),
             self.render_right_away_box,

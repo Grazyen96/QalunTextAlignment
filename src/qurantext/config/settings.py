@@ -185,16 +185,21 @@ def _load_env_file(path: Path) -> None:
             os.environ[key] = value
 
 
-def load_project_env() -> None:
-    """Load .env files while keeping the current process environment authoritative.
+def env_dir() -> Path:
+    """The folder whose .env files are read: the checkout's root, else the data folder.
 
     From a checkout these sit at the repository root, where they always have.
     Installed there is no repository, so the platform data directory is the only
     sensible home for them — a desktop app should be writing settings there
     rather than asking the user to keep a dotfile next to the code.
     """
+    return checkout_root() or user_data_dir()
+
+
+def load_project_env() -> None:
+    """Load the .env files in :func:`env_dir`, keeping the process environment authoritative."""
     existing_env = dict(os.environ)
-    root = checkout_root() or user_data_dir()
+    root = env_dir()
     _load_env_file(root / ".env")
     _load_env_file(root / ".env.local")
 
