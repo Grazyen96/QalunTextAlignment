@@ -74,7 +74,7 @@ anything is built on it.
 | Word starts against NeMo, over all recitation words | every clip's median ≤ 20 ms, and at least 95% of all recitation words within 100 ms |
 | Word ends | no end is before its start, and no word overlaps the next. An RNNT decoder can emit two words on the same frame, so "equal" must be allowed |
 
-Amended 10 October 2026 after the first run: identical card splits and a per-clip onset rate measured the matcher's boundary noise and a known NeMo error at the end of 25:11, not the engine (see the bake-off finding).
+Amended 10 October 2026 after the first run: identical card splits and a per-clip onset rate measured mostly the matcher's boundary noise and a known NeMo error at the end of 25:11, plus one int8 word merge in 25:10 (see the bake-off finding).
 
 int8 ships if it passes. Otherwise fp32 ships, and the download size in §2
 changes from about 120 MB to about 450 MB. If neither passes, work stops and
@@ -168,13 +168,20 @@ audio ──ffmpeg (bundled)──► 16 kHz mono float32, decoded incrementally
 - **Memory:** audio is read from FFmpeg's pipe in blocks and cut into windows
   as it arrives, never decoded whole. An 80-minute lecture would otherwise be
   more than 300 MB of float32 on a machine that is often near its memory limit.
-- **Tokens to words:** a token that begins with the word marker (`▁`) starts a
-  new word, and the following tokens join it.
+- **Tokens to words:** a token that begins with the word marker (`▁`, which
+  sherpa-onnx's Python API renders as a leading space) starts a new word, and
+  the following tokens join it. A bare space token also starts the next word.
+  Special tokens such as `<unk>` and `<blk>` are not speech and are skipped.
   - A word's **start** is its first token's time.
   - Its **end** is the next word's start, capped at its last token's time plus
     0.5 s. The last word of a window ends at the window's end or that cap,
     whichever is earlier.
-  - Phase 0 checks this rule against NeMo's word ends.
+  - Phase 0 measured this rule's ends on the raw recitation transcripts. The
+    int8 ends sit a median 320 ms after NeMo's own ends (7% within 100 ms), and
+    its card `end_time` is 0.42 s later on every card. Against WhisperX, which
+    users get today, the median difference is 125 ms (73% within 250 ms); NeMo's
+    own ends differ from WhisperX's by a median 208 ms. The renderer switches on
+    word starts, so this is not user-visible.
   - Pure punctuation tokens attach to the word before them. The model's
     diacritics stay in the word text, because the matcher normalises them.
 - **One segment per window:** `start`, `end`, `text` and `words`, where each

@@ -230,30 +230,36 @@ sherpa-onnx 1.13.8 on the same 17 clips, checked against NeMo RNNT by
 | furqanTra recall >= 883/893 | pass, 889/893 | pass, 888/893 |
 | furquanTra7-11 detected range identical, ayat covered within 1 of NeMo | pass, 5/5, range 25:7-11 | pass, 5/5, range 25:7-11 |
 | alFurqanCut detected range identical, ayat covered within 1 of NeMo | pass, 22/22, range 25:23-44 | pass, 22/22, range 25:23-44 |
-| alFurqan detected range identical, ayat covered within 1 of NeMo | pass, 76/74, range 25:1-77 | pass, 74/74, range 25:1-77 |
-| furqanTra detected range identical, ayat covered within 1 of NeMo | pass, 75/76, range 25:1-77 | pass, 75/76, range 25:1-77 |
+| alFurqan detected range identical, ayat covered within 1 of NeMo | pass, 76 (NeMo 74), range 25:1-77 | pass, 74 (NeMo 74), range 25:1-77 |
+| furqanTra detected range identical, ayat covered within 1 of NeMo | pass, 75 (NeMo 76), range 25:1-77 | pass, 75 (NeMo 76), range 25:1-77 |
 | Lecture studied ayat >= 54/72 | pass, 56/72 | pass, 56/72 |
 | Onsets vs NeMo over all recitation words (every median <= 20 ms, >= 95% within 100 ms) | pass, 2007/2043 (98.2%), medians 0 ms | pass, 2025/2051 (98.7%), medians 0 ms |
 | Word ends never before start nor past next start | pass, 0 | pass, 0 |
 
 Both variants exit 0 under the amended gate.
 
-The strict first run failed three checks, and none of them measured the
-engine. "Range and cards identical" failed on the two full-surah recitations:
-the matcher split one card one ayah differently, as WhisperX and NeMo also
-differ from each other, and both of those were accepted. What matters is card
-coverage (ayat covered of 77):
+The strict first run failed three checks. Mostly they measured the matcher's
+boundary noise and a known NeMo error rather than the engine, with one
+exception in int8 (below). "Range and cards identical" failed on the two
+full-surah recitations: the card boundaries differ from NeMo's at four places
+per full recitation for int8 and two for fp32 (int8 also has one extra card on
+alFurqan), and WhisperX differs from NeMo as well, which was accepted. What
+matters is card coverage (ayat covered of 77):
 
 | | NeMo | sherpa int8 | sherpa fp32 | WhisperX |
 |---|---|---|---|---|
 | alFurqan | 74 | 76 | 74 | 74 |
 | furqanTra | 76 | 75 (misses 6) | 75 (misses 76) | 76 |
 
-The per-clip onset check failed on furquanTra7-11 by one word (63/67, below
-95%). The four off words are at the end of 25:11, where NeMo's own reference
-merged "بالساعة وأعتدنا" into one garbled word. The spec's criterion was over
-all recitation words, which passes. The gate was amended on 10 October 2026
-accordingly: the detected range must be identical to NeMo's, coverage must be
+The per-clip onset check failed on furquanTra7-11. fp32 scored 63/67: the four
+off words are at the end of 25:11, where NeMo's own reference merged
+"بالساعة وأعتدنا" into one garbled word. int8 scored 62/67, two words short of
+95%, with five off words: the same four, plus `لَّكَ` in 25:10 (off by +0.56 s),
+where int8 itself merged "ويجعل لك" into one word `ويجعلك`; fp32 and NeMo split
+it correctly. int8's alFurqan recall sits exactly on the 883 floor (NeMo and
+fp32: 887). The spec's criterion was over all recitation words, which passes
+for both variants with margin (98.2% and 98.7%). The gate was amended on
+10 October 2026 accordingly: the detected range must be identical to NeMo's, coverage must be
 at least NeMo's minus one, and onsets are judged over all recitation words.
 Separately, `score.py` now skips the five WhisperX reference words that were
 never aligned (no start/end) when counting end violations.

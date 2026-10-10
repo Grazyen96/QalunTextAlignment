@@ -27,9 +27,13 @@ def tokens_to_words(tokens, times, *, window_end, offset):
         if not text:
             pending = pending or starts
             continue
+        if text.startswith("<") and text.endswith(">"):  # <unk>, <blk>: not speech
+            pending = pending or starts
+            continue
         if all(ch in PUNCT for ch in text):
             if pieces:
                 pieces[-1][0] += text
+            pending = pending or starts
             continue
         if starts or pending or not pieces:
             pieces.append([text, t, t])

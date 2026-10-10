@@ -12,7 +12,9 @@ python3 tools/export_local_model/package.py --variant-dir /tmp/qalun-export/int8
 ```
 
 `/tmp/qalun-release` then holds the archive to upload to the `model-v1` release
-of `Grazyen96/qalun-models`, together with `NOTICE.md`. It also holds
+of `Grazyen96/qalun-models`. The `NOTICE.md` that belongs with it is
+`tools/export_local_model/NOTICE.md` (a copy also sits in the variant directory,
+inside the archive). `/tmp/qalun-release` also holds
 `manifest_literal.py.txt`, which is pasted over `LOCAL_MODEL` in
 `src/qurantext/services/model_store.py`. A new model version is a new
 `--version`, a new release asset and a new pinned literal. Never replace an

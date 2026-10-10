@@ -1998,8 +1998,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 **Interfaces:**
 - Produces:
   - `tokens_to_words(tokens: Sequence[str], times: Sequence[float], *, window_end: float, offset: float = 0.0) -> list[dict]`, returning `{"word", "start", "end", "score": 1.0}` dicts in absolute seconds, rounded to 3 places;
-  - the constants `WORD_MARK = "▁"` and `MAX_TAIL_SECONDS = 0.5`.
-- It must behave exactly like `tokens_to_words` in `prototypes/asr_bakeoff/run_sherpa.py` (Task 0.2), which passed the gate.
+  - the constants `WORD_MARK = "▁"`, `WORD_STARTS = (WORD_MARK, " ")` and `MAX_TAIL_SECONDS = 0.5`.
+- It must behave exactly like `tokens_to_words` in `prototypes/asr_bakeoff/run_sherpa.py` (Task 0.2), which passed the gate: a token starts a word if it begins with `▁` or with a space (sherpa-onnx's Python API renders the mark as a leading space), and `<...>` special tokens are skipped.
 
 - [ ] **Step 1: Write the failing tests** (`tests/test_token_words.py`)
 
@@ -2058,6 +2058,36 @@ def test_leading_punctuation_is_dropped() -> None:
     assert [w["word"] for w in words] == ["a"]
 
 
+def test_a_leading_space_starts_a_word_like_the_mark() -> None:
+    # sherpa-onnx's Python API renders the SentencePiece mark as a leading space.
+    words = tokens_to_words([" وقا", "لوا", " ما"], [0.0, 0.16, 0.8], window_end=2.0)
+    assert [w["word"] for w in words] == ["وقالوا", "ما"]
+    assert _w(words)[0] == ("وقالوا", 0.0, 0.66)
+
+
+def test_a_bare_space_starts_the_next_piece_as_a_word() -> None:
+    words = tokens_to_words([" a", " ", "b"], [0.0, 0.4, 0.48], window_end=2.0)
+    assert [w["word"] for w in words] == ["a", "b"]
+    assert words[1]["start"] == 0.48
+
+
+def test_punctuation_after_a_leading_space_attaches_to_the_word_before() -> None:
+    words = tokens_to_words([" a", " ،", "b"], [0.0, 0.2, 0.3], window_end=1.0)
+    assert [w["word"] for w in words] == ["a،", "b"]
+
+
+def test_a_marked_punctuation_token_still_starts_the_next_piece() -> None:
+    words = tokens_to_words([f"{M}a", f"{M}،", "b"], [0.0, 0.2, 0.3], window_end=1.0)
+    assert [w["word"] for w in words] == ["a،", "b"]
+
+
+def test_special_tokens_are_not_speech() -> None:
+    words = tokens_to_words(
+        [" a", "<unk>", " b", " <blk>", " c"], [0, 0.1, 0.2, 0.3, 0.4], window_end=1.0
+    )
+    assert [w["word"] for w in words] == ["a", "b", "c"]
+
+
 def test_a_continuation_with_nothing_before_starts_a_word() -> None:
     words = tokens_to_words(["ab", "c"], [0.0, 0.1], window_end=1.0)
     assert [w["word"] for w in words] == ["abc"]
@@ -2096,8 +2126,11 @@ Expected: FAIL (`ModuleNotFoundError`).
 ```python
 """Turn the recogniser's sub-word tokens and their times into timed words.
 
-The model emits SentencePiece tokens: a token beginning with ``▁`` starts a new
-word and the tokens after it continue that word. Each token carries only a start
+The model emits SentencePiece tokens: a token beginning with the word mark
+starts a new word and the tokens after it continue that word. sherpa-onnx's
+Python API renders the mark ``▁`` as a leading space (``" وقال"``, and a bare
+``" "``), so a token starts a word on either; this mirrors
+``prototypes/asr_bakeoff/run_sherpa.py`` exactly. Each token carries only a start
 time, so a word ends where the next one starts, capped half a second after its
 last token so a long pause does not stretch the word across it. Punctuation the
 model writes belongs to the word before it. The rule is the one the ASR bake-off's
@@ -2108,9 +2141,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-__all__ = ["MAX_TAIL_SECONDS", "WORD_MARK", "tokens_to_words"]
+__all__ = ["MAX_TAIL_SECONDS", "WORD_MARK", "WORD_STARTS", "tokens_to_words"]
 
 WORD_MARK = "▁"
+WORD_STARTS = (WORD_MARK, " ")
 MAX_TAIL_SECONDS = 0.5
 _PUNCT = frozenset(".,،؛;:!?؟\"'«»()[]-…")
 
@@ -2128,14 +2162,18 @@ def tokens_to_words(
     pieces: list[list] = []  # [text, start, last token time]
     pending = False
     for token, t in zip(tokens, times, strict=True):
-        starts = token.startswith(WORD_MARK)
+        starts = token.startswith(WORD_STARTS)
         text = token.replace(WORD_MARK, "").strip()
         if not text:
+            pending = pending or starts
+            continue
+        if text.startswith("<") and text.endswith(">"):  # <unk>, <blk>: not speech
             pending = pending or starts
             continue
         if all(ch in _PUNCT for ch in text):
             if pieces:
                 pieces[-1][0] += text
+            pending = pending or starts
             continue
         if starts or pending or not pieces:
             pieces.append([text, float(t), float(t)])
@@ -2208,7 +2246,6 @@ from qurantext.utils.progress import CancelToken, JobCancelled
 
 FFMPEG = shutil.which("ffmpeg")
 pytestmark = pytest.mark.skipif(FFMPEG is None, reason="needs ffmpeg")
-M = "▁"
 
 
 def _tone(path, seconds=3.0, *, rate=16000, channels=1, extra=()):
@@ -2224,7 +2261,7 @@ def _tone(path, seconds=3.0, *, rate=16000, channels=1, extra=()):
 class FakeRecognizer:
     """Returns two words per window, at fixed times, and records what it was given."""
 
-    def __init__(self, *, tokens=(f"{M}قال", f"{M}رب"), times=(0.1, 0.5)):
+    def __init__(self, *, tokens=(" قال", " رب"), times=(0.1, 0.5)):
         self.windows: list[np.ndarray] = []
         self._tokens, self._times = list(tokens), list(times)
 

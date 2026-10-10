@@ -191,13 +191,13 @@ for clip, (mode, surah, first, last, _audio) in CLIPS.items():
             row["onsets"] = onsets(match)
         per_engine[eng] = row
     if mode == "recitation":
-        for ref in (BASELINE, "nemo-rnnt"):
-            if ref not in per_engine:
+        for base in (BASELINE, "nemo-rnnt"):
+            if base not in per_engine:
                 continue
             for eng, row in per_engine.items():
-                if eng != ref:
-                    row[f"timing_vs_{ref}"] = (
-                        timing_agreement(per_engine[ref]["onsets"], row["onsets"])
+                if eng != base:
+                    row[f"timing_vs_{base}"] = (
+                        timing_agreement(per_engine[base]["onsets"], row["onsets"])
                         or "no common words"
                     )
     for row in per_engine.values():

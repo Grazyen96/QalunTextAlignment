@@ -72,7 +72,10 @@ def main() -> None:
         f"    archive_size={manifest['archive_size']},",
         f'    archive_sha256="{manifest["archive_sha256"]}",',
         "    files=(",
-        *[f'        ModelFile("{f["name"]}", {f["size"]}, "{f["sha256"]}"),' for f in files],
+        *[
+            f'        ModelFile(\n            "{f["name"]}",\n            {f["size"]},\n            "{f["sha256"]}",\n        ),'
+            for f in files
+        ],
         "    ),",
         ")",
     ]
