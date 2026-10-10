@@ -147,24 +147,46 @@ def iter_word_windows(
                 }
 
 
-def score_span_for_lecture(span_norm: str, window_norm: str) -> float:
-    """Score a Qur'an span against a transcript window."""
+def _word_overlap(span_norm: str, window_norm: str) -> tuple[float, float] | None:
+    """The score's two cheap terms, recall and precision; None when either text is empty."""
     span_words = span_norm.split()
     window_words = window_norm.split()
-
     if not span_words or not window_words:
-        return 0.0
-
+        return None
     span_word_set = set(span_words)
-    window_word_set = set(window_words)
+    recall = word_recall(span_words, set(window_words))
+    precision = sum(1 for word in window_words if word in span_word_set) / len(window_words)
+    return recall, precision
 
-    recall = word_recall(span_words, window_word_set)
-    matched_window_words = sum(1 for word in window_words if word in span_word_set)
-    precision = matched_window_words / len(window_words)
+
+def score_span_for_lecture(span_norm: str, window_norm: str) -> float:
+    """Score a Qur'an span against a transcript window."""
+    overlap = _word_overlap(span_norm, window_norm)
+    if overlap is None:
+        return 0.0
+    recall, precision = overlap
     partial = max(partial_ratio(span_norm, window_norm), partial_ratio(window_norm, span_norm))
 
     score = (0.45 * partial) + (0.40 * recall) + (0.15 * precision)
     return round(score, 4)
+
+
+def score_upper_bound(span_norm: str, window_norm: str) -> float:
+    """The highest score this pair could get, without the slow fuzzy step.
+
+    The score is ``0.45·partial + 0.40·recall + 0.15·precision`` and ``partial``
+    is a ratio, at most 1, so taking it as 1 gives a ceiling the real score never
+    exceeds. On a real lecture about 95% of candidates fall below the threshold
+    even at that ceiling, and ``partial_ratio`` is nearly all of the matcher's
+    time, so checking this first skips most of the work without changing any
+    result. Rounded like the score: rounding keeps order, so the ceiling holds
+    after rounding too.
+    """
+    overlap = _word_overlap(span_norm, window_norm)
+    if overlap is None:
+        return 0.0
+    recall, precision = overlap
+    return round(0.45 + (0.40 * recall) + (0.15 * precision), 4)
 
 
 def candidate_spans_by_word_overlap(
@@ -729,18 +751,24 @@ def detect_quran_mentions_in_lecture(
 
         for span in candidates:
             span_text_norm = str(span["text_norm"])
-            score = score_span_for_lecture(span_text_norm, window_text_norm)
-            if score < min_score:
+            # The cheap checks run first, and none of them needs the fuzzy score:
+            # too few shared words, or a ceiling (score_upper_bound) already under
+            # a threshold, rules a candidate out exactly as the full score would,
+            # without its cost.
+            span_words = span["_word_set"]
+            matched_words = sum(1 for word in window_words if word in span_words)
+            if matched_words < min_matched_words:
                 continue
 
             # Short-phrase guard: require higher confidence for spans with few words
             # to avoid false positives from common short phrases.
-            if span["num_words"] < short_phrase_word_limit and score < short_phrase_threshold:
+            short_phrase = span["num_words"] < short_phrase_word_limit
+            required = max(min_score, short_phrase_threshold) if short_phrase else min_score
+            if score_upper_bound(span_text_norm, window_text_norm) < required:
                 continue
 
-            span_words = span["_word_set"]
-            matched_words = sum(1 for word in window_words if word in span_words)
-            if matched_words < min_matched_words:
+            score = score_span_for_lecture(span_text_norm, window_text_norm)
+            if score < required:
                 continue
 
             matches.append(
