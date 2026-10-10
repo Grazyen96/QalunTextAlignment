@@ -385,11 +385,20 @@ class TestLocalEngine:
     @pytest.fixture
     def env(self, monkeypatch, tmp_path):
         from qurantext.config.settings import get_settings
-        from qurantext.services import engine_local, model_store
+        from qurantext.services import engine_local, model_store, transcription
 
         monkeypatch.setenv("QURANTEXT_CACHE_DIR", str(tmp_path / "cache"))
         get_settings.cache_clear()
-        calls = {"ensure": 0, "run": 0, "discard": 0}
+        calls = {"ensure": 0, "run": 0, "discard": 0, "verify": 0}
+        # A fresh process: nothing checked yet. The runtime is there and the files intact.
+        monkeypatch.setattr(transcription, "_VERIFIED", set())
+        monkeypatch.setattr(engine_local, "runtime_problem", lambda: None)
+
+        def verify(_m):
+            calls["verify"] += 1
+            return True
+
+        monkeypatch.setattr(model_store, "verify_installed", verify)
         monkeypatch.setattr(
             model_store,
             "ensure_model",
@@ -453,10 +462,114 @@ class TestLocalEngine:
                 raise ModelLoadError("bad file")
             return {"segments": []}
 
+        checks = iter([True, False])  # intact before loading, damaged once it would not load
         monkeypatch.setattr(env.engine_local, "transcribe_local", run)
-        monkeypatch.setattr(env.model_store, "verify_installed", lambda m: False)
+        monkeypatch.setattr(env.model_store, "verify_installed", lambda m: next(checks))
         transcription.transcribe_audio(env.audio, engine="local")
         assert env.calls["discard"] == 1 and env.calls["ensure"] == 2
+
+    def test_files_are_checked_once_per_process_before_the_first_load(
+        self, env, monkeypatch
+    ) -> None:
+        """A damaged file is replaced before loading: some damage ends the process instead."""
+        from qurantext.services import transcription
+
+        checks = iter([False])
+        loads_after_discard: list[int] = []
+
+        def run(*_a, **_k):
+            loads_after_discard.append(env.calls["discard"])
+            return {"segments": []}
+
+        monkeypatch.setattr(env.engine_local, "transcribe_local", run)
+        monkeypatch.setattr(env.model_store, "verify_installed", lambda m: next(checks))
+        transcription.transcribe_audio(env.audio, engine="local")
+        assert env.calls["discard"] == 1 and env.calls["ensure"] == 2
+        assert loads_after_discard == [1]
+        # The second job in the same process does not check again (iter would raise).
+        transcription.transcribe_audio(env.audio, engine="local", use_cache=False)
+        assert env.calls["discard"] == 1 and loads_after_discard == [1, 1]
+
+    def test_a_second_load_failure_names_the_fix_and_caches_nothing(self, env, monkeypatch) -> None:
+        from qurantext.services import transcription
+        from qurantext.services.errors import (
+            LocalEngineError,
+            ModelLoadError,
+            TranscriptionError,
+        )
+
+        def run(*_a, **_k):
+            raise ModelLoadError("still broken")
+
+        checks = iter([True, False])
+        monkeypatch.setattr(env.engine_local, "transcribe_local", run)
+        monkeypatch.setattr(env.model_store, "verify_installed", lambda m: next(checks))
+        with pytest.raises(LocalEngineError, match="still broken") as caught:
+            transcription.transcribe_audio(env.audio, engine="local")
+        assert isinstance(caught.value, TranscriptionError)
+        assert "--doctor" in str(caught.value) and "WhisperX online" in str(caught.value)
+        assert env.calls["discard"] == 1 and env.calls["ensure"] == 2
+        monkeypatch.setattr(env.engine_local, "transcribe_local", lambda *a, **k: {"segments": []})
+        assert transcription.transcribe_audio(env.audio, engine="local").from_cache is False
+
+    def test_a_missing_runtime_fails_before_downloading(self, env, monkeypatch) -> None:
+        from qurantext.services import transcription
+        from qurantext.services.errors import LocalEngineError
+
+        monkeypatch.setattr(
+            env.engine_local, "runtime_problem", lambda: "No module named 'sherpa_onnx'"
+        )
+        with pytest.raises(LocalEngineError, match="speech runtime.*sherpa_onnx"):
+            transcription.transcribe_audio(env.audio, engine="local")
+        assert env.calls["ensure"] == 0
+
+    def test_a_cancel_during_recognition_caches_nothing(self, env, monkeypatch, tmp_path) -> None:
+        import functools
+        import shutil
+        import subprocess
+
+        from qurantext.services import transcription
+        from qurantext.utils.progress import CancelToken, JobCancelled
+
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg is None:
+            pytest.skip("needs ffmpeg")
+        audio = tmp_path / "long.wav"
+        subprocess.run(
+            [ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=440:r=16000:d=150", audio],
+            check=True,
+        )
+
+        class Recogniser:
+            def create_stream(self):
+                return SimpleNamespace(
+                    accept_waveform=lambda *_: None,
+                    result=SimpleNamespace(tokens=[" قال"], timestamps=[0.1]),
+                )
+
+            def decode_streams(self, streams):
+                pass
+
+        real = env.engine_local.transcribe_local
+        monkeypatch.setattr(
+            env.engine_local,
+            "transcribe_local",
+            functools.partial(real, recognizer_factory=lambda *_: Recogniser()),
+        )
+        token = CancelToken()
+
+        def cancel_after_first_batch(event) -> None:
+            if event.stage == "transcribe" and event.fraction is not None:
+                token.cancel()
+
+        with pytest.raises(JobCancelled):
+            transcription.transcribe_audio(
+                audio, engine="local", progress=cancel_after_first_batch, cancel=token
+            )
+        finished = transcription.transcribe_audio(audio, engine="local")
+        assert (
+            finished.from_cache is False and finished.word_count > 4
+        )  # every window, not one batch
 
     def test_an_intact_model_that_will_not_load_is_not_downloaded_again(
         self, env, monkeypatch

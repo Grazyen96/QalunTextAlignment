@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import sys
+import threading
 from types import SimpleNamespace
 
 import numpy as np
@@ -153,7 +156,7 @@ def test_no_ffmpeg_child_remains_after_an_error_in_the_loop(tmp_path, monkeypatc
         def decode_streams(self, streams):
             raise RuntimeError("boom")
 
-    with pytest.raises(RuntimeError, match="boom"):
+    with pytest.raises(LocalEngineError, match="boom"):
         engine_local.transcribe_local(audio, tmp_path, recognizer_factory=lambda *_: Broken())
     assert len(made) == 1 and made[0].poll() is not None
 
@@ -173,11 +176,20 @@ def test_no_ffmpeg_child_remains_after_success_and_decode_failure(tmp_path, monk
 def test_progress_reports_the_transcribe_stage(tmp_path) -> None:
     audio = _tone(tmp_path / "a.wav", seconds=30)
     events = []
+    seen_at_load: list[int] = []
+
+    def factory(*_a):
+        seen_at_load.append(len(events))
+        return FakeRecognizer()
+
     engine_local.transcribe_local(
-        audio, tmp_path, progress=events.append, recognizer_factory=lambda *_: FakeRecognizer()
+        audio, tmp_path, progress=events.append, recognizer_factory=factory
     )
     assert events and {e.stage for e in events} == {"transcribe"}
-    assert events[-1].done is True
+    # The stage is named before the model loads, without a percentage yet.
+    assert seen_at_load == [1] and events[0].fraction is None
+    assert all(e.fraction is None or e.fraction <= 0.99 for e in events[:-1])
+    assert events[-1].done is True and events[-1].fraction == 1.0
 
 
 def test_a_model_that_will_not_load_raises_model_load_error(tmp_path) -> None:
@@ -185,3 +197,137 @@ def test_a_model_that_will_not_load_raises_model_load_error(tmp_path) -> None:
     (tmp_path / "encoder.onnx").write_bytes(b"garbage")
     with pytest.raises(ModelLoadError):
         engine_local.make_recognizer(tmp_path, 1)
+
+
+def _fake_ffmpeg(tmp_path, *, samples: int, exit_code: int = 0):
+    """A stand-in "ffmpeg" that floods stderr (about 256 KB) before writing any audio."""
+    script = tmp_path / f"fake_ffmpeg_{exit_code}.py"
+    script.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\n"
+        "for n in range(4096):\n"
+        "    sys.stderr.write(f'[mp3 @ 0x55] Header missing, frame {n:06d} skipped....\\n')\n"
+        "sys.stderr.write('LAST ERROR LINE\\n')\n"
+        "sys.stderr.flush()\n"
+        f"sys.stdout.buffer.write(bytes(4 * {samples}))\n"
+        "sys.stdout.flush()\n"
+        f"sys.exit({exit_code})\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return str(script)
+
+
+def _decode_in_thread(audio, deadline: float = 20.0) -> dict:
+    outcome: dict = {}
+
+    def run() -> None:
+        try:
+            outcome["samples"] = sum(len(b) for b in engine_local.decode_pcm(audio))
+        except Exception as error:  # noqa: BLE001 — the test inspects whatever it was
+            outcome["error"] = error
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(deadline)
+    assert not thread.is_alive(), "decode_pcm hung on FFmpeg's error output"
+    return outcome
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the fake ffmpeg is a script with a shebang")
+def test_a_flood_of_ffmpeg_errors_does_not_hang_the_decoder(tmp_path, monkeypatch) -> None:
+    fake = _fake_ffmpeg(tmp_path, samples=3 * 16000)
+    monkeypatch.setattr(engine_local, "require_binary", lambda *_a, **_k: fake)
+    outcome = _decode_in_thread(tmp_path / "glitchy.mp3")
+    assert outcome == {"samples": 3 * 16000}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the fake ffmpeg is a script with a shebang")
+def test_a_failed_decode_reports_the_end_of_ffmpeg_errors(tmp_path, monkeypatch) -> None:
+    fake = _fake_ffmpeg(tmp_path, samples=16000, exit_code=1)
+    monkeypatch.setattr(engine_local, "require_binary", lambda *_a, **_k: fake)
+    outcome = _decode_in_thread(tmp_path / "glitchy.mp3")
+    error = outcome["error"]
+    assert isinstance(error, LocalEngineError)
+    assert "glitchy.mp3" in str(error) and "LAST ERROR LINE" in str(error)
+
+
+def test_reads_that_split_a_sample_are_rejoined(tmp_path, monkeypatch) -> None:
+    source = np.arange(50_001, dtype=np.float32) / 7
+    payload = source.tobytes()
+
+    class SplitPipe:
+        """Returns odd-sized reads, as a raw pipe may: samples straddle reads."""
+
+        def __init__(self) -> None:
+            self.pos, self.sizes, self.turn = 0, (1, 2, 3, 5, 7, 4093, 4097), 0
+
+        def read(self, _n: int) -> bytes:
+            size = self.sizes[self.turn % len(self.sizes)]
+            self.turn += 1
+            chunk = payload[self.pos : self.pos + size]
+            self.pos += len(chunk)
+            return chunk
+
+        def close(self) -> None:
+            pass
+
+    class FakeProcess:
+        def __init__(self, *_a, **_k) -> None:
+            self.stdout, self.stderr = SplitPipe(), None
+
+        def poll(self):
+            return 0
+
+        def wait(self):
+            return 0
+
+        def kill(self):
+            pass
+
+    monkeypatch.setattr(engine_local.subprocess, "Popen", FakeProcess)
+    blocks = list(engine_local.decode_pcm(tmp_path / "a.wav"))
+    assert np.array_equal(np.concatenate(blocks), source)
+
+
+def test_cancel_during_the_run_stops_after_the_current_batch(tmp_path) -> None:
+    audio = _tone(tmp_path / "long.wav", seconds=150)  # six windows: two batches
+    token = CancelToken()
+    fake = FakeRecognizer()
+
+    def cancel_after_first_batch(event) -> None:
+        if event.fraction is not None:
+            token.cancel()
+
+    with pytest.raises(JobCancelled):
+        engine_local.transcribe_local(
+            audio,
+            tmp_path,
+            progress=cancel_after_first_batch,
+            cancel=token,
+            recognizer_factory=lambda *_: fake,
+        )
+    assert len(fake.windows) == 4
+
+
+def test_a_recogniser_failure_after_loading_is_an_engine_error(tmp_path) -> None:
+    audio = _tone(tmp_path / "a.wav")
+
+    class OutOfMemory(FakeRecognizer):
+        def decode_streams(self, streams):
+            raise MemoryError()
+
+    with pytest.raises(LocalEngineError, match=r"a\.wav.*WhisperX online") as caught:
+        engine_local.transcribe_local(audio, tmp_path, recognizer_factory=lambda *_: OutOfMemory())
+    assert isinstance(caught.value.__cause__, MemoryError)
+
+
+def test_cancel_is_not_turned_into_an_engine_error(tmp_path) -> None:
+    audio = _tone(tmp_path / "a.wav")
+
+    class Cancelled(FakeRecognizer):
+        def decode_streams(self, streams):
+            raise JobCancelled("transcribe was cancelled")
+
+    with pytest.raises(JobCancelled):
+        engine_local.transcribe_local(audio, tmp_path, recognizer_factory=lambda *_: Cancelled())

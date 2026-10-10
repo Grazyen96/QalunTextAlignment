@@ -1,9 +1,10 @@
-"""Remember a transcript so the same audio is never sent twice.
+"""Remember a transcript so the same audio is never recognised twice.
 
-Recognition is the one stage that is slow, billed and needs the network. It is
-also perfectly repeatable: the same audio and the same settings give the same
-transcript. Without a cache, correcting one subtitle line and re-rendering paid
-for the whole recording again.
+Recognition is the slowest stage: minutes of computing on this computer, or, with
+WhisperX, a billed call that needs the network. It is also perfectly repeatable:
+the same audio and the same settings give the same transcript. Without a cache,
+correcting one subtitle line and re-rendering recognised the whole recording
+again.
 
 The key is the audio's content, not its path, so renaming or moving a file still
 hits, and editing it does not. Settings that change the output are part of the

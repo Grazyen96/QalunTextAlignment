@@ -1,4 +1,6 @@
-"""The real model on a real recitation. Opt-in: downloads ~110 MB once and runs ~10 s.
+"""The real model on a real recitation. Opt-in: downloads ~110 MB once.
+
+It runs about a minute, or about 15 s once its transcript is cached.
 
 QURANTEXT_SLOW_TESTS=1 venv/bin/python -m pytest tests/test_local_engine_slow.py
 """
