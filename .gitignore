@@ -47,6 +47,7 @@ output_word/
 htmlcov/
 dist/
 build/
+.ci-cache/
 *.egg-info/
 
 # Generated output tree (renders, match JSON, export packages)

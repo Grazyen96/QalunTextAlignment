@@ -73,6 +73,12 @@ datas += [
     (str(_sherpa_licence.locate()), "sherpa_onnx"),
     (str(ROOT / "packaging" / "licenses" / "onnxruntime-LICENSE"), "sherpa_onnx/lib"),
 ]
+# The Linux wheel also vendors ALSA's libasound (LGPL-2.1) into sherpa_onnx.libs/,
+# linked dynamically. Its licence goes beside it; the other wheels carry none.
+if any(f.name.startswith("libasound") for f in distribution("sherpa_onnx").files or ()):
+    datas.append(
+        (str(ROOT / "packaging" / "licenses" / "libasound-LGPL-2.1.txt"), "sherpa_onnx.libs")
+    )
 
 # The model download trusts certifi's bundle as well as the system's: a frozen
 # app's OpenSSL looks where the build machine kept its certificates, which a

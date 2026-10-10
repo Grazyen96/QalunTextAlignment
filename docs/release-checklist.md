@@ -3,20 +3,21 @@
 What a person has to check before tagging a release, because a machine here cannot.
 Work top to bottom; stop at the first item that fails and fix it before going on.
 
-## Once, before the first release that uses `package.sh`
-
-- [ ] In `.github/workflows/release.yml`, replace the whole `run:` block of the
-      **Package** step with `run: bash packaging/ci/package.sh ${{ matrix.artifact }}`.
-      This needs a token with the `workflow` scope, which is why it is not done in the
-      repository already (see `packaging/ci/README.md`). Until then the Linux zip stores
-      every symlinked library twice and unpacks to about 600 MB instead of about 430 MB
-      (both with FFmpeg).
-
 ## Build
 
 - [ ] Actions → **Build the app** → **Run workflow**, on the commit you mean to tag.
 - [ ] Every platform's gate step (**Check the built app can render**, which runs
-      `--doctor --release`) passes on Windows, macOS and Linux.
+      `--doctor --release` and then a local transcription) passes on Windows, macOS
+      and Linux.
+- [ ] In each platform's gate log, the transcription gate ends with `The built app
+      transcribed on this computer: ... for a 5 s tone.` It proves the speech model
+      loads and runs inside the app that ships, and, when the step **Keep the speech
+      model between runs** found no cache, that it downloads from the `qalun-models`
+      release and verifies. To prove the download on purpose, delete the
+      `qalun-model-*` caches (Actions → Caches) first. If it fails, it is usually a
+      broken `qalun-models` asset, a checksum in `model_store.py` that no longer
+      matches it, or a sherpa-onnx library missing from the bundle; see
+      `packaging/ci/README.md`.
 - [ ] In each platform's gate log, the Playback line says `through the FFmpeg backend,
       as QT_MEDIA_BACKEND asks`. Windows and macOS also ship a native backend, and only
       this line shows the recording did not play through that one instead.
@@ -28,10 +29,12 @@ Work top to bottom; stop at the first item that fails and fix it before going on
       workflow artifacts expire after 30 days. If no such run survives, compare with
       Linux instead: Multimedia added 20 MB to the Linux zip, so expect about that. If a
       zip grew far more than 30–40 MB, stop and find out why before releasing.
+- [ ] Each zip has `THIRD_PARTY_NOTICES.md` at its top: beside `qalun.exe` or `qalun`
+      in `qalun/`, and beside `Qalun.app` in the macOS zip.
 - [ ] Download `qalun-linux.zip` and unzip it with `unzip`. Check two things (the gate
       already checks that `libxcb-cursor.so.0` is in the bundle):
   - `find qalun -type l | wc -l` is not 0. If it is 0, the links were not kept: check
-    the Package step change above.
+    that the **Package** step still runs `packaging/ci/package.sh`.
   - `du -sm qalun` is about 430 MB, FFmpeg included. About 600 MB means the links were
     followed and every linked library is stored twice.
 - [ ] Extract `qalun-linux.zip` once more with the desktop's own **Extract here** (or
@@ -95,6 +98,12 @@ This is the spec's §6 manual check.
 - [ ] Publishing a new speech model: follow `tools/export_local_model/README.md`. A new
       model is a new release asset. Never replace a release asset in place, because
       shipped apps pin the old one by size and checksum.
+- [ ] With a new model, change the sha256 in the key of the **Keep the speech model
+      between runs** step in `release.yml` to the new archive's (the tests fail until
+      it matches). This needs a token with the `workflow` scope.
+- [ ] When reading the model asset's download count as installs, remember CI: each
+      build that misses its cache downloads once per platform (up to three per run).
+      See `packaging/ci/README.md`.
 
 ## Publish
 

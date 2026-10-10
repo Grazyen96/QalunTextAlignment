@@ -18,3 +18,12 @@ The model is provided "as is", without warranties of any kind.
 
 https://github.com/k2-fsa/sherpa-onnx, Apache License 2.0. It includes
 ONNX Runtime (MIT License).
+
+## ALSA library (Linux builds only)
+
+The Linux build includes `libasound` from alsa-lib,
+https://github.com/alsa-project/alsa-lib, GNU Lesser General Public License
+version 2.1. sherpa-onnx's Linux package brings it, and the app links it
+dynamically, so it can be replaced with another build of the same library. The
+licence text is in the app's folder, at
+`_internal/sherpa_onnx.libs/libasound-LGPL-2.1.txt`.

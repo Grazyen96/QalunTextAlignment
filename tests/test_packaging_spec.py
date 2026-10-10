@@ -96,3 +96,19 @@ def test_the_spec_ships_the_engine_licences_beside_its_binaries() -> None:
     licence = SPEC.parent / "licenses" / "onnxruntime-LICENSE"
     body = licence.read_text(encoding="utf-8")
     assert "MIT License" in body and "Copyright (c) Microsoft Corporation" in body
+
+
+def test_the_spec_ships_the_libasound_licence_where_the_wheel_vendors_it() -> None:
+    """sherpa-onnx's Linux wheel vendors ALSA's libasound (LGPL-2.1) without its
+    licence. The text goes beside it, and the notice names it, for Linux builds."""
+    text = SPEC.read_text(encoding="utf-8")
+    assert '"libasound-LGPL-2.1.txt"), "sherpa_onnx.libs"' in text
+    assert 'f.name.startswith("libasound")' in text
+    body = (SPEC.parent / "licenses" / "libasound-LGPL-2.1.txt").read_text(encoding="utf-8")
+    assert "GNU LESSER GENERAL PUBLIC LICENSE" in body and "Version 2.1, February 1999" in body
+    assert "END OF TERMS AND CONDITIONS" in body
+    readme = (SPEC.parent / "licenses" / "README.md").read_text(encoding="utf-8")
+    assert "https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt" in readme
+    notice = (SPEC.parents[1] / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    assert "libasound" in notice and "Linux builds only" in notice
+    assert "Lesser General Public License" in notice

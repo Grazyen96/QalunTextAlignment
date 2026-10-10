@@ -44,6 +44,18 @@ def test_the_linux_zip_stores_links_as_links_under_a_qalun_folder(tmp_path: Path
     assert target == b"PySide6/Qt/lib/libQt6Core.so.6"
 
 
+def test_the_third_party_notice_sits_beside_the_executable(tmp_path: Path) -> None:
+    """Someone who unzips the app sees the credits the model's licence asks for."""
+    (tmp_path / "dist" / "qalun" / "_internal").mkdir(parents=True)
+    (tmp_path / "dist" / "qalun" / "qalun").write_bytes(b"\0")
+
+    subprocess.run(["bash", str(SCRIPT), "qalun-linux"], cwd=tmp_path, check=True)
+
+    notices = SCRIPT.parents[2] / "THIRD_PARTY_NOTICES.md"
+    with zipfile.ZipFile(tmp_path / "out" / "qalun-linux.zip") as archive:
+        assert archive.read("qalun/THIRD_PARTY_NOTICES.md") == notices.read_bytes()
+
+
 def test_it_refuses_when_there_is_nothing_to_zip(tmp_path: Path) -> None:
     result = subprocess.run(
         ["bash", str(SCRIPT), "qalun-linux"], cwd=tmp_path, capture_output=True, text=True

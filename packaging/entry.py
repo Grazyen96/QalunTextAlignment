@@ -22,7 +22,10 @@ USAGE = """Qalun — turn Arabic audio into a subtitled video.
   qalun --doctor        check this machine can render, and say what to fix
   qalun --doctor --release
                         the same, failing on anything a release must have
-                        (playback, Qt's Arabic translation, an Arabic font)
+                        (playback, Qt's Arabic translation, an Arabic font,
+                        the Replicate client whatever the engine; the local
+                        engine's runtime blocks when it is the engine, as by
+                        default)
   qalun --cli ...       run a command-line subcommand, e.g. --cli preview --help
   qalun --version       print the version
 """

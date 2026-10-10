@@ -8,7 +8,15 @@
 #
 # --release makes playback, Qt's Arabic translation and an Arabic interface font
 # blocking: a developer's checkout is only told about them, a release must have
-# them. On Linux there is no display here; the app draws offscreen for the check.
+# them. It also makes the Replicate client's import blocking whatever engine is
+# configured, because the window offers WhisperX online. The engine here is set
+# to local, so the sherpa-onnx runtime line blocks too, whatever this machine's
+# environment says. On Linux there is no display here; the app draws offscreen
+# for the check.
+#
+# When all that passes, check-transcription.sh runs a real transcription inside
+# the built app: the model downloads, verifies and loads, and a transcript comes
+# out. Not before, so a build that will not ship never downloads the model.
 #
 # Bounded: the media load inside the doctor waits at most 5 s, but starting Qt,
 # asking for audio outputs and the sound-server client bundled from the build
@@ -17,6 +25,10 @@
 set -euo pipefail
 
 limit="${QALUN_GATE_TIMEOUT_S:-180}"
+
+# The engine a person gets by default. Set here so the doctor checks its runtime
+# as blocking even on a machine whose environment chose WhisperX.
+export QURANTEXT_TRANSCRIBE_ENGINE=local
 
 if [ -d "dist/Qalun.app" ]; then
   app="dist/Qalun.app/Contents/MacOS/qalun"
@@ -51,6 +63,10 @@ if [ "$(uname -s)" = "Linux" ]; then
       "open on X11. Install libxcb-cursor0 on the build machine and build again." >&2
     status=1
   fi
+fi
+
+if [ "$status" -eq 0 ]; then
+  bash "$(dirname "${BASH_SOURCE[0]}")/check-transcription.sh" || status=$?
 fi
 
 exit "$status"

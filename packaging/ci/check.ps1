@@ -6,6 +6,23 @@
 #
 # --release makes playback, Qt's Arabic translation and an Arabic interface font
 # blocking: a developer's checkout is only told about them, a release must have them.
+# It also makes the Replicate client's import blocking whatever engine is configured,
+# because the window offers WhisperX online. The engine is set to local here, so the
+# sherpa-onnx runtime line blocks too, whatever the runner's environment says.
+#
+# When all that passes, check-transcription.sh (the same script macOS and Linux run)
+# does a real transcription inside the built app; see the end of this file.
+$env:QURANTEXT_TRANSCRIBE_ENGINE = "local"
+
+# Kept for check-transcription.sh, which needs Git's bash and the runner's Python.
+# Git's own bash.exe first: a bare `bash` can be WSL's, in System32.
+$fullPath = $env:PATH
+$gitBash = Join-Path $env:ProgramFiles "Git\bin\bash.exe"
+if (-not (Test-Path $gitBash)) {
+  $found = Get-Command bash -ErrorAction SilentlyContinue
+  $gitBash = if ($found) { $found.Source } else { $null }
+}
+
 $env:PATH = "$env:SystemRoot\system32;$env:SystemRoot"
 
 # Start-Process rather than `& app --doctor`, because the app is built windowed
@@ -51,3 +68,14 @@ if ($code -ne 0) {
   throw "The gate failed: the built app's doctor reported a problem (exit code $code; see above)."
 }
 Write-Host "The built app reports it can render."
+
+# A real transcription inside the built app. Only now, so a build that will not ship
+# never downloads the model. The script strips PATH for the app itself.
+if (-not $gitBash) {
+  throw "The gate failed: no Git bash to run packaging/ci/check-transcription.sh with."
+}
+$env:PATH = $fullPath
+& $gitBash packaging/ci/check-transcription.sh
+if ($LASTEXITCODE -ne 0) {
+  throw "The gate failed: the built app could not transcribe on this computer (exit code $LASTEXITCODE; see above)."
+}
