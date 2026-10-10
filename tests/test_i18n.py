@@ -424,3 +424,21 @@ def test_every_window_title_goes_through_plain_title() -> None:
     assert any(k.startswith("QFileDialog.") for k in kinds), "the scan found no file dialogs"
     bare = [(name, line, call) for name, line, call, title in calls if not _is_plain_title(title)]
     assert bare == []
+
+
+def test_engine_and_stage_strings_exist_in_both_languages() -> None:
+    keys = (
+        "job.stage.download",
+        "job.stage.unpack",
+        "job.stage.transcribe",
+        "home.engine",
+        "home.engine.local",
+        "home.engine.whisperx",
+        "home.engine.no_token",
+        "home.engine.folded",
+    )
+    for language in ("en", "ar"):
+        for key in keys:
+            assert i18n.STRINGS[language].get(key), f"{language} lacks {key}"
+    assert "{folder}" in i18n.STRINGS["en"]["home.engine.no_token"]
+    assert "{folder}" in i18n.STRINGS["ar"]["home.engine.no_token"]

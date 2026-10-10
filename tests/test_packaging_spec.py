@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 SPEC = Path(__file__).resolve().parents[1] / "packaging" / "qalun.spec"
 
 
@@ -37,3 +39,31 @@ def test_the_linux_build_machine_gets_the_libraries_qt_links() -> None:
     text = COLLECT_LINUX.read_text(encoding="utf-8")
     for package in ("libpulse0", "libegl1", "libxcb-cursor0", "libxkbcommon-x11-0"):
         assert package in text, package
+
+
+def test_the_third_party_notice_credits_the_speech_model() -> None:
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[1] / "THIRD_PARTY_NOTICES.md").read_text(
+        encoding="utf-8"
+    )
+    assert "stt_ar_fastconformer_hybrid_large_pcd_v1.0" in text
+    assert "CC BY 4.0" in text
+    assert "sherpa-onnx" in text and "Apache" in text
+    assert "without warranties" in text
+
+
+def test_requirements_txt_carries_every_core_dependency() -> None:
+    """The README installs from requirements.txt; pyproject is what CI installs.
+
+    sherpa-onnx was once missing from requirements.txt, so an install that
+    followed the README could not transcribe on the default engine, and nothing
+    in CI noticed. Same name and same version range in both, or they drift again.
+    """
+    tomllib = pytest.importorskip("tomllib")  # Python 3.11+; the project allows 3.10
+    root = Path(__file__).resolve().parents[1]
+    with (root / "pyproject.toml").open("rb") as handle:
+        core = tomllib.load(handle)["project"]["dependencies"]
+    lines = (root / "requirements.txt").read_text(encoding="utf-8").splitlines()
+    pinned = {line.strip() for line in lines if line.strip() and not line.startswith("#")}
+    assert set(core) == pinned

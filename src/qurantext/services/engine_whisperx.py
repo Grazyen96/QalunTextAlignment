@@ -97,11 +97,11 @@ def cache_settings(settings: AppSettings, model_ref: str) -> dict[str, Any]:
 def run_whisperx(audio_file_path: Path, settings: AppSettings, model_ref: str) -> Any:
     """Upload *audio_file_path* to Replicate and return WhisperX's raw output."""
     if not settings.replicate_api_token:
-        from qurantext.config.paths import user_data_dir
+        from qurantext.config.settings import env_dir
 
         raise WhisperXServiceError(
             "No Replicate API token is set, so audio cannot be transcribed.\n"
-            f"Create a file named .env in {user_data_dir()} containing one line:\n"
+            f"Create a file named .env in {env_dir()} containing one line:\n"
             "  REPLICATE_API_TOKEN=your-token\n"
             "Get a token from https://replicate.com/account/api-tokens, then "
             "restart the app — settings are read once at startup."
@@ -129,8 +129,7 @@ def run_whisperx(audio_file_path: Path, settings: AppSettings, model_ref: str) -
             # which looks identical to having no token unless the message says
             # otherwise. The token is described rather than printed, because
             # this text ends up in logs people send to other people.
-            from qurantext.config.paths import user_data_dir
-            from qurantext.config.settings import describe_secret
+            from qurantext.config.settings import describe_secret, env_dir
 
             raise WhisperXServiceError(
                 "Replicate rejected the API token.\n"
@@ -140,7 +139,7 @@ def run_whisperx(audio_file_path: Path, settings: AppSettings, model_ref: str) -
                 "starts with 'r8_'. If it does not match, the likely cause is "
                 "that REPLICATE_API_TOKEN is also set as a system environment "
                 "variable, which takes precedence over the .env file in "
-                f"{user_data_dir()}."
+                f"{env_dir()}."
             ) from error
         if "status: 404" in error_text or status == 404:
             raise WhisperXServiceError(

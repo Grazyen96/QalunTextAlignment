@@ -1134,3 +1134,179 @@ def test_the_two_forms_share_one_label_column(qt_app, prefs, store) -> None:
     upper = panel.surah_box.x()
     lower = panel.quran_row.x()
     assert abs(upper - lower) <= 2
+
+
+def test_the_engine_row_defaults_to_this_computer(qt_app, prefs, store) -> None:
+    panel = _panel(prefs, store)
+    assert panel.engine_buttons["local"].isChecked()
+    assert panel.spec().engine == "local"
+    assert panel.no_token_label.isHidden()
+    assert panel.more_form.labelForField(panel.engine_row).text() == t("home.engine")
+
+
+def test_choosing_whisperx_is_remembered_and_reaches_the_spec(qt_app, prefs, store) -> None:
+    panel = _panel(prefs, store)
+    panel.engine_buttons["whisperx"].setChecked(True)
+    assert panel.spec().engine == "whisperx"
+    assert _panel(prefs, store).engine_buttons["whisperx"].isChecked()
+
+
+def test_whisperx_without_a_token_says_where_to_put_it(qt_app, prefs, store, monkeypatch) -> None:
+    from qurantext.config.settings import env_dir, get_settings
+
+    # Empty rather than unset: the process environment outranks a .env file,
+    # so a token in the checkout's own .env cannot creep back in.
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "")
+    get_settings.cache_clear()
+    try:
+        panel = _panel(prefs, store)
+        panel.engine_buttons["whisperx"].setChecked(True)
+        assert not panel.no_token_label.isHidden()
+        assert ".env" in panel.no_token_label.text()
+        assert path_text(env_dir()) in panel.no_token_label.text()
+        # The note informs; it does not add a reason to keep Start disabled.
+        assert panel.problem() == panel.spec().validate()
+        panel.engine_buttons["local"].setChecked(True)
+        assert panel.no_token_label.isHidden()
+    finally:
+        get_settings.cache_clear()
+
+
+def test_whisperx_with_a_token_needs_no_note(qt_app, prefs, store, monkeypatch) -> None:
+    from qurantext.config.settings import get_settings
+
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_test")
+    get_settings.cache_clear()
+    try:
+        prefs.engine = "whisperx"
+        panel = _panel(prefs, store)
+        assert panel.engine_buttons["whisperx"].isChecked()
+        assert panel.no_token_label.isHidden()
+    finally:
+        get_settings.cache_clear()
+
+
+def test_a_folded_whisperx_choice_without_a_token_is_still_said(
+    qt_app, prefs, store, monkeypatch
+) -> None:
+    """More options is folded by default; the note must not fold away with it."""
+    from qurantext.config.settings import env_dir, get_settings
+
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "")
+    get_settings.cache_clear()
+    try:
+        prefs.engine = "whisperx"
+        prefs.more_options_open = False
+        panel = _panel(prefs, store)
+        assert panel.more_group.isHidden()
+        assert not panel.engine_hint_label.isHidden()
+        hint = panel.engine_hint_label.text()
+        assert hint.startswith(t("home.engine.folded"))
+        assert t("home.engine.no_token", folder=path_text(env_dir())) in hint
+
+        # Open, the note sits under the engine row instead, and only there.
+        panel.more_button.setChecked(True)
+        assert panel.engine_hint_label.isHidden()
+        assert not panel.no_token_label.isHidden()
+        panel.more_button.setChecked(False)
+        assert not panel.engine_hint_label.isHidden()
+    finally:
+        get_settings.cache_clear()
+
+
+def test_a_folded_whisperx_choice_says_the_recording_goes_online(
+    qt_app, prefs, store, monkeypatch
+) -> None:
+    from qurantext.config.settings import get_settings
+
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_test")
+    get_settings.cache_clear()
+    try:
+        prefs.engine = "whisperx"
+        prefs.more_options_open = False
+        panel = _panel(prefs, store)
+        assert not panel.engine_hint_label.isHidden()
+        assert panel.engine_hint_label.text() == t("home.engine.folded")
+    finally:
+        get_settings.cache_clear()
+
+
+def test_the_folded_hint_does_not_widen_the_panel(qt_app, prefs, store, monkeypatch, tmp_path):
+    from PySide6.QtCore import QSettings
+
+    from qurantext.config.settings import get_settings
+
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "")
+    get_settings.cache_clear()
+    try:
+        local = Prefs(QSettings(str(tmp_path / "local.ini"), QSettings.Format.IniFormat))
+        local.more_options_open = False
+        baseline = _panel(local, store).minimumSizeHint().width()
+        prefs.engine = "whisperx"
+        prefs.more_options_open = False
+        assert _panel(prefs, store).minimumSizeHint().width() <= baseline
+    finally:
+        get_settings.cache_clear()
+
+
+def test_a_folded_local_choice_needs_no_hint(qt_app, prefs, store) -> None:
+    prefs.more_options_open = False
+    panel = _panel(prefs, store)
+    assert panel.engine_hint_label.isHidden()
+    panel.more_button.setChecked(True)
+    panel.engine_buttons["whisperx"].setChecked(True)
+    assert panel.engine_hint_label.isHidden(), "open, the engine row itself shows the choice"
+    panel.engine_buttons["local"].setChecked(True)
+    panel.more_button.setChecked(False)
+    assert panel.engine_hint_label.isHidden()
+
+
+@pytest.mark.parametrize("more_open", [False, True])
+def test_a_malformed_setting_with_whisperx_remembered_still_opens(
+    qt_app, prefs, store, monkeypatch, more_open
+) -> None:
+    """Reading the token reads every setting; one typo there must not stop the window."""
+    from qurantext.config.settings import get_settings
+
+    monkeypatch.setenv("QURANTEXT_VIDEO_FPS", "30fps")
+    get_settings.cache_clear()
+    try:
+        with pytest.raises(ValueError):
+            get_settings()
+        prefs.engine = "whisperx"
+        prefs.more_options_open = more_open
+        panel = _panel(prefs, store)
+        assert panel.engine_buttons["whisperx"].isChecked()
+        assert panel.no_token_label.isHidden(), "the token is unknown, not missing"
+        panel.engine_buttons["local"].setChecked(True)
+        panel.engine_buttons["whisperx"].setChecked(True)
+        assert panel.spec().engine == "whisperx"
+    finally:
+        get_settings.cache_clear()
+
+
+def test_a_malformed_setting_with_whisperx_remembered_still_opens_the_window(
+    qt_app, prefs, monkeypatch
+) -> None:
+    from qurantext.config.settings import get_settings
+    from qurantext.gui.main_window import MainWindow
+
+    monkeypatch.setenv("QURANTEXT_VIDEO_FPS", "30fps")
+    get_settings.cache_clear()
+    try:
+        prefs.engine = "whisperx"
+        window = MainWindow(prefs=prefs)
+        assert window.new_job.engine_buttons["whisperx"].isChecked()
+        window.close()
+        window.deleteLater()
+        spin(50)
+    finally:
+        get_settings.cache_clear()
+
+
+def test_the_engine_cannot_change_while_a_job_runs(qt_app, prefs, store) -> None:
+    panel = _panel(prefs, store)
+    panel.set_running(True)
+    assert not any(button.isEnabled() for button in panel.engine_buttons.values())
+    panel.set_running(False)
+    assert all(button.isEnabled() for button in panel.engine_buttons.values())

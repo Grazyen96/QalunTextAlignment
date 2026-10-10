@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from qurantext.config.paths import QURAN_DB_PATH, QURAN_INPUT_DIR
-from qurantext.config.settings import VIDEO_PRESETS
+from qurantext.config.settings import ENGINES, VIDEO_PRESETS, env_dir, get_settings
 from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.data.quran_db import ensure_quran_db, list_surahs
 from qurantext.gui.i18n import path_text, plain_title, t, tn
@@ -229,6 +229,13 @@ class NewJobPanel(QWidget):
         self.more_button.toggled.connect(self._toggle_more_options)
         layout.addWidget(self.more_button)
 
+        # With More options folded, the engine row and its no-token note are out
+        # of sight; a job that uploads the recording, or cannot start, says so here.
+        self.engine_hint_label = QLabel()
+        self.engine_hint_label.setWordWrap(True)
+        self.engine_hint_label.setVisible(False)
+        layout.addWidget(self.engine_hint_label)
+
         # Labelled rows like the form above, so each choice says what it is
         # and its value text need not repeat it.
         self.more_group = QWidget()
@@ -262,6 +269,27 @@ class NewJobPanel(QWidget):
         self.output_reset_button.clicked.connect(lambda: self.set_output_dir(None))
         output_row.addWidget(self.output_reset_button)
         self.more_form.addRow(t("home.output_dir"), self.output_row)
+
+        self.engine_row = QWidget()
+        engine_row = QVBoxLayout(self.engine_row)
+        engine_row.setContentsMargins(0, 0, 0, 0)
+        choices = QHBoxLayout()
+        self._engine_group = QButtonGroup(self)
+        self._engine_group.setExclusive(True)
+        self.engine_buttons: dict[str, QRadioButton] = {}
+        for value in ENGINES:
+            button = QRadioButton(t(f"home.engine.{value}"))
+            self.engine_buttons[value] = button
+            self._engine_group.addButton(button)
+            choices.addWidget(button)
+        choices.addStretch(1)
+        engine_row.addLayout(choices)
+        self.no_token_label = QLabel()
+        self.no_token_label.setWordWrap(True)
+        self.no_token_label.setVisible(False)
+        engine_row.addWidget(self.no_token_label)
+        self.more_form.addRow(t("home.engine"), self.engine_row)
+        self._engine_group.buttonToggled.connect(self._engine_changed)
 
         self.subtitles_row = QWidget()
         subtitles_row = QHBoxLayout(self.subtitles_row)
@@ -357,6 +385,9 @@ class NewJobPanel(QWidget):
         chosen = set(self._prefs.formats)
         for fmt, box in self.format_boxes.items():
             box.setChecked(fmt in chosen)
+
+        self.engine_buttons[self._prefs.engine].setChecked(True)
+        self._show_engine_notes()
 
         self.render_right_away_box.setChecked(self._prefs.render_right_away)
 
@@ -612,6 +643,7 @@ class NewJobPanel(QWidget):
     def _set_more_options_visibility(self, open_: bool) -> None:
         self.more_group.setVisible(open_)
         self.more_button.setArrowType(self._more_arrow(open_=open_))
+        self._show_engine_notes()
 
     def _more_arrow(self, *, open_: bool) -> Qt.ArrowType:
         """Down when the options show; else toward where the line reads on, as a disclosure does.
@@ -636,6 +668,38 @@ class NewJobPanel(QWidget):
         self._prefs.subtitles = value
         self._set_formats_visibility(value)
         self._refresh()
+
+    def _current_engine(self) -> str:
+        for value, button in self.engine_buttons.items():
+            if button.isChecked():
+                return value
+        return "local"
+
+    def _engine_changed(self) -> None:
+        value = self._current_engine()
+        self._prefs.engine = value
+        self._show_engine_notes()
+        self._refresh()
+
+    def _show_engine_notes(self) -> None:
+        """Say before Start, not after a failed upload, that WhisperX has no token.
+
+        Under the engine row while More options is open; folded, under its
+        button instead, together with the fact that this job goes online.
+        """
+        whisperx = self._current_engine() == "whisperx"
+        note = (
+            t("home.engine.no_token", folder=path_text(env_dir()))
+            if whisperx and _token_missing()
+            else ""
+        )
+        self.no_token_label.setText(note)
+        self.no_token_label.setVisible(bool(note))
+        folded = whisperx and not self.more_button.isChecked()
+        self.engine_hint_label.setText(
+            " ".join(text for text in (t("home.engine.folded"), note) if text) if folded else ""
+        )
+        self.engine_hint_label.setVisible(folded)
 
     def _set_formats_visibility(self, subtitles: str) -> None:
         """Show the file formats, and their label, only when there are files to write."""
@@ -672,6 +736,7 @@ class NewJobPanel(QWidget):
             subtitles=self._current_subtitles(),
             formats=formats,
             render_right_away=self.render_right_away_box.isChecked(),
+            engine=self._current_engine(),
             output_dir=self._output_dir,
         )
 
@@ -701,6 +766,7 @@ class NewJobPanel(QWidget):
             self.quran_reset_button,
             self.output_choose_button,
             self.output_reset_button,
+            *self.engine_buttons.values(),
             *self.subtitle_buttons.values(),
             *self.format_boxes.values(),
             self.render_right_away_box,
@@ -736,6 +802,18 @@ class NewJobPanel(QWidget):
         """
         self.status_label.setText(text)
         self.status_label.setVisible(bool(text))
+
+
+def _token_missing() -> bool:
+    """True when no Replicate token is set; False when the settings cannot be read.
+
+    A malformed ``QURANTEXT_*`` value makes reading them raise. The job names it
+    when it runs; the window must still open, so the token is taken as unknown.
+    """
+    try:
+        return not get_settings().replicate_api_token
+    except ValueError:
+        return False
 
 
 def _file_filter(name: str, suffixes: list[str]) -> str:

@@ -182,3 +182,15 @@ def test_an_unknown_stored_language_follows_the_system(tmp_path) -> None:
 def test_only_a_known_language_can_be_chosen(settings) -> None:
     with pytest.raises(ValueError):
         Prefs(settings).language = "klingon"
+
+
+def test_engine_defaults_to_local_and_round_trips(settings) -> None:
+    prefs = Prefs(settings)
+    assert prefs.engine == "local"
+    prefs.engine = "whisperx"
+    assert Prefs(settings).engine == "whisperx"
+
+
+def test_an_unknown_stored_engine_reads_as_local(settings) -> None:
+    settings.setValue("engine", "cohere")
+    assert Prefs(settings).engine == "local"

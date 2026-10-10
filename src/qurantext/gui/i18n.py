@@ -102,6 +102,14 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "home.quran_text": "Quran text",
         "home.output_dir": "Output folder",
         "home.subtitles": "Subtitles",
+        "home.engine": "Transcription",
+        "home.engine.local": "On this computer",
+        "home.engine.whisperx": "WhisperX online (needs a Replicate token)",
+        "home.engine.no_token": (
+            "No Replicate token is set. Put REPLICATE_API_TOKEN=… in a file named .env "
+            "in {folder}, then restart Qalun."
+        ),
+        "home.engine.folded": "Transcription: WhisperX online, which uploads the recording.",
         "home.formats": "Files",
         "home.quran_override.default": "The certified text that ships with Qalun",
         "home.quran_override.custom": "{path}",
@@ -313,6 +321,16 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "home.quran_text": "نص القرآن",
         "home.output_dir": "مجلد الحفظ",
         "home.subtitles": "الترجمة النصية",
+        # \u2066…\u2069 keep the variable, ".env" and "WhisperX" in one left-to-right
+        # run each: the "=…" and the leading dot would otherwise move to the far side.
+        "home.engine": "التفريغ",
+        "home.engine.local": "على هذا الحاسوب",
+        "home.engine.whisperx": "\u2066WhisperX\u2069 عبر الإنترنت (يتطلّب رمز Replicate)",
+        "home.engine.no_token": (
+            "لم يُضبط رمز Replicate. ضع السطر \u2066REPLICATE_API_TOKEN=…\u2069 في ملف "
+            "باسم \u2066.env\u2069 داخل {folder}، ثم أعد تشغيل Qalun."
+        ),
+        "home.engine.folded": "التفريغ: \u2066WhisperX\u2069 عبر الإنترنت، ويُرفَع التسجيل إليه.",
         "home.formats": "الملفات",
         "home.quran_override.default": "النص الموثَّق المرفق مع Qalun",
         "home.quran_override.custom": "\u200f{path}",

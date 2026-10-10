@@ -70,7 +70,14 @@ def test_the_report_ends_with_a_verdict() -> None:
 def test_a_release_check_that_fails_does_not_claim_rendering_is_broken() -> None:
     """Without playback, Qt's Arabic or an Arabic font the app still renders; the build
     is only unfit to ship, and whoever reads the report should be told that."""
-    for name in ("Playback", "Window translation", "Arabic interface font", "Transcription"):
+    for name in (
+        "Playback",
+        "Window translation",
+        "Arabic interface font",
+        "Transcription",
+        "WhisperX online (optional)",
+        "On this computer (optional)",
+    ):
         report = format_report([CheckResult(name, Status.FAIL, "missing", "fix it")], release=True)
         assert report.rstrip().endswith("Not ready for release: 1 problem(s) above."), name
         assert "Cannot render" not in report
@@ -197,7 +204,7 @@ class TestTranscriptionCheck:
 
         get_settings.cache_clear()
         monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_secret_value_1234")
-        result = preflight._transcription()
+        result = preflight._whisperx_check()
         get_settings.cache_clear()
 
         assert result.status == preflight.Status.OK
@@ -211,7 +218,7 @@ class TestTranscriptionCheck:
         secret = "r8_secret_value_1234"
         get_settings.cache_clear()
         monkeypatch.setenv("REPLICATE_API_TOKEN", secret)
-        result = preflight._transcription()
+        result = preflight._whisperx_check()
         get_settings.cache_clear()
 
         assert secret not in result.detail
@@ -226,8 +233,8 @@ class TestTranscriptionCheck:
         # anything a .env file supplies, so this is what "no token" looks like
         # even in a checkout that has one.
         monkeypatch.setenv("REPLICATE_API_TOKEN", "")
-        monkeypatch.setattr(preflight, "user_data_dir", lambda: Path("/somewhere/qalun"))
-        result = preflight._transcription()
+        monkeypatch.setattr(preflight, "env_dir", lambda: Path("/somewhere/qalun"))
+        result = preflight._whisperx_check()
         get_settings.cache_clear()
 
         assert result.status == preflight.Status.WARN
@@ -250,7 +257,7 @@ class TestTranscriptionCheck:
 
         monkeypatch.setattr(metadata, "version", hidden)
         monkeypatch.delitem(sys.modules, "replicate", raising=False)
-        result = preflight._transcription()
+        result = preflight._whisperx_check()
 
         assert result.status == preflight.Status.FAIL
         assert "No package metadata" in result.detail
@@ -265,7 +272,7 @@ class TestTranscriptionCheck:
         )
         monkeypatch.delitem(sys.modules, "replicate", raising=False)
         monkeypatch.setattr(sys, "frozen", True, raising=False)
-        result = preflight._transcription()
+        result = preflight._whisperx_check()
 
         assert "report it" in (result.remedy or "").lower()
 
@@ -469,3 +476,249 @@ class TestMissingSystemLibrary:
     def test_an_unknown_library_still_says_what_to_look_for(self) -> None:
         remedy = preflight._system_library_remedy("libfoo.so.3")
         assert "libfoo.so.3" in remedy
+
+
+def _lines(results: list[CheckResult]) -> dict[str, CheckResult]:
+    return {r.name: r for r in results}
+
+
+def _hide_replicate_metadata(monkeypatch) -> None:
+    """The packaging fault the release gate exists for: no metadata, so the import fails."""
+    import importlib.metadata as metadata
+
+    real = metadata.version
+
+    def hidden(name: str) -> str:
+        if name == "replicate":
+            raise metadata.PackageNotFoundError(name)
+        return real(name)
+
+    monkeypatch.setattr(metadata, "version", hidden)
+    monkeypatch.delitem(sys.modules, "replicate", raising=False)
+
+
+class TestTranscriptionEngineChoice:
+    """Both engines are reported; only the configured one's problems block."""
+
+    CONFIGURED = "Transcription"
+    LOCAL = "On this computer (optional)"
+    WHISPERX = "WhisperX online (optional)"
+
+    @pytest.fixture
+    def engine(self, monkeypatch):
+        from qurantext.config.settings import get_settings
+
+        def use(name: str) -> None:
+            monkeypatch.setenv("QURANTEXT_TRANSCRIBE_ENGINE", name)
+            get_settings.cache_clear()
+
+        yield use
+        get_settings.cache_clear()
+
+    @pytest.fixture
+    def local_ready(self, monkeypatch):
+        from qurantext.services import engine_local, model_store
+
+        monkeypatch.setattr(engine_local, "runtime_problem", lambda: None)
+        monkeypatch.setattr(model_store, "is_installed", lambda m: True)
+
+    def test_local_without_the_runtime_is_blocking(self, engine, monkeypatch) -> None:
+        from qurantext.services import engine_local
+
+        engine("local")
+        monkeypatch.setattr(engine_local, "runtime_problem", lambda: "no sherpa")
+        result = _lines(preflight._transcription())[self.CONFIGURED]
+        assert result.status == Status.FAIL and "sherpa-onnx" in result.detail
+
+    def test_a_missing_runtime_from_source_says_how_to_reinstall(self, engine, monkeypatch) -> None:
+        from qurantext.services import engine_local
+
+        engine("local")
+        monkeypatch.setattr(engine_local, "runtime_problem", lambda: "no sherpa")
+        monkeypatch.delattr(sys, "frozen", raising=False)
+        remedy = _lines(preflight._transcription())[self.CONFIGURED].remedy
+        assert "pip install -e ." in remedy
+        assert "WhisperX online" in remedy
+
+    def test_a_missing_runtime_in_the_packaged_app_is_a_packaging_fault(
+        self, engine, monkeypatch
+    ) -> None:
+        """Reinstalling the same download would not help; the person is told so."""
+        from qurantext.services import engine_local
+
+        engine("local")
+        monkeypatch.setattr(engine_local, "runtime_problem", lambda: "no sherpa")
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        remedy = _lines(preflight._transcription())[self.CONFIGURED].remedy
+        assert "report it" in remedy.lower()
+        assert "pip" not in remedy and "reinstall" not in remedy.lower()
+        assert "WhisperX online" in remedy
+
+    def test_runtime_problem_reports_an_unimportable_sherpa(self, monkeypatch) -> None:
+        import builtins
+
+        from qurantext.services import engine_local
+
+        real_import = builtins.__import__
+
+        def no_sherpa(name, *args, **kwargs):
+            if name == "sherpa_onnx":
+                raise ImportError("no sherpa")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.delitem(sys.modules, "sherpa_onnx", raising=False)
+        monkeypatch.setattr(builtins, "__import__", no_sherpa)
+        assert engine_local.runtime_problem() == "no sherpa"
+
+    def test_runtime_problem_passes_the_real_runtime(self) -> None:
+        """The other local tests stub it, so this is the one that loads sherpa-onnx."""
+        pytest.importorskip("sherpa_onnx")
+        from qurantext.services import engine_local
+
+        assert engine_local.runtime_problem() is None
+
+    def test_local_with_no_model_yet_only_informs(self, engine, monkeypatch) -> None:
+        from qurantext.services import engine_local, model_store
+
+        engine("local")
+        monkeypatch.setattr(engine_local, "runtime_problem", lambda: None)
+        monkeypatch.setattr(model_store, "is_installed", lambda m: False)
+        result = _lines(preflight._transcription())[self.CONFIGURED]
+        assert result.status == Status.WARN
+        assert "first use" in result.detail
+        assert f"about {model_store.LOCAL_MODEL.download_mb} MB" in result.detail
+
+    def test_local_names_the_model_and_its_licence(self, engine, local_ready) -> None:
+        engine("local")
+        result = _lines(preflight._transcription())[self.CONFIGURED]
+        assert result.status == Status.OK
+        assert "NVIDIA" in result.detail and "CC BY 4.0" in result.detail
+
+    def test_the_model_named_is_the_one_the_app_downloads(
+        self, engine, local_ready, monkeypatch
+    ) -> None:
+        """A new model release must not leave the doctor crediting the old one."""
+        import dataclasses
+
+        from qurantext.services import model_store
+
+        engine("local")
+        assert model_store.LOCAL_MODEL.model_id.split("/")[-1] in (
+            _lines(preflight._transcription())[self.CONFIGURED].detail
+        )
+        newer = dataclasses.replace(model_store.LOCAL_MODEL, model_id="nvidia/stt_ar_newer_v2")
+        monkeypatch.setattr(model_store, "LOCAL_MODEL", newer)
+        detail = _lines(preflight._transcription())[self.CONFIGURED].detail
+        assert "stt_ar_newer_v2" in detail
+        assert "pcd_v1.0" not in detail
+
+    def test_no_replicate_token_is_not_a_problem_for_the_local_engine(
+        self, engine, local_ready, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("REPLICATE_API_TOKEN", "")
+        engine("local")
+        results = preflight._transcription()
+        assert not any(r.blocking for r in results)
+        whisperx = _lines(results)[self.WHISPERX]
+        assert whisperx.status == Status.OK
+        assert "no API token" in whisperx.detail
+        assert "not needed unless you choose WhisperX online" in whisperx.detail
+
+    def test_local_reports_whisperx_as_information_too(
+        self, engine, local_ready, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_secret_value_1234")
+        engine("local")
+        results = preflight._transcription()
+        assert [r.name for r in results] == [self.CONFIGURED, self.WHISPERX]
+        whisperx = _lines(results)[self.WHISPERX]
+        assert whisperx.status == Status.OK and "Replicate client" in whisperx.detail
+        assert "r8_secret_value_1234" not in whisperx.detail
+
+    def test_a_broken_replicate_client_is_only_a_note_outside_a_release(
+        self, engine, local_ready, monkeypatch
+    ) -> None:
+        engine("local")
+        _hide_replicate_metadata(monkeypatch)
+        results = _lines(preflight._transcription(release=False))
+        assert results[self.CONFIGURED].status == Status.OK
+        assert results[self.WHISPERX].status == Status.WARN
+        assert "No package metadata" in results[self.WHISPERX].detail
+
+    def test_a_broken_replicate_client_fails_a_release_whatever_is_configured(
+        self, engine, local_ready, monkeypatch
+    ) -> None:
+        """The window offers WhisperX, so a release must carry its client."""
+        engine("local")
+        _hide_replicate_metadata(monkeypatch)
+        results = preflight._transcription(release=True)
+        whisperx = _lines(results)[self.WHISPERX]
+        assert whisperx.status == Status.FAIL
+        report = format_report(results, release=True)
+        assert report.rstrip().endswith("Not ready for release: 1 problem(s) above.")
+
+    def test_a_packaged_broken_client_does_not_claim_transcription_is_down(
+        self, engine, local_ready, monkeypatch
+    ) -> None:
+        engine("local")
+        _hide_replicate_metadata(monkeypatch)
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        remedy = _lines(preflight._transcription())[self.WHISPERX].remedy
+        assert "report it" in remedy.lower()
+        assert "on this computer is unaffected" in remedy
+
+    def test_the_release_gate_runs_the_replicate_check(self, engine, monkeypatch) -> None:
+        engine("local")
+        _hide_replicate_metadata(monkeypatch)
+        names = {r.name: r.status for r in run_checks(release=True)}
+        assert names[self.WHISPERX] == Status.FAIL
+
+    def test_whisperx_keeps_todays_token_check(self, engine, monkeypatch) -> None:
+        monkeypatch.setenv("REPLICATE_API_TOKEN", "")
+        engine("whisperx")
+        results = preflight._transcription()
+        assert results[0] == preflight._whisperx_check()
+        assert [r.name for r in results] == [self.CONFIGURED, self.LOCAL]
+
+    def test_whisperx_reports_the_local_engine_as_information(self, engine, monkeypatch) -> None:
+        from qurantext.services import engine_local, model_store
+
+        monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_secret_value_1234")
+        engine("whisperx")
+        monkeypatch.setattr(engine_local, "runtime_problem", lambda: None)
+        monkeypatch.setattr(model_store, "is_installed", lambda m: False)
+        local = _lines(preflight._transcription(release=True))[self.LOCAL]
+        assert local.status == Status.OK, "not downloaded yet is nothing to do"
+        assert "NVIDIA" in local.detail and "CC BY 4.0" in local.detail
+
+    def test_whisperx_users_are_only_told_the_local_runtime_is_missing(
+        self, engine, monkeypatch
+    ) -> None:
+        from qurantext.services import engine_local
+
+        monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_secret_value_1234")
+        engine("whisperx")
+        monkeypatch.setattr(engine_local, "runtime_problem", lambda: "no sherpa")
+        for release in (False, True):
+            results = preflight._transcription(release=release)
+            local = _lines(results)[self.LOCAL]
+            assert local.status == Status.WARN, release
+            assert local.remedy and "choose WhisperX" not in local.remedy, "they already use it"
+            assert not any(r.blocking for r in results), release
+
+    def test_an_unknown_engine_is_a_failure_that_names_the_choices(
+        self, engine, local_ready
+    ) -> None:
+        """The CLI stops with this; the doctor must not report a healthy engine."""
+        engine("cohere")
+        results = preflight._transcription()
+        configured = _lines(results)[self.CONFIGURED]
+        assert configured.status == Status.FAIL
+        assert "'cohere'" in configured.detail and "local, whisperx" in configured.detail
+        assert "QURANTEXT_TRANSCRIBE_ENGINE" in configured.remedy
+        assert {self.LOCAL, self.WHISPERX} <= set(_lines(results))
+        assert (
+            format_report(results)
+            .rstrip()
+            .endswith("Rendering works; Transcription cannot run yet: see above.")
+        )

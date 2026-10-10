@@ -1,3 +1,13 @@
+"""Transcribe a recording: choose the engine, and never recognise the same audio twice.
+
+The one entry point the CLI and the window call. :func:`resolve_engine` picks
+the engine (an explicit choice, else ``QURANTEXT_TRANSCRIBE_ENGINE``, else
+local); :func:`transcribe_audio` looks the audio up in the transcript cache
+(``transcript_cache.py``) and only on a miss runs the engine: ``engine_local``
+on this computer, or ``engine_whisperx``, which uploads the audio to Replicate.
+Both return the WhisperX raw shape, so everything downstream reads one format.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable

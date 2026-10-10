@@ -213,7 +213,8 @@ def test_more_options_points_the_way_arabic_reads(
 
 
 #: The Latin words the Arabic table itself keeps: the app's name, subtitle
-#: formats, key names, the package to install, and "English" in the language menu.
+#: formats, key names, the package to install, "English" in the language menu,
+#: and the online engine, its service and the setting and file its token goes in.
 _LATIN_THE_TABLE_KEEPS = {
     "Qalun",
     "SRT",
@@ -225,6 +226,12 @@ _LATIN_THE_TABLE_KEEPS = {
     "PySide6",
     "Addons",
     "English",
+    "WhisperX",
+    "Replicate",
+    "REPLICATE",
+    "API",
+    "TOKEN",
+    "env",
 }
 #: The letters of the key caps Qt itself writes into a tip (Save's Ctrl+S): a
 #: key's letter is what is printed on it, in either language.
@@ -527,3 +534,50 @@ def test_the_arabic_review_title_keeps_the_name_in_place_without_isolates(
     title = review_window.windowTitle()
     assert not any(c in title for c in "\u2066\u2067\u2068\u2069")
     assert title == "مراجعة — \u200emissing\u200e"
+
+
+def test_the_no_token_note_keeps_the_setting_and_the_file_name_whole(qt_app) -> None:
+    """``REPLICATE_API_TOKEN=…`` keeps its "=…" after the name, and ".env" its dot before."""
+    from tests.bidi_helpers import left_to_right
+
+    line = i18n.t("home.engine.no_token", folder=i18n.path_text("/home/k/دروس"))
+    parts = ["تشغيل", "دروس", "\u2066.", "env", "TOKEN", "=…", "لم"]
+    assert left_to_right(line, parts) == parts, line
+
+
+def test_the_folded_engine_hint_keeps_whisperx_in_its_place(qt_app) -> None:
+    """Read from the right: the label, then WhisperX, then that the recording goes online."""
+    from tests.bidi_helpers import left_to_right
+
+    line = i18n.t("home.engine.folded")
+    parts = ["إليه", "عبر", "WhisperX", "التفريغ"]
+    assert left_to_right(line, parts) == parts, line
+
+
+def test_the_folded_engine_hint_wraps_inside_the_panel(
+    qt_app, tmp_path, store, no_default_job_dirs, monkeypatch
+) -> None:
+    """The hint and its no-token sentence wrap; they never widen the Arabic panel."""
+    from qurantext.config.settings import get_settings
+
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "")
+    get_settings.cache_clear()
+    try:
+        local_prefs = Prefs(QSettings(str(tmp_path / "local.ini"), QSettings.Format.IniFormat))
+        local_prefs.more_options_open = False
+        baseline = NewJobPanel(local_prefs, quran_default=QURAN_FILE, db_path=store)
+        prefs = _prefs(tmp_path)
+        prefs.engine = "whisperx"
+        prefs.more_options_open = False
+        panel = NewJobPanel(prefs, quran_default=QURAN_FILE, db_path=store)
+        assert panel.minimumSizeHint().width() <= baseline.minimumSizeHint().width()
+
+        panel.resize(panel.minimumSizeHint().width(), 700)
+        panel.show()
+        qt_app.processEvents()
+        hint = panel.engine_hint_label
+        assert hint.isVisible() and hint.layoutDirection() == RTL
+        assert hint.geometry().right() <= panel.width()
+        assert hint.height() > hint.fontMetrics().height(), "the long note wraps"
+    finally:
+        get_settings.cache_clear()

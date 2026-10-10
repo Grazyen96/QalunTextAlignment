@@ -16,7 +16,7 @@ QuranText is organized around a small number of stable layers:
 - `config/` centralizes project paths, environment loading, and runtime settings.
 - `core/` contains pure Quran parsing, transcript matching, lecture matching, and video rendering logic.
 - `io/` loads and saves JSON, WhisperX transcript structures, and subtitle output.
-- `services/` contains external integrations such as WhisperX transcription via Replicate.
+- `services/` contains the transcription engines (a local model by default, WhisperX on Replicate) and the model store.
 - `pipelines/` coordinates complete workflows such as recitation matching, detect-range matching, and video generation.
 - `gui/` is the desktop window: widgets, a worker thread, and the one call it makes
   into the pipeline. Qt is optional, so nothing outside this package imports it.
@@ -39,6 +39,8 @@ QuranText is organized around a small number of stable layers:
 - `quran_parser.py` parses Qalun-format Quran text and handles surah headers, basmala skipping, and ta'awwudh skipping.
 - `range_matching.py` implements first/last ayah detection, confidence scoring, recitation timeline trimming, and warnings.
 - `lecture_matching.py` builds ayah spans, scans transcript windows, scores lecture matches, and merges overlapping detections.
+- `pause_cut.py` cuts a stream of audio into recognisable windows, at pauses.
+- `token_words.py` turns the recogniser's sub-word tokens and their times into timed words.
 - `alignment.py` holds the legacy word- and segment-alignment fuzzy matching helpers.
 - `video_common.py` contains shared validation, timing, JSON loading, and rendering helpers.
 - `ass_renderer.py` contains ASS subtitle generation, FFmpeg ASS rendering, and font-family validation.
@@ -55,7 +57,12 @@ QuranText is organized around a small number of stable layers:
 
 ### `src/qurantext/services`
 
-- `transcription.py` wraps Replicate WhisperX transcription with consistent settings and error handling.
+- `transcription.py` is the entry point: it chooses the engine and checks the transcript cache (`transcript_cache.py`) before running it.
+- `transcript_cache.py` remembers each transcript against the audio's content and the settings that shape it, so the same recording is never recognised twice.
+- `engine_local.py` is the local engine: NVIDIA's FastConformer Arabic run by sherpa-onnx on this computer, returning the WhisperX raw shape.
+- `engine_whisperx.py` is WhisperX on Replicate, the optional online engine.
+- `model_store.py` says where the local speech model lives and downloads it once, checked against pinned sizes and checksums.
+- `errors.py` holds the errors a transcription can end in, under one base the CLI and the window catch.
 
 ### `src/qurantext/pipelines`
 
@@ -70,7 +77,7 @@ QuranText is organized around a small number of stable layers:
 ### Detect-range flow
 
 1. Parse Quran text with `core.quran_parser.parse_ayat`.
-2. Load or transcribe WhisperX output.
+2. Load a saved transcript, or transcribe (local model by default, or WhisperX).
 3. Normalize transcript words with `io.readers.extract_matching_words`.
 4. Run either:
    - `core.range_matching.detect_first_ayah` / `detect_last_ayah`
@@ -81,10 +88,14 @@ QuranText is organized around a small number of stable layers:
 ### Legacy word-align flow
 
 1. Load Quran text.
-2. Load or transcribe WhisperX output.
+2. Load a saved transcript, or transcribe (local model by default, or WhisperX).
 3. Normalize aligned words.
 4. Fuzzy-match against canonical Quran words.
 5. Write JSON and SRT output.
+
+## Developer Tooling
+
+- `tools/export_local_model/` exports and packages the local speech model for release; see its `README.md`.
 
 ## Extending The Project
 
