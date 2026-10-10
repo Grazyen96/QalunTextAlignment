@@ -84,6 +84,9 @@ if any(f.name.startswith("libasound") for f in distribution("sherpa_onnx").files
 # app's OpenSSL looks where the build machine kept its certificates, which a
 # Mac or another Linux does not have. certifi.where() must find cacert.pem.
 datas += collect_data_files("certifi")
+# certifi is MPL-2.0, and its licence travels in its metadata. replicate's
+# recursive copy below brings it too, but naming it here keeps it if replicate goes.
+datas += copy_metadata("certifi")
 
 # replicate/__about__.py runs `version("replicate")` at import time, so the
 # package's metadata has to travel with it or the import raises. recursive=True

@@ -86,6 +86,35 @@ def test_the_spec_ships_certifis_certificates() -> None:
     assert 'collect_data_files("certifi")' in SPEC.read_text(encoding="utf-8")
 
 
+def test_the_spec_ships_certifis_licence_in_its_own_right() -> None:
+    """certifi is MPL-2.0 and its licence is in its metadata. It once travelled only
+    because replicate's metadata is copied recursively, so dropping replicate would
+    have dropped it silently; the notice names it, and the spec asks for it."""
+    assert 'copy_metadata("certifi")' in SPEC.read_text(encoding="utf-8")
+    notice = (SPEC.parents[1] / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    assert "certifi" in notice and "Mozilla Public License 2.0" in notice
+
+
+def test_the_notice_says_the_sherpa_onnx_build_contains_gpl_code() -> None:
+    """The PyPI sherpa-onnx links espeak-ng (GPL-3.0-or-later) statically into the
+    extension the app loads. The notice must not present the build as Apache/MIT only."""
+    notice = (SPEC.parents[1] / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    section = notice.split("## sherpa-onnx", 1)[1].split("\n## ", 1)[0]
+    assert "espeak-ng" in section and "GPL-3.0-or-later" in section
+    for component in (
+        "ONNX Runtime",
+        "ThirdPartyNotices.txt",
+        "kaldi-native-fbank",
+        "kaldi-decoder",
+        "kaldifst",
+        "OpenFst",
+        "pybind11",
+        "piper-phonemize",
+        "cppjieba",
+    ):
+        assert component in section, component
+
+
 def test_the_spec_ships_the_engine_licences_beside_its_binaries() -> None:
     """sherpa-onnx (Apache 2.0) and the ONNX Runtime inside it (MIT) both ask for
     their licence text to go wherever the binaries go. sherpa-onnx's wheel carries

@@ -16,8 +16,57 @@ The model is provided "as is", without warranties of any kind.
 
 ## sherpa-onnx
 
-https://github.com/k2-fsa/sherpa-onnx, Apache License 2.0. It includes
-ONNX Runtime (MIT License).
+https://github.com/k2-fsa/sherpa-onnx, version 1.13.8 as published on PyPI.
+sherpa-onnx's own code is under the Apache License 2.0; its licence text is in
+the app's folder, at `_internal/sherpa_onnx/LICENSE`.
+
+The bundled sherpa-onnx build is not under the Apache License 2.0 alone. Its
+compiled libraries also contain the following components, each under its own
+licence.
+
+**GNU General Public License version 3 or later (GPL-3.0-or-later):**
+
+- **espeak-ng**, https://github.com/espeak-ng/espeak-ng, including its
+  `ucd-tools` library. sherpa-onnx uses it for text to speech, which Qalun does
+  not use, but the PyPI build of sherpa-onnx links it statically into
+  `_sherpa_onnx` (the Python extension the app loads) and into
+  `libsherpa-onnx-c-api`. Found in the Linux build; the Windows and macOS builds
+  of the same version offer the same text-to-speech functions and are expected
+  to contain it too.
+
+**MIT License:**
+
+- **ONNX Runtime** 1.28.2, https://github.com/microsoft/onnxruntime, © Microsoft
+  Corporation, the library sherpa-onnx runs the model with (`libonnxruntime`,
+  `onnxruntime.dll`). Its licence text is in the app's folder, at
+  `_internal/sherpa_onnx/lib/onnxruntime-LICENSE`. ONNX Runtime itself contains
+  third-party code (among others protobuf, abseil, flatbuffers, ONNX and Eigen),
+  whose licences and notices ONNX Runtime lists in its `ThirdPartyNotices.txt`:
+  https://github.com/microsoft/onnxruntime/blob/v1.28.2/ThirdPartyNotices.txt
+- **piper-phonemize**, https://github.com/rhasspy/piper-phonemize (text to
+  speech, unused by Qalun).
+- **cppjieba**, https://github.com/yanyiwu/cppjieba (Chinese word splitting,
+  unused by Qalun).
+- **nlohmann/json**, https://github.com/nlohmann/json.
+
+**Apache License 2.0:**
+
+- **kaldi-native-fbank**, https://github.com/csukuangfj/kaldi-native-fbank
+- **kaldi-decoder**, https://github.com/k2-fsa/kaldi-decoder
+- **kaldifst**, https://github.com/k2-fsa/kaldifst, and **OpenFst**,
+  https://www.openfst.org
+- **simple-sentencepiece**, https://github.com/pkufool/simple-sentencepiece
+
+**BSD 3-Clause License:**
+
+- **pybind11**, https://github.com/pybind/pybind11
+
+## certifi
+
+https://github.com/certifi/python-certifi, Mozilla Public License 2.0. Qalun
+uses its certificate bundle (`cacert.pem`) to check the speech model's download.
+The licence text is in the app's folder, at
+`_internal/certifi-<version>.dist-info/licenses/LICENSE`.
 
 ## ALSA library (Linux builds only)
 

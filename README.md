@@ -209,7 +209,11 @@ QURANTEXT_VIDEO_FPS=25
 
 `packaging/` builds a self-contained desktop app with PyInstaller. See
 [packaging/README.md](packaging/README.md) for the per-platform wrappers and
-the two mistakes that are easy to make.
+the two mistakes that are easy to make. Before a build is released, its gate
+runs the built app's `--doctor --release` and then a real local transcription
+inside it, after checking that the published speech model still matches the
+pin; see [the transcription gate](packaging/ci/README.md#the-transcription-gate)
+and [docs/release-checklist.md](docs/release-checklist.md).
 
 ## Project Layout
 

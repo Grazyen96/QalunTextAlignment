@@ -9,6 +9,7 @@ a real local transcription inside the app.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -19,6 +20,7 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "packaging" / "ci" / "check.sh"
+TRANSCRIPTION_SCRIPT = SCRIPT.parent / "check-transcription.sh"
 
 pytestmark = pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="the stand-in bundle is the Linux layout"
@@ -63,22 +65,93 @@ def _bundle(
         (internal / "lib" / "libxcb-cursor.so.0").write_bytes(b"\0")
 
 
-def _gate(tmp_path: Path, **env: str) -> subprocess.CompletedProcess[str]:
+def _published(**changes: object) -> dict[str, object]:
+    """What GitHub's API says about the pinned release, as model_store.py pins it,
+    with *changes* applied to the model's asset (a value of None drops the key)."""
+    from qurantext.services.model_store import LOCAL_MODEL
+
+    asset: dict[str, object] = {
+        "name": LOCAL_MODEL.url.rsplit("/", 1)[1],
+        "size": LOCAL_MODEL.archive_size,
+        "digest": f"sha256:{LOCAL_MODEL.archive_sha256}",
+        "state": "uploaded",
+    }
+    for key, value in changes.items():
+        if value is None:
+            asset.pop(key, None)
+        else:
+            asset[key] = value
+    other = {"name": "something-else.tar.bz2", "size": 1, "digest": "sha256:00"}
+    return {"tag_name": "model-v1", "assets": [other, asset]}
+
+
+def _fake_curl(tmp_path: Path, release: dict[str, object] | None) -> Path:
+    """A folder holding a curl that answers with *release* (or fails, for None) and
+    records the URL it was asked for, using only bash builtins, so no test reaches
+    the network."""
+    tools = tmp_path / "fake-curl"
+    tools.mkdir(exist_ok=True)
+    answer = tmp_path / "release-answer.json"
+    calls = tmp_path / "curl-calls"
+    if release is not None:
+        answer.write_text(json.dumps(release), encoding="utf-8")
+    curl = tools / "curl"
+    curl.write_text(
+        f"""#!{shutil.which("bash")}
+out=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift ;;
+    -H) echo "header: $2" >> {calls}; shift ;;
+    *) url="$1" ;;
+  esac
+  shift
+done
+echo "url: $url" >> {calls}
+[ -f {answer} ] || exit 22
+printf '%s' "$(<{answer})" > "$out"
+""",
+        encoding="utf-8",
+    )
+    curl.chmod(0o755)
+    return tools
+
+
+def _gate(
+    tmp_path: Path,
+    *,
+    release: dict[str, object] | None = None,
+    api_fails: bool = False,
+    script: Path = SCRIPT,
+    **env: str,
+) -> subprocess.CompletedProcess[str]:
     inherited = {
         k: v
         for k, v in os.environ.items()
-        if k not in ("QURANTEXT_CACHE_DIR", "GITHUB_ACTIONS", "QURANTEXT_TRANSCRIBE_ENGINE")
+        if k
+        not in (
+            "QURANTEXT_CACHE_DIR",
+            "GITHUB_ACTIONS",
+            "QURANTEXT_TRANSCRIBE_ENGINE",
+            "GITHUB_TOKEN",
+            "GH_TOKEN",
+        )
     }
+    curl = _fake_curl(tmp_path, None if api_fails else (release or _published()))
+    path = env.pop("PATH", inherited.get("PATH", ""))
     return subprocess.run(
-        ["bash", str(SCRIPT)],
+        ["bash", str(script)],
         cwd=tmp_path,
         capture_output=True,
         text=True,
         env={
             **inherited,
+            # Where the app's model folder is when QURANTEXT_CACHE_DIR is not set.
+            "XDG_CACHE_HOME": str(tmp_path / "xdg-cache"),
             "QALUN_GATE_TIMEOUT_S": "2",
             "QALUN_TRANSCRIPTION_GATE_TIMEOUT_S": "2",
             **env,
+            "PATH": f"{curl}:{path}",
         },
         timeout=60,
     )
@@ -236,3 +309,145 @@ def test_the_workflow_caches_that_folder_under_the_pinned_models_checksum() -> N
     step = workflow.split("uses: actions/cache@", 1)[1].split("\n\n", 1)[0]
     assert "path: .ci-cache/qalun/models" in step
     assert LOCAL_MODEL.archive_sha256 in step
+
+
+# --- The published model, checked against the pin on every run (cache or not) ---
+
+
+def _transcription_gate(tmp_path: Path, **kwargs: object) -> subprocess.CompletedProcess[str]:
+    """check-transcription.sh on its own, with a marker the stand-in app leaves
+    when it is asked to transcribe."""
+    _bundle(
+        tmp_path,
+        'echo "Ready to render."',
+        transcribe=f": > {tmp_path / 'transcribed'}" + WRITES_A_TRANSCRIPT,
+    )
+    return _gate(tmp_path, script=TRANSCRIPTION_SCRIPT, **kwargs)  # type: ignore[arg-type]
+
+
+def test_the_published_model_is_checked_against_the_pin_in_model_store(tmp_path: Path) -> None:
+    from qurantext.services.model_store import LOCAL_MODEL
+
+    result = _transcription_gate(tmp_path)
+    assert result.returncode == 0, result.stderr
+    calls = (tmp_path / "curl-calls").read_text(encoding="utf-8")
+    assert "url: https://api.github.com/repos/Grazyen96/qalun-models/releases/tags/model-v1\n" in (
+        calls
+    )
+    assert "Authorization" not in calls
+    assert f"{LOCAL_MODEL.archive_size} bytes, sha256 {LOCAL_MODEL.archive_sha256}" in result.stdout
+    assert (tmp_path / "transcribed").exists()
+
+
+def test_the_script_does_not_write_the_pin_down_a_second_time() -> None:
+    """model_store.py is the one place the pin lives; the gate reads it from there."""
+    from qurantext.services.model_store import LOCAL_MODEL
+
+    text = TRANSCRIPTION_SCRIPT.read_text(encoding="utf-8")
+    assert LOCAL_MODEL.archive_sha256 not in text
+    assert str(LOCAL_MODEL.archive_size) not in text
+    assert LOCAL_MODEL.url.rsplit("/", 1)[1] not in text
+    assert "from qurantext.services.model_store import LOCAL_MODEL" in text
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"size": 108151681}, "the pin says 108151682"),
+        ({"digest": "sha256:" + "0" * 64}, "has digest sha256:000"),
+        ({"name": "renamed.tar.bz2"}, "has no asset named"),
+    ],
+)
+def test_a_published_model_that_no_longer_matches_fails_before_any_download(
+    tmp_path: Path, changes: dict[str, object], message: str
+) -> None:
+    result = _transcription_gate(tmp_path, release=_published(**changes))
+    assert result.returncode == 1
+    assert message in result.stderr
+    assert "no longer matches model_store.py" in result.stderr
+    assert not (tmp_path / "transcribed").exists()
+
+
+def test_without_a_digest_from_github_the_size_is_still_checked(tmp_path: Path) -> None:
+    result = _transcription_gate(tmp_path, release=_published(digest=None))
+    assert result.returncode == 0, result.stderr
+    assert "matches the pin by size" in result.stdout
+    result = _transcription_gate(tmp_path / "again", release=_published(digest=None, size=5))
+    assert result.returncode == 1
+
+
+def test_a_release_that_cannot_be_read_fails_the_gate(tmp_path: Path) -> None:
+    result = _transcription_gate(tmp_path, api_fails=True)
+    assert result.returncode == 1
+    assert "could not read release model-v1" in result.stderr
+    assert not (tmp_path / "transcribed").exists()
+
+
+def test_a_github_token_is_used_when_there_is_one_and_never_printed(tmp_path: Path) -> None:
+    result = _transcription_gate(tmp_path, GITHUB_TOKEN="secret-token-value")
+    assert result.returncode == 0, result.stderr
+    calls = (tmp_path / "curl-calls").read_text(encoding="utf-8")
+    assert "header: Authorization: Bearer secret-token-value" in calls
+    assert "secret-token-value" not in result.stdout + result.stderr
+
+
+def test_a_cache_miss_leaves_one_greppable_line_and_a_hit_none(tmp_path: Path) -> None:
+    """CI's share of the asset's download count, countable from the Actions logs."""
+    from qurantext.services.model_store import LOCAL_MODEL
+
+    cache = tmp_path / "cache"
+    miss = _transcription_gate(tmp_path / "miss", QURANTEXT_CACHE_DIR=str(cache))
+    assert miss.returncode == 0, miss.stderr
+    lines = [
+        line for line in miss.stdout.splitlines() if line.startswith("QALUN-CI-MODEL-DOWNLOAD ")
+    ]
+    assert lines == [
+        f"QALUN-CI-MODEL-DOWNLOAD model-v1 {LOCAL_MODEL.url.rsplit('/', 1)[1]}:"
+        " not in the cache, so this run downloads it once."
+    ]
+    (cache / "models" / LOCAL_MODEL.folder_name).mkdir(parents=True)
+    hit = _transcription_gate(tmp_path / "hit", QURANTEXT_CACHE_DIR=str(cache))
+    assert hit.returncode == 0, hit.stderr
+    assert "QALUN-CI-MODEL-DOWNLOAD" not in hit.stdout
+    assert "already in the cache" in hit.stdout
+
+
+# --- The transcription's own bound on macOS (perl) and Windows (timeout.exe) ---
+
+
+def _tools_without_timeout(tmp_path: Path) -> Path:
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    for name in ("bash", "perl", "uname", "dirname", "mkdir", "rm", "tr"):
+        (tools / name).symlink_to(shutil.which(name))
+    (tools / "python3").symlink_to(shutil.which("python3") or sys.executable)
+    return tools
+
+
+def test_a_hung_transcription_is_bounded_through_perl_without_timeout(tmp_path: Path) -> None:
+    """What macOS runs: it has no timeout(1)."""
+    tools = _tools_without_timeout(tmp_path)
+    _bundle(tmp_path, 'echo "Ready to render."', transcribe=f"exec {shutil.which('sleep')} 30")
+    started = time.monotonic()
+    result = _gate(tmp_path, script=TRANSCRIPTION_SCRIPT, PATH=str(tools))
+    assert time.monotonic() - started < 15
+    assert result.returncode == 1, result.stderr
+    assert "did not finish within 2 s" in result.stderr
+
+
+def test_a_timeout_that_does_not_answer_version_is_passed_over_for_perl(tmp_path: Path) -> None:
+    """Windows' own timeout.exe only waits: it must not be taken for GNU's."""
+    fake = tmp_path / "windows-timeout"
+    fake.mkdir()
+    (fake / "timeout").write_text(
+        '#!/bin/sh\nif [ "$1" = "--version" ]; then exit 1; fi\nexit 99\n', encoding="utf-8"
+    )
+    (fake / "timeout").chmod(0o755)
+    _bundle(tmp_path, 'echo "Ready to render."', transcribe=f"exec {shutil.which('sleep')} 30")
+    started = time.monotonic()
+    result = _gate(
+        tmp_path, script=TRANSCRIPTION_SCRIPT, PATH=f"{fake}:{os.environ.get('PATH', '')}"
+    )
+    assert time.monotonic() - started < 15
+    assert result.returncode == 1, result.stderr
+    assert "did not finish within 2 s" in result.stderr

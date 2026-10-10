@@ -16,5 +16,9 @@ the wheels the binaries come from do not carry them.
   it, so Linux builds only. Copied verbatim from
   https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt (fetched 10 Oct 2026).
 
+ONNX Runtime's `ThirdPartyNotices.txt` (the notices for the code inside ONNX
+Runtime) is not in the sherpa-onnx wheel either, and is not kept here yet:
+`THIRD_PARTY_NOTICES.md` links the copy for the bundled version, 1.28.2.
+
 sherpa-onnx's own licence (Apache 2.0) is not here: its wheel carries it, and the
 spec takes it from the installed distribution so it always matches the version built.

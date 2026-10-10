@@ -10,6 +10,11 @@
 # The audio is a five-second tone made here, so nothing is kept in the
 # repository; how well the model recognises speech is the parity gate's job.
 #
+# Before that, every run (cache hit or not) asks GitHub's API whether the
+# published asset still has the pinned name, size and sha256, so a run that
+# restores the model from the cache still proves the release a person will
+# download from. A cache miss prints one QALUN-CI-MODEL-DOWNLOAD line.
+#
 # A failure here usually means one of three things: the qalun-models release
 # asset is broken or gone, the pinned checksum in model_store.py no longer
 # matches it, or the bundle is missing one of sherpa-onnx's native libraries.
@@ -87,6 +92,96 @@ if [ -n "${QURANTEXT_CACHE_DIR:-}" ]; then
   echo "Speech model folder: $QURANTEXT_CACHE_DIR/models"
 fi
 
+work="build/transcription-gate"
+rm -rf "$work"
+mkdir -p "$work"
+
+# The published asset still matches the pin, checked every run, cache or not.
+# On a cache hit the app never touches the release, so without this a deleted,
+# renamed or replaced model-v1 asset (or qalun-models made private) would ship.
+# This reads the release's metadata from GitHub's API, which does not count as
+# a download of the asset. What it expects is read from model_store.py, the one
+# place the pin is written down; that import needs nothing outside the standard
+# library, so any Python 3.10+ can run it from src/, installed or not.
+src_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../src" && pwd)"
+if ! pin="$("$python" -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+from qurantext.services.model_store import LOCAL_MODEL as m, model_dir
+parts = m.url.split("/")
+if parts[:3] != ["https:", "", "github.com"] or parts[5:7] != ["releases", "download"] or len(parts) != 9:
+    sys.exit(f"the pinned URL is not a GitHub release asset: {m.url}")
+owner, repo, tag, name = parts[3], parts[4], parts[7], parts[8]
+api = f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}"
+print("\t".join([tag, api, name, str(m.archive_size), m.archive_sha256, str(model_dir(m))]))
+' "$src_dir" | tr -d '\r')"; then
+  echo "The transcription gate failed: could not read the pinned model from model_store.py." >&2
+  exit 1
+fi
+IFS=$'\t' read -r pin_tag pin_api pin_name pin_size pin_sha256 pin_dir <<<"$pin"
+[ "$windows" = true ] && pin_dir="$(cygpath -u "$pin_dir")"
+
+curl="$(command -v curl || true)"
+if [ -z "$curl" ]; then
+  echo "The transcription gate failed: no curl on PATH to check the published model with." >&2
+  exit 1
+fi
+# GITHUB_TOKEN when the step passes one; otherwise anonymous, which is plenty
+# for one call per run. The token never reaches the log.
+auth=()
+token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+if [ -n "$token" ]; then
+  auth=(-H "Authorization: Bearer $token")
+fi
+release_json="$work/release.json"
+if ! "$curl" -fsSL --retry 3 --max-time 60 -H "Accept: application/vnd.github+json" \
+  ${auth[@]+"${auth[@]}"} -o "$release_json" "$pin_api"; then
+  echo "The transcription gate failed: could not read release $pin_tag from $pin_api." >&2
+  echo "Usually: the release or its repository is gone, renamed or private." >&2
+  exit 1
+fi
+if ! "$python" - "$release_json" "$pin_name" "$pin_size" "$pin_sha256" "$pin_tag" <<'PY'; then
+import json
+import sys
+
+path, name, size, sha256, tag = sys.argv[1:6]
+try:
+    with open(path, encoding="utf-8") as handle:
+        release = json.load(handle)
+except (OSError, ValueError) as error:
+    sys.exit(f"cannot read the release metadata {path}: {error}")
+assets = release.get("assets") if isinstance(release, dict) else None
+if not isinstance(assets, list):
+    sys.exit(f"release {tag} lists no assets")
+found = [a for a in assets if isinstance(a, dict) and a.get("name") == name]
+if not found:
+    sys.exit(f"release {tag} has no asset named {name}")
+asset = found[0]
+if asset.get("size") != int(size):
+    sys.exit(f"the asset {name} is {asset.get('size')} bytes; the pin says {size}")
+digest = asset.get("digest")
+if digest:
+    if digest != f"sha256:{sha256}":
+        sys.exit(f"the asset {name} has digest {digest}; the pin says sha256:{sha256}")
+    print(f"The published model matches the pin: {name} in {tag}, {size} bytes, sha256 {sha256}.")
+else:
+    print(f"The published model matches the pin by size: {name} in {tag}, {size} bytes"
+          " (GitHub gave no digest to compare the sha256 with).")
+PY
+  echo "The transcription gate failed: the published model no longer matches model_store.py." >&2
+  echo "A release asset is never replaced in place; see tools/export_local_model/README.md." >&2
+  exit 1
+fi
+
+# One greppable line per download this run adds to the asset's count, so CI's
+# share of it can be counted from the Actions logs:
+#   gh run view <run-id> --log | grep -c 'QALUN-CI-MODEL-DOWNLOAD '
+if [ -d "$pin_dir" ]; then
+  echo "Speech model already in the cache ($pin_dir): no download."
+else
+  echo "QALUN-CI-MODEL-DOWNLOAD $pin_tag $pin_name: not in the cache, so this run downloads it once."
+fi
+
 stripped=/nonexistent
 if [ "$windows" = true ]; then
   # What check.ps1 leaves the doctor: Windows' own folders and nothing else.
@@ -94,9 +189,6 @@ if [ "$windows" = true ]; then
   stripped="$system_root/System32:$system_root"
 fi
 
-work="build/transcription-gate"
-rm -rf "$work"
-mkdir -p "$work"
 tone="$work/tone.wav"
 transcript="$work/tone.json"
 

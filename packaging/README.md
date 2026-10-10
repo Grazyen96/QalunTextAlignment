@@ -104,8 +104,7 @@ These zips were made the way the release workflow made them until then, with
 Python's `shutil.make_archive`, which stores each of the bundle's 59 symlinked
 libraries a second time (the zip unpacks to 446 MB). `packaging/ci/package.sh`
 keeps the links: the same after-bundle zips to 113 MB and unpacks to the 275 MB
-folder. The workflow uses it once its Package step is changed; see
-[ci/README.md](ci/README.md).
+folder. The workflow's Package step runs it; see [ci/README.md](ci/README.md).
 
 ### The local transcription engine
 
@@ -140,6 +139,37 @@ trusts alongside the system's certificates. Verified in the frozen app with the
 system's certificates hidden (`SSL_CERT_FILE` and `SSL_CERT_DIR` pointed at
 nothing): the download completes through certifi alone, and fails with
 `CERTIFICATE_VERIFY_FAILED` once certifi's file is removed too.
+
+The PyPI build of sherpa-onnx is not Apache/MIT only: it links espeak-ng
+(GPL-3.0-or-later), for its text to speech, statically into the extension the
+app loads. `THIRD_PARTY_NOTICES.md` names it and the other components inside the
+build. Releasing is blocked until the owner decides how to resolve it; see
+[docs/release-checklist.md](../docs/release-checklist.md) and the "Licence
+finding" in [docs/findings/asr-bakeoff.md](../docs/findings/asr-bakeoff.md).
+
+**ONNX Runtime telemetry (Windows): not verified on the binary.** Qalun collects no
+usage data: the app opens a connection only to download the speech model and,
+when someone chooses it, to transcribe online with WhisperX. ONNX Runtime's Windows builds *can* emit usage events through Windows'
+own event tracing (TraceLogging), which Windows' diagnostic service may upload;
+Microsoft's official builds have it on, builds from source have it off unless
+built with `--use_telemetry`. What was checked (10 Oct 2026, by reading, not on
+a Windows machine):
+
+- sherpa-onnx's `cmake/onnxruntime-win-x64.cmake` takes ONNX Runtime 1.28.2 not
+  from Microsoft but from `csukuangfj/onnxruntime-libs`, and that repository's
+  `windows-x64.yaml` workflow builds `onnxruntime.dll` from source with
+  `tools/ci_build/build.py` and no `--use_telemetry` (it copies only the headers,
+  `LICENSE`, `ThirdPartyNotices.txt` and similar files from Microsoft's zip). So
+  the DLL in the Windows wheel is very likely not a telemetry build.
+- The Linux `libonnxruntime.so` is such a custom build too (source paths under
+  `/shared/onnxruntime/`), and on Linux ONNX Runtime has no telemetry provider.
+- Neither sherpa-onnx's Python API nor anything Qalun loads exposes ONNX
+  Runtime's `DisableTelemetryEvents`, so the app cannot switch it off itself.
+  The C API has it, but it needs the `OrtEnv` sherpa-onnx keeps to itself.
+
+Not checked: the DLL inside the sherpa-onnx 1.13.8 Windows wheel itself, which
+needs that wheel or a Windows machine. Until then, "no telemetry" holds for
+Qalun's own code, and for ONNX Runtime on Windows only as far as the above goes.
 
 Windows and macOS: record from the first release-workflow run after this change
 (the zip sizes on the run's summary page) — see

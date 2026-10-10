@@ -3,6 +3,15 @@
 What a person has to check before tagging a release, because a machine here cannot.
 Work top to bottom; stop at the first item that fails and fix it before going on.
 
+## Blocking
+
+- [ ] **Licence: the bundled sherpa-onnx contains GPL-3.0 code (espeak-ng). Do not tag
+      a release until this is resolved** (see the "Licence finding" in
+      `docs/findings/asr-bakeoff.md`). The PyPI build of sherpa-onnx 1.13.8 links
+      espeak-ng (GPL-3.0-or-later) statically into the extension the app loads.
+      `THIRD_PARTY_NOTICES.md` says so; how to resolve it is the owner's decision,
+      still pending.
+
 ## Build
 
 - [ ] Actions → **Build the app** → **Run workflow**, on the commit you mean to tag.
@@ -11,13 +20,15 @@ Work top to bottom; stop at the first item that fails and fix it before going on
       and Linux.
 - [ ] In each platform's gate log, the transcription gate ends with `The built app
       transcribed on this computer: ... for a 5 s tone.` It proves the speech model
-      loads and runs inside the app that ships, and, when the step **Keep the speech
-      model between runs** found no cache, that it downloads from the `qalun-models`
-      release and verifies. To prove the download on purpose, delete the
-      `qalun-model-*` caches (Actions → Caches) first. If it fails, it is usually a
-      broken `qalun-models` asset, a checksum in `model_store.py` that no longer
-      matches it, or a sherpa-onnx library missing from the bundle; see
-      `packaging/ci/README.md`.
+      loads and runs inside the app that ships. Before it, the line `The published
+      model matches the pin: ...` proves, cache or not, that the `qalun-models`
+      release still has the asset with the size and sha256 pinned in
+      `model_store.py`. If it says `matches the pin by size` instead, GitHub gave no
+      sha256 to compare; when the step **Keep the speech model between runs** found
+      no cache, the line `QALUN-CI-MODEL-DOWNLOAD ...` shows the run downloaded and
+      verified the asset itself. If the gate fails, it is usually a broken
+      `qalun-models` asset, a checksum in `model_store.py` that no longer matches it,
+      or a sherpa-onnx library missing from the bundle; see `packaging/ci/README.md`.
 - [ ] In each platform's gate log, the Playback line says `through the FFmpeg backend,
       as QT_MEDIA_BACKEND asks`. Windows and macOS also ship a native backend, and only
       this line shows the recording did not play through that one instead.

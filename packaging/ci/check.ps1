@@ -19,8 +19,16 @@ $env:QURANTEXT_TRANSCRIBE_ENGINE = "local"
 $fullPath = $env:PATH
 $gitBash = Join-Path $env:ProgramFiles "Git\bin\bash.exe"
 if (-not (Test-Path $gitBash)) {
-  $found = Get-Command bash -ErrorAction SilentlyContinue
-  $gitBash = if ($found) { $found.Source } else { $null }
+  # Git installed elsewhere: its bash is in bin\ beside the cmd\ that holds git.exe.
+  # A bare `bash` only as the last resort, because that is the one that can be WSL's.
+  $git = Get-Command git -ErrorAction SilentlyContinue
+  $besideGit = if ($git) { Join-Path (Split-Path (Split-Path $git.Source)) "bin\bash.exe" } else { $null }
+  if ($besideGit -and (Test-Path $besideGit)) {
+    $gitBash = $besideGit
+  } else {
+    $found = Get-Command bash -ErrorAction SilentlyContinue
+    $gitBash = if ($found) { $found.Source } else { $null }
+  }
 }
 
 $env:PATH = "$env:SystemRoot\system32;$env:SystemRoot"
