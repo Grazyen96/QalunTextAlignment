@@ -4,6 +4,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from qurantext.cli.main import build_parser
 
 
@@ -88,3 +90,10 @@ def test_package_and_root_detect_range_smoke(tmp_path: Path) -> None:
 
     wrapper_result = json.loads(output.read_text(encoding="utf-8"))
     assert wrapper_result["last_ayah"]["ayah_num"] == 2
+
+
+def test_cli_offers_the_engine_choice(capsys) -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["transcribe", "--help"])
+    out = capsys.readouterr().out
+    assert "--engine" in out and "local" in out and "whisperx" in out

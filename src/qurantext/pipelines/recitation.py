@@ -58,6 +58,7 @@ def run_word_alignment(
     output_paths: RecitationOutputPaths | None = None,
     whisperx_output: dict | list | None = None,
     model_ref: str | None = None,
+    engine: str | None = None,
 ) -> RecitationAlignmentResult:
     """Run the word-level recitation alignment workflow."""
     ensure_required_directories()
@@ -82,13 +83,14 @@ def run_word_alignment(
             audio_file,
             save_raw_to=resolved_output_paths.raw_output_json,
             model_ref=model_ref,
+            engine=engine,
         )
         raw_output = transcription.output
 
     words = extract_alignment_words(raw_output)
     if not words:
         raise RuntimeError(
-            "No word timestamps were returned by the Replicate model. Print the raw output to inspect the response shape."
+            "No word timestamps were returned by the transcription. Print the raw output to inspect the response shape."
         )
 
     settings = get_settings()

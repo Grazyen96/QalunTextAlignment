@@ -26,7 +26,7 @@ from qurantext.core.range_matching import (
 from qurantext.data.quran_db import QuranDataError, ensure_quran_db
 from qurantext.io.readers import extract_matching_words, load_json
 from qurantext.io.writers import write_json
-from qurantext.services.transcription import transcribe_audio
+from qurantext.services.transcription import ENGINE_LABELS, resolve_engine, transcribe_audio
 from qurantext.utils.progress import CancelToken, ConsoleProgress, ProgressCallback, report
 
 
@@ -133,6 +133,7 @@ def run_recitation_range(
     to_ayah: int,
     whisperx: str | Path | None = None,
     audio: str | Path | None = None,
+    engine: str | None = None,
     max_span: int | None = None,
     echo: bool = True,
     progress: ProgressCallback | None = None,
@@ -203,15 +204,24 @@ def run_recitation_range(
         transcript_input_path = str(wx_path.resolve())
         whisperx_raw_output_path = str(wx_path.resolve())
         whisperx_model_ref = None
+        transcription_engine = None
     else:
         assert audio is not None
-        emit(f"[2/3] Transcribing audio with WhisperX: {audio}")
-        service_result = transcribe_audio(audio, save_raw_to=default_whisperx_raw_path(out_path))
+        label = ENGINE_LABELS[resolve_engine(engine, get_settings())]
+        emit(f"[2/3] Transcribing audio with {label}: {audio}")
+        service_result = transcribe_audio(
+            audio,
+            save_raw_to=default_whisperx_raw_path(out_path),
+            engine=engine,
+            progress=progress,
+            cancel=cancel,
+        )
         wx_data = service_result.output
         transcript_source = "audio"
         transcript_input_path = str(Path(audio).resolve())
         whisperx_raw_output_path = service_result.raw_output_path
         whisperx_model_ref = service_result.model_ref
+        transcription_engine = service_result.engine
 
     words = extract_matching_words(wx_data)
     if not words:
@@ -244,6 +254,7 @@ def run_recitation_range(
             "input_path": transcript_input_path,
             "whisperx_raw_output_path": whisperx_raw_output_path,
             "whisperx_model_ref": whisperx_model_ref,
+            "transcription_engine": transcription_engine,
             "whisperx_words": len(words),
             "audio_start_s": words[0]["start"],
             "audio_end_s": words[-1]["end"],
@@ -286,6 +297,7 @@ def run_detection(
     mode: str = "range",
     whisperx: str | Path | None = None,
     audio: str | Path | None = None,
+    engine: str | None = None,
     surah: str | None = None,
     head_words: int | None = None,
     tail_words: int | None = None,
@@ -363,16 +375,25 @@ def run_detection(
         transcript_input_path = str(wx_path.resolve())
         whisperx_raw_output_path = str(wx_path.resolve())
         whisperx_model_ref = None
+        transcription_engine = None
         whisperx_segment_count = count_whisperx_segments(wx_data)
     else:
         assert audio is not None
-        emit(f"[2/4] Transcribing audio with WhisperX: {audio}")
-        service_result = transcribe_audio(audio, save_raw_to=default_whisperx_raw_path(out_path))
+        label = ENGINE_LABELS[resolve_engine(engine, get_settings())]
+        emit(f"[2/4] Transcribing audio with {label}: {audio}")
+        service_result = transcribe_audio(
+            audio,
+            save_raw_to=default_whisperx_raw_path(out_path),
+            engine=engine,
+            progress=progress,
+            cancel=cancel,
+        )
         wx_data = service_result.output
         transcript_source = "audio"
         transcript_input_path = str(Path(audio).resolve())
         whisperx_raw_output_path = service_result.raw_output_path
         whisperx_model_ref = service_result.model_ref
+        transcription_engine = service_result.engine
         whisperx_segment_count = service_result.segment_count
         emit(
             f"      {'Reused the cached transcript' if service_result.from_cache else 'WhisperX raw JSON saved'}"
@@ -444,6 +465,7 @@ def run_detection(
                 "input_path": transcript_input_path,
                 "whisperx_raw_output_path": whisperx_raw_output_path,
                 "whisperx_model_ref": whisperx_model_ref,
+                "transcription_engine": transcription_engine,
                 "whisperx_segments": whisperx_segment_count,
                 "total_ayat_in_file": len(ayat),
                 "whisperx_words": len(words),
@@ -589,6 +611,7 @@ def run_detection(
                 "input_path": transcript_input_path,
                 "whisperx_raw_output_path": whisperx_raw_output_path,
                 "whisperx_model_ref": whisperx_model_ref,
+                "transcription_engine": transcription_engine,
                 "whisperx_segments": whisperx_segment_count,
                 "total_ayat_in_file": len(ayat),
                 "recitation_ayat_scanned": len(recitation_ayat),
@@ -643,6 +666,7 @@ def run_detection(
             "input_path": transcript_input_path,
             "whisperx_raw_output_path": whisperx_raw_output_path,
             "whisperx_model_ref": whisperx_model_ref,
+            "transcription_engine": transcription_engine,
             "whisperx_segments": whisperx_segment_count,
             "total_ayat_in_file": len(ayat),
             "whisperx_words": len(words),

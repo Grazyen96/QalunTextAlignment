@@ -221,3 +221,33 @@ class TestEngineChoice:
         )
         get_settings.cache_clear()
         assert result.engine == "whisperx"
+
+
+def test_detection_passes_engine_progress_and_cancel(monkeypatch, tmp_path) -> None:
+    from qurantext.config.paths import DEFAULT_QURAN_PATH
+    from qurantext.pipelines import detection
+    from qurantext.utils.progress import CancelToken
+
+    seen = {}
+
+    def fake(audio, **kwargs):
+        seen.update(kwargs)
+        raise RuntimeError("stop after the call")
+
+    monkeypatch.setattr(detection, "transcribe_audio", fake)
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"RIFF....WAVE")
+    token = CancelToken()
+    with pytest.raises(RuntimeError, match="stop after the call"):
+        detection.run_detection(
+            quran=DEFAULT_QURAN_PATH,
+            output=tmp_path / "m.json",
+            mode="lecture",
+            audio=audio,
+            echo=False,
+            engine="whisperx",
+            cancel=token,
+        )
+    assert seen["engine"] == "whisperx"
+    assert seen["cancel"] is token
+    assert "progress" in seen
