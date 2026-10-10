@@ -52,7 +52,9 @@ _JOB_LIST_WIDTH = 300
 _WINDOW_SIZE = (1024, 680)
 #: The stages the pipeline reports, each said in the window's words as
 #: ``job.stage.<stage>``; any other stage says ``job.stage.working``.
-_KNOWN_STAGES = frozenset({"download", "detect", "match", "render", "export"})
+_KNOWN_STAGES = frozenset({"download", "unpack", "detect", "match", "render", "export"})
+#: The percentage sentence of each stage that has its own; any other says "Matching".
+_PERCENT_KEYS = {"download": "home.progress.downloading", "render": "home.progress.rendering"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -537,17 +539,16 @@ def _stage_key(stage: str) -> str:
 
 
 def _progress_text(event: ProgressEvent) -> str:
-    """``Matching — 40%, about 2m 05s left``: the stage, how far, and how long when known."""
+    """``Matching — 40%, about 2m 05s left``: the stage, how far, and how long when known.
+
+    A stage without a sentence of its own in ``_PERCENT_KEYS`` says "Matching",
+    the name of the matching stages that report fractions.
+    """
     percent = int(max(0.0, min(1.0, event.fraction or 0.0)) * 100)
-    rendering = event.stage == "render"
+    key = _PERCENT_KEYS.get(event.stage, "home.progress.matching")
     if event.eta_seconds is not None and not event.done:
-        eta = _minutes(event.eta_seconds)
-        if rendering:
-            return t("home.progress.rendering_eta", percent=percent, eta=eta)
-        return t("home.progress.matching_eta", percent=percent, eta=eta)
-    if rendering:
-        return t("home.progress.rendering", percent=percent)
-    return t("home.progress.matching", percent=percent)
+        return t(f"{key}_eta", percent=percent, eta=_minutes(event.eta_seconds))
+    return t(key, percent=percent)
 
 
 def _minutes(seconds: float) -> str:

@@ -2,3 +2,5 @@ numpy>=1.24,<3
 # Pillow must be built with libraqm for correct Arabic shaping/RTL (frame renderer).
 Pillow>=10.0,<13
 replicate>=1.0,<2
+# Trusted certificates for the speech model download (a frozen app cannot rely on the system).
+certifi>=2023
