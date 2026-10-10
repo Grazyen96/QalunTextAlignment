@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from qurantext.services import transcription
-from qurantext.services.transcription import (
+from qurantext.services import engine_whisperx
+from qurantext.services.engine_whisperx import (
     WhisperXServiceError,
     _await_prediction_output,
     _transient_status,
@@ -44,7 +44,7 @@ def test_transient_status_detects_gateway_codes() -> None:
 
 
 def test_await_prediction_output_recovers_after_transient_502(monkeypatch) -> None:
-    monkeypatch.setattr(transcription.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(engine_whisperx.time, "sleep", lambda _s: None)
 
     prediction = _FakePrediction(
         statuses=["processing", "succeeded"],
@@ -56,7 +56,7 @@ def test_await_prediction_output_recovers_after_transient_502(monkeypatch) -> No
 
 
 def test_await_prediction_output_raises_on_failed_status(monkeypatch) -> None:
-    monkeypatch.setattr(transcription.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(engine_whisperx.time, "sleep", lambda _s: None)
 
     prediction = _FakePrediction(statuses=["failed"], error="model crashed")
     with pytest.raises(WhisperXServiceError, match="model crashed"):
@@ -64,7 +64,7 @@ def test_await_prediction_output_raises_on_failed_status(monkeypatch) -> None:
 
 
 def test_await_prediction_output_gives_up_after_persistent_gateway_errors(monkeypatch) -> None:
-    monkeypatch.setattr(transcription.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(engine_whisperx.time, "sleep", lambda _s: None)
 
     prediction = _FakePrediction(
         statuses=["processing"],
@@ -75,7 +75,7 @@ def test_await_prediction_output_gives_up_after_persistent_gateway_errors(monkey
 
 
 def test_await_prediction_output_propagates_non_transient_error(monkeypatch) -> None:
-    monkeypatch.setattr(transcription.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(engine_whisperx.time, "sleep", lambda _s: None)
 
     prediction = _FakePrediction(
         statuses=["processing"],
@@ -101,14 +101,14 @@ class TestRejectedToken:
 
     def _run(self, monkeypatch, tmp_path, token: str):
         import qurantext.config.settings as settings_module
-        from qurantext.services import transcription
+        from qurantext.services import engine_whisperx, transcription
 
         audio = tmp_path / "a.wav"
         audio.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfmt ")
         settings_module.get_settings.cache_clear()
         monkeypatch.setenv("REPLICATE_API_TOKEN", token)
         monkeypatch.setattr(
-            transcription,
+            engine_whisperx,
             "_create_prediction",
             lambda *a, **k: (_ for _ in ()).throw(self._Unauthenticated()),
         )
@@ -138,3 +138,40 @@ class TestRejectedToken:
         message = self._run(monkeypatch, tmp_path, "r8_a_token_that_is_wrong")
         assert "environment variable" in message
         assert ".env" in message
+
+
+def test_every_transcription_error_shares_one_base() -> None:
+    from qurantext.services.errors import (
+        LocalEngineError,
+        ModelDownloadError,
+        ModelLoadError,
+        TranscriptionError,
+        WhisperXServiceError,
+    )
+
+    for cls in (WhisperXServiceError, ModelDownloadError, LocalEngineError, ModelLoadError):
+        assert issubclass(cls, TranscriptionError)
+    assert issubclass(ModelLoadError, LocalEngineError)
+    assert issubclass(TranscriptionError, RuntimeError)
+
+
+def test_old_names_still_import_from_transcription() -> None:
+    from qurantext.services import errors, transcription
+
+    assert transcription.WhisperXServiceError is errors.WhisperXServiceError
+    assert transcription.WhisperXResult is transcription.TranscriptionResult
+
+
+def test_result_records_its_engine() -> None:
+    from qurantext.services.transcription import TranscriptionResult
+
+    result = TranscriptionResult(
+        output={},
+        audio_path="a",
+        raw_output_path=None,
+        model_ref="m",
+        segment_count=0,
+        word_count=0,
+    )
+    assert result.engine == "whisperx"
+    assert result.from_cache is False

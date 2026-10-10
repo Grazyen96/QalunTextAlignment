@@ -90,7 +90,7 @@ def test_no_partial_file_is_left_behind(tmp_path, audio) -> None:
 def test_transcribe_uses_the_cache_instead_of_the_network(tmp_path, audio, monkeypatch) -> None:
     """The point of the whole module: a second run sends nothing."""
     from qurantext.config.settings import get_settings
-    from qurantext.services import transcription
+    from qurantext.services import engine_whisperx, transcription
 
     monkeypatch.setenv("QURANTEXT_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setenv("REPLICATE_API_TOKEN", "test-token")
@@ -110,7 +110,7 @@ def test_transcribe_uses_the_cache_instead_of_the_network(tmp_path, audio, monke
     )
     transcription.store_cached(key, payload)
 
-    monkeypatch.setattr(transcription, "_create_prediction", fake_create)
+    monkeypatch.setattr(engine_whisperx, "_create_prediction", fake_create)
     result = transcription.transcribe_audio(audio, save_raw_to=tmp_path / "raw.json")
     get_settings.cache_clear()
 
@@ -123,7 +123,7 @@ def test_transcribe_uses_the_cache_instead_of_the_network(tmp_path, audio, monke
 
 def test_use_cache_false_forces_a_fresh_call(tmp_path, audio, monkeypatch) -> None:
     from qurantext.config.settings import get_settings
-    from qurantext.services import transcription
+    from qurantext.services import engine_whisperx, transcription
 
     monkeypatch.setenv("QURANTEXT_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setenv("REPLICATE_API_TOKEN", "test-token")
@@ -140,7 +140,7 @@ def test_use_cache_false_forces_a_fresh_call(tmp_path, audio, monkeypatch) -> No
         reached["n"] += 1
         raise RuntimeError("stop here")
 
-    monkeypatch.setattr(transcription, "_create_prediction", fake_create)
+    monkeypatch.setattr(engine_whisperx, "_create_prediction", fake_create)
     with pytest.raises(transcription.WhisperXServiceError):
         transcription.transcribe_audio(audio, use_cache=False)
     get_settings.cache_clear()
