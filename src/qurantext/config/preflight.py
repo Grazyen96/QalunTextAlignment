@@ -45,6 +45,7 @@ from qurantext.config.paths import (
     checkout_root,
     user_data_dir,
 )
+from qurantext.config.settings import describe_secret, env_dir, get_settings
 from qurantext.core.video_common import require_binary
 
 __all__ = [
@@ -226,8 +227,8 @@ def _window() -> CheckResult:
     return CheckResult("Window", Status.OK, f"Qt {QtCore.qVersion()}")
 
 
-def _transcription() -> CheckResult:
-    """Can we reach the recogniser at all?
+def _whisperx_check() -> CheckResult:
+    """Can we reach the recogniser at all (WhisperX on Replicate)?
 
     Added because a build passed every check here, rendered video correctly, and
     then died partway through a real job with "No package metadata was found for
@@ -256,8 +257,6 @@ def _transcription() -> CheckResult:
             remedy = "Reinstall the app's dependencies: pip install -e '.[gui]'"
         return CheckResult("Transcription", Status.FAIL, detail, remedy)
 
-    from qurantext.config.settings import get_settings
-
     token = get_settings().replicate_api_token
     if not token:
         return CheckResult(
@@ -265,18 +264,61 @@ def _transcription() -> CheckResult:
             Status.WARN,
             f"Replicate client {client_version}, but no API token is set",
             "Transcribing audio needs a Replicate API token. Put a file named "
-            f".env in {user_data_dir()} containing a single line: "
+            f".env in {env_dir()} containing a single line: "
             "REPLICATE_API_TOKEN=your-token. Then restart the app — settings are "
             "read once at startup. Everything else works without it.",
         )
     # Described the same way the rejection message describes it, so the two can
     # be held side by side when a token is refused.
-    from qurantext.config.settings import describe_secret
-
     return CheckResult(
         "Transcription",
         Status.OK,
         f"Replicate client {client_version}, token: {describe_secret(token)}",
+    )
+
+
+_MODEL_CREDIT = (
+    "NVIDIA FastConformer Arabic (stt_ar_fastconformer_hybrid_large_pcd_v1.0), CC BY 4.0"
+)
+
+
+def _transcription() -> CheckResult:
+    """Check the engine that is configured, and only that one.
+
+    Someone who transcribes on their own computer never needs a Replicate token,
+    so its absence is not reported to them as a problem.
+    """
+    if get_settings().transcription.engine == "whisperx":
+        return _whisperx_check()
+    return _local_engine_check()
+
+
+def _local_engine_check() -> CheckResult:
+    from qurantext.services import engine_local, model_store
+
+    problem = engine_local.runtime_problem()
+    if problem is not None:
+        return CheckResult(
+            "Transcription",
+            Status.FAIL,
+            f"the speech runtime (sherpa-onnx) did not load: {problem}",
+            "Transcription on this computer cannot start. Reinstall Qalun; from source, "
+            "`pip install -e .` installs sherpa-onnx.",
+        )
+    manifest = model_store.LOCAL_MODEL
+    if not model_store.is_installed(manifest):
+        return CheckResult(
+            "Transcription",
+            Status.WARN,
+            f"on this computer with {_MODEL_CREDIT}; the model downloads once, on first "
+            f"use (about {manifest.download_mb} MB), into {model_store.models_dir()}",
+            "Nothing to do: the first transcription downloads it. It needs an internet "
+            "connection that one time.",
+        )
+    return CheckResult(
+        "Transcription",
+        Status.OK,
+        f"on this computer with {_MODEL_CREDIT}, installed in {model_store.model_dir(manifest)}",
     )
 
 

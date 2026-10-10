@@ -197,7 +197,7 @@ class TestTranscriptionCheck:
 
         get_settings.cache_clear()
         monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_secret_value_1234")
-        result = preflight._transcription()
+        result = preflight._whisperx_check()
         get_settings.cache_clear()
 
         assert result.status == preflight.Status.OK
@@ -211,7 +211,7 @@ class TestTranscriptionCheck:
         secret = "r8_secret_value_1234"
         get_settings.cache_clear()
         monkeypatch.setenv("REPLICATE_API_TOKEN", secret)
-        result = preflight._transcription()
+        result = preflight._whisperx_check()
         get_settings.cache_clear()
 
         assert secret not in result.detail
@@ -226,8 +226,8 @@ class TestTranscriptionCheck:
         # anything a .env file supplies, so this is what "no token" looks like
         # even in a checkout that has one.
         monkeypatch.setenv("REPLICATE_API_TOKEN", "")
-        monkeypatch.setattr(preflight, "user_data_dir", lambda: Path("/somewhere/qalun"))
-        result = preflight._transcription()
+        monkeypatch.setattr(preflight, "env_dir", lambda: Path("/somewhere/qalun"))
+        result = preflight._whisperx_check()
         get_settings.cache_clear()
 
         assert result.status == preflight.Status.WARN
@@ -250,7 +250,7 @@ class TestTranscriptionCheck:
 
         monkeypatch.setattr(metadata, "version", hidden)
         monkeypatch.delitem(sys.modules, "replicate", raising=False)
-        result = preflight._transcription()
+        result = preflight._whisperx_check()
 
         assert result.status == preflight.Status.FAIL
         assert "No package metadata" in result.detail
@@ -265,7 +265,7 @@ class TestTranscriptionCheck:
         )
         monkeypatch.delitem(sys.modules, "replicate", raising=False)
         monkeypatch.setattr(sys, "frozen", True, raising=False)
-        result = preflight._transcription()
+        result = preflight._whisperx_check()
 
         assert "report it" in (result.remedy or "").lower()
 
@@ -469,3 +469,77 @@ class TestMissingSystemLibrary:
     def test_an_unknown_library_still_says_what_to_look_for(self) -> None:
         remedy = preflight._system_library_remedy("libfoo.so.3")
         assert "libfoo.so.3" in remedy
+
+
+class TestTranscriptionEngineChoice:
+    @pytest.fixture
+    def engine(self, monkeypatch):
+        from qurantext.config.settings import get_settings
+
+        def use(name: str) -> None:
+            monkeypatch.setenv("QURANTEXT_TRANSCRIBE_ENGINE", name)
+            get_settings.cache_clear()
+
+        yield use
+        get_settings.cache_clear()
+
+    def test_local_without_the_runtime_is_blocking(self, engine, monkeypatch) -> None:
+        from qurantext.services import engine_local
+
+        engine("local")
+        monkeypatch.setattr(engine_local, "runtime_problem", lambda: "no sherpa")
+        result = preflight._transcription()
+        assert result.status == Status.FAIL and "sherpa-onnx" in result.detail
+
+    def test_runtime_problem_reports_an_unimportable_sherpa(self, monkeypatch) -> None:
+        import builtins
+
+        from qurantext.services import engine_local
+
+        real_import = builtins.__import__
+
+        def no_sherpa(name, *args, **kwargs):
+            if name == "sherpa_onnx":
+                raise ImportError("no sherpa")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.delitem(sys.modules, "sherpa_onnx", raising=False)
+        monkeypatch.setattr(builtins, "__import__", no_sherpa)
+        assert engine_local.runtime_problem() == "no sherpa"
+
+    def test_local_with_no_model_yet_only_informs(self, engine, monkeypatch) -> None:
+        from qurantext.services import engine_local, model_store
+
+        engine("local")
+        monkeypatch.setattr(engine_local, "runtime_problem", lambda: None)
+        monkeypatch.setattr(model_store, "is_installed", lambda m: False)
+        result = preflight._transcription()
+        assert result.status == Status.WARN
+        assert "first use" in result.detail
+        assert f"about {model_store.LOCAL_MODEL.download_mb} MB" in result.detail
+
+    def test_local_names_the_model_and_its_licence(self, engine, monkeypatch) -> None:
+        from qurantext.services import engine_local, model_store
+
+        engine("local")
+        monkeypatch.setattr(engine_local, "runtime_problem", lambda: None)
+        monkeypatch.setattr(model_store, "is_installed", lambda m: True)
+        result = preflight._transcription()
+        assert result.status == Status.OK
+        assert "NVIDIA" in result.detail and "CC BY 4.0" in result.detail
+
+    def test_no_replicate_token_is_not_a_problem_for_the_local_engine(
+        self, engine, monkeypatch
+    ) -> None:
+        from qurantext.services import engine_local, model_store
+
+        monkeypatch.setenv("REPLICATE_API_TOKEN", "")
+        engine("local")
+        monkeypatch.setattr(engine_local, "runtime_problem", lambda: None)
+        monkeypatch.setattr(model_store, "is_installed", lambda m: True)
+        assert not preflight._transcription().blocking
+
+    def test_whisperx_keeps_todays_token_check(self, engine, monkeypatch) -> None:
+        monkeypatch.setenv("REPLICATE_API_TOKEN", "")
+        engine("whisperx")
+        assert preflight._transcription() == preflight._whisperx_check()
