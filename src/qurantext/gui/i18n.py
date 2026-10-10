@@ -124,6 +124,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "job.progress.kept": "Kept your earlier corrections in {name}",
         # What the status line says while a stage runs; the pipeline's own
         # messages are English log lines and are never shown.
+        "job.stage.download": "Downloading the speech model, once (about 120 MB)…",
         "job.stage.detect": "Matching the recording to the Quran text…",
         "job.stage.match": "Looking for Quran citations in the lecture…",
         "job.stage.render": "Rendering the video…",
@@ -326,6 +327,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "job.progress.aligning": "جارٍ مطابقة التلاوة مع الآيات التي اخترتها…",
         "job.progress.detecting": "جارٍ البحث عن القرآن في التسجيل…",
         "job.progress.kept": "أُبقيت تصحيحاتك السابقة في {name}",
+        "job.stage.download": "جارٍ تنزيل نموذج التعرّف على الكلام، مرة واحدة فقط (نحو 120 ميغابايت)…",
         "job.stage.detect": "جارٍ مطابقة التسجيل مع نص القرآن…",
         "job.stage.match": "جارٍ البحث عن الاستشهادات القرآنية في المحاضرة…",
         "job.stage.render": "جارٍ إخراج الفيديو…",
