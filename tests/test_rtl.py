@@ -543,3 +543,41 @@ def test_the_no_token_note_keeps_the_setting_and_the_file_name_whole(qt_app) -> 
     line = i18n.t("home.engine.no_token", folder=i18n.path_text("/home/k/دروس"))
     parts = ["تشغيل", "دروس", "\u2066.", "env", "TOKEN", "=…", "لم"]
     assert left_to_right(line, parts) == parts, line
+
+
+def test_the_folded_engine_hint_keeps_whisperx_in_its_place(qt_app) -> None:
+    """Read from the right: the label, then WhisperX, then that the recording goes online."""
+    from tests.bidi_helpers import left_to_right
+
+    line = i18n.t("home.engine.folded")
+    parts = ["إليه", "عبر", "WhisperX", "التفريغ"]
+    assert left_to_right(line, parts) == parts, line
+
+
+def test_the_folded_engine_hint_wraps_inside_the_panel(
+    qt_app, tmp_path, store, no_default_job_dirs, monkeypatch
+) -> None:
+    """The hint and its no-token sentence wrap; they never widen the Arabic panel."""
+    from qurantext.config.settings import get_settings
+
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "")
+    get_settings.cache_clear()
+    try:
+        local_prefs = Prefs(QSettings(str(tmp_path / "local.ini"), QSettings.Format.IniFormat))
+        local_prefs.more_options_open = False
+        baseline = NewJobPanel(local_prefs, quran_default=QURAN_FILE, db_path=store)
+        prefs = _prefs(tmp_path)
+        prefs.engine = "whisperx"
+        prefs.more_options_open = False
+        panel = NewJobPanel(prefs, quran_default=QURAN_FILE, db_path=store)
+        assert panel.minimumSizeHint().width() <= baseline.minimumSizeHint().width()
+
+        panel.resize(panel.minimumSizeHint().width(), 700)
+        panel.show()
+        qt_app.processEvents()
+        hint = panel.engine_hint_label
+        assert hint.isVisible() and hint.layoutDirection() == RTL
+        assert hint.geometry().right() <= panel.width()
+        assert hint.height() > hint.fontMetrics().height(), "the long note wraps"
+    finally:
+        get_settings.cache_clear()

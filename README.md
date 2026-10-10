@@ -36,6 +36,14 @@ Create or activate a Python environment, then install runtime dependencies:
 python3 -m pip install -r requirements.txt
 ```
 
+The runtime dependencies are NumPy, Pillow (built with libraqm, for Arabic
+shaping), certifi, the Replicate client (only used by the optional WhisperX
+engine) and **sherpa-onnx** (Apache 2.0), which runs the local speech model.
+That model, NVIDIA's FastConformer Hybrid Large (Arabic),
+`stt_ar_fastconformer_hybrid_large_pcd_v1.0`, is not installed by pip: Qalun
+downloads it once, on first use (about 110 MB). It is licensed CC BY 4.0; the
+attribution is in `THIRD_PARTY_NOTICES.md`.
+
 For normal development, install the package in editable mode so `python3 -m qurantext ...` works directly:
 
 ```bash
@@ -61,8 +69,9 @@ no Quran text file. Everything below is for working on the code.
 python3 -m qurantext doctor
 ```
 
-Checks Arabic shaping, FFmpeg, the bundled font, the Quran store and the output
-folder, and tells you what to do about anything that is not ready. The packaged
+Checks Arabic shaping, FFmpeg, the bundled font, the Quran store, the output
+folder and transcription (the configured engine, with the other one listed for
+information), and tells you what to do about anything that is not ready. The packaged
 app answers the same question with `qalun --doctor`, which matters because a
 packaged app that will not render is exactly when there is no Python to hand.
 
@@ -87,8 +96,10 @@ undo).
 **Starting a job.** Drop an audio file, say whether it is a recitation or a
 lecture, pick the surah and the ayat if you know them, choose a video size,
 and press Start. Progress and remaining time show as it runs, Cancel stops it,
-and a cancelled job leaves nothing behind. Matching done, the review opens
-automatically so corrections happen before anything is rendered.
+and a cancelled job leaves nothing behind. The first job transcribed on this
+computer downloads the speech model once (about 110 MB), shown as its own
+stage. Matching done, the review opens automatically so corrections happen
+before anything is rendered.
 
 **The review, in brief.** Play the recording, step word by word, and nudge a
 word's start or end at the playhead; Save (Ctrl+S) writes the correction, Undo
@@ -100,8 +111,11 @@ own.
 **More options**, folded away since most jobs don't need them: a Quran text
 other than the certified one that ships with the app, subtitles burned into
 the picture, written as files beside it, or both (and in which formats), an
-output folder other than the default, and rendering right away instead of
-stopping for review — for jobs you already trust.
+output folder other than the default, where transcription runs (on this
+computer, the default, or WhisperX online, which uploads the recording and needs
+a Replicate token), and rendering right away instead of stopping for review —
+for jobs you already trust. While More options is folded, a WhisperX choice is
+still named under it, with a note when no token is set.
 
 **Where files go.** Matching results land in `output/recitation_matching/` or
 `output/lecture_matching/`, and a rendered video in `output/videos/`, unless

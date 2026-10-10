@@ -12,6 +12,8 @@ Changes: converted to ONNX for sherpa-onnx (transducer branch only), and
 quantised to 8 bits for the int8 build. Qalun downloads it once, on first use,
 from https://github.com/Grazyen96/qalun-models.
 
+The model is provided "as is", without warranties of any kind.
+
 ## sherpa-onnx
 
 https://github.com/k2-fsa/sherpa-onnx, Apache License 2.0. It includes

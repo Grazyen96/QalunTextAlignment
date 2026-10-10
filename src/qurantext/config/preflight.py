@@ -35,6 +35,7 @@ import tempfile
 import wave
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from qurantext.config.fribidi import fribidi_names
 from qurantext.config.paths import (
@@ -47,6 +48,9 @@ from qurantext.config.paths import (
 )
 from qurantext.config.settings import describe_secret, env_dir, get_settings
 from qurantext.core.video_common import require_binary
+
+if TYPE_CHECKING:
+    from qurantext.services.model_store import ModelManifest
 
 __all__ = [
     "CannotMeasureFonts",
@@ -277,48 +281,118 @@ def _whisperx_check() -> CheckResult:
     )
 
 
-_MODEL_CREDIT = (
-    "NVIDIA FastConformer Arabic (stt_ar_fastconformer_hybrid_large_pcd_v1.0), CC BY 4.0"
-)
+#: The configured engine's line. The other engine's line has its own name, so a
+#: reader can tell which one their jobs use.
+_TRANSCRIPTION = "Transcription"
+_LOCAL_OPTIONAL = "On this computer (optional)"
+_WHISPERX_OPTIONAL = "WhisperX online (optional)"
+#: How the configured local line begins; the optional line's name already says it.
+_ON_THIS_COMPUTER = "on this computer with "
 
 
-def _transcription() -> CheckResult:
-    """Check the engine that is configured, and only that one.
+def _model_credit(manifest: ModelManifest) -> str:
+    """The model's attribution, its id read from the manifest the app downloads."""
+    return f"NVIDIA FastConformer Arabic ({manifest.model_id.rsplit('/', 1)[-1]}), CC BY 4.0"
 
-    Someone who transcribes on their own computer never needs a Replicate token,
-    so its absence is not reported to them as a problem.
+
+def _transcription(release: bool = False) -> list[CheckResult]:
+    """Both engines: the configured one as "Transcription", the other as information.
+
+    Only the configured engine's problems block. The other line never fails, with
+    one exception: under *release* (the build gate) a Replicate client that will
+    not import fails whatever is configured, because the window offers WhisperX
+    and a release must carry its client. Someone who transcribes on their own
+    computer never needs a Replicate token, so its absence is not a problem to them.
     """
-    if get_settings().transcription.engine == "whisperx":
-        return _whisperx_check()
-    return _local_engine_check()
+    from qurantext.services.transcription import resolve_engine
+
+    settings = get_settings()
+    try:
+        configured = resolve_engine(None, settings)
+    except ValueError as error:
+        # The words a CLI job stops with, so the doctor and the failed job agree.
+        unknown = CheckResult(
+            _TRANSCRIPTION,
+            Status.FAIL,
+            str(error),
+            "Set QURANTEXT_TRANSCRIBE_ENGINE to local or whisperx, or remove it "
+            "(the default is local).",
+        )
+        return [unknown, _optional_local(), _optional_whisperx(release)]
+    if configured == "whisperx":
+        return [_whisperx_check(), _optional_local()]
+    return [_local_engine_check(), _optional_whisperx(release)]
 
 
-def _local_engine_check() -> CheckResult:
+def _optional_whisperx(release: bool) -> CheckResult:
+    """WhisperX when it is not the configured engine: information, bar the build gate."""
+    result = _whisperx_check()
+    if result.status == Status.FAIL:
+        # The client will not import. A person is told; a release build fails.
+        remedy = result.remedy.replace(
+            "Transcription cannot run.",
+            "WhisperX online cannot run; transcription on this computer is unaffected.",
+        )
+        return CheckResult(_WHISPERX_OPTIONAL, _strict(release), result.detail, remedy)
+    if result.status == Status.WARN:
+        # Only a missing token warns, and nobody needs one until they choose WhisperX.
+        return CheckResult(
+            _WHISPERX_OPTIONAL,
+            Status.OK,
+            f"{result.detail}; not needed unless you choose WhisperX online",
+        )
+    return CheckResult(_WHISPERX_OPTIONAL, Status.OK, result.detail)
+
+
+def _optional_local() -> CheckResult:
+    """Transcription on this computer when WhisperX is configured: information only."""
+    result = _local_engine_check(offer_whisperx=False)
+    if result.status == Status.FAIL:
+        return CheckResult(_LOCAL_OPTIONAL, Status.WARN, result.detail, result.remedy)
+    # Not downloaded yet is nothing to do for someone who uses WhisperX.
+    return CheckResult(_LOCAL_OPTIONAL, Status.OK, result.detail.removeprefix(_ON_THIS_COMPUTER))
+
+
+def _local_engine_check(*, offer_whisperx: bool = True) -> CheckResult:
+    """The local engine's runtime and model. *offer_whisperx*: name the other engine
+    as a way round a broken runtime (not to someone already using it)."""
     from qurantext.services import engine_local, model_store
 
+    manifest = model_store.LOCAL_MODEL
+    credit = _model_credit(manifest)
     problem = engine_local.runtime_problem()
     if problem is not None:
+        if _frozen():
+            remedy = (
+                "Transcription on this computer cannot start. This is a packaging fault "
+                "rather than anything to fix on this machine. Please report it."
+            )
+        else:
+            remedy = (
+                "Transcription on this computer cannot start. Reinstall the app's "
+                "dependencies: `pip install -e .` installs sherpa-onnx."
+            )
+        if offer_whisperx:
+            remedy += " Until then, you can choose WhisperX online instead."
         return CheckResult(
-            "Transcription",
+            _TRANSCRIPTION,
             Status.FAIL,
             f"the speech runtime (sherpa-onnx) did not load: {problem}",
-            "Transcription on this computer cannot start. Reinstall Qalun; from source, "
-            "`pip install -e .` installs sherpa-onnx.",
+            remedy,
         )
-    manifest = model_store.LOCAL_MODEL
     if not model_store.is_installed(manifest):
         return CheckResult(
-            "Transcription",
+            _TRANSCRIPTION,
             Status.WARN,
-            f"on this computer with {_MODEL_CREDIT}; the model downloads once, on first "
+            f"{_ON_THIS_COMPUTER}{credit}; the model downloads once, on first "
             f"use (about {manifest.download_mb} MB), into {model_store.models_dir()}",
             "Nothing to do: the first transcription downloads it. It needs an internet "
             "connection that one time.",
         )
     return CheckResult(
-        "Transcription",
+        _TRANSCRIPTION,
         Status.OK,
-        f"on this computer with {_MODEL_CREDIT}, installed in {model_store.model_dir(manifest)}",
+        f"{_ON_THIS_COMPUTER}{credit}, installed in {model_store.model_dir(manifest)}",
     )
 
 
@@ -824,7 +898,15 @@ def _arabic_ui_font(release: bool) -> CheckResult:
 #: Checks whose failure leaves rendering working: the job, the review window or
 #: the Arabic interface is what suffers, so the report must not say "Cannot render".
 _NOT_RENDERING = frozenset(
-    {"Transcription", "Window", "Playback", "Window translation", "Arabic interface font"}
+    {
+        _TRANSCRIPTION,
+        _LOCAL_OPTIONAL,
+        _WHISPERX_OPTIONAL,
+        "Window",
+        "Playback",
+        "Window translation",
+        "Arabic interface font",
+    }
 )
 
 #: Qt logging rules for the doctor: the FFmpeg plugin prints the test recording's
@@ -852,15 +934,16 @@ def prepare_doctor_process(*, release: bool = False) -> None:
 def run_checks(*, release: bool = False) -> list[CheckResult]:
     """Every check, in the order a person would want to read them.
 
-    *release* makes playback, Qt's Arabic translation and an Arabic interface
-    font blocking: a developer's checkout is only told about them, a release
-    build (``qalun --doctor --release``, the CI gate) must have them.
+    *release* makes playback, Qt's Arabic translation, an Arabic interface
+    font and the Replicate client blocking: a developer's checkout is only told
+    about them, a release build (``qalun --doctor --release``, the CI gate) must
+    have them.
     """
     return [
         _arabic_shaping(),
         _ffmpeg_binary("ffmpeg"),
         _ffmpeg_binary("ffprobe"),
-        _transcription(),
+        *_transcription(release),
         _bundled_font(),
         _bundled_quran(),
         _quran_store(),

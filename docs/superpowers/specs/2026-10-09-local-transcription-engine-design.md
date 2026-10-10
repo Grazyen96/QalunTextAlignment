@@ -235,8 +235,9 @@ audio ──ffmpeg (bundled)──► 16 kHz mono float32, decoded incrementally
 - The model is CC-BY-4.0, which requires attribution. That is met in three
   places:
   1. a new `THIRD_PARTY_NOTICES.md` at the repository root, bundled beside the
-     executable by `qalun.spec`, carrying the NVIDIA attribution and the
-     CC-BY-4.0 text, plus sherpa-onnx (Apache 2.0);
+     executable by `qalun.spec`, carrying the NVIDIA attribution, the
+     CC-BY-4.0 licence's URI (which CC BY 4.0 §3(a)(1)(C) accepts in place of
+     the text) and its "as is" disclaimer, plus sherpa-onnx (Apache 2.0);
   2. the doctor report's transcription line, which names the model and its
      licence;
   3. the same notice in the `qalun-models` release, next to the model files.

@@ -57,7 +57,8 @@ QuranText is organized around a small number of stable layers:
 
 ### `src/qurantext/services`
 
-- `transcription.py` is the entry point: it holds the transcript cache and chooses the engine.
+- `transcription.py` is the entry point: it chooses the engine and checks the transcript cache (`transcript_cache.py`) before running it.
+- `transcript_cache.py` remembers each transcript against the audio's content and the settings that shape it, so the same recording is never recognised twice.
 - `engine_local.py` is the local engine: NVIDIA's FastConformer Arabic run by sherpa-onnx on this computer, returning the WhisperX raw shape.
 - `engine_whisperx.py` is WhisperX on Replicate, the optional online engine.
 - `model_store.py` says where the local speech model lives and downloads it once, checked against pinned sizes and checksums.

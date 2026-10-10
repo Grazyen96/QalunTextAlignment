@@ -4,3 +4,6 @@ Pillow>=10.0,<13
 replicate>=1.0,<2
 # Trusted certificates for the speech model download (a frozen app cannot rely on the system).
 certifi>=2023
+# The local transcription engine (NVIDIA FastConformer Arabic through ONNX).
+# Pinned to the release the parity gate passed with: docs/findings/asr-bakeoff.md.
+sherpa-onnx~=1.13.8
