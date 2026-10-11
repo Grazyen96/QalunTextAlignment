@@ -181,7 +181,26 @@ def test_a_playhead_outside_the_window_is_not_drawn(qt_app) -> None:
     view.set_playhead(70.0)  # after it: not pinned to its left edge
     assert _playhead_columns(view) == []
     view.set_playhead(55.0)
-    assert _playhead_columns(view) == [99]  # halfway: column 99 holds (55, 55.05]
+    assert _playhead_columns(view) == [99]  # halfway: column 99 holds [55, 55.05)
+
+
+@pytest.mark.parametrize(("duration", "span"), [(100.0, 10.0), (7.3, 2.1), (3.7, 1.3)])
+def test_a_playhead_at_the_recordings_end_is_drawn_at_the_left(qt_app, duration, span) -> None:
+    from qurantext.gui.review.waveform_view import WaveformView
+
+    vp = Viewport()
+    vp.set_duration(duration)
+    vp.set_window(0.0, span)
+    vp.follow(duration)  # playback finished: the window goes as far as it can
+    assert vp.start + vp.span == pytest.approx(duration)
+    view = WaveformView(vp)
+    view.resize(200, 90)
+    view.set_playhead(duration)  # exactly start + span: x is 0 (or -4e-14 after rounding)
+    assert _playhead_columns(view) == [0]
+    view.set_playhead(duration + 0.01)  # past the window's end: still hidden
+    assert _playhead_columns(view) == []
+    view.set_playhead(vp.start - 0.01)  # before its start: still hidden
+    assert _playhead_columns(view) == []
 
 
 def test_a_playhead_at_the_windows_start_is_drawn(qt_app) -> None:

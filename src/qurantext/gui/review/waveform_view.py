@@ -29,6 +29,8 @@ from qurantext.gui.review.viewport import Viewport
 __all__ = ["WaveformView", "column_extremes"]
 
 _GAP_COLOR = QColor(239, 159, 39, 70)
+#: How far past a window edge, in pixels, float rounding may put a time on it.
+_EDGE_SLACK_PX = 1e-6
 
 
 class WaveformView(QWidget):
@@ -135,16 +137,22 @@ class WaveformView(QWidget):
     def _playhead_column(self, width: int) -> int | None:
         """The pixel column the playhead is drawn in, or ``None`` outside the window.
 
-        Right to left, pixel column ``p`` holds the times in
-        ``(t_for(p + 1), t_for(p)]``, so the column is ``ceil(x) - 1``: the
-        same column as the waveform bar for that time, and the window's start
-        (``x == width``, where a review opens) lands in the last column instead
-        of one past it. A playhead outside ``[start, start + span)`` is not
-        drawn at all, as before: pinning it to an edge would mark a time the
-        window does not show.
+        Right to left, ``ceil(x) - 1`` puts pixel column ``p`` over the times
+        in ``[t_for(p + 1), t_for(p))``: the same column as the waveform bar
+        for that time, and the window's start (``x == width``, where a review
+        opens) lands in the last column instead of one past it. The window's
+        end (``x == 0``) is drawn too, in column 0: that is where the playhead
+        stops when playback reaches the recording's end, with the window
+        scrolled as far as it goes. A playhead truly outside
+        ``[start, start + span]`` is not drawn at all, as before: pinning it to
+        an edge would mark a time the window does not show. The edges allow
+        :data:`_EDGE_SLACK_PX` for float rounding, so a playhead at exactly the
+        recording's end (whose x can come out as -4e-14) still counts as on it.
         """
-        x = math.ceil(self._viewport.x_for(self._playhead, width)) - 1
-        return x if 0 <= x < width else None
+        x = self._viewport.x_for(self._playhead, width)
+        if not -_EDGE_SLACK_PX <= x <= width + _EDGE_SLACK_PX:
+            return None
+        return min(max(math.ceil(x) - 1, 0), width - 1)
 
     def _paint_bars(
         self, painter: QPainter, peaks: Peaks, width: int, height: int, color: QColor

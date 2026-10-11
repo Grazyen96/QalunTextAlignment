@@ -189,10 +189,9 @@ the clock, exports and subtitles are unchanged. The text below keeps its
 original wording where it says otherwise.
 
 ~~Time runs left to right in both languages.~~ (Superseded 11 Oct 2026, see
-above.) Gap bands come from
-`find_uncovered_speech`, which now runs automatically when the editor opens
-(in a worker) and again after each edit settles (debounced 1 s). The warning
-strip lists them, each with Jump.
+above.) Gap bands come from `find_uncovered_speech`, which now runs
+automatically when the editor opens (in a worker) and again after each edit
+settles (debounced 1 s). The warning strip lists them, each with Jump.
 
 ### 2.3 Word strip and retiming
 
