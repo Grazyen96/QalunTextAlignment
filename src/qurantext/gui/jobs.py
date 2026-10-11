@@ -123,6 +123,9 @@ class JobOutcome:
     #: What the look could not do (``image_missing``, ``image_unreadable``):
     #: the video was made with the preset's background instead.
     look_warnings: tuple[str, ...] = ()
+    #: The chosen studied surah when none of its ayat had a card, so the video
+    #: shows only its opening title card; None otherwise.
+    studied_surah_missing: int | None = None
 
 
 def _set_aside(path: Path) -> Path | None:
@@ -314,4 +317,7 @@ def run_render(
         cards=len(project.cards),
         project=project.path,
         look_warnings=result.render.look_warnings if result.render is not None else (),
+        studied_surah_missing=(
+            result.render.studied_surah_missing if result.render is not None else None
+        ),
     )

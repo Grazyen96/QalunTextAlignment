@@ -365,3 +365,38 @@ def test_the_projects_choice_wins_over_a_fallback_surah(monkeypatch, tmp_path) -
     project_render.render_project(project, tmp_path / "v.mp4", preset="social", studied_surah=2)
     assert captured == [2, 25]
     assert project.render_is_stale is False
+
+
+def test_a_fallback_surah_leaves_a_recitations_render_current(monkeypatch, tmp_path) -> None:
+    """A recitation draws every card whatever the surah, so the flag changes nothing."""
+    from qurantext.jobs import project_render
+
+    captured = []
+
+    def fake_export_job(request, *, progress=None, cancel=None):
+        captured.append(request.studied_surah)
+        return _fake_result(tmp_path)
+
+    monkeypatch.setattr(project_render, "export_job", fake_export_job)
+    project = _fake_project(tmp_path)  # a recitation
+    project_render.render_project(project, tmp_path / "v.mp4", preset="social", studied_surah=5)
+    assert captured == [None]
+    assert project.render_is_stale is False
+
+
+def test_a_render_says_when_the_chosen_surah_has_no_card(tmp_path, no_basmala, monkeypatch) -> None:
+    from qurantext.jobs import render as render_module
+    from qurantext.jobs.project import JobSettings, set_job_settings
+
+    project = _lecture_with_a_quote(tmp_path)
+    monkeypatch.setattr(
+        render_module,
+        "render_frame_video",
+        lambda audio, cards, output, *a, **k: output.write_bytes(b"") or 6.0,
+    )
+    result = render_project(project, tmp_path / "v.mp4", width=160, height=120, fps=8)
+    assert result.render.studied_surah_missing is None
+
+    set_job_settings(project, JobSettings(studied_surah=114))
+    result = render_project(project, tmp_path / "v.mp4", width=160, height=120, fps=8)
+    assert result.render.studied_surah_missing == 114

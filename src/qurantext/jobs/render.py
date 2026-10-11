@@ -29,6 +29,7 @@ from qurantext.core.looks import NIGHT_GOLD, Look
 from qurantext.core.video_common import (
     cards_on_screen,
     get_audio_duration,
+    has_surah_cards,
     load_caption_segments,
     load_matches,
     validate_dimensions,
@@ -120,6 +121,9 @@ class RenderResult:
     #: Codes for what the look could not do (``image_missing``,
     #: ``image_unreadable``); the render still finished with the preset's background.
     look_warnings: tuple[str, ...] = ()
+    #: The chosen studied surah when none of its ayat has a card: the video
+    #: shows only its opening title card. None otherwise.
+    studied_surah_missing: int | None = None
 
 
 def render_video(
@@ -157,13 +161,19 @@ def render_video(
     )
     # A lecture's card keeps to the surah it studies; quotes from elsewhere
     # stay in the captions only.
-    detected = bool(matches)
-    matches = cards_on_screen(
-        matches, load_matches_meta(matches_path).get("mode"), request.studied_surah
+    mode = load_matches_meta(matches_path).get("mode")
+    studied_surah_missing = (
+        request.studied_surah
+        if str(mode or "").lower() == "lecture"
+        and request.studied_surah is not None
+        and not has_surah_cards(matches, request.studied_surah)
+        else None
     )
-    if not matches and detected:
+    detected = bool(matches)
+    matches = cards_on_screen(matches, mode, request.studied_surah)
+    if studied_surah_missing is not None and detected:
         warn(
-            f"No ayah of the chosen surah {request.studied_surah} was found. Rendering "
+            f"No ayah of the chosen surah {studied_surah_missing} was found. Rendering "
             "the opening title card only."
         )
     elif not matches:
@@ -267,6 +277,7 @@ def render_video(
         caption_segments=caption_count,
         ass_path=ass_path,
         look_warnings=tuple(look_warnings),
+        studied_surah_missing=studied_surah_missing,
     )
 
 

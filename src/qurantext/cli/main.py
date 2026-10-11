@@ -313,13 +313,22 @@ def _add_studied_surah_argument(parser: argparse.ArgumentParser) -> None:
         metavar="N",
         help="Lecture only: the surah the ayah cards keep to (1-114); ayat quoted from "
         "other surahs stay in the subtitles. A project's own choice wins when it has "
-        "made one. Defaults to the surah heard for the most time.",
+        "made one: generate-video reads it from --project, preview from the project "
+        "file beside --matches (for the surah only; its cards and look still come from "
+        "the match file and --look). Defaults to the surah heard for the most time.",
     )
 
 
 def _resolve_studied_surah(args: argparse.Namespace, project: Project | None) -> int | None:
-    """The studied surah to render with: the project's own choice, else ``--studied-surah``."""
+    """The studied surah to render with: the project's own choice, else ``--studied-surah``.
+
+    A recitation project ignores it (it draws every card), and says so.
+    """
     chosen = getattr(args, "studied_surah", None)
+    if project is not None and str(project.mode).lower() != "lecture":
+        if chosen is not None:
+            warn("Ignoring --studied-surah because the project is a recitation.")
+        return None
     own = job_settings(project).studied_surah if project is not None else None
     if own is not None:
         if chosen is not None and chosen != own:
@@ -328,9 +337,31 @@ def _resolve_studied_surah(args: argparse.Namespace, project: Project | None) ->
     return chosen
 
 
+def _project_beside(matches: Path) -> Project | None:
+    """The project the window keeps beside *matches* (``project_path_for``), if it has one.
+
+    None when there is none, or when it cannot be read (said, not raised): the
+    preview still draws from the match file.
+    """
+    path = project_path_for(matches)
+    if not path.is_file():
+        return None
+    try:
+        return load_project(path)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        warn(f"Could not read the project beside the match file ({error}); ignoring it.")
+        return None
+
+
 def _run_preview(args: argparse.Namespace) -> int:
-    """Draw one frame, so a style can be judged without rendering the video."""
+    """Draw one frame, so a style can be judged without rendering the video.
+
+    The cards and the look come from the match file and ``--look``. Only the
+    studied surah follows the project beside the match file, when there is
+    one, so a surah chosen in the review shows here as it does in the video.
+    """
     output = args.output or str(Path(args.matches).with_suffix(".preview.png"))
+    studied_surah = _resolve_studied_surah(args, _project_beside(Path(args.matches)))
     result = render_preview(
         PreviewRequest(
             matches=Path(args.matches),
@@ -343,7 +374,7 @@ def _run_preview(args: argparse.Namespace) -> int:
             title=args.title,
             audio=Path(args.audio) if args.audio else None,
             look=_resolve_look(args, None) or NIGHT_GOLD,
-            studied_surah=getattr(args, "studied_surah", None),
+            studied_surah=studied_surah,
         )
     )
     for code in result.look_warnings:

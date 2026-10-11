@@ -333,3 +333,67 @@ def test_the_preview_cli_passes_the_studied_surah(tmp_path, capsys) -> None:
     )
     assert args.handler(args) == 0
     assert "showing 17:48" in capsys.readouterr().out
+
+
+def _project_beside(matches, *, mode="lecture", studied_surah=None):
+    from qurantext.jobs.project import (
+        JobSettings,
+        Project,
+        project_path_for,
+        save_project,
+        set_job_settings,
+    )
+
+    project = Project(audio=matches.with_suffix(".mp3"), mode=mode, matches=matches)
+    set_job_settings(project, JobSettings(studied_surah=studied_surah))
+    save_project(project, project_path_for(matches))
+
+
+def _cli_preview(matches, tmp_path, *flags):
+    from qurantext.cli.main import build_parser
+
+    args = build_parser().parse_args(
+        [
+            "preview",
+            "--matches",
+            str(matches),
+            "--output",
+            str(tmp_path / "p.png"),
+            "--at",
+            "7",
+            "--width",
+            "240",
+            "--height",
+            "180",
+            "--font-file",
+            str(DEFAULT_FONT_PATH),
+            *flags,
+        ]
+    )
+    assert args.handler(args) == 0
+
+
+def test_the_preview_cli_follows_the_surah_of_the_project_beside_the_matches(
+    tmp_path, capsys
+) -> None:
+    """Chosen in the review and saved: the preview shows what the export will."""
+    matches = _lecture_quoting_al_isra(tmp_path)
+    _project_beside(matches, studied_surah=17)
+    _cli_preview(matches, tmp_path)
+    assert "showing 17:48" in capsys.readouterr().out
+
+    _cli_preview(matches, tmp_path, "--studied-surah", "25")
+    captured = capsys.readouterr()
+    assert "showing 17:48" in captured.out, "the project's own choice wins"
+    assert "Ignoring --studied-surah" in captured.err
+
+
+def test_the_preview_cli_flag_applies_when_the_project_beside_has_no_choice(
+    tmp_path, capsys
+) -> None:
+    matches = _lecture_quoting_al_isra(tmp_path)
+    _project_beside(matches)
+    _cli_preview(matches, tmp_path)
+    assert "showing 25:8" in capsys.readouterr().out, "no choice: the guess"
+    _cli_preview(matches, tmp_path, "--studied-surah", "17")
+    assert "showing 17:48" in capsys.readouterr().out

@@ -112,11 +112,13 @@ lecture, pick the surah and the ayat if you know them, choose a video size,
 and press Start. For a lecture, the surah is the one it studies: the video's
 ayah card shows only that surah, and ayat quoted from other surahs stay in the
 subtitles. Leave it on "Detect automatically" and the surah heard the longest
-is used; the review window can change it later ("Surah on the cards"). Progress and remaining time show as it runs, Cancel stops it,
-and a cancelled job leaves nothing behind. The first job transcribed on this
-computer downloads the speech model once (about 110 MB), shown as its own
-stage. Matching done, the review opens automatically so corrections happen
-before anything is rendered.
+is used; the review window can change it later ("Surah on the cards").
+Matching the same recording again keeps a surah chosen earlier unless you pick
+another one, as it keeps the video's look. Progress and remaining time show as
+it runs, Cancel stops it, and a cancelled job leaves nothing behind. The first
+job transcribed on this computer downloads the speech model once (about
+110 MB), shown as its own stage. Matching done, the review opens automatically
+so corrections happen before anything is rendered.
 
 **The review, in brief.** Play the recording, step word by word, and nudge a
 word's start or end at the playhead; Save (Ctrl+S) writes the correction, Undo
@@ -352,9 +354,12 @@ empty; there the sidecar is an accessibility and platform deliverable rather
 than a substitute for the card.
 
 A lecture's ayah card keeps to the surah it studies, which is the surah heard the
-longest unless you say otherwise with `--studied-surah N` (on `generate-video` and
-`preview`; a project's own choice wins). Ayat quoted from other surahs are still in
-the subtitles.
+longest unless you say otherwise with `--studied-surah N` on `generate-video` or
+`preview`. A project's own choice wins: `generate-video` reads it from `--project`,
+and `preview` from the project file beside `--matches` (for the surah only; the
+preview's cards and look still come from the match file and `--look`). A
+recitation ignores the flag. Ayat quoted from other surahs are still in the
+subtitles.
 
 ### `project`
 Use when you want to correct the subtitles before rendering.

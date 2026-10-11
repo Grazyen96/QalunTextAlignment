@@ -688,3 +688,12 @@ def test_a_recitation_never_reports_a_missing_surah() -> None:
     project = _recitation()
     project.export["studied_surah"] = 114
     assert ReviewSession(project).missing_studied_surah is None
+
+
+def test_a_chosen_surah_whose_only_card_cannot_be_drawn_is_reported() -> None:
+    """Judged on the drawn cards: a card lasting no time is no card on screen."""
+    project = _lecture_with_a_quote()
+    project.cards[1]["end_time"] = project.cards[1]["start_time"]
+    session = ReviewSession(project)
+    session.set_studied_surah(2)
+    assert session.missing_studied_surah == 2

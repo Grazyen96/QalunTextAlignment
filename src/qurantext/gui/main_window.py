@@ -42,6 +42,7 @@ from qurantext.gui.prefs import Prefs
 from qurantext.gui.review import ReviewWindow
 from qurantext.gui.review.background import BackgroundJobs
 from qurantext.gui.review.look_panel import look_warning_key
+from qurantext.gui.surahs import stored_surah_names, surah_label
 from qurantext.jobs.project import Project, load_project, project_path_for
 from qurantext.utils.progress import CancelToken, ProgressCallback, ProgressEvent
 
@@ -363,8 +364,12 @@ class MainWindow(QMainWindow):
         outcome = finished.outcome
         if outcome is not None and outcome.video is not None:
             # Rendered right away: the person chose to skip the review.
-            # What the look could not do (its image) is said after it, as the review says it.
+            # What the look could not do (its image) is said after it, as the review says it,
+            # and so is a chosen surah with no card: the video holds only its title card.
             warnings = tuple(_Said(look_warning_key(code)) for code in outcome.look_warnings)
+            if outcome.studied_surah_missing is not None:
+                label = surah_label(outcome.studied_surah_missing, stored_surah_names())
+                warnings += (_Said("review.studied_surah_missing", {"surah": label}),)
             self._ending = _Said(
                 "home.finished.rendered", {"path": path_text(outcome.video)}, then=warnings
             )

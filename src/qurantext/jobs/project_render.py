@@ -69,7 +69,7 @@ def render_project(
     hash the project does not have, and the render would read stale at once.
 
     *studied_surah* is the same kind of fallback (the command line's
-    ``--studied-surah``): it applies only when the project has not chosen one,
+    ``--studied-surah``): it applies only to a lecture that has not chosen one,
     and then the recorded hash names it, as it does an override look.
     """
     if project.matches is None:
@@ -90,7 +90,10 @@ def render_project(
     elif look != own:
         set_project_look(snapshot, look)
     settings = job_settings(snapshot)
-    if settings.studied_surah is None and studied_surah is not None:
+    # A recitation draws every card whatever the surah, so a fallback there
+    # changes nothing in the video and must not make its render read stale.
+    lecture = str(snapshot.mode).lower() == "lecture"
+    if lecture and settings.studied_surah is None and studied_surah is not None:
         set_job_settings(snapshot, replace(settings, studied_surah=studied_surah))
     rendered_hash = snapshot.content_hash()
     result = export_job(

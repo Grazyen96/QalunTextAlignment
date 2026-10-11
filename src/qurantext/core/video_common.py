@@ -96,13 +96,24 @@ def _card_surah(card: dict[str, Any]) -> int | str | None:
 
 
 def _card_span(card: dict[str, Any]) -> tuple[float, float] | None:
+    """The card's time on screen, or None for a card ``validated_matches`` drops.
+
+    The export picks the studied surah before validating its cards and the
+    preview and the review after, so a card validation would drop must count
+    for nothing here, or the two orders could guess different surahs.
+    """
     try:
         start = float(card.get("_start_time", card.get("start_time")))
         end = float(card.get("_end_time", card.get("end_time")))
     except (TypeError, ValueError):
         return None
-    if not (math.isfinite(start) and math.isfinite(end)):
+    if not (math.isfinite(start) and math.isfinite(end)) or end <= start:
         return None
+    if "_display_text" not in card:
+        try:
+            _match_display_text(card, 0)
+        except ValueError:
+            return None
     return start, end
 
 
@@ -155,13 +166,14 @@ def cards_on_screen(
 
 
 def has_surah_cards(cards: list[dict[str, Any]], surah: int) -> bool:
-    """Whether any of *cards* is an ayah of *surah*.
+    """Whether any of *cards* is an ayah of *surah* that the video can draw.
 
-    A chosen studied surah with no card leaves a lecture with only its opening
-    title card, which the review window points out rather than leave a person
-    wondering where the ayat went.
+    A chosen studied surah with no such card leaves a lecture with only its
+    opening title card, which the review window and a finished render point
+    out rather than leave a person wondering where the ayat went. A card
+    validation would drop (no time on screen, no text) does not count.
     """
-    return any(card.get("surah_num") == surah for card in cards)
+    return any(card.get("surah_num") == surah and _card_span(card) is not None for card in cards)
 
 
 def warn(message: str) -> None:

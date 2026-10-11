@@ -440,3 +440,15 @@ def test_the_projects_studied_surah_wins_over_the_flag(tmp_path, monkeypatch, ca
     assert _run_generate_video(args) == 0
     assert seen["studied_surah"] == 25
     assert "Ignoring --studied-surah" in capsys.readouterr().err
+
+
+def test_the_studied_surah_flag_is_ignored_for_a_recitation_project(tmp_path, capsys) -> None:
+    import argparse
+
+    from qurantext.cli.main import _resolve_studied_surah
+    from qurantext.jobs.project import Project
+
+    recitation = Project(audio=tmp_path / "a.mp3", mode="recitation")
+    assert _resolve_studied_surah(argparse.Namespace(studied_surah=5), recitation) is None
+    assert "project is a recitation" in capsys.readouterr().err
+    assert _resolve_studied_surah(argparse.Namespace(studied_surah=5), None) == 5

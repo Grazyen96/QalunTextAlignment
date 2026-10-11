@@ -605,15 +605,17 @@ class ReviewSession:
 
     @property
     def missing_studied_surah(self) -> int | None:
-        """The chosen studied surah when no card is one of its ayat, else None.
+        """The chosen studied surah when no card the frame draws is one of its ayat.
 
         The video then shows only its opening title card, which the window
-        says rather than leave the person looking for the ayat.
+        says rather than leave the person looking for the ayat. Judged on the
+        cards the frame draws (``validated_cards``), so a card validation drops
+        does not hide the warning.
         """
         surah = self.studied_surah
         if surah is None or str(self.project.mode).lower() != "lecture":
             return None
-        return None if has_surah_cards(self.project.cards, surah) else surah
+        return None if has_surah_cards(self.validated_cards(), surah) else surah
 
     # -- gestures and undo -----------------------------------------------------
 

@@ -2262,3 +2262,60 @@ def test_surah_names_come_from_a_built_store_and_nothing_breaks_without_one(
     names = stored_surah_names(store)
     assert len(names) == 114 and names[1]
     assert stored_surah_names(tmp_path / "never-built.sqlite") == {}
+
+
+def test_run_render_hands_on_a_missing_studied_surah(tmp_path, monkeypatch) -> None:
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.jobs.export import ExportResult
+    from qurantext.jobs.project import Project
+    from qurantext.jobs.render import RenderResult
+
+    video = tmp_path / "v.mp4"
+    monkeypatch.setattr(
+        jobs_module,
+        "render_project",
+        lambda project, output, **kwargs: ExportResult(
+            video=video,
+            render=RenderResult(
+                output=video,
+                width=1,
+                height=1,
+                fps=1,
+                duration_seconds=1.0,
+                studied_surah_missing=114,
+            ),
+        ),
+    )
+    project = Project(audio=tmp_path / "a.mp3", mode="lecture", matches=tmp_path / "m.json")
+    assert jobs_module.run_render(project).studied_surah_missing == 114
+
+
+def test_render_right_away_says_the_chosen_surah_has_no_card(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    """The review would have said it; a job that skips the review says it on the status line."""
+    from qurantext.gui import main_window as module
+    from qurantext.gui.jobs import JobOutcome
+
+    _fake_matching(monkeypatch)
+    monkeypatch.setattr(module, "stored_surah_names", lambda: {114: "الناس"})
+
+    def fake_render(project, *, progress=None, cancel=None):
+        return JobOutcome(
+            matches=project.matches,
+            video=tmp_path / "a.mp4",
+            cards=1,
+            look_warnings=("image_missing",),
+            studied_surah_missing=114,
+        )
+
+    monkeypatch.setattr(module, "run_render", fake_render)
+
+    _run_start(qt_app, home, _spec(tmp_path, output_dir=tmp_path / "jobs", render_right_away=True))
+
+    rendered = module.t("home.finished.rendered", path=module.path_text(tmp_path / "a.mp4"))
+    missing = module.t(
+        "review.studied_surah_missing", surah=module.t("surah.item", num=114, name="الناس")
+    )
+    said = home.new_job.status_label.text()
+    assert said == f"{rendered} {module.t('look.image_missing')} {missing}"
