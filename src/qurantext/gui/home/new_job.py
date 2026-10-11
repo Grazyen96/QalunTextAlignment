@@ -738,6 +738,7 @@ class NewJobPanel(QWidget):
             render_right_away=self.render_right_away_box.isChecked(),
             engine=self._current_engine(),
             output_dir=self._output_dir,
+            style=self._prefs.default_look_style(),
         )
 
     def problem(self) -> str | None:

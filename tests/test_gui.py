@@ -641,6 +641,118 @@ def test_a_rematch_compares_without_the_look_on_both_sides(tmp_path, monkeypatch
     assert jobs_module._keep_earlier(first.path, derived) == jobs_module._UNCHANGED
 
 
+# --- the default look a new job starts with ------------------------------------
+
+
+def _image_look(image: Path, preset: str = "sand"):
+    from qurantext.core.looks import PRESETS, Background
+
+    return replace(
+        PRESETS[preset],
+        background=Background("image", (0, 0, 0, 255), (0, 0, 0, 255), image, 0.35, 0),
+    )
+
+
+def test_a_new_job_is_seeded_with_the_default_look(tmp_path, monkeypatch) -> None:
+    from qurantext.core.looks import PRESETS
+    from qurantext.jobs.look_assets import project_look
+    from qurantext.jobs.project import load_project
+
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    project = jobs_module.run_matching(replace(spec, style=PRESETS["sand"].to_dict()))
+
+    assert project_look(project) == PRESETS["sand"]
+    assert project_look(load_project(project.path)) == PRESETS["sand"]
+
+
+def test_a_new_job_without_a_default_look_has_no_style(tmp_path, monkeypatch) -> None:
+    from qurantext.jobs.project import load_project
+
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    project = jobs_module.run_matching(spec)
+    assert spec.style == {}
+    assert load_project(project.path).style == {}
+
+
+def test_a_default_image_is_copied_beside_the_new_project(tmp_path, monkeypatch) -> None:
+    from PIL import Image
+
+    from qurantext.jobs.look_assets import look_dir_for, project_look
+    from qurantext.jobs.project import load_project
+
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    (tmp_path / "app").mkdir()
+    image = tmp_path / "app" / "bg.png"
+    Image.new("RGB", (4, 4), (7, 8, 9)).save(image)
+    look = _image_look(image)
+
+    project = jobs_module.run_matching(replace(spec, style=look.to_dict()))
+
+    stored = project.style["background"]["image"]
+    assert not Path(stored).is_absolute()  # moves with the project folder
+    copied = project_look(load_project(project.path)).background.image
+    assert copied.parent == look_dir_for(project.path)
+    assert copied.read_bytes() == image.read_bytes()
+    assert project_look(load_project(project.path)) == replace(
+        look, background=replace(look.background, image=copied)
+    )
+
+
+def test_seeding_with_a_missing_default_image_still_creates_the_project(
+    tmp_path, monkeypatch
+) -> None:
+    from qurantext.core.looks import PRESETS
+    from qurantext.jobs.look_assets import project_look
+    from qurantext.jobs.project import load_project
+
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    look = _image_look(tmp_path / "gone.png")
+
+    project = jobs_module.run_matching(replace(spec, style=look.to_dict()))
+
+    saved = load_project(project.path)
+    assert project_look(saved) == replace(look, background=PRESETS["sand"].background)
+    assert project_look(saved).background.image is None
+
+
+def test_a_rerun_with_unchanged_content_keeps_the_videos_own_look(tmp_path, monkeypatch) -> None:
+    from qurantext.core.looks import PRESETS
+    from qurantext.jobs.look_assets import project_look, set_project_look
+    from qurantext.jobs.project import load_project, save_project
+
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    first = jobs_module.run_matching(spec)
+    own = load_project(first.path)
+    set_project_look(own, PRESETS["emerald"])
+    save_project(own, first.path)
+
+    project = jobs_module.run_matching(replace(spec, style=PRESETS["sand"].to_dict()))
+
+    assert not list(tmp_path.glob("*.qalun-backup.json")), "content unchanged"
+    assert project_look(project) == PRESETS["emerald"]
+    assert project_look(load_project(first.path)) == PRESETS["emerald"]
+
+
+def test_a_rerun_with_changed_content_keeps_the_earlier_look_not_the_default(
+    tmp_path, monkeypatch
+) -> None:
+    from qurantext.core.looks import NIGHT_GOLD, PRESETS
+    from qurantext.jobs.look_assets import project_look
+    from qurantext.jobs.project import load_project, save_project
+
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    first = jobs_module.run_matching(spec)  # made before any default look: Night gold
+    corrected = load_project(first.path)
+    corrected.cards[0]["start_time"] = 0.25
+    save_project(corrected, first.path)
+
+    project = jobs_module.run_matching(replace(spec, style=PRESETS["sand"].to_dict()))
+
+    assert list(tmp_path.glob("clip_recitation.*.qalun-backup.json")), "content changed"
+    assert project_look(project) == NIGHT_GOLD
+    assert load_project(first.path).style == {}
+
+
 def test_start_renders_only_when_asked_to_right_away(tmp_path, monkeypatch) -> None:
     """The job Start runs: match, then render only when the job skips the review."""
     from qurantext.gui.main_window import _match_then_render

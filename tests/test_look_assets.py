@@ -191,3 +191,75 @@ def test_a_look_is_its_own_only_when_the_style_holds_a_look_key(tmp_path: Path) 
     for key in ("preset", "colours", "background"):
         project.style = {key: "anything"}
         assert has_own_look(project)
+
+
+def test_copy_by_content_names_any_folder_s_copy_by_its_bytes(tmp_path: Path) -> None:
+    source = _png(tmp_path / "Photo.PNG")
+    folder = tmp_path / "data" / "looks"
+    first = look_assets.copy_by_content(source, folder)
+    second = look_assets.copy_by_content(source, folder)
+    assert first == second == (folder / first.name).resolve()
+    assert first.suffix == ".png"
+    assert first.stem == hashlib.sha256(source.read_bytes()).hexdigest()[:12]
+    assert [p.name for p in folder.iterdir()] == [first.name]
+
+
+@pytest.mark.skipif(__import__("sys").platform == "win32", reason="POSIX permission bits")
+def test_an_imported_image_is_readable_like_the_project_beside_it(tmp_path: Path) -> None:
+    import stat
+
+    copy = import_look_image(tmp_path / "job.qalun.json", _png(tmp_path / "bg.png"))
+    assert stat.S_IMODE(copy.stat().st_mode) == 0o644
+
+
+def _image_look(image: Path, preset: str = "ocean"):
+    return replace(
+        PRESETS[preset],
+        background=Background("image", (1, 2, 3, 255), (4, 5, 6, 255), image, 0.2, 3),
+    )
+
+
+def test_seeding_copies_the_image_and_stores_it_beside_the_unsaved_project(
+    tmp_path: Path,
+) -> None:
+    project = Project(audio=tmp_path / "dars.mp3", mode="lecture", cards=[])
+    destination = tmp_path / "out" / "job.qalun.json"
+    look = _image_look(_png(tmp_path / "bg.png"))
+
+    look_assets.seed_project_look(project, destination, look.to_dict())
+
+    assert project.path is None  # seeding does not pretend the project is saved
+    stored = project.style["background"]["image"]
+    assert stored.startswith("job.qalun.look/")  # relative to the destination's folder
+    save_project(project, destination)
+    copied = project_look(load_project(destination)).background.image
+    assert copied.parent == look_dir_for(destination)
+    assert project_look(load_project(destination)) == replace(
+        look, background=replace(look.background, image=copied)
+    )
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [FileNotFoundError("gone"), ValueError("not an image"), PermissionError(errno.EACCES, "no")],
+)
+def test_seeding_falls_back_to_the_preset_background_when_the_image_cannot_be_copied(
+    tmp_path: Path, monkeypatch, failure
+) -> None:
+    def refuse(source, folder):
+        raise failure
+
+    monkeypatch.setattr(look_assets, "copy_by_content", refuse)
+    project = Project(audio=tmp_path / "dars.mp3", mode="lecture", cards=[])
+    look = _image_look(_png(tmp_path / "bg.png"))
+
+    look_assets.seed_project_look(project, tmp_path / "job.qalun.json", look.to_dict())
+
+    assert project_look(project) == PRESETS["ocean"]
+
+
+def test_seeding_night_gold_leaves_the_style_alone(tmp_path: Path) -> None:
+    project = Project(audio=tmp_path / "dars.mp3", mode="lecture", cards=[])
+    project.style = {"future_option": 3}
+    look_assets.seed_project_look(project, tmp_path / "job.qalun.json", {})
+    assert project.style == {"future_option": 3}
