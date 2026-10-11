@@ -1522,3 +1522,100 @@ def test_disabling_the_panel_mid_slider_drag_closes_the_gesture(qt_app, session,
     assert not panel.dim_slider.isSliderDown()
     _assert_a_later_edit_is_its_own_undo_step(session)
     container.close()
+
+
+# -- the ayah picker -------------------------------------------------------------
+
+
+@pytest.fixture
+def db(store):
+    """The word-level store the suite builds once per module (``conftest.store``)."""
+    return store
+
+
+def test_picker_defaults_and_preview(qt_app, db) -> None:
+    from qurantext.gui.review.ayah_picker import AyahPicker
+
+    picker = AyahPicker(surah=25, from_ayah=7, db_path=db)
+    assert picker.choice() == (25, 7, 7)
+    assert picker.preview.text().strip().endswith("٧")
+    assert picker.ok_button.isEnabled()
+
+
+def test_to_follows_from_until_edited(qt_app, db) -> None:
+    from qurantext.gui.review.ayah_picker import AyahPicker
+
+    picker = AyahPicker(surah=25, from_ayah=7, db_path=db)
+    picker.from_spin.setValue(9)
+    assert picker.to_spin.value() == 9
+    picker.to_spin.setValue(11)
+    picker.from_spin.setValue(10)
+    assert picker.choice() == (25, 10, 11)
+    picker.from_spin.setValue(12)
+    assert picker.to_spin.value() == 12  # never below from
+
+
+def test_a_given_range_is_kept_when_from_moves(qt_app, db) -> None:
+    """Opened on a card's 7–9, moving the first ayah must not collapse the range."""
+    from qurantext.gui.review.ayah_picker import AyahPicker
+
+    picker = AyahPicker(surah=25, from_ayah=7, to_ayah=9, db_path=db)
+    picker.from_spin.setValue(8)
+    assert picker.choice() == (25, 8, 9)
+
+
+def test_changing_surah_clamps_the_ayah_spins(qt_app, db) -> None:
+    from qurantext.gui.review.ayah_picker import AyahPicker
+
+    picker = AyahPicker(surah=2, from_ayah=200, db_path=db)
+    index = picker.surah_box.findData(103)  # Al-ʿAṣr: 3 ayat
+    picker.surah_box.setCurrentIndex(index)
+    assert picker.from_spin.maximum() == 3 and picker.choice()[1:] == (3, 3)
+    assert picker.to_spin.maximum() == 3
+
+
+def test_the_surah_box_lists_every_surah_by_name(qt_app, db) -> None:
+    from qurantext.gui.review.ayah_picker import AyahPicker
+
+    picker = AyahPicker(surah=25, db_path=db)
+    assert picker.surah_box.count() == 114
+    assert picker.surah_box.currentData() == 25
+    assert "الفُرقَانِ" in picker.surah_box.currentText(), "named from the store"
+
+
+def test_a_long_range_preview_is_shortened(qt_app, db) -> None:
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.ayah_picker import AyahPicker
+
+    picker = AyahPicker(surah=25, from_ayah=1, to_ayah=20, db_path=db)
+    assert picker.preview.text().count("\n") <= 6
+    assert picker.preview.text().endswith(t("ayah_picker.more", count=15))
+
+
+def test_the_preview_follows_the_spins(qt_app, db) -> None:
+    from qurantext.gui.review.ayah_picker import AyahPicker
+
+    picker = AyahPicker(surah=25, from_ayah=7, db_path=db)
+    picker.from_spin.setValue(8)
+    assert picker.preview.text().strip().endswith("٨")
+    assert picker.preview.text().count("\n") == 0
+
+
+def test_no_store_disables_ok(qt_app, tmp_path) -> None:
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.ayah_picker import AyahPicker
+
+    picker = AyahPicker(surah=25, db_path=tmp_path / "missing.sqlite")
+    assert not picker.ok_button.isEnabled()
+    assert picker.preview.text() == t("ayah_picker.no_store")
+
+
+def test_a_damaged_store_disables_ok(qt_app, tmp_path) -> None:
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.ayah_picker import AyahPicker
+
+    broken = tmp_path / "quran.sqlite"
+    broken.write_bytes(b"not a database at all")
+    picker = AyahPicker(surah=25, db_path=broken)
+    assert not picker.ok_button.isEnabled()
+    assert picker.preview.text() == t("ayah_picker.no_store")
