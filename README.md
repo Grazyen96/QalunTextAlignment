@@ -140,9 +140,11 @@ job list keeps finding it.
 **Language.** The window is in English or Arabic. It follows the system's
 language until you choose one at the bottom of the home window, and remembers
 that choice from then on (switching waits until no review is open and no job
-is running). Arabic lays the window out right to left, while the waveform, the
-word strip and the time fields keep time running left to right, and numbers
-stay Western digits in both. The Arabic text is a draft awaiting review by a
+is running). Arabic lays the window out right to left. In both languages the
+review window's timeline — the waveform and the word strip — runs right to
+left, so an ayah's words read in their own order: the recording's start is on
+the right, ← steps to the next word and → to the previous. Times and numbers
+read left to right and stay Western digits in both. The Arabic text is a draft awaiting review by a
 native speaker.
 
 **Where settings live.** The window's settings (the language, the last choices

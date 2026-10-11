@@ -29,7 +29,7 @@ Two defects make any editing pointless today, and are fixed here first:
 | Word retiming | Both recitation ayah words and lecture caption words |
 | Subtitle export | An Export dialog: formats and destination, no re-render |
 | Job flow | Start matches, then opens review. Rendering is a separate step. "Render right away" stays as an option |
-| Time axis | Always left to right, in both languages. Arabic text inside a word box is shaped RTL as usual |
+| Time axis | ~~Always left to right, in both languages.~~ *Superseded 11 Oct 2026 (owner decision):* always **right to left**, in both languages — see the note in §2.2. Arabic text inside a word box is shaped RTL as usual |
 
 ## Out of scope
 
@@ -170,6 +170,21 @@ word strip, frame and all editing keep working. `qalun --doctor` reports it.
 
 ### 2.2 Waveform and gaps
 
+*Amended 11 Oct 2026 (owner decision), superseding "time axis always left to
+right":* the timeline runs **right to left, always, in both interface
+languages**. The words are Arabic, and left to right an ayah's first word sat on
+the left, so the strip read backwards. `Viewport.x_for`/`t_for` map the window's
+start to the right edge and later time further left; the waveform, word strip,
+playhead, gap bands, selection and click-to-seek all go through them, so they
+flip together. In the word strip a box's right edge is its start and its left
+edge its end, and a drag to the left moves time later; Shift-drag (ripple) and
+Ctrl-drag (part two words) keep their meaning. ← steps to the next word and →
+to the previous; `,` / `.` still nudge earlier / later. The nudge row reads
+"Snap | +50 ms | −50 ms" from the left, the earlier-moving button on the right.
+The zoom slider (a zoom level, not time), the frame preview, the segment list,
+the clock, exports and subtitles are unchanged. The text below keeps its
+original wording where it says otherwise.
+
 Time runs left to right in both languages. Gap bands come from
 `find_uncovered_speech`, which now runs automatically when the editor opens
 (in a worker) and again after each edit settles (debounced 1 s). The warning
@@ -179,9 +194,10 @@ strip lists them, each with Jump.
 
 - Click a word: select it and seek to its start.
 - Drag its left or right edge: `retime`. Shift-drag the body: `ripple`.
-- Keys: space play/pause; ←/→ previous/next word; `[` / `]` set the selected
-  word's start / end at the playhead; `,` / `.` nudge the selected edge by
-  −/+50 ms (Shift: 10 ms); Ctrl+Z / Ctrl+Shift+Z undo/redo; Ctrl+S save.
+- Keys: space play/pause; ←/→ previous/next word (*11 Oct 2026:* now →/←,
+  see §2.2); `[` / `]` set the selected word's start / end at the playhead;
+  `,` / `.` nudge the selected edge by −/+50 ms (Shift: 10 ms); Ctrl+Z /
+  Ctrl+Shift+Z undo/redo; Ctrl+S save.
 - The selected-word bar shows the word, its times, −50 ms, +50 ms and
   "Snap to playhead".
 - Recitation: after any retime, `derive_card_windows` updates card start/end.
@@ -260,7 +276,9 @@ comes from More options on the home window and is stored in `project.export`.
   Rebuilding a review under unsaved corrections is where work would go missing,
   and a language change is rare enough to ask for a quiet moment.
 - The waveform, word strip and time fields are pinned `LeftToRight` so time
-  keeps its direction; everything else mirrors.
+  keeps its direction; everything else mirrors. (*11 Oct 2026:* the timeline
+  widgets stay pinned so Qt never mirrors them, but their time axis is now right
+  to left in both languages, through the viewport's mapping — see §2.2.)
 - Numbers and times stay Western digits in both languages (they are timing
   values a reviewer compares with other tools).
 - A test asserts both tables have the same keys and the same `{placeholders}`.
