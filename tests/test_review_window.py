@@ -50,6 +50,24 @@ def _no_window_outlives_its_test(qt_app):
     qt_app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
+@pytest.fixture(autouse=True)
+def _no_real_settings(monkeypatch, tmp_path):
+    """A window built without ``prefs`` gets settings under tmp_path, never the person's.
+
+    "Use for new videos" writes the default look; a test clicking it on a
+    window made without ``prefs`` would otherwise write to the real settings.
+    """
+    from PySide6.QtCore import QSettings
+
+    from qurantext.gui.prefs import Prefs
+    from qurantext.gui.review import window as window_module
+
+    ini = str(tmp_path / "window-prefs.ini")
+    monkeypatch.setattr(
+        window_module, "Prefs", lambda: Prefs(QSettings(ini, QSettings.Format.IniFormat))
+    )
+
+
 class _Now:
     t = 0.0
 
@@ -1349,3 +1367,32 @@ def test_a_missing_look_image_is_said_on_opening(qt_app, tmp_path) -> None:
     save_project(project, project.path)
     window = ReviewWindow(load_project(project.path), player=FakePlayer(duration=10.0, now=_Now()))
     assert html.escape(t("look.image_missing")) in window.warnings.text()
+
+
+def test_a_look_problem_leaves_the_strip_once_the_look_is_fixed(qt_app, tmp_path) -> None:
+    from dataclasses import replace
+
+    from qurantext.core.looks import NIGHT_GOLD, Background
+    from qurantext.gui.review.window import ReviewWindow
+    from qurantext.jobs.look_assets import set_project_look
+
+    project = _project(tmp_path)
+    gone = tmp_path / "m.qalun.look" / "gone.png"
+    background = Background("image", NIGHT_GOLD.frame_bg, NIGHT_GOLD.frame_bg, gone, dim=0.35)
+    set_project_look(project, replace(NIGHT_GOLD, background=background))
+    save_project(project, project.path)
+    window = ReviewWindow(load_project(project.path), player=FakePlayer(duration=10.0, now=_Now()))
+    missing = html.escape(t("look.image_missing"))
+    assert missing in window.warnings.text()
+    window.look_panel.reset_button.click()
+    assert missing not in window.warnings.text()
+    assert "missing.mp3" in window.warnings.text(), "the strip's other lines stay"
+    window.undo_button.click()
+    assert missing in window.warnings.text(), "undo brings the image, and its problem, back"
+
+
+def test_a_window_without_prefs_never_touches_the_real_settings(qt_app, tmp_path) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    window.look_panel.palette_buttons["rose"].click()
+    window.look_panel.default_button.click()
+    assert (tmp_path / "window-prefs.ini").is_file()

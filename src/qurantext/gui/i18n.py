@@ -277,6 +277,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "look.colour.caption_text": "Caption text",
         "look.colour.caption_active": "Caption, word being spoken",
         "look.colour.placeholder_text": "Opening text",
+        "look.colour.background": "Background colour",
         "look.card_opacity": "Card opacity",
         "look.background": "Background",
         "look.bg.solid": "Solid colour",
@@ -292,7 +293,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "look.use_for_new": "Use for new videos",
         "look.default_saved": "New videos will start with this look.",
         "look.reset": "Reset",
-        "look.image_failed": "{name} could not be used as a background.",
+        "look.image_failed": "\u2068{name}\u2069 could not be used as a background.",
         "look.image_missing": (
             "The background image is missing; the palette's background is shown instead."
         ),
@@ -553,6 +554,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "look.colour.caption_text": "نص الترجمة النصية",
         "look.colour.caption_active": "الكلمة المنطوقة الآن",
         "look.colour.placeholder_text": "نص الافتتاح",
+        "look.colour.background": "لون الخلفية",
         "look.card_opacity": "عتامة البطاقة",
         "look.background": "الخلفية",
         "look.bg.solid": "لون واحد",
@@ -568,7 +570,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "look.use_for_new": "استخدمه للمقاطع الجديدة",
         "look.default_saved": "ستبدأ المقاطع الجديدة بهذا المظهر.",
         "look.reset": "إعادة الضبط",
-        "look.image_failed": "تعذّر استخدام {name} خلفيةً.",
+        "look.image_failed": "تعذّر استخدام \u2068{name}\u2069 خلفيةً.",
         "look.image_missing": "صورة الخلفية مفقودة؛ تُعرض خلفية اللوحة بدلًا منها.",
         "look.image_unreadable": "تعذّرت قراءة صورة الخلفية؛ تُعرض خلفية اللوحة بدلًا منها.",
     },

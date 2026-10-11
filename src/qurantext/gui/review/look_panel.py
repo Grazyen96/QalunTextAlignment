@@ -12,15 +12,30 @@ The readability check measures the text colours against the card as it sits
 on this background (its average colour, from the same cached layer the
 preview draws on), and the same layer says when a chosen image has gone
 missing or cannot be read.
+
+The panel sits in a scroll area, so its sliders and its background list take
+the mouse wheel only once they have focus: scrolling past them moves the
+panel, never the look.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QRectF, QSignalBlocker, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QStandardItemModel
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSignalBlocker, QSize, Qt, Signal
+from PySide6.QtGui import (
+    QColor,
+    QFocusEvent,
+    QHideEvent,
+    QIcon,
+    QMouseEvent,
+    QPainter,
+    QPixmap,
+    QStandardItemModel,
+    QWheelEvent,
+)
 from PySide6.QtWidgets import (
     QColorDialog,
     QComboBox,
@@ -176,6 +191,85 @@ def _alpha_percent(alpha: int) -> int:
     return round(alpha * 100 / 255)
 
 
+def _rgba(colour: QColor) -> RGBA:
+    return (colour.red(), colour.green(), colour.blue(), colour.alpha())
+
+
+class _GestureSlider(QSlider):
+    """A slider whose drag is one gesture however it ends, and that leaves the wheel alone.
+
+    Qt hands a slider the wheel whether or not it has focus, so scrolling the
+    panel would edit each slider passing under the pointer. Until a click or
+    Tab gives it focus, the wheel goes on to the scroll area instead.
+
+    A drag can lose its mouse grab with no release ever arriving: focus moves
+    away, a modal dialog opens (a render's "ready" box), the panel is hidden
+    or disabled. Left down, the session's gesture stays open and every later
+    edit merges into its undo step (as ``WordStrip._finish_drag`` explains), so
+    each of those paths lets the slider go: ``sliderReleased`` closes the
+    gesture, and the rest of that drag is ignored.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(Qt.Orientation.Horizontal, parent)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def let_go(self) -> None:
+        """End a drag as a release would; nothing when the slider is not held."""
+        if not self.isSliderDown():
+            return
+        # A release with no button held: QSlider forgets the grabbed handle
+        # (later moves of that drag are then ignored) and says it was released.
+        release = QMouseEvent(
+            QEvent.Type.MouseButtonRelease,
+            QPointF(0, 0),
+            QPointF(self.mapToGlobal(QPointF(0, 0))),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        super().mouseReleaseEvent(release)
+        if self.isSliderDown():  # held without the mouse (setSliderDown)
+            self.setSliderDown(False)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802 - Qt override
+        if not self.hasFocus():
+            event.ignore()  # on to the scroll area
+            return
+        super().wheelEvent(event)
+
+    def focusOutEvent(self, event: QFocusEvent) -> None:  # noqa: N802 - Qt override
+        self.let_go()
+        super().focusOutEvent(event)
+
+    def hideEvent(self, event: QHideEvent) -> None:  # noqa: N802 - Qt override
+        self.let_go()
+        super().hideEvent(event)
+
+    def changeEvent(self, event: QEvent) -> None:  # noqa: N802 - Qt override
+        if event.type() == QEvent.Type.EnabledChange and not self.isEnabled():
+            self.let_go()
+        super().changeEvent(event)
+
+
+class _WheelSafeCombo(QComboBox):
+    """A list that takes the wheel only with focus: scrolling past it must not change it.
+
+    Over the background list a stray wheel would swap the background (and on
+    "My image" open a file dialog nobody asked for).
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802 - Qt override
+        if not self.hasFocus():
+            event.ignore()  # on to the scroll area
+            return
+        super().wheelEvent(event)
+
+
 class LookPanel(QWidget):
     """Palette swatches, Customise, Background, and the default; edits go through the session."""
 
@@ -183,6 +277,9 @@ class LookPanel(QWidget):
     look_changed = Signal()
     #: A problem to show in the warnings strip, already in the person's words.
     notice = Signal(str)
+    #: Every problem the current look has (its image), in the person's words;
+    #: replaces the last list, so a problem that went away leaves the strip.
+    look_notices = Signal(list)
     #: A short confirmation for the status bar, already in the person's words.
     message = Signal(str)
 
@@ -269,11 +366,15 @@ class LookPanel(QWidget):
             custom.addWidget(button)
             if name == "card":
                 self.opacity_label = QLabel(t("look.card_opacity"))
-                self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
+                self.opacity_slider = _GestureSlider()
                 self.opacity_slider.setRange(0, 100)
                 self.opacity_label.setBuddy(self.opacity_slider)
                 custom.addWidget(self.opacity_label)
                 custom.addWidget(self.opacity_slider)
+        # The colour a built-in background is drawn in; an image has none to pick.
+        self.background_colour_button = QPushButton(t("look.colour.background"))
+        self.background_colour_button.setIconSize(_CHIP)
+        custom.addWidget(self.background_colour_button)
         self.customise_box.setVisible(False)
         column.addWidget(self.customise_box)
 
@@ -284,7 +385,7 @@ class LookPanel(QWidget):
 
         background_label = QLabel(t("look.background"))
         column.addWidget(background_label)
-        self.background_combo = QComboBox()
+        self.background_combo = _WheelSafeCombo()
         for kind in BACKGROUND_KINDS:
             self.background_combo.addItem(_background_name(kind), kind)
         background_label.setBuddy(self.background_combo)
@@ -303,11 +404,11 @@ class LookPanel(QWidget):
                 item.setToolTip(t("session.no_file"))
 
         self.dim_label = QLabel(t("look.dim"))
-        self.dim_slider = QSlider(Qt.Orientation.Horizontal)
+        self.dim_slider = _GestureSlider()
         self.dim_slider.setRange(0, round(MAX_DIM * 100))
         self.dim_label.setBuddy(self.dim_slider)
         self.blur_label = QLabel(t("look.blur"))
-        self.blur_slider = QSlider(Qt.Orientation.Horizontal)
+        self.blur_slider = _GestureSlider()
         self.blur_slider.setRange(0, round(MAX_BLUR))
         self.blur_label.setBuddy(self.blur_slider)
         sliders = QGridLayout()
@@ -330,6 +431,7 @@ class LookPanel(QWidget):
         self.customise_toggle.toggled.connect(self._toggle_customise)
         for name, button in self.colour_buttons.items():
             button.clicked.connect(lambda _checked=False, n=name: self._pick_colour(n))
+        self.background_colour_button.clicked.connect(self._pick_background_colour)
         for slider, on_value in (
             (self.opacity_slider, self._on_opacity),
             (self.dim_slider, self._on_dim),
@@ -386,6 +488,8 @@ class LookPanel(QWidget):
         for name, button in self.colour_buttons.items():
             button.setIcon(_chip_icon(getattr(look, name)))
         bg = look.background
+        self.background_colour_button.setIcon(_chip_icon(bg.colour))
+        self.background_colour_button.setVisible(bg.kind != "image")
         self._set_slider(self.opacity_slider, _alpha_percent(look.card[3]))
         self._set_slider(self.dim_slider, round(bg.dim * 100))
         self._set_slider(self.blur_slider, round(bg.blur))
@@ -413,8 +517,7 @@ class LookPanel(QWidget):
             colour = warning_color(self.palette()).name()
             self.contrast_label.setStyleSheet(f"color: {colour};")
         self.contrast_label.setVisible(bool(names))
-        for code in layer.warnings:
-            self.notice.emit(look_warning_text(code))
+        self.look_notices.emit([look_warning_text(code) for code in layer.warnings])
 
     # -- changes ----------------------------------------------------------------
 
@@ -445,16 +548,79 @@ class LookPanel(QWidget):
 
     def _pick_colour(self, name: str) -> None:
         look = self._session.look
-        chosen = QColorDialog.getColor(
-            _qcolor(getattr(look, name)),
-            self,
-            plain_title(_colour_name(name)),
-            QColorDialog.ColorDialogOption.ShowAlphaChannel,
+        self._ask_colour(
+            getattr(look, name),
+            _colour_name(name),
+            lambda start, rgba: replace(start, **{name: rgba}),
+            alpha=True,
         )
-        if not chosen.isValid():
-            return
-        rgba = (chosen.red(), chosen.green(), chosen.blue(), chosen.alpha())
-        self._apply(replace(self._session.look, **{name: rgba}))
+
+    def _pick_background_colour(self) -> None:
+        """The colour a built-in background is drawn in.
+
+        A solid background is that colour, and the frame's own colour follows
+        it. A gradient or a pattern derives its second colour from the new one
+        as choosing it in the list does.
+        """
+        look = self._session.look
+
+        def with_colour(start: Look, rgba: RGBA) -> Look:
+            bg = start.background
+            if bg.kind == "solid":
+                return replace(
+                    start, frame_bg=rgba, background=replace(bg, colour=rgba, colour2=rgba)
+                )
+            colour2 = self._second_colour(start, rgba)
+            return replace(start, background=replace(bg, colour=rgba, colour2=colour2))
+
+        self._ask_colour(
+            look.background.colour, t("look.colour.background"), with_colour, alpha=False
+        )
+
+    def _ask_colour(
+        self,
+        initial: RGBA,
+        title: str,
+        with_colour: Callable[[Look, RGBA], Look],
+        *,
+        alpha: bool,
+    ) -> None:
+        """Ask for a colour, showing each one in the preview while the dialog is open.
+
+        The dialog is one gesture: whatever was tried while it was open, OK is
+        one undo step and Cancel leaves no edit at all.
+        """
+        session = self._session
+        start = session.look
+        before = session.revision
+        dialog = QColorDialog(_qcolor(initial), self)
+        dialog.setWindowTitle(plain_title(title))
+        dialog.setOption(QColorDialog.ColorDialogOption.ShowAlphaChannel, alpha)
+
+        def look_with(colour: QColor) -> Look:
+            rgba = _rgba(colour)
+            return with_colour(start, rgba if alpha else (*rgba[:3], 255))
+
+        def try_colour(colour: QColor) -> None:
+            if colour.isValid():
+                session.set_look(look_with(colour))
+                self.refresh()
+                self.look_changed.emit()
+
+        session.begin_gesture()
+        try:
+            dialog.currentColorChanged.connect(try_colour)
+            accepted = bool(dialog.exec())
+            dialog.currentColorChanged.disconnect(try_colour)
+            chosen = dialog.currentColor()
+            session.set_look(look_with(chosen) if accepted and chosen.isValid() else start)
+        finally:
+            session.end_gesture()
+            dialog.deleteLater()
+        if session.revision != before:
+            self._shown = None
+            self.refresh()
+            self.look_changed.emit()
 
     def _on_opacity(self, value: int) -> None:
         look = self._session.look

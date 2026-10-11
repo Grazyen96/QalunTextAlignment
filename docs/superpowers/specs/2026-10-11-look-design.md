@@ -40,8 +40,18 @@ A **Look** panel in the review window, beside the frame preview. Every change re
   and the suggested background.
 - **Customise** is folded away by default. It holds colour pickers for:
   - the ayah text, the highlighted word and the surah title;
+  - the opening text (`placeholder_text`: the title drawn on the card before the first ayah).
+    Every text colour the contrast warning can name has a picker, so a warning can always be
+    acted on;
   - the card colour, with an opacity slider (0–100 %);
-  - the caption text and the caption's active word.
+  - the caption text and the caption's active word;
+  - the **background colour** of a built-in background (hidden for an image). For `solid` it is
+    the background and `frame_bg` follows it; for `gradient` and the patterns it is the first
+    colour, and the second is derived from it as choosing that background in the list does (the
+    preset's own second colour when the colour is the preset's, else a shade of it).
+
+  A colour dialog previews each colour while it is open; OK is one undo step and Cancel leaves no
+  edit.
 
   Once anything is customised, the palette reads "Custom (from <preset>)".
 - **Contrast warning**, shown inline and never blocking. It appears when any text colour against the
@@ -180,7 +190,7 @@ A **Look** panel in the review window, beside the frame preview. Every change re
 | User image missing or undecodable at preview or export | Base preset's built-in background; a warning in the strip and in the render result; the export completes |
 | Image is huge (e.g. 8000×6000) | Decoded once, cover-fitted down to frame size, and cached; never resized per frame |
 | Low contrast | Inline warning only; never blocks |
-| Preferences hold a default look whose image is gone | New jobs get the look with the base preset's built-in background, and a warning is shown in the review window |
+| Preferences hold a default look whose image is gone | New jobs are still created. The look keeps naming the image where it was, so the preview and the export draw the base preset's built-in background, and the warning is shown in the review window (and in the render result of "render right away") until another image is chosen |
 
 ## 5. Testing
 

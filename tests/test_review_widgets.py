@@ -787,6 +787,25 @@ def _recorded(signal) -> list:
     return seen
 
 
+def _answer_colours(monkeypatch, *colours, accept: bool = True) -> list:
+    """The colour dialog: each of *colours* is tried in turn, then OK (or Cancel).
+
+    Returns what the session's look was after each try, as the preview drew it.
+    """
+    from PySide6.QtWidgets import QColorDialog
+
+    seen: list = []
+
+    def exec_(dialog) -> int:
+        for colour in colours:
+            dialog.setCurrentColor(colour)
+            seen.append(dialog.parent()._session.look)
+        return 1 if accept else 0
+
+    monkeypatch.setattr(QColorDialog, "exec", exec_)
+    return seen
+
+
 def test_choosing_a_palette_sets_the_session_look(qt_app, session, prefs) -> None:
     from qurantext.core.looks import PRESETS
 
@@ -808,9 +827,8 @@ def test_customise_is_folded_away_until_opened(qt_app, session, prefs) -> None:
 
 def test_one_customised_colour_reads_as_custom(qt_app, session, prefs, monkeypatch) -> None:
     from PySide6.QtGui import QColor
-    from PySide6.QtWidgets import QColorDialog
 
-    monkeypatch.setattr(QColorDialog, "getColor", lambda *a, **k: QColor(10, 200, 30, 255))
+    _answer_colours(monkeypatch, QColor(10, 200, 30, 255))
     panel = _panel(session, prefs)
     changed = _recorded(panel.look_changed)
     panel.colour_buttons["highlight_word"].click()
@@ -821,23 +839,144 @@ def test_one_customised_colour_reads_as_custom(qt_app, session, prefs, monkeypat
 
 
 def test_a_cancelled_colour_dialog_changes_nothing(qt_app, session, prefs, monkeypatch) -> None:
-    from PySide6.QtGui import QColor
-    from PySide6.QtWidgets import QColorDialog
-
-    monkeypatch.setattr(QColorDialog, "getColor", lambda *a, **k: QColor())
+    _answer_colours(monkeypatch, accept=False)
     panel = _panel(session, prefs)
     changed = _recorded(panel.look_changed)
     panel.colour_buttons["card"].click()
     assert not changed and not session.can_undo
 
 
+def test_the_colour_dialog_previews_live_and_is_one_undo_step(
+    qt_app, session, prefs, monkeypatch
+) -> None:
+    from PySide6.QtGui import QColor
+
+    from qurantext.core.looks import NIGHT_GOLD
+
+    tried = _answer_colours(monkeypatch, QColor(200, 0, 0), QColor(0, 0, 200))
+    panel = _panel(session, prefs)
+    changed = _recorded(panel.look_changed)
+    panel.colour_buttons["body_text"].click()
+    assert [look.body_text for look in tried] == [(200, 0, 0, 255), (0, 0, 200, 255)]
+    assert len(changed) >= 2, "each colour tried is shown in the preview"
+    assert session.look.body_text == (0, 0, 200, 255)
+    assert session.undo() and session.look == NIGHT_GOLD
+    assert not session.can_undo
+
+
+def test_a_cancelled_colour_dialog_takes_back_what_it_previewed(
+    qt_app, session, prefs, monkeypatch
+) -> None:
+    from PySide6.QtGui import QColor
+
+    from qurantext.core.looks import NIGHT_GOLD
+
+    tried = _answer_colours(monkeypatch, QColor(200, 0, 0), accept=False)
+    panel = _panel(session, prefs)
+    changed = _recorded(panel.look_changed)
+    panel.colour_buttons["header_text"].click()
+    assert tried[0].header_text == (200, 0, 0, 255)
+    assert session.look == NIGHT_GOLD and not session.can_undo and not session.dirty
+    assert changed, "the preview is drawn again without the colour"
+
+
+def test_every_colour_the_contrast_warning_names_has_a_picker(qt_app, session, prefs) -> None:
+    from qurantext.core.looks import _CAPTION_TEXT, _CARD_TEXT
+
+    panel = _panel(session, prefs)
+    assert set(_CARD_TEXT) | set(_CAPTION_TEXT) <= set(panel.colour_buttons)
+    assert panel.colour_buttons["placeholder_text"].text() == "Opening text"
+
+
+def test_the_opening_text_picker_clears_its_warning(qt_app, session, prefs, monkeypatch) -> None:
+    from dataclasses import replace
+
+    from PySide6.QtGui import QColor
+
+    from qurantext.core.looks import NIGHT_GOLD
+
+    dark = (20, 20, 20, 255)
+    # A light card with dark text, except the opening text left light grey.
+    session.set_look(
+        replace(
+            NIGHT_GOLD,
+            card=(240, 240, 235, 255),
+            body_text=dark,
+            header_text=dark,
+            highlight_word=dark,
+        )
+    )
+    panel = _panel(session, prefs)
+    panel.show()
+    assert panel.contrast_label.isVisible()
+    assert panel.contrast_label.text() == "Hard to read: Opening text"
+    _answer_colours(monkeypatch, QColor(*dark))
+    panel.colour_buttons["placeholder_text"].click()
+    assert session.look.placeholder_text == dark
+    assert not panel.contrast_label.isVisible()
+
+
+def test_the_background_colour_sets_a_solid_background_and_the_frame(
+    qt_app, session, prefs, monkeypatch
+) -> None:
+    from PySide6.QtGui import QColor
+
+    from qurantext.core.looks import NIGHT_GOLD
+
+    _answer_colours(monkeypatch, QColor(90, 20, 40, 128))
+    panel = _panel(session, prefs)
+    assert panel.background_colour_button.text() == "Background colour"
+    panel.background_colour_button.click()
+    bg = session.look.background
+    red = (90, 20, 40, 255)  # a background is opaque
+    assert (bg.kind, bg.colour, bg.colour2) == ("solid", red, red)
+    assert session.look.frame_bg == red
+    assert panel.status_label.text() == "Custom (from Night gold)"
+    assert session.undo() and session.look == NIGHT_GOLD
+
+
+@pytest.mark.parametrize("kind", ["gradient", "pattern_lattice"])
+def test_the_background_colour_of_a_gradient_or_pattern_keeps_a_second_colour(
+    qt_app, session, prefs, monkeypatch, kind
+) -> None:
+    from PySide6.QtGui import QColor
+
+    from qurantext.core.looks import NIGHT_GOLD
+
+    panel = _panel(session, prefs)
+    combo = panel.background_combo
+    combo.setCurrentIndex(combo.findData(kind))
+    _answer_colours(monkeypatch, QColor(10, 60, 30))
+    panel.background_colour_button.click()
+    bg = session.look.background
+    assert bg.kind == kind and bg.colour == (10, 60, 30, 255)
+    assert bg.colour2 == (32, 82, 52, 255), "a lighter shade of a dark colour"
+    assert session.look.frame_bg == NIGHT_GOLD.frame_bg
+
+
+def test_an_image_background_has_no_colour_to_pick(
+    qt_app, session, prefs, tmp_path, monkeypatch
+) -> None:
+    from PIL import Image
+    from PySide6.QtWidgets import QFileDialog
+
+    src = tmp_path / "photo.png"
+    Image.new("RGB", (20, 20), (200, 10, 10)).save(src)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(src), ""))
+    panel = _panel(session, prefs)
+    panel.show()
+    panel.customise_toggle.click()
+    assert panel.background_colour_button.isVisible()
+    panel.image_button.click()
+    assert not panel.background_colour_button.isVisible()
+
+
 def test_low_contrast_shows_a_warning_that_names_the_part(
     qt_app, session, prefs, monkeypatch
 ) -> None:
     from PySide6.QtGui import QColor
-    from PySide6.QtWidgets import QColorDialog
 
-    monkeypatch.setattr(QColorDialog, "getColor", lambda *a, **k: QColor(40, 40, 46, 255))
+    _answer_colours(monkeypatch, QColor(40, 40, 46, 255))
     panel = _panel(session, prefs)
     panel.show()
     assert not panel.contrast_label.isVisible()
@@ -928,7 +1067,7 @@ def test_an_image_that_cannot_be_used_says_so(
     panel = _panel(session, prefs)
     notices = _recorded(panel.notice)
     panel.image_button.click()
-    assert notices == [("gone.png could not be used as a background.",)]
+    assert notices == [("\u2068gone.png\u2069 could not be used as a background.",)]
     assert not session.can_undo
 
 
@@ -942,11 +1081,12 @@ def test_a_missing_image_is_reported(qt_app, session, prefs, tmp_path, monkeypat
     panel = _panel(session, prefs)
     panel.image_button.click()
     session.look.background.image.unlink()
-    notices = _recorded(panel.notice)
+    notices = _recorded(panel.look_notices)
     panel.blur_slider.setValue(5)
-    assert (
-        "The background image is missing; the palette's background is shown instead.",
-    ) in notices
+    missing = "The background image is missing; the palette's background is shown instead."
+    assert notices[-1] == ([missing],)
+    panel.reset_button.click()
+    assert notices[-1] == ([],), "a look without the problem takes the line back"
 
 
 def test_a_project_without_a_file_cannot_take_an_image(qt_app, prefs) -> None:
@@ -1016,3 +1156,181 @@ def test_the_swatches_keep_their_order_in_arabic(qt_app, session, prefs) -> None
     _spin_briefly(qt_app)
     xs = [panel.palette_buttons[name].x() for name in ("night_gold", "emerald", "sand")]
     assert xs == sorted(xs)
+
+
+# -- the panel's sliders and list in a scroll area: wheel and lost grabs -------------
+
+
+def _wheel(widget, ticks: int, *, up: bool) -> list[bool]:
+    """*ticks* notches of the mouse wheel over *widget*; whether each was taken.
+
+    Up raises a slider; down moves a list to its next entry. A real wheel event
+    that a widget ignores goes on to its parents, the scroll area among them;
+    Qt does not pass on one sent by hand, so the tests check it was ignored.
+    """
+    from PySide6.QtCore import QPoint, QPointF
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtWidgets import QApplication
+
+    pos = QPointF(widget.rect().center())
+    taken = []
+    for _ in range(ticks):
+        event = QWheelEvent(
+            pos,
+            QPointF(widget.mapToGlobal(pos)),
+            QPoint(0, 0),
+            QPoint(0, 120 if up else -120),
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+            Qt.ScrollPhase.NoScrollPhase,
+            False,
+        )
+        QApplication.sendEvent(widget, event)
+        taken.append(event.isAccepted())
+    return taken
+
+
+def _handle_centre(slider) -> QPoint:
+    from PySide6.QtWidgets import QStyle, QStyleOptionSlider
+
+    option = QStyleOptionSlider()
+    slider.initStyleOption(option)
+    return (
+        slider.style()
+        .subControlRect(
+            QStyle.ComplexControl.CC_Slider, option, QStyle.SubControl.SC_SliderHandle, slider
+        )
+        .center()
+    )
+
+
+def test_the_wheel_scrolls_past_the_sliders_and_the_list(
+    qt_app, session, prefs, monkeypatch
+) -> None:
+    """Scrolling the panel must not edit each control passing under the pointer."""
+    from PySide6.QtWidgets import QFileDialog, QScrollArea
+
+    from qurantext.core.looks import NIGHT_GOLD
+
+    asked: list = []
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: asked.append(a) or ("", ""))
+    panel = _panel(session, prefs)
+    scroll = QScrollArea()
+    scroll.setWidget(panel)
+    scroll.setWidgetResizable(True)
+    scroll.resize(260, 240)
+    panel.customise_toggle.click()
+    scroll.show()
+    _spin_briefly(qt_app)
+
+    taken = []
+    for control in (panel.opacity_slider, panel.dim_slider, panel.blur_slider):
+        taken += _wheel(control, 3, up=True)
+    taken += _wheel(panel.background_combo, 6, up=False)  # far enough to reach "My image"
+
+    assert not any(taken), "every notch is left to the scroll area"
+    assert session.look == NIGHT_GOLD and not session.can_undo
+    assert panel.background_combo.currentData() == "solid"
+    assert not asked, "no file dialog nobody asked for"
+    scroll.close()
+
+
+def test_a_control_with_focus_still_takes_the_wheel(qt_app, session, prefs) -> None:
+    panel = _panel(session, prefs)
+    panel.show()
+    _spin_briefly(qt_app)
+    panel.dim_slider.setFocus(Qt.FocusReason.MouseFocusReason)
+    qt_app.processEvents()
+    assert panel.dim_slider.hasFocus()
+    assert _wheel(panel.dim_slider, 1, up=True) == [True]
+    assert session.look.background.dim > 0
+    panel.background_combo.setFocus(Qt.FocusReason.MouseFocusReason)
+    qt_app.processEvents()
+    assert _wheel(panel.background_combo, 1, up=False) == [True]
+    assert session.look.background.kind == "gradient"
+    panel.close()
+
+
+def _panel_beside_a_field(qt_app, session, prefs):
+    from PySide6.QtWidgets import QLineEdit, QVBoxLayout, QWidget
+
+    container = QWidget()
+    column = QVBoxLayout(container)
+    panel = _panel(session, prefs)
+    column.addWidget(panel)
+    other = QLineEdit()
+    column.addWidget(other)
+    container.resize(260, 700)
+    container.show()
+    _spin_briefly(qt_app)
+    return container, panel, other
+
+
+def _press_and_drag(qt_app, slider, value: int) -> None:
+    QTest.mousePress(slider, Qt.MouseButton.LeftButton, pos=_handle_centre(slider))
+    assert slider.hasFocus() and slider.isSliderDown()
+    slider.setValue(value)  # where the drag has taken it
+
+
+def _assert_a_later_edit_is_its_own_undo_step(session) -> None:
+    from qurantext.gui.review.session import CARD, WordRef
+
+    session.retime(WordRef(CARD, 0, 1), end=4.5)
+    assert session.undo()
+    assert session.words()[1].end == pytest.approx(3.0), "the retime undoes alone"
+    assert session.look.background.dim == pytest.approx(0.3), "the drag is still there"
+    assert session.undo() and session.look.background.dim == 0.0
+    assert not session.can_undo
+
+
+def test_losing_focus_mid_slider_drag_closes_the_gesture(qt_app, session, prefs) -> None:
+    """Like the word strip: a lost grab (focus moved, a modal box opened) ends the drag."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QApplication
+
+    container, panel, other = _panel_beside_a_field(qt_app, session, prefs)
+    slider = panel.dim_slider
+    _press_and_drag(qt_app, slider, 30)
+    assert session.look.background.dim == pytest.approx(0.3)
+
+    other.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+    qt_app.processEvents()
+    assert not slider.hasFocus()
+    assert not slider.isSliderDown()
+
+    # The rest of that drag, should it still arrive, moves nothing.
+    end = QPointF(slider.width() - 2, slider.height() / 2)
+    move = QMouseEvent(
+        QMouseEvent.Type.MouseMove,
+        end,
+        QPointF(slider.mapToGlobal(end)),
+        Qt.MouseButton.NoButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(slider, move)
+    assert slider.value() == 30
+
+    _assert_a_later_edit_is_its_own_undo_step(session)
+    panel.refresh()  # as the window does after an undo
+    assert slider.value() == 0, "the slider follows undo again"
+    container.close()
+
+
+def test_hiding_the_panel_mid_slider_drag_closes_the_gesture(qt_app, session, prefs) -> None:
+    container, panel, _ = _panel_beside_a_field(qt_app, session, prefs)
+    _press_and_drag(qt_app, panel.dim_slider, 30)
+    panel.hide()
+    assert not panel.dim_slider.isSliderDown()
+    _assert_a_later_edit_is_its_own_undo_step(session)
+    container.close()
+
+
+def test_disabling_the_panel_mid_slider_drag_closes_the_gesture(qt_app, session, prefs) -> None:
+    container, panel, _ = _panel_beside_a_field(qt_app, session, prefs)
+    _press_and_drag(qt_app, panel.dim_slider, 30)
+    panel.setEnabled(False)
+    assert not panel.dim_slider.isSliderDown()
+    _assert_a_later_edit_is_its_own_undo_step(session)
+    container.close()

@@ -36,6 +36,8 @@ class WarningsStrip(QLabel):
         self.setTextFormat(Qt.TextFormat.RichText)
         self.setVisible(False)
         self._notices: list[str] = []
+        #: What is wrong with the video's look now; replaced whenever the look is checked again.
+        self._look_notices: list[str] = []
         #: ``None`` until a coverage check has reported; then its gaps (maybe none).
         self._gaps: list[UncoveredSpeech] | None = None
         #: Whether the recording's levels are being read for a first coverage check.
@@ -49,6 +51,18 @@ class WarningsStrip(QLabel):
         self._notices.append(text)
         self._render()
 
+    def set_look_notices(self, texts: list[str]) -> None:
+        """Replace the lines about the look: a problem fixed (another image, Reset) leaves."""
+        self._look_notices = list(dict.fromkeys(texts))
+        self._render()
+
+    def add_look_notice(self, text: str) -> None:
+        """Add a line about the look (a render's), until the look is checked again."""
+        if text in self._look_notices:
+            return
+        self._look_notices.append(text)
+        self._render()
+
     def set_gaps(self, gaps: list[UncoveredSpeech]) -> None:
         self._gaps = list(gaps)
         self._checking = False
@@ -60,7 +74,8 @@ class WarningsStrip(QLabel):
         self._render()
 
     def _render(self) -> None:
-        lines = [html.escape(notice) for notice in self._notices]
+        notices = self._notices + [n for n in self._look_notices if n not in self._notices]
+        lines = [html.escape(notice) for notice in notices]
         if self._gaps:
             lines.append(html.escape(tn("review.gaps", len(self._gaps))))
             jump = html.escape(t("review.jump"))

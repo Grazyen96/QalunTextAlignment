@@ -50,11 +50,14 @@ MAX_BLUR = 20.0
 MIN_CONTRAST = 4.5
 DEFAULT_PRESET = "night_gold"
 
-#: The colours the Customise section offers; the rest follow the preset.
+#: The colours the Customise section offers; the rest follow the preset. Every
+#: text colour the readability check can name is here, so a warning can always
+#: be acted on.
 EDITABLE_COLOURS = (
     "body_text",
     "highlight_word",
     "header_text",
+    "placeholder_text",
     "card",
     "caption_text",
     "caption_active",

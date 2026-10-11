@@ -404,6 +404,7 @@ class ReviewWindow(QMainWindow):
         self.player.error.connect(self.warnings.add_notice)
         self.look_panel.look_changed.connect(self._after_look_change)
         self.look_panel.notice.connect(self.warnings.add_notice)
+        self.look_panel.look_notices.connect(self.warnings.set_look_notices)
         self.look_panel.message.connect(lambda text: self.statusBar().showMessage(text, 4000))
 
     def _bind_keys(self) -> None:
@@ -719,7 +720,10 @@ class ReviewWindow(QMainWindow):
         session = self.session
         self._seen_revision = session.revision
         self._seen_counts = self._segment_counts()
-        # A render reads the project's current content: nothing may edit it meanwhile.
+        # A render reads a snapshot taken when it started, but undo, save and the
+        # timing edits wait for it to finish all the same. The Look panel stays
+        # open (a look changed meanwhile only makes the render stale), so a look
+        # change made during a render is undone once the render is done.
         editable = not self._rendering
         self.save_button.setEnabled(session.dirty and editable)
         self.undo_button.setEnabled(session.can_undo and editable)
@@ -761,10 +765,11 @@ class ReviewWindow(QMainWindow):
 
         The job never sees the live ``Project``: it gets a deep copy, so a
         render running for minutes cannot be mutated by (or itself mutate) a
-        project the person is still, in principle, looking at. Editing is
-        disabled for the duration anyway (see ``_set_render_running``), so the
-        copy and the live project can only ever differ in ``render`` — which
-        ``_on_render_finished`` copies back once the job is done.
+        project the person is still, in principle, looking at. Timing edits
+        are disabled for the duration (see ``_set_render_running``); the look
+        is not, so the live project may differ from the copy in its ``style``
+        too. Only ``render`` is copied back (in ``_on_render_finished``) once
+        the job is done; a look changed meanwhile leaves that render stale.
         """
         if self._rendering:
             return
@@ -797,9 +802,9 @@ class ReviewWindow(QMainWindow):
         window is shown again.
         """
         if self._render_project_copy is not None:
-            # ``render`` is the only field that may have changed underneath the
-            # live project (editing was disabled): copy it back rather than the
-            # whole snapshot, so it never overwrites an editing that snuck in.
+            # ``render`` is the only field the job changes: copy it back rather
+            # than the whole snapshot, so it never overwrites an edit made
+            # meanwhile (the look stays editable during a render).
             self.session.project.render = copy.deepcopy(self._render_project_copy.render)
         if self.session.project.path is not None:
             # The render recorded itself in the project file (``render_project`` saves it).
@@ -808,7 +813,7 @@ class ReviewWindow(QMainWindow):
             return
         # Said before the announcement, which waits for the person to close it.
         for code in outcome.look_warnings:
-            self.warnings.add_notice(look_warning_text(code))
+            self.warnings.add_look_notice(look_warning_text(code))
         self._announce_render(outcome)
 
     def _on_render_done(self) -> None:
