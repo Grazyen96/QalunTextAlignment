@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import time
 
@@ -47,6 +48,24 @@ def _no_window_outlives_its_test(qt_app):
         widget.hide()
         widget.deleteLater()
     qt_app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_settings(monkeypatch, tmp_path):
+    """A window built without ``prefs`` gets settings under tmp_path, never the person's.
+
+    "Use for new videos" writes the default look; a test clicking it on a
+    window made without ``prefs`` would otherwise write to the real settings.
+    """
+    from PySide6.QtCore import QSettings
+
+    from qurantext.gui.prefs import Prefs
+    from qurantext.gui.review import window as window_module
+
+    ini = str(tmp_path / "window-prefs.ini")
+    monkeypatch.setattr(
+        window_module, "Prefs", lambda: Prefs(QSettings(ini, QSettings.Format.IniFormat))
+    )
 
 
 class _Now:
@@ -1251,3 +1270,129 @@ def test_a_small_window_keeps_rows_in_the_list_and_shrinks_the_frame(qt_app, tmp
     assert frame.height() < 480
     assert frame.pixmap().height() <= frame.height()
     assert frame.pixmap().width() <= frame.width()
+
+
+# -- the Look panel ----------------------------------------------------------------
+
+
+def test_the_look_panel_drives_the_preview_and_undo(qt_app, tmp_path) -> None:
+    from qurantext.config.paths import DEFAULT_FONT_PATH
+
+    if not DEFAULT_FONT_PATH.exists():
+        pytest.skip("needs the bundled font")
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    _spin(50)
+    before = window.frame_view.pixmap().toImage()
+    window.look_panel.palette_buttons["ink_on_paper"].click()
+    assert window.frame_view.pixmap().toImage() != before
+    assert window.undo_button.isEnabled()
+    assert window.windowTitle().endswith("*")
+    window.undo_button.click()
+    assert window.frame_view.pixmap().toImage() == before
+    assert window.look_panel.status_label.text() == "Night gold"
+    assert not window.undo_button.isEnabled() and window.redo_button.isEnabled()
+    window.redo_button.click()
+    assert window.look_panel.status_label.text() == "Ink on paper"
+
+
+def test_the_look_panel_sits_right_of_the_frame(qt_app, tmp_path) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    _spin(50)
+    frame = window.frame_view.mapTo(window, window.frame_view.rect().topRight())
+    panel = window.look_scroll.mapTo(window, window.look_scroll.rect().topLeft())
+    waveform = window.waveform.mapTo(window, window.waveform.rect().topLeft())
+    assert frame.x() <= panel.x() < waveform.x()
+
+
+def test_discarding_puts_the_look_panel_back(qt_app, tmp_path, monkeypatch) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    window.look_panel.palette_buttons["rose"].click()
+    monkeypatch.setattr(window, "_confirm_discard", lambda: "discard")
+    window.close()
+    assert window.look_panel.status_label.text() == "Night gold"
+
+
+def test_use_for_new_videos_confirms_in_the_status_bar(qt_app, tmp_path, prefs) -> None:
+    from qurantext.core.looks import PRESETS
+    from qurantext.gui.review.window import ReviewWindow
+
+    window = ReviewWindow(
+        _project(tmp_path), player=FakePlayer(duration=10.0, now=_Now()), prefs=prefs
+    )
+    window.look_panel.palette_buttons["emerald"].click()
+    window.look_panel.default_button.click()
+    assert prefs.default_look == PRESETS["emerald"]
+    assert window.statusBar().currentMessage() == t("look.default_saved")
+
+
+def test_a_render_s_look_warnings_reach_the_strip(qt_app, tmp_path, monkeypatch) -> None:
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.gui.jobs import JobOutcome
+
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    seen = {}
+
+    def fake_render(project, **kwargs):
+        return JobOutcome(
+            matches=project.matches,
+            video=tmp_path / "v.mp4",
+            cards=1,
+            look_warnings=("image_unreadable",),
+        )
+
+    monkeypatch.setattr(jobs_module, "run_render", fake_render)
+    monkeypatch.setattr(
+        window, "_announce_render", lambda outcome: seen.setdefault("done", outcome)
+    )
+    window.render_requested.emit()
+    assert _wait_for(lambda: "done" in seen, 5000)
+    assert html.escape(t("look.image_unreadable")) in window.warnings.text()
+
+
+def test_a_missing_look_image_is_said_on_opening(qt_app, tmp_path) -> None:
+    from dataclasses import replace
+
+    from qurantext.core.looks import NIGHT_GOLD, Background
+    from qurantext.gui.review.window import ReviewWindow
+    from qurantext.jobs.look_assets import set_project_look
+
+    project = _project(tmp_path)
+    gone = tmp_path / "m.qalun.look" / "gone.png"
+    background = Background("image", NIGHT_GOLD.frame_bg, NIGHT_GOLD.frame_bg, gone, dim=0.35)
+    set_project_look(project, replace(NIGHT_GOLD, background=background))
+    save_project(project, project.path)
+    window = ReviewWindow(load_project(project.path), player=FakePlayer(duration=10.0, now=_Now()))
+    assert html.escape(t("look.image_missing")) in window.warnings.text()
+
+
+def test_a_look_problem_leaves_the_strip_once_the_look_is_fixed(qt_app, tmp_path) -> None:
+    from dataclasses import replace
+
+    from qurantext.core.looks import NIGHT_GOLD, Background
+    from qurantext.gui.review.window import ReviewWindow
+    from qurantext.jobs.look_assets import set_project_look
+
+    project = _project(tmp_path)
+    gone = tmp_path / "m.qalun.look" / "gone.png"
+    background = Background("image", NIGHT_GOLD.frame_bg, NIGHT_GOLD.frame_bg, gone, dim=0.35)
+    set_project_look(project, replace(NIGHT_GOLD, background=background))
+    save_project(project, project.path)
+    window = ReviewWindow(load_project(project.path), player=FakePlayer(duration=10.0, now=_Now()))
+    missing = html.escape(t("look.image_missing"))
+    assert missing in window.warnings.text()
+    window.look_panel.reset_button.click()
+    assert missing not in window.warnings.text()
+    assert "missing.mp3" in window.warnings.text(), "the strip's other lines stay"
+    window.undo_button.click()
+    assert missing in window.warnings.text(), "undo brings the image, and its problem, back"
+
+
+def test_a_window_without_prefs_never_touches_the_real_settings(qt_app, tmp_path) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    window.look_panel.palette_buttons["rose"].click()
+    window.look_panel.default_button.click()
+    assert (tmp_path / "window-prefs.ini").is_file()

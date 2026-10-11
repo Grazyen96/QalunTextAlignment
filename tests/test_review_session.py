@@ -529,3 +529,68 @@ def test_an_edge_dragged_without_keep_joined_opens_a_gap() -> None:
     joined.end_gesture()
     words = joined.words()
     assert (words[0].end, words[1].start) == (0.8, 0.8), "by default a shared edge stays shared"
+
+
+# -- the look ------------------------------------------------------------------
+
+
+@pytest.fixture
+def session(tmp_path):
+    """A saved recitation's session, so ``save`` has a file to write to."""
+    return ReviewSession(load_project(_recitation(tmp_path).path))
+
+
+def test_a_new_session_shows_night_gold_and_is_clean(session) -> None:
+    from qurantext.core.looks import NIGHT_GOLD
+
+    assert session.look == NIGHT_GOLD and not session.dirty
+
+
+def test_set_look_is_one_undo_step_and_makes_the_session_dirty(session) -> None:
+    from qurantext.core.looks import NIGHT_GOLD, PRESETS
+
+    session.set_look(PRESETS["emerald"])
+    assert session.look == PRESETS["emerald"] and session.dirty and session.can_undo
+    assert session.undo()
+    assert session.look == NIGHT_GOLD and not session.dirty
+    assert session.redo()
+    assert session.look == PRESETS["emerald"]
+
+
+def test_setting_the_same_look_is_no_edit(session) -> None:
+    from qurantext.core.looks import NIGHT_GOLD
+
+    session.set_look(NIGHT_GOLD)
+    assert not session.can_undo and not session.dirty
+
+
+def test_a_slider_drag_is_one_undo_step(session) -> None:
+    from dataclasses import replace
+
+    from qurantext.core.looks import NIGHT_GOLD, PRESETS
+
+    session.begin_gesture()
+    for dim in (0.1, 0.2, 0.3):
+        bg = replace(PRESETS["ocean"].background, dim=dim)
+        session.set_look(replace(PRESETS["ocean"], background=bg))
+    session.end_gesture()
+    assert session.undo() and session.look == NIGHT_GOLD and not session.can_undo
+
+
+def test_save_and_revert_include_the_look(session) -> None:
+    from qurantext.core.looks import PRESETS
+
+    session.set_look(PRESETS["rose"])
+    session.save()
+    assert not session.dirty
+    session.set_look(PRESETS["sand"])
+    session.revert()
+    assert session.look == PRESETS["rose"]
+
+
+def test_a_timing_gesture_that_ends_where_it_began_still_settles(session) -> None:
+    # Existing behaviour must hold with the 4-tuple snapshot: begin_gesture();
+    # end_gesture() with no change → not dirty, nothing to undo.
+    session.begin_gesture()
+    session.end_gesture()
+    assert not session.dirty and not session.can_undo

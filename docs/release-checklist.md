@@ -168,6 +168,15 @@ this is the only place anyone hears each platform's build recognise speech.
     `home.progress.downloading`, `home.progress.downloading_eta`,
     `home.progress.transcribing` and `home.progress.transcribing_eta`
   - the video header: «الآيات 7 - 11» or «الآيات من 7 إلى 11»
+  - the Look panel, every `look.*` line, read beside the panel and its swatches: the
+    palette names (`look.preset.*`: «ذهبي ليلي»، «زمردي»، «رملي»، «حبر على ورق»، «محيطي»،
+    «وردي»), the colour names (`look.colour.*`, among them «نص الترجمة النصية», «الكلمة
+    المنطوقة الآن», «نص الافتتاح» and the background colour picker «لون الخلفية»),
+    `look.card_opacity` («عتامة البطاقة»), the backgrounds (`look.bg.*`),
+    `look.dim` and `look.blur` («تعتيم»، «تمويه»), `look.use_for_new`, `look.reset`,
+    `look.low_contrast`, and the image lines `look.image_failed`, `look.image_missing` and
+    `look.image_unreadable`. A list of colour names in `look.low_contrast` is joined
+    with «، ».
 - [ ] Keep every direction mark: the U+2066…U+2069 isolates and the U+200F marks,
       written as `\u2066`-style escapes in the source. The tests fail if a key goes
       missing.

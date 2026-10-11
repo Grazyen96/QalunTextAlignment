@@ -641,6 +641,133 @@ def test_a_rematch_compares_without_the_look_on_both_sides(tmp_path, monkeypatch
     assert jobs_module._keep_earlier(first.path, derived) == jobs_module._UNCHANGED
 
 
+# --- the default look a new job starts with ------------------------------------
+
+
+def _image_look(image: Path, preset: str = "sand"):
+    from qurantext.core.looks import PRESETS, Background
+
+    return replace(
+        PRESETS[preset],
+        background=Background("image", (0, 0, 0, 255), (0, 0, 0, 255), image, 0.35, 0),
+    )
+
+
+def test_a_new_job_is_seeded_with_the_default_look(tmp_path, monkeypatch) -> None:
+    from qurantext.core.looks import PRESETS
+    from qurantext.jobs.look_assets import project_look
+    from qurantext.jobs.project import load_project
+
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    project = jobs_module.run_matching(replace(spec, style=PRESETS["sand"].to_dict()))
+
+    assert project_look(project) == PRESETS["sand"]
+    assert project_look(load_project(project.path)) == PRESETS["sand"]
+
+
+def test_a_new_job_without_a_default_look_has_no_style(tmp_path, monkeypatch) -> None:
+    from qurantext.jobs.project import load_project
+
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    project = jobs_module.run_matching(spec)
+    assert spec.style == {}
+    assert load_project(project.path).style == {}
+
+
+def test_a_default_image_is_copied_beside_the_new_project(tmp_path, monkeypatch) -> None:
+    from PIL import Image
+
+    from qurantext.jobs.look_assets import look_dir_for, project_look
+    from qurantext.jobs.project import load_project
+
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    (tmp_path / "app").mkdir()
+    image = tmp_path / "app" / "bg.png"
+    Image.new("RGB", (4, 4), (7, 8, 9)).save(image)
+    look = _image_look(image)
+
+    project = jobs_module.run_matching(replace(spec, style=look.to_dict()))
+
+    stored = project.style["background"]["image"]
+    assert not Path(stored).is_absolute()  # moves with the project folder
+    copied = project_look(load_project(project.path)).background.image
+    assert copied.parent == look_dir_for(project.path)
+    assert copied.read_bytes() == image.read_bytes()
+    assert project_look(load_project(project.path)) == replace(
+        look, background=replace(look.background, image=copied)
+    )
+
+
+def test_seeding_with_a_missing_default_image_still_creates_the_project(
+    qt_app, tmp_path, monkeypatch
+) -> None:
+    """Spec §4: the job is made, and the review window says the image is gone."""
+    import html
+
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.player import FakePlayer
+    from qurantext.gui.review.window import ReviewWindow
+    from qurantext.jobs.look_assets import project_look
+    from qurantext.jobs.project import load_project
+
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    gone = (tmp_path / "gone.png").resolve()
+    look = _image_look(gone)
+
+    project = jobs_module.run_matching(replace(spec, style=look.to_dict()))
+
+    saved = load_project(project.path)
+    assert project_look(saved) == look, "the look still names the image it could not copy"
+    spec.audio.unlink()  # no recording to read in the background
+    window = ReviewWindow(
+        saved,
+        player=FakePlayer(duration=2.0, now=lambda: 0.0),
+        prefs=Prefs(QSettings(str(tmp_path / "prefs.ini"), QSettings.Format.IniFormat)),
+    )
+    try:
+        assert html.escape(t("look.image_missing")) in window.warnings.text()
+    finally:
+        window.deleteLater()
+
+
+def test_a_rerun_with_unchanged_content_keeps_the_videos_own_look(tmp_path, monkeypatch) -> None:
+    from qurantext.core.looks import PRESETS
+    from qurantext.jobs.look_assets import project_look, set_project_look
+    from qurantext.jobs.project import load_project, save_project
+
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    first = jobs_module.run_matching(spec)
+    own = load_project(first.path)
+    set_project_look(own, PRESETS["emerald"])
+    save_project(own, first.path)
+
+    project = jobs_module.run_matching(replace(spec, style=PRESETS["sand"].to_dict()))
+
+    assert not list(tmp_path.glob("*.qalun-backup.json")), "content unchanged"
+    assert project_look(project) == PRESETS["emerald"]
+    assert project_look(load_project(first.path)) == PRESETS["emerald"]
+
+
+def test_a_rerun_with_changed_content_keeps_the_earlier_look_not_the_default(
+    tmp_path, monkeypatch
+) -> None:
+    from qurantext.core.looks import NIGHT_GOLD, PRESETS
+    from qurantext.jobs.look_assets import project_look
+    from qurantext.jobs.project import load_project, save_project
+
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    first = jobs_module.run_matching(spec)  # made before any default look: Night gold
+    corrected = load_project(first.path)
+    corrected.cards[0]["start_time"] = 0.25
+    save_project(corrected, first.path)
+
+    project = jobs_module.run_matching(replace(spec, style=PRESETS["sand"].to_dict()))
+
+    assert list(tmp_path.glob("clip_recitation.*.qalun-backup.json")), "content changed"
+    assert project_look(project) == NIGHT_GOLD
+    assert load_project(first.path).style == {}
+
+
 def test_start_renders_only_when_asked_to_right_away(tmp_path, monkeypatch) -> None:
     """The job Start runs: match, then render only when the job skips the review."""
     from qurantext.gui.main_window import _match_then_render
@@ -1513,7 +1640,9 @@ def real_reviews(qt_app, prefs, monkeypatch):
 
     real = module.ReviewWindow
     monkeypatch.setattr(
-        module, "ReviewWindow", lambda project: real(project, player=FakePlayer(duration=10.0))
+        module,
+        "ReviewWindow",
+        lambda project, **kw: real(project, player=FakePlayer(duration=10.0), **kw),
     )
     main = module.MainWindow(prefs=prefs)
     yield main
@@ -1988,3 +2117,40 @@ def test_the_engine_choice_reaches_detection_too(tmp_path, monkeypatch) -> None:
 
 def test_a_spec_transcribes_locally_unless_told_otherwise(tmp_path) -> None:
     assert _spec(tmp_path).engine == "local"
+
+
+def test_render_right_away_says_what_the_look_could_not_do(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui import main_window as module
+    from qurantext.gui.jobs import JobOutcome
+
+    _fake_matching(monkeypatch)
+
+    def fake_render(project, *, progress=None, cancel=None):
+        return JobOutcome(
+            matches=project.matches,
+            video=tmp_path / "a.mp4",
+            cards=1,
+            look_warnings=("image_missing",),
+        )
+
+    monkeypatch.setattr(module, "run_render", fake_render)
+
+    _run_start(qt_app, home, _spec(tmp_path, output_dir=tmp_path / "jobs", render_right_away=True))
+
+    rendered = module.t("home.finished.rendered", path=module.path_text(tmp_path / "a.mp4"))
+    said = home.new_job.status_label.text()
+    assert said == f"{rendered} {module.t('look.image_missing')}"
+
+
+def test_the_review_window_gets_the_main_window_s_prefs(real_reviews, prefs, tmp_path) -> None:
+    """ "Use for new videos" writes where the home window reads its settings."""
+    from qurantext.jobs.project import Project, save_project
+
+    path = save_project(
+        Project(audio=tmp_path / "a.mp3", cards=[_card()]), tmp_path / "a.qalun.json"
+    )
+    real_reviews._open_review(path)
+    review = real_reviews._review_of(path)
+    assert review is not None and review._prefs is prefs

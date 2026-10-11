@@ -9,7 +9,7 @@ calls, so the window can put review between them.
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -19,6 +19,7 @@ from qurantext.config.paths import (
     VIDEOS_OUTPUT_DIR,
 )
 from qurantext.gui.i18n import t
+from qurantext.jobs.look_assets import seed_project_look
 from qurantext.jobs.project import (
     JobSettings,
     Project,
@@ -63,6 +64,10 @@ class JobSpec:
     #: "local" (this computer) or "whisperx" (Replicate). Never switched automatically.
     engine: str = "local"
     output_dir: Path | None = None
+    #: The look a brand-new project starts with, as a project style (the
+    #: person's default look); empty for Night gold. A re-match never uses it:
+    #: the video already has its own look.
+    style: dict = field(default_factory=dict)
 
     @property
     def settings(self) -> JobSettings:
@@ -243,6 +248,9 @@ def run_matching(
         return existing
     if isinstance(kept, Path):
         report(progress, "detect", t("job.progress.kept", name=kept.name), translated=True)
+    elif kept is None and spec.style:
+        # Nothing was there: a brand-new video starts with the default look.
+        seed_project_look(project, destination, spec.style)
     save_project(project, destination)
     return project
 

@@ -87,3 +87,20 @@ def qt_app():
     from PySide6.QtWidgets import QApplication
 
     return QApplication.instance() or QApplication([])
+
+
+@pytest.fixture()
+def settings(tmp_path):
+    """A ``QSettings`` on an INI file under tmp_path: never the person's real settings."""
+    pytest.importorskip("PySide6", reason="the window needs Qt: pip install 'qurantext[gui]'")
+    from PySide6.QtCore import QSettings
+
+    return QSettings(str(tmp_path / "prefs.ini"), QSettings.Format.IniFormat)
+
+
+@pytest.fixture()
+def prefs(settings):
+    """``Prefs`` over :func:`settings` (modules that scan job folders define their own)."""
+    from qurantext.gui.prefs import Prefs
+
+    return Prefs(settings)

@@ -14,14 +14,18 @@ never crash the window.
 
 from __future__ import annotations
 
+import json
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QSettings
 
-from qurantext.config.paths import redirect_retired_quran
+from qurantext.config.paths import redirect_retired_quran, user_data_dir
 from qurantext.config.settings import ENGINES, VIDEO_PRESETS
+from qurantext.core.looks import NIGHT_GOLD, Look, look_from_style
 from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.gui.i18n import LANGUAGES
+from qurantext.jobs.look_assets import copy_by_content
 from qurantext.jobs.project import SUBTITLE_CHOICES
 
 __all__ = ["Prefs"]
@@ -212,6 +216,45 @@ class Prefs:
         else:
             self._settings.setValue("quran_override", str(Path(value).expanduser().resolve()))
         self._settings.sync()
+
+    # -- default_look -----------------------------------------------------------
+    # The look new videos start with. Stored with an absolute image path into the
+    # app's own folder, so deleting the original photo does not lose it.
+
+    @property
+    def default_look(self) -> Look:
+        raw = self._settings.value("default_look", "")
+        if not isinstance(raw, str) or not raw:
+            return NIGHT_GOLD
+        try:
+            return look_from_style(json.loads(raw))
+        except ValueError:  # json.JSONDecodeError is a ValueError
+            return NIGHT_GOLD
+
+    @default_look.setter
+    def default_look(self, look: Look) -> None:
+        self.save_default_look(look)
+
+    def save_default_look(self, look: Look) -> Look:
+        """Remember *look* for new videos; return the look as stored.
+
+        An image is copied into the app's own ``looks`` folder, named by its
+        content, and the stored look points there. Raises what
+        :func:`~qurantext.jobs.look_assets.copy_by_content` raises (``ValueError``,
+        ``OSError``) when the image cannot be copied; nothing is stored then.
+        """
+        bg = look.background
+        if bg.kind == "image" and bg.image is not None:
+            copied = copy_by_content(bg.image, user_data_dir() / "looks")
+            look = replace(look, background=replace(bg, image=copied))
+        self._settings.setValue("default_look", json.dumps(look.to_dict()))
+        self._settings.sync()
+        return look
+
+    def default_look_style(self) -> dict:
+        """The default look as a project style (empty for Night gold)."""
+        look = self.default_look
+        return {} if look == NIGHT_GOLD else look.to_dict()
 
     # -- more_options_open --------------------------------------------------
 

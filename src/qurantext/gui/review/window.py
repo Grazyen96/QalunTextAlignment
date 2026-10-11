@@ -3,7 +3,7 @@
 This module is layout and wiring only. What an edit may do lives in
 :class:`ReviewSession` (and below it ``core.timing_edit``); how each widget
 draws lives in that widget (the small bars included: :class:`WarningsStrip`,
-:class:`SelectionBar`, :class:`ZoomSlider`); the slow reads of the recording
+:class:`SelectionBar`, :class:`ZoomSlider`, and the :class:`LookPanel`); the slow reads of the recording
 run through :class:`BackgroundJobs`. The window turns what the person does — a key, a
 click, a drag the strip reports — into session calls, and after every change
 brings the widgets, the toolbar and the title back in line with the session.
@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSplitter,
     QVBoxLayout,
@@ -57,9 +58,11 @@ from qurantext.gui import jobs as jobs_module
 from qurantext.gui.files import show_in_folder
 from qurantext.gui.i18n import clock, path_text, plain_title, t
 from qurantext.gui.jobs import JobOutcome
+from qurantext.gui.prefs import Prefs
 from qurantext.gui.review.background import BackgroundJobs
 from qurantext.gui.review.export_dialog import ExportDialog
 from qurantext.gui.review.frame_view import FrameView
+from qurantext.gui.review.look_panel import LookPanel, look_warning_text
 from qurantext.gui.review.player import RATES, Player, create_player
 from qurantext.gui.review.segment_list import SegmentList
 from qurantext.gui.review.selection_bar import NUDGE_S, SelectionBar
@@ -120,6 +123,8 @@ _DEFAULT_SPAN_S = 20.0
 #: The least height the segment list keeps, in pixels: its header and a few rows,
 #: so a small window shrinks the frame above it instead of the rows away.
 _LIST_MIN_HEIGHT = 150
+#: The Look panel's width, in pixels: three palette swatches with their names.
+_LOOK_PANEL_WIDTH = 260
 
 
 def _platform_family() -> str:
@@ -167,7 +172,7 @@ def _content_end(project: Project) -> float:
 
 
 class ReviewWindow(QMainWindow):
-    """One project under review: toolbar, warnings, frame, timeline, segment list."""
+    """One project under review: toolbar, warnings, frame, look, timeline, segment list."""
 
     #: The project file was written; carries its path.
     saved = Signal(object)
@@ -180,10 +185,17 @@ class ReviewWindow(QMainWindow):
     closed = Signal()
 
     def __init__(
-        self, project: Project, *, player: Player | None = None, parent: QWidget | None = None
+        self,
+        project: Project,
+        *,
+        player: Player | None = None,
+        prefs: Prefs | None = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.session = ReviewSession(project)
+        #: Where "Use for new videos" keeps the default look.
+        self._prefs = prefs if prefs is not None else Prefs()
         self.player = player if player is not None else create_player(self)
         self.viewport = Viewport(self)
         self._jobs = BackgroundJobs(self)
@@ -236,6 +248,8 @@ class ReviewWindow(QMainWindow):
         else:
             self.waveform.set_missing()
             self.warnings.add_notice(t("review.audio_missing", path=path_text(self._audio)))
+        # Connected now: a chosen image that has gone missing is said on opening.
+        self.look_panel.announce()
         self._sync_state()
         self._show_time(self.player.position(), force=True)
 
@@ -283,6 +297,7 @@ class ReviewWindow(QMainWindow):
         body_row.setContentsMargins(0, 0, 0, 0)
         self.frame_view = FrameView(self.session, portrait=_is_portrait(self.session.project))
         body_row.addWidget(self.frame_view, 0, Qt.AlignmentFlag.AlignTop)
+        body_row.addWidget(self._build_look_panel())
         body_row.addLayout(self._build_timeline(), 1)
 
         self.segment_list = SegmentList(self.session)
@@ -304,6 +319,23 @@ class ReviewWindow(QMainWindow):
         self.hint_label.installEventFilter(self)
         self.statusBar().addWidget(self.hint_label, 1)
         self.setCentralWidget(central)
+
+    def _build_look_panel(self) -> QScrollArea:
+        """The Look panel beside the frame it changes, scrolling when the window is short."""
+        self.look_panel = LookPanel(
+            self.session,
+            prefs=self._prefs,
+            frame_size=(self.frame_view.sizeHint().width(), self.frame_view.sizeHint().height()),
+            reserve_caption_band=self.session.frame_inputs(0.0)[2],
+        )
+        scroll = QScrollArea()
+        scroll.setWidget(self.look_panel)
+        scroll.setWidgetResizable(True)
+        scroll.setFixedWidth(_LOOK_PANEL_WIDTH)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.look_scroll = scroll
+        return scroll
 
     def _build_timeline(self) -> QVBoxLayout:
         right = QVBoxLayout()
@@ -370,6 +402,10 @@ class ReviewWindow(QMainWindow):
         self.player.playing_changed.connect(self._on_playing_changed)
         self.player.duration_changed.connect(self._set_duration)
         self.player.error.connect(self.warnings.add_notice)
+        self.look_panel.look_changed.connect(self._after_look_change)
+        self.look_panel.notice.connect(self.warnings.add_notice)
+        self.look_panel.look_notices.connect(self.warnings.set_look_notices)
+        self.look_panel.message.connect(lambda text: self.statusBar().showMessage(text, 4000))
 
     def _bind_keys(self) -> None:
         bindings: list[tuple[str, Callable[[], None]]] = [
@@ -648,9 +684,20 @@ class ReviewWindow(QMainWindow):
             # The rebuilt rows carry no playhead mark yet.
             self._highlight_segment(self.player.position(), force=True)
         self._sync_state()
+        # Undo, redo and discard may have changed the look too; a no-op when not.
+        self.look_panel.refresh()
         self.frame_view.show_at(self.player.position(), force=True)
         if self._levels is not None:
             self._coverage_timer.start()
+
+    def _after_look_change(self) -> None:
+        """The look changed from its panel: redraw the frame, and bring undo and the title along.
+
+        Lighter than ``_after_edit``: no word, card or caption moved, so the
+        strip, the list and the coverage check stay as they are.
+        """
+        self._sync_state()
+        self.frame_view.show_at(self.player.position(), force=True)
 
     def _segment_counts(self) -> tuple[int, int]:
         project = self.session.project
@@ -673,7 +720,10 @@ class ReviewWindow(QMainWindow):
         session = self.session
         self._seen_revision = session.revision
         self._seen_counts = self._segment_counts()
-        # A render reads the project's current content: nothing may edit it meanwhile.
+        # A render reads a snapshot taken when it started, but undo, save and the
+        # timing edits wait for it to finish all the same. The Look panel stays
+        # open (a look changed meanwhile only makes the render stale), so a look
+        # change made during a render is undone once the render is done.
         editable = not self._rendering
         self.save_button.setEnabled(session.dirty and editable)
         self.undo_button.setEnabled(session.can_undo and editable)
@@ -715,10 +765,11 @@ class ReviewWindow(QMainWindow):
 
         The job never sees the live ``Project``: it gets a deep copy, so a
         render running for minutes cannot be mutated by (or itself mutate) a
-        project the person is still, in principle, looking at. Editing is
-        disabled for the duration anyway (see ``_set_render_running``), so the
-        copy and the live project can only ever differ in ``render`` — which
-        ``_on_render_finished`` copies back once the job is done.
+        project the person is still, in principle, looking at. Timing edits
+        are disabled for the duration (see ``_set_render_running``); the look
+        is not, so the live project may differ from the copy in its ``style``
+        too. Only ``render`` is copied back (in ``_on_render_finished``) once
+        the job is done; a look changed meanwhile leaves that render stale.
         """
         if self._rendering:
             return
@@ -751,15 +802,18 @@ class ReviewWindow(QMainWindow):
         window is shown again.
         """
         if self._render_project_copy is not None:
-            # ``render`` is the only field that may have changed underneath the
-            # live project (editing was disabled): copy it back rather than the
-            # whole snapshot, so it never overwrites an editing that snuck in.
+            # ``render`` is the only field the job changes: copy it back rather
+            # than the whole snapshot, so it never overwrites an edit made
+            # meanwhile (the look stays editable during a render).
             self.session.project.render = copy.deepcopy(self._render_project_copy.render)
         if self.session.project.path is not None:
             # The render recorded itself in the project file (``render_project`` saves it).
             self.saved.emit(self.session.project.path)
         if self._closed:
             return
+        # Said before the announcement, which waits for the person to close it.
+        for code in outcome.look_warnings:
+            self.warnings.add_look_notice(look_warning_text(code))
         self._announce_render(outcome)
 
     def _on_render_done(self) -> None:

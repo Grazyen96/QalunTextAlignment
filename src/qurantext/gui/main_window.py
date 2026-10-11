@@ -41,6 +41,7 @@ from qurantext.gui.language import apply_language
 from qurantext.gui.prefs import Prefs
 from qurantext.gui.review import ReviewWindow
 from qurantext.gui.review.background import BackgroundJobs
+from qurantext.gui.review.look_panel import look_warning_key
 from qurantext.jobs.project import Project, load_project, project_path_for
 from qurantext.utils.progress import CancelToken, ProgressCallback, ProgressEvent
 
@@ -71,11 +72,15 @@ class _Said:
     fmt: dict[str, object] = field(default_factory=dict)
     #: Set for a key with plural forms, read with ``tn``.
     count: int | None = None
+    #: Sentences said after this one, on the same line (a render's look warnings).
+    then: tuple[_Said, ...] = ()
 
     def text(self) -> str:
         if self.count is None:
-            return t(self.key, **self.fmt)
-        return tn(self.key, self.count, **self.fmt)
+            said = t(self.key, **self.fmt)
+        else:
+            said = tn(self.key, self.count, **self.fmt)
+        return " ".join([said, *(more.text() for more in self.then)])
 
 
 @dataclass(frozen=True, slots=True)
@@ -358,7 +363,11 @@ class MainWindow(QMainWindow):
         outcome = finished.outcome
         if outcome is not None and outcome.video is not None:
             # Rendered right away: the person chose to skip the review.
-            self._ending = _Said("home.finished.rendered", {"path": path_text(outcome.video)})
+            # What the look could not do (its image) is said after it, as the review says it.
+            warnings = tuple(_Said(look_warning_key(code)) for code in outcome.look_warnings)
+            self._ending = _Said(
+                "home.finished.rendered", {"path": path_text(outcome.video)}, then=warnings
+            )
             return
         problem = self._show_review(project_path)
         self._ending = problem or _Said("home.finished.matched", count=len(project.cards))
@@ -474,7 +483,7 @@ class MainWindow(QMainWindow):
         except (OSError, ValueError, KeyError, TypeError) as error:
             return _Said("home.review_failed", {"name": project_path.name, "details": str(error)})
 
-        window = ReviewWindow(project)
+        window = ReviewWindow(project, prefs=self._prefs)
         window.saved.connect(self._review_saved)
         window.closed.connect(partial(self._forget_review, project_path, window))
         window.show()

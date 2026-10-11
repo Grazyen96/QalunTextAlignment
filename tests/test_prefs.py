@@ -11,13 +11,6 @@ pytest.importorskip("PySide6", reason="the window needs Qt: pip install 'qurante
 from qurantext.gui.prefs import Prefs
 
 
-@pytest.fixture()
-def settings(tmp_path):
-    from PySide6.QtCore import QSettings
-
-    return QSettings(str(tmp_path / "prefs.ini"), QSettings.Format.IniFormat)
-
-
 def test_defaults_on_an_empty_ini(settings) -> None:
     prefs = Prefs(settings)
     assert prefs.mode == "recitation"
@@ -213,3 +206,78 @@ def test_a_saved_choice_of_the_retired_bundled_text_reads_as_the_default(
     elsewhere = tmp_path / "usb" / "UthmanicQaloon1-Ver05.txt"
     settings.setValue("quran_override", str(elsewhere))
     assert Prefs(settings).quran_override == elsewhere.resolve()
+
+
+# -- the default look -----------------------------------------------------------
+
+
+def test_default_look_starts_as_night_gold(settings) -> None:
+    from qurantext.core.looks import NIGHT_GOLD
+
+    prefs = Prefs(settings)
+    assert prefs.default_look == NIGHT_GOLD
+    assert prefs.default_look_style() == {}
+
+
+def test_default_look_round_trips(tmp_path) -> None:
+    from PySide6.QtCore import QSettings
+
+    from qurantext.core.looks import PRESETS
+
+    path = str(tmp_path / "prefs.ini")
+    stored = Prefs(QSettings(path, QSettings.Format.IniFormat)).save_default_look(PRESETS["ocean"])
+    assert stored == PRESETS["ocean"]
+    read = Prefs(QSettings(path, QSettings.Format.IniFormat))
+    assert read.default_look == PRESETS["ocean"]
+    assert read.default_look_style() == PRESETS["ocean"].to_dict()
+
+
+def test_the_default_look_setter_saves_it(settings) -> None:
+    from qurantext.core.looks import PRESETS
+
+    prefs = Prefs(settings)
+    prefs.default_look = PRESETS["sand"]
+    assert prefs.default_look == PRESETS["sand"]
+
+
+def test_choosing_night_gold_again_gives_new_jobs_no_style(settings) -> None:
+    from qurantext.core.looks import NIGHT_GOLD, PRESETS
+
+    prefs = Prefs(settings)
+    prefs.save_default_look(PRESETS["sand"])
+    prefs.save_default_look(NIGHT_GOLD)
+    assert prefs.default_look == NIGHT_GOLD
+    assert prefs.default_look_style() == {}
+
+
+def test_a_default_image_is_copied_into_the_app_data(settings, tmp_path, monkeypatch) -> None:
+    from dataclasses import replace
+
+    from PIL import Image
+
+    from qurantext.core.looks import NIGHT_GOLD, Background
+
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    src = tmp_path / "bg.png"
+    Image.new("RGB", (4, 4)).save(src)
+    look = replace(
+        NIGHT_GOLD,
+        background=Background("image", (0, 0, 0, 255), (0, 0, 0, 255), src, 0.35, 0),
+    )
+    prefs = Prefs(settings)
+    stored = prefs.save_default_look(look)
+    assert stored.background.image.parent == (tmp_path / "data" / "looks").resolve()
+    assert stored.background.image.read_bytes() == src.read_bytes()
+    src.unlink()  # the person's original photo going away does not lose the default
+    assert prefs.default_look.background.image == stored.background.image
+    assert prefs.default_look.background.image.is_file()
+    assert Path(prefs.default_look_style()["background"]["image"]).is_absolute()
+
+
+def test_junk_in_settings_is_night_gold(settings) -> None:
+    from qurantext.core.looks import NIGHT_GOLD
+
+    prefs = Prefs(settings)
+    for junk in ("{not json", "[1, 2]", "7", "null"):
+        settings.setValue("default_look", junk)
+        assert prefs.default_look == NIGHT_GOLD, junk
