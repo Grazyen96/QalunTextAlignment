@@ -264,13 +264,18 @@ class Project:
         )
 
     def content_hash(self) -> str:
-        """A digest of what a render depends on: the cards and the captions."""
-        payload = json.dumps(
-            {"cards": self.cards, "captions": [cue.to_dict() for cue in self.captions]},
-            sort_keys=True,
-            ensure_ascii=False,
-            default=str,
-        )
+        """A digest of what a render depends on: the cards, the captions and a chosen look.
+
+        The look joins the digest only once one is chosen, so a project from
+        before looks existed keeps its hash and its render stays current.
+        """
+        content: dict[str, Any] = {
+            "cards": self.cards,
+            "captions": [cue.to_dict() for cue in self.captions],
+        }
+        if self.style:
+            content["style"] = self.style
+        payload = json.dumps(content, sort_keys=True, ensure_ascii=False, default=str)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def record_render(
@@ -310,7 +315,7 @@ class Project:
 
     @property
     def render_is_stale(self) -> bool:
-        """True when the cards or captions changed after the last render."""
+        """True when the cards, captions or look changed after the last render."""
         return self.render is not None and self.render.get("content_hash") != self.content_hash()
 
     def mark_reviewed(self, when: datetime | None = None) -> None:

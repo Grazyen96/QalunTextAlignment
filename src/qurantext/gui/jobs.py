@@ -8,7 +8,7 @@ calls, so the window can put review between them.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -147,7 +147,10 @@ def _keep_earlier(destination: Path, derived: Project) -> Path | str | None:
     if not destination.exists():
         return None
     try:
-        unchanged = load_project(destination).content_hash() == derived.content_hash()
+        # Compared without the look: a re-match derives cards and captions only,
+        # and a look the person chose is not something it could have changed.
+        earlier = replace(load_project(destination), style={})
+        unchanged = earlier.content_hash() == derived.content_hash()
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         unchanged = False
     if unchanged:
