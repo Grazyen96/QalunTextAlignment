@@ -95,6 +95,10 @@ def _card_surah(card: dict[str, Any]) -> int | str | None:
     return str(card.get("surah_name") or "").strip() or None
 
 
+def _is_manual(card: dict[str, Any]) -> bool:
+    return card.get("manual") is True
+
+
 def _card_span(card: dict[str, Any]) -> tuple[float, float] | None:
     """The card's time on screen, or None for a card ``validated_matches`` drops.
 
@@ -133,7 +137,9 @@ def cards_on_screen(
     none of its ayat was, which leaves only the opening title card: the person
     knows which surah the lecture is about better than a count of seconds does.
     Without a choice the studied surah is guessed as the one heard for the most
-    time, a tie going to the one heard first.
+    time, a tie going to the one heard first. A card the person placed by hand
+    (``manual``) is their own choice too, so this filter never hides it; it
+    still counts toward the guess.
 
     The export, the single-frame preview and the review window's live frame all
     call this, so none of them shows a card the others leave out.
@@ -145,7 +151,9 @@ def cards_on_screen(
         return [
             card
             for card in cards
-            if _card_surah(card) is None or card.get("surah_num") == studied_surah
+            if _is_manual(card)
+            or _card_surah(card) is None
+            or card.get("surah_num") == studied_surah
         ]
 
     heard: dict[int | str, float] = {}
@@ -162,7 +170,7 @@ def cards_on_screen(
         return list(cards)
 
     studied = max(heard, key=lambda surah: (heard[surah], -first[surah]))
-    return [card for card in cards if _card_surah(card) in (None, studied)]
+    return [card for card in cards if _is_manual(card) or _card_surah(card) in (None, studied)]
 
 
 def has_surah_cards(cards: list[dict[str, Any]], surah: int) -> bool:

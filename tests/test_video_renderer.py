@@ -1126,6 +1126,129 @@ def test_a_recitation_ignores_a_chosen_surah() -> None:
     assert cards_on_screen(cards, "recitation", 26) == cards
 
 
+def test_a_manual_card_from_another_surah_is_kept_under_the_automatic_rule() -> None:
+    from qurantext.core.video_common import cards_on_screen
+
+    cards = [
+        _card(25, 7, 0.0, 30.0),
+        _card(25, 8, 30.0, 60.0),
+        {**_card(2, 255, 60.0, 65.0), "manual": True},
+        _card(2, 256, 65.0, 66.0),  # a detected quote from another surah
+    ]
+    refs = [(c["surah_num"], c["from_ayah"]) for c in cards_on_screen(cards, "lecture")]
+    assert (2, 255) in refs and (2, 256) not in refs
+
+
+def test_a_manual_card_is_kept_under_a_chosen_surah() -> None:
+    from qurantext.core.video_common import cards_on_screen
+
+    cards = [_card(25, 7, 0.0, 30.0), {**_card(2, 255, 30.0, 35.0), "manual": True}]
+    shown = cards_on_screen(cards, "lecture", studied_surah=25)
+    assert [(c["surah_num"], c["from_ayah"]) for c in shown] == [(25, 7), (2, 255)]
+
+
+def test_manual_cards_still_count_toward_the_automatic_guess() -> None:
+    from qurantext.core.video_common import cards_on_screen
+
+    cards = [
+        _card(25, 7, 0.0, 10.0),
+        {**_card(2, 255, 10.0, 60.0), "manual": True},  # heard longest
+        _card(25, 8, 60.0, 65.0),
+    ]
+    shown = cards_on_screen(cards, "lecture")
+    # Surah 2 is the guess, so the detected surah-25 cards are hidden; the manual one shows.
+    assert [(c["surah_num"], c["from_ayah"]) for c in shown] == [(2, 255)]
+
+
+_MANUAL_LECTURE = [
+    _card(25, 7, 0.0, 3.0),
+    {**_card(2, 255, 4.0, 7.0), "manual": True},
+    _card(25, 8, 7.0, 8.0),
+]
+
+
+@pytest.mark.skipif(not _BUNDLED_FONT.exists(), reason="bundled font not present")
+def test_a_manual_card_from_another_surah_is_drawn_by_export_preview_and_review(
+    tmp_path, monkeypatch, no_basmala
+) -> None:
+    """A hand-made card from another surah shows everywhere, even under a chosen surah."""
+    import io
+
+    import numpy as np
+
+    from qurantext.core.subtitles import card_ref
+    from qurantext.gui.review.session import ReviewSession
+    from qurantext.jobs.preview import PreviewRequest, render_preview
+    from qurantext.jobs.project import Project
+    from qurantext.jobs.render import RenderRequest, render_video
+    from tests.media_helpers import MEDIA_AVAILABLE, MEDIA_REASON, build_job
+
+    if not MEDIA_AVAILABLE:
+        pytest.skip(MEDIA_REASON)
+    audio, matches = build_job(tmp_path, seconds=8.0)
+    matches.write_text(
+        json.dumps({"matches": _MANUAL_LECTURE, "meta": {"mode": "lecture"}}),
+        encoding="utf-8",
+    )
+    drawn: list[tuple[float, str | None]] = []
+
+    def fake_frame(t, match, width, height, font_file, **kwargs):
+        drawn.append((t, card_ref(match) if match else None))
+        return np.zeros((height, width, 3), np.uint8)
+
+    class _Encoder:
+        stdin = io.BytesIO()
+        returncode = 0
+
+        def wait(self):
+            return 0
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(frame_renderer, "render_frame_pillow", fake_frame)
+    monkeypatch.setattr(frame_renderer, "_start_frame_encoder", lambda *a, **k: _Encoder())
+    render_video(
+        RenderRequest(
+            audio=audio,
+            matches=matches,
+            output=tmp_path / "v.mp4",
+            width=32,
+            height=24,
+            fps=10,
+            font_file=_BUNDLED_FONT,
+            studied_surah=25,
+        )
+    )
+    rendered = list(drawn)
+    project = Project(
+        audio=audio,
+        mode="lecture",
+        cards=[dict(c) for c in _MANUAL_LECTURE],
+        export={"studied_surah": 25},
+    )
+    session = ReviewSession(project)
+
+    for at in (1.05, 5.05, 7.55):
+        exported = [ref for t, ref in rendered if t <= at + 1e-9][-1]
+        previewed = render_preview(
+            PreviewRequest(
+                matches=matches,
+                output=tmp_path / "p.png",
+                at=at,
+                width=32,
+                height=24,
+                font_file=_BUNDLED_FONT,
+                studied_surah=25,
+            )
+        ).card
+        card = session.frame_inputs(at)[0]
+        reviewed = card_ref(card) if card else None
+        assert exported == previewed == reviewed, at
+        if at == 5.05:
+            assert reviewed == "2:255"
+
+
 # The shapes a review fuzz found the export and the review disagreeing on: a card
 # with no time on screen, and one with no text, both counted toward the guess in
 # the export (which picks before validating) but not in the review (after).
