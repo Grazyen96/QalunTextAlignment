@@ -1,0 +1,13 @@
+{
+  "environment": {
+    "pillow": "12.2.0",
+    "freetype2": "2.14.3",
+    "raqm": "0.10.3"
+  },
+  "frames": {
+    "ayah_portrait": "1fd7ef0157812afecbd9ebb5e79a6a92ecaf48b121942512c5a8232e1db0e925",
+    "ayah_with_caption": "085167a12d376339d944aab0aefe7e77e5105e35762419452abece7e6e6eed11",
+    "placeholder": "af89ad04cc82787c6de0d7c8fa29e69508d438f483bb0afdc96262dce8e84257",
+    "placeholder_subtitle": "685d011803164054c0fc20657e2fea5dd82c359ed9ae255926dcc71f643bf38d"
+  }
+}

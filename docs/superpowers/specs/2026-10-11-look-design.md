@@ -92,9 +92,18 @@ A **Look** panel in the review window, beside the frame preview. Every change re
 - `base_layer(look, width, height) -> PIL.Image (RGBA)`: the background (built-in or image, then
   blur, then dim) with the card panel and its border composited on top at the frame layout's card
   box. The card box is passed in from the caller's `_frame_layout` result.
-- The cache key is `(look, width, height, card_box, radius)`; `Look` is hashable. The image's file
-  size and mtime are added to the key so a replaced file is noticed. The cache holds an LRU of 4
-  entries, which bounds memory at 4 × w × h × 4 bytes.
+- The cache key is what the layer draws: `(look.background, look.card, look.card_border,
+  look.base_preset, width, height, card_box, radius)`. `base_preset` is there because it picks the
+  fallback background. Text and caption colours are not in the key, so editing them is a cache hit.
+  The image's file size and mtime are added to the key so a replaced file is noticed. The cache
+  holds an LRU of 4 entries, which bounds memory at 4 × w × h × 4 bytes. One module lock guards
+  every cache lookup and insert; layers are built outside it.
+- A decoded photo has its own small cache, keyed by `(path, size and mtime, width, height)`. It
+  holds the photo cover-fitted to the frame, with its alpha kept and no blur applied. Blur and dim
+  are applied to the frame-size image when the base layer is built, so a blur, dim or card-colour
+  change never decodes the file again. Transparent areas of the photo show `background.colour`
+  (made opaque), composited in at layer build before blur and dim. A JPEG decodes at a reduced
+  scale (Pillow's `draft()`) when that still covers the frame.
 - `background_mean(look, width, height) -> RGB` feeds the contrast check.
 - An image that is missing or fails to decode raises nothing. The layer uses the base preset's
   built-in background and reports the problem through a returned `warnings` list, or a sibling

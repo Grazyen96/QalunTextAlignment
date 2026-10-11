@@ -597,6 +597,195 @@ def test_write_frame_video_reports_ffmpeg_failure(tmp_path) -> None:
     assert "FFmpeg" in str(excinfo.value)
 
 
+# --- the look reaches every frame ----------------------------------------------
+
+
+@pytest.mark.skipif(not _BUNDLED_FONT.exists(), reason="bundled font missing")
+def test_render_frame_pillow_draws_the_highlight_in_the_looks_colour() -> None:
+    from dataclasses import replace
+
+    import numpy as np
+
+    from qurantext.core.looks import NIGHT_GOLD
+
+    magenta = (255, 0, 255, 255)
+    look = replace(NIGHT_GOLD, highlight_word=magenta)
+    match = {
+        "surah_name": "سُورَةُ الفُرقَانِ",
+        "from_ayah": 1,
+        "to_ayah": 1,
+        "_display_text": "تَبَٰرَكَ اَ۬لذِے نَزَّلَ",
+        "_start_time": 0.0,
+        "_end_time": 3.0,
+        "_word_timings": [
+            {"start": 0.0, "end": 1.0},
+            {"start": 1.0, "end": 2.0},
+            {"start": 2.0, "end": 3.0},
+        ],
+    }
+    frame = render_frame_pillow(
+        0.5, match, 540, 960, _BUNDLED_FONT, reserve_caption_band=False, look=look
+    )
+    bgr = np.array(frame)
+    assert ((bgr[:, :, 2] == 255) & (bgr[:, :, 1] == 0) & (bgr[:, :, 0] == 255)).any()
+
+
+@pytest.mark.skipif(
+    not (_FFMPEG and _FFPROBE and _BUNDLED_FONT.exists()),
+    reason="needs ffmpeg, ffprobe and the bundled font",
+)
+def test_write_frame_video_passes_the_look_to_every_frame(monkeypatch, tmp_path) -> None:
+    from qurantext.core.looks import PRESETS
+
+    seen = []
+    real = frame_renderer.render_frame_pillow
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("look"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(frame_renderer, "render_frame_pillow", spy)
+    audio = tmp_path / "silence.m4a"
+    subprocess.run(
+        [
+            _FFMPEG,
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=44100:cl=mono",
+            "-t",
+            "2",
+            "-c:a",
+            "aac",
+            str(audio),
+        ],
+        check=True,
+    )
+    matches = validated_matches(
+        [
+            {
+                "surah_num": 25,
+                "surah_name": "سُورَةُ الفُرقَانِ",
+                "from_ayah": 7,
+                "to_ayah": 7,
+                "full_text": "وَقَالُواْ مَالِ هَٰذَا اَ۬لرَّسُولِ",
+                "confidence": 0.9,
+                "start_time": 0.0,
+                "end_time": 2.0,
+            }
+        ],
+        bridge_gaps=False,
+    )
+
+    warnings = frame_renderer.write_frame_video(
+        matches,
+        2.0,
+        audio,
+        tmp_path / "out.mp4",
+        320,
+        240,
+        10,
+        _BUNDLED_FONT,
+        log_path=tmp_path / "enc.log",
+        look=PRESETS["ocean"],
+    )
+
+    assert seen and all(look is PRESETS["ocean"] for look in seen)
+    assert warnings == ()
+
+
+def test_write_frame_video_reports_the_warnings_its_frames_saw(monkeypatch, tmp_path) -> None:
+    """Taken before the encode: an image that appears mid-render does not erase the warning."""
+    import io
+    from dataclasses import replace
+
+    import numpy as np
+    from PIL import Image
+
+    from qurantext.core.backgrounds import clear_cache
+    from qurantext.core.looks import NIGHT_GOLD
+
+    clear_cache()
+    image = tmp_path / "bg.png"
+    look = replace(NIGHT_GOLD, background=replace(NIGHT_GOLD.background, kind="image", image=image))
+
+    def fake_frame(t, match, width, height, font_file, **kwargs):
+        Image.new("RGB", (8, 8), (255, 0, 0)).save(image)  # the photo turns up mid-render
+        return np.zeros((height, width, 3), np.uint8)
+
+    class _Encoder:
+        stdin = io.BytesIO()
+        returncode = 0
+
+        def wait(self):
+            return 0
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(frame_renderer, "render_frame_pillow", fake_frame)
+    monkeypatch.setattr(frame_renderer, "_start_frame_encoder", lambda *a, **k: _Encoder())
+    warnings = frame_renderer.write_frame_video(
+        [],
+        1.0,
+        tmp_path / "a.m4a",
+        tmp_path / "o.mp4",
+        32,
+        24,
+        10,
+        _BUNDLED_FONT,
+        log_path=tmp_path / "enc.log",
+        look=look,
+    )
+    clear_cache()
+    assert warnings == ("image_missing",)
+
+
+def test_render_frame_video_passes_the_look_and_collects_its_warnings(
+    monkeypatch, tmp_path
+) -> None:
+    from qurantext.core.looks import PRESETS
+
+    seen = {}
+
+    def fake_write(*args, **kwargs):
+        seen.update(kwargs)
+        return ("image_unreadable",)
+
+    monkeypatch.setattr(frame_renderer, "write_frame_video", fake_write)
+    monkeypatch.setattr(frame_renderer, "_require_raqm_support", lambda: None)
+    monkeypatch.setattr(frame_renderer, "require_binary", lambda *a, **k: None)
+    monkeypatch.setattr(frame_renderer, "get_audio_duration", lambda _path: 3.0)
+    collected: list[str] = ["earlier"]
+
+    duration = frame_renderer.render_frame_video(
+        tmp_path / "a.m4a",
+        [],
+        tmp_path / "o.mp4",
+        32,
+        24,
+        10,
+        _BUNDLED_FONT,
+        look=PRESETS["rose"],
+        look_warnings=collected,
+    )
+
+    assert duration == 3.0
+    assert seen["look"] is PRESETS["rose"]
+    assert collected == ["earlier", "image_unreadable"]
+    # Without a list the warnings are simply not collected; the return stays the duration.
+    assert (
+        frame_renderer.render_frame_video(
+            tmp_path / "a.m4a", [], tmp_path / "o.mp4", 32, 24, 10, _BUNDLED_FONT
+        )
+        == 3.0
+    )
+    assert seen["look"] is frame_renderer.NIGHT_GOLD
+
+
 # --- locating helper binaries -------------------------------------------------
 
 
