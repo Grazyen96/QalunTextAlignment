@@ -15,8 +15,10 @@ thread) and an export (worker thread) render at the same time:
   card and its border, the base preset (it picks the fallback), the size, the
   card box and radius, plus the photo's size and mtime. A text-colour edit is
   a cache hit;
-- the **photo** cache holds a decoded, cover-fitted (and blurred) photo, so a
-  dim or card-colour edit does not decode the file again.
+- the **photo** cache holds a decoded, cover-fitted photo (alpha kept, not yet
+  blurred), so a blur, dim or card-colour edit does not decode the file again.
+  Its transparent areas show the background colour, and blur and dim are
+  applied to the frame-size image when the layer is built.
 
 A photo that is missing or unreadable never stops a render: the look's preset
 background is drawn instead and the layer carries a warning code for the
@@ -168,20 +170,23 @@ class _ImageProblem(Exception):
 
 def _draw_background(background: Background, width: int, height: int, stamp) -> Image.Image:
     kind = background.kind
-    if kind == "image":
-        # Blurred inside the photo cache; never drawn on below, so sharing it is safe.
-        image = _photo(background.image, stamp, width, height, background.blur)
+    if kind == "solid":
+        # NIGHT_GOLD's solid colour is the old COLOUR_BG, so this is the old frame fill.
+        image = Image.new("RGBA", (width, height), background.colour)
+    elif kind == "gradient":
+        image = _gradient(background.colour, background.colour2, width, height)
+    elif kind == "image":
+        photo = _photo(background.image, stamp, width, height)
+        # A transparent photo shows the background colour (opaque: the layer is
+        # the bottom of the frame). Compositing onto a new image also leaves the
+        # shared cached photo untouched.
+        image = Image.new("RGBA", (width, height), (*background.colour[:3], 255))
+        image.alpha_composite(photo)
     else:
-        if kind == "solid":
-            # NIGHT_GOLD's solid colour is the old COLOUR_BG, so this is the old frame fill.
-            image = Image.new("RGBA", (width, height), background.colour)
-        elif kind == "gradient":
-            image = _gradient(background.colour, background.colour2, width, height)
-        else:
-            image = Image.new("RGBA", (width, height), background.colour)
-            _PATTERNS[kind](ImageDraw.Draw(image), background.colour2, width, height)
-        if background.blur > 0:
-            image = image.filter(_blur_filter(background.blur, height))
+        image = Image.new("RGBA", (width, height), background.colour)
+        _PATTERNS[kind](ImageDraw.Draw(image), background.colour2, width, height)
+    if background.blur > 0:
+        image = image.filter(_blur_filter(background.blur, height))
     if background.dim > 0:
         shade = Image.new("RGBA", (width, height), (0, 0, 0, int(round(background.dim * 255))))
         image = Image.alpha_composite(image, shade)
@@ -199,22 +204,23 @@ def _gradient(top, bottom, width: int, height: int) -> Image.Image:
     )
 
 
-def _photo(path: Path | None, stamp, width: int, height: int, blur: float) -> Image.Image:
-    """The photo cover-fitted to the frame and blurred, from the photo cache when it can be."""
+def _photo(path: Path | None, stamp, width: int, height: int) -> Image.Image:
+    """The photo cover-fitted to the frame (RGBA, unblurred), from the photo cache when it can be.
+
+    Shared between layers: never draw on it.
+    """
     if path is None:
         raise _ImageProblem("image_missing")
-    key = (path, stamp, width, height, blur)
+    key = (path, stamp, width, height)
     image = _cached(_photo_cache, key)
     if image is None:
         image = _decode_photo(path, width, height)
-        if blur > 0:
-            image = image.filter(_blur_filter(blur, height))
         _store(_photo_cache, key, image, _PHOTO_CACHE_SIZE)
     return image
 
 
 def _decode_photo(path: Path, width: int, height: int) -> Image.Image:
-    """Decode *path* upright, as opaque RGB, cover-fitted to width × height (RGBA).
+    """Decode *path* upright as 8-bit RGBA, cover-fitted to width × height, alpha kept.
 
     This is the "an image never fails a render" boundary: whatever goes wrong
     reading a user's file — it is gone, a folder is unreadable, the path is
@@ -236,10 +242,11 @@ def _decode_photo(path: Path, width: int, height: int) -> Image.Image:
             upright = source
             if orientation in _ORIENTATION:
                 upright = source.transpose(_ORIENTATION[orientation])
+            # RGBA resizes premultiplied in Pillow, so edges do not fringe.
             fitted = ImageOps.fit(
-                _opaque_rgb(upright), (width, height), method=Image.Resampling.LANCZOS
+                _eight_bit_rgba(upright), (width, height), method=Image.Resampling.LANCZOS
             )
-        return _to_srgb(fitted, icc).convert("RGBA")
+        return _to_srgb(fitted, icc)
     except _ImageProblem:
         raise
     except (FileNotFoundError, NotADirectoryError, IsADirectoryError):
@@ -269,23 +276,18 @@ def _decode_size(
     return (max(1, math.ceil(sw * scale)), max(1, math.ceil(sh * scale)))
 
 
-def _opaque_rgb(image: Image.Image) -> Image.Image:
-    """8-bit RGB: 16-bit greys scaled down, transparency laid over black."""
+def _eight_bit_rgba(image: Image.Image) -> Image.Image:
+    """8-bit RGBA: 16-bit greys scaled down (not clipped), transparency kept as alpha."""
     if image.mode in ("I;16", "I;16L", "I;16B", "I;16N", "I"):
         values = np.asarray(image).astype(np.int64)
         if image.mode != "I" or values.max(initial=0) > 255:
             values = values >> 8
         image = Image.fromarray(np.clip(values, 0, 255).astype(np.uint8))
-    has_alpha = image.mode in ("RGBA", "RGBa", "LA", "La", "PA") or "transparency" in image.info
-    if has_alpha:
-        backdrop = Image.new("RGBA", image.size, (0, 0, 0, 255))
-        backdrop.alpha_composite(image.convert("RGBA"))
-        return backdrop.convert("RGB")
-    return image if image.mode == "RGB" else image.convert("RGB")
+    return image if image.mode == "RGBA" else image.convert("RGBA")
 
 
 def _to_srgb(image: Image.Image, icc: bytes | None) -> Image.Image:
-    """Convert from an embedded RGB colour profile (Display P3, Adobe RGB…) to sRGB."""
+    """Convert an RGBA image from its embedded RGB profile (Display P3, Adobe RGB…) to sRGB."""
     if not icc:
         return image
     try:
@@ -295,11 +297,15 @@ def _to_srgb(image: Image.Image, icc: bytes | None) -> Image.Image:
         if source.profile.xcolor_space.strip() != "RGB":
             return image
         converted = ImageCms.profileToProfile(
-            image, source, ImageCms.createProfile("sRGB"), outputMode="RGB"
+            image.convert("RGB"), source, ImageCms.createProfile("sRGB"), outputMode="RGB"
         )
     except Exception:  # noqa: BLE001 — a broken profile keeps the pixels as they are
         return image
-    return converted if converted is not None else image
+    if converted is None:
+        return image
+    converted = converted.convert("RGBA")
+    converted.putalpha(image.getchannel("A"))
+    return converted
 
 
 def _line_width(height: int) -> int:

@@ -98,10 +98,12 @@ A **Look** panel in the review window, beside the frame preview. Every change re
   The image's file size and mtime are added to the key so a replaced file is noticed. The cache
   holds an LRU of 4 entries, which bounds memory at 4 × w × h × 4 bytes. One module lock guards
   every cache lookup and insert; layers are built outside it.
-- A decoded photo has its own small cache, keyed by `(path, size and mtime, width, height, blur)`
-  and holding it cover-fitted and blurred. A dim or card-colour change therefore does not decode the
-  file again. A JPEG decodes at a reduced scale (Pillow's `draft()`) when that still covers the
-  frame.
+- A decoded photo has its own small cache, keyed by `(path, size and mtime, width, height)`. It
+  holds the photo cover-fitted to the frame, with its alpha kept and no blur applied. Blur and dim
+  are applied to the frame-size image when the base layer is built, so a blur, dim or card-colour
+  change never decodes the file again. Transparent areas of the photo show `background.colour`
+  (made opaque), composited in at layer build before blur and dim. A JPEG decodes at a reduced
+  scale (Pillow's `draft()`) when that still covers the frame.
 - `background_mean(look, width, height) -> RGB` feeds the contrast check.
 - An image that is missing or fails to decode raises nothing. The layer uses the base preset's
   built-in background and reports the problem through a returned `warnings` list, or a sibling

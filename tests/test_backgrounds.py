@@ -257,18 +257,32 @@ def test_decode_size_still_covers_the_frame(stored, orientation, target, expecte
     assert backgrounds._decode_size(stored, orientation, target) == expected
 
 
-def test_transparency_is_laid_over_black(tmp_path: Path) -> None:
+_GROUND = (0, 128, 255, 255)
+
+
+def _ground_layer(path, **kw):
+    look = _with_bg(kind="image", image=path, colour=_GROUND, **kw)
+    return base_layer(look, 50, 50, (10, 10, 20, 20), 2)
+
+
+def test_transparent_pixels_show_the_background_colour(tmp_path: Path) -> None:
     path = tmp_path / "a.png"
-    Image.new("RGBA", (50, 50), (255, 255, 255, 0)).save(path)
-    px = np.array(_image_layer(path, (50, 50)).image.convert("RGB"))
-    assert tuple(px[25, 5]) == (0, 0, 0)
+    image = Image.new("RGBA", (50, 50), (255, 255, 255, 0))  # transparent left half
+    image.paste((255, 0, 0, 255), (25, 0, 50, 50))  # opaque red right half
+    image.save(path)
+    px = np.array(_ground_layer(path).image.convert("RGB"))
+    assert tuple(px[25, 3]) == _GROUND[:3]
+    assert tuple(px[25, 46]) == (255, 0, 0)
+    dimmed = np.array(_ground_layer(path, dim=0.5).image.convert("RGB"))
+    # Dim comes after: the background colour itself is dimmed by half.
+    assert np.abs(dimmed[25, 3].astype(int) - np.array(_GROUND[:3]) * 0.5).max() <= 1
 
     palette = tmp_path / "p.png"
     image = Image.new("P", (50, 50), 0)
     image.putpalette([255, 255, 255] + [0, 0, 0] * 255)
     image.save(palette, transparency=0)
-    px = np.array(_image_layer(palette, (50, 50)).image.convert("RGB"))
-    assert tuple(px[25, 5]) == (0, 0, 0)
+    px = np.array(_ground_layer(palette).image.convert("RGB"))
+    assert tuple(px[25, 5]) == _GROUND[:3]
 
 
 def test_sixteen_bit_grey_is_scaled_not_clipped(tmp_path: Path) -> None:
@@ -336,6 +350,34 @@ def test_dim_and_card_changes_reuse_the_decoded_photo(tmp_path: Path, monkeypatc
     base_layer(replace(look, card=(1, 2, 3, 200)), 200, 300, CARD, 10)
     base_layer(replace(look, card_border=(9, 9, 9, 99)), 200, 300, CARD, 10)
     assert counts == {"background": 4, "decode": 1}
+
+
+def test_dragging_the_blur_slider_never_decodes_the_photo_again(
+    tmp_path: Path, monkeypatch
+) -> None:
+    counts = _counting(monkeypatch)
+    look = _with_bg(kind="image", image=_photo(tmp_path / "p.png"), dim=0.3, blur=0)
+    layers = [
+        base_layer(replace(look, background=replace(look.background, blur=b)), 200, 300, CARD, 10)
+        for b in (0, 1, 2, 4, 8, 16, 20)
+    ]
+    assert counts == {"background": 7, "decode": 1}
+    assert len({layer.image.tobytes() for layer in layers}) == 7  # each blur still shows
+
+
+def test_blur_is_applied_at_frame_size_after_the_fit(tmp_path: Path) -> None:
+    """Same pixels as blurring the fitted, unblurred layer: the source is never blurred."""
+    from PIL import ImageFilter
+
+    photo = _photo(tmp_path / "p.png", (100, 100))
+    sharp = base_layer(_with_bg(kind="image", image=photo), 100, 100, (0, 0, 1, 1), 0)
+    blurred = base_layer(_with_bg(kind="image", image=photo, blur=20), 100, 100, (0, 0, 1, 1), 0)
+    clear_cache()
+    expected = backgrounds._draw_background(
+        _with_bg(kind="image", image=photo).background, 100, 100, None
+    ).filter(ImageFilter.GaussianBlur(20 * 100 / 1000))
+    assert sharp.image.tobytes() != blurred.image.tobytes()
+    assert np.array_equal(np.array(blurred.image)[50:, 50:], np.array(expected)[50:, 50:])
 
 
 def _key_variants(tmp_path: Path) -> dict[str, tuple]:
