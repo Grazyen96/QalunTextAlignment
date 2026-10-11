@@ -223,7 +223,8 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.discard_text": "This review has changes that are not saved.",
         "review.shortcuts": (
             "Space plays · ← next word, → previous · [ ] set start/end at the playhead · "
-            ", . nudge 50 ms (Shift: 10 ms) · Shift-drag ripples the later words · "
+            ", . nudge the edge left/right 50 ms (Shift: 10 ms) · "
+            "Shift-drag ripples the later words · "
             "Ctrl-drag an edge to part two words · Ctrl+Z undoes"
         ),
         "review.tip": "{action} ({keys})",
@@ -494,9 +495,9 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.discard_title": "هل تحفظ تصحيحاتك؟",
         "review.discard_text": "في هذه المراجعة تغييرات غير محفوظة.",
         "review.shortcuts": (
-            "المسافة للتشغيل · \u2066←\u2069 للكلمة التالية و\u2066→\u2069 للسابقة · "
+            "المسافة للتشغيل · \u2066←\u2069 للكلمة التالية و \u2066→\u2069 للسابقة · "
             "\u2066[ ]\u2069 للبداية/النهاية عند مؤشر التشغيل · "
-            "\u2066, .\u2069 للإزاحة 50 م.ث (مع Shift: 10 م.ث) · "
+            "\u2066,\u2069 لإزاحة الحافة يسارًا و \u2066.\u2069 يمينًا 50 م.ث (مع Shift: 10 م.ث) · "
             "اسحب مع Shift لإزاحة الكلمات التالية · "
             "اسحب حافة مع Ctrl لفصل كلمتين · Ctrl+Z للتراجع"
         ),

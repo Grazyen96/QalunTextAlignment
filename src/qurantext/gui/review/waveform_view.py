@@ -14,6 +14,8 @@ pixels is further left.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPaintEvent
@@ -123,14 +125,26 @@ class WaveformView(QWidget):
                 right = self._viewport.x_for(gap_start, width)
                 painter.fillRect(int(left), 0, max(1, int(right - left)), height, _GAP_COLOR)
 
-            # The window's start maps to x == width, one past the last column:
-            # kept on the widget, a playhead at the start (where a review opens)
-            # is drawn rather than falling just off the right edge.
-            playhead_x = min(int(self._viewport.x_for(self._playhead, width)), width - 1)
-            painter.setPen(playhead_color(palette))
-            painter.drawLine(playhead_x, 0, playhead_x, height)
+            playhead_x = self._playhead_column(width)
+            if playhead_x is not None:
+                painter.setPen(playhead_color(palette))
+                painter.drawLine(playhead_x, 0, playhead_x, height)
         finally:
             painter.end()
+
+    def _playhead_column(self, width: int) -> int | None:
+        """The pixel column the playhead is drawn in, or ``None`` outside the window.
+
+        Right to left, pixel column ``p`` holds the times in
+        ``(t_for(p + 1), t_for(p)]``, so the column is ``ceil(x) - 1``: the
+        same column as the waveform bar for that time, and the window's start
+        (``x == width``, where a review opens) lands in the last column instead
+        of one past it. A playhead outside ``[start, start + span)`` is not
+        drawn at all, as before: pinning it to an edge would mark a time the
+        window does not show.
+        """
+        x = math.ceil(self._viewport.x_for(self._playhead, width)) - 1
+        return x if 0 <= x < width else None
 
     def _paint_bars(
         self, painter: QPainter, peaks: Peaks, width: int, height: int, color: QColor

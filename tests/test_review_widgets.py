@@ -138,6 +138,52 @@ def test_the_waveform_draws_the_windows_start_at_the_right(qt_app) -> None:
     assert image.pixelColor(50, near_top) == background, "the silent last 5 s on the left"
 
 
+def test_a_gap_band_is_drawn_from_its_end_on_the_left_to_its_start_on_the_right(qt_app) -> None:
+    from PySide6.QtGui import QPalette
+
+    from qurantext.gui.review.waveform_view import WaveformView
+
+    vp = Viewport()
+    vp.set_duration(10.0)
+    vp.set_window(0.0, 10.0)
+    view = WaveformView(vp)
+    view.resize(200, 90)
+    view.set_gaps([(2.0, 4.0)])
+    view.set_playhead(9.95)  # out of the way, at the far left
+    image = view.grab().toImage()
+    background = view.palette().color(QPalette.ColorRole.Window)
+    row = 5  # above the "reading" placeholder text
+    # 2-4 s is x 120-160 right to left; left to right it would be x 40-80.
+    for x in (122, 125, 140, 155, 158):
+        assert image.pixelColor(x, row) != background, x
+    for x in (45, 60, 75, 110, 170):
+        assert image.pixelColor(x, row) == background, x
+
+
+def _playhead_columns(view) -> list[int]:
+    from qurantext.gui.colors import playhead_color
+
+    image = view.grab().toImage()
+    red = playhead_color(view.palette())
+    return [x for x in range(view.width()) if image.pixelColor(x, 45) == red]
+
+
+def test_a_playhead_outside_the_window_is_not_drawn(qt_app) -> None:
+    from qurantext.gui.review.waveform_view import WaveformView
+
+    vp = Viewport()
+    vp.set_duration(100.0)
+    vp.set_window(50.0, 10.0)
+    view = WaveformView(vp)
+    view.resize(200, 90)
+    view.set_playhead(20.0)  # before the window: not pinned to its right edge
+    assert _playhead_columns(view) == []
+    view.set_playhead(70.0)  # after it: not pinned to its left edge
+    assert _playhead_columns(view) == []
+    view.set_playhead(55.0)
+    assert _playhead_columns(view) == [99]  # halfway: column 99 holds (55, 55.05]
+
+
 def test_a_playhead_at_the_windows_start_is_drawn(qt_app) -> None:
     from qurantext.gui.colors import playhead_color
     from qurantext.gui.review.waveform_view import WaveformView
@@ -619,7 +665,9 @@ def test_the_playhead_row_is_marked_without_being_selected(qt_app) -> None:
 def test_an_edge_dragged_past_its_neighbour_and_back_leaves_the_neighbour(qt_app) -> None:
     session, strip = _strip(qt_app)
     QTest.mousePress(strip, Qt.MouseButton.LeftButton, pos=QPoint(800, 17))
-    for x in (700, 650, 800):
+    QTest.mouseMove(strip, QPoint(700, 17))
+    assert session.words()[0].end > 2.5, "the press grabbed the a/b edge and dragged it later"
+    for x in (650, 800):
         QTest.mouseMove(strip, QPoint(x, 17))
     QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, pos=QPoint(800, 17))
     words = session.words()
@@ -630,7 +678,9 @@ def test_a_ripple_dragged_past_the_clamp_and_back_ends_where_it_began(qt_app) ->
     session, strip = _strip(qt_app)
     shift = Qt.KeyboardModifier.ShiftModifier
     QTest.mousePress(strip, Qt.MouseButton.LeftButton, shift, QPoint(650, 17))
-    for x in (900, 1000, 650):
+    QTest.mouseMove(strip, QPoint(900, 17))
+    assert session.words()[2].start < 3.0, "the press started a ripple and it moved c earlier"
+    for x in (1000, 650):
         QTest.mouseMove(strip, QPoint(x, 17))
     QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, shift, QPoint(650, 17))
     words = session.words()

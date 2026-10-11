@@ -416,10 +416,13 @@ class ReviewWindow(QMainWindow):
             ("Right", partial(self._step, -1)),
             ("[", self._set_start_at_playhead),
             ("]", self._set_end_at_playhead),
-            (",", partial(self._nudge, -NUDGE_S)),
-            (".", partial(self._nudge, NUDGE_S)),
-            ("Shift+,", partial(self._nudge, -_FINE_NUDGE_S)),
-            ("Shift+.", partial(self._nudge, _FINE_NUDGE_S)),
+            # The nudges match their keys' < and > to the screen: "," moves the
+            # edge left, which on the right-to-left timeline is later, and "."
+            # moves it right, earlier.
+            (",", partial(self._nudge, NUDGE_S)),
+            (".", partial(self._nudge, -NUDGE_S)),
+            ("Shift+,", partial(self._nudge, _FINE_NUDGE_S)),
+            ("Shift+.", partial(self._nudge, -_FINE_NUDGE_S)),
             ("Ctrl+Z", self.undo),
             ("Ctrl+Shift+Z", self.redo),
             ("Ctrl+S", self.save),
@@ -451,8 +454,8 @@ class ReviewWindow(QMainWindow):
             button.setToolTip(t("review.tip", action=button.text(), keys=shown))
         self.play_button.setToolTip(self._play_tip())
         bar = self.selection_bar
-        bar.minus_button.setToolTip(t("review.tip_fine", action=bar.minus_button.text(), keys=","))
-        bar.plus_button.setToolTip(t("review.tip_fine", action=bar.plus_button.text(), keys="."))
+        bar.minus_button.setToolTip(t("review.tip_fine", action=bar.minus_button.text(), keys="."))
+        bar.plus_button.setToolTip(t("review.tip_fine", action=bar.plus_button.text(), keys=","))
 
     def _play_tip(self) -> str:
         """The play button's tip for its current action.

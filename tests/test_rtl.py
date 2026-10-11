@@ -145,9 +145,10 @@ def _texts(root: QWidget) -> Iterator[str]:
 
 
 def test_time_widgets_keep_left_to_right_and_the_rest_mirrors(qt_app, review_window) -> None:
-    # The timeline widgets are pinned left to right so Qt never mirrors them a
-    # second time: their right-to-left time axis is the viewport's mapping,
-    # the same in both languages.
+    # The timeline's right-to-left axis is the viewport's mapping, the same in
+    # both languages. Qt never mirrors a custom-painted widget's coordinates,
+    # so on the waveform and strip the pin only fixes the base text direction;
+    # on the slider, the clock and the nudge row it keeps the layout itself.
     w = review_window
     pinned = (
         w.waveform,
@@ -180,6 +181,38 @@ def test_the_timeline_runs_right_to_left_in_arabic(qt_app, review_window) -> Non
     width = w.strip.width()
     assert w.viewport.x_for(first.start, width) > w.viewport.x_for(second.start, width)
     assert w.viewport.t_for(width, width) == pytest.approx(w.viewport.start)
+
+
+def test_the_arabic_word_strip_puts_the_first_word_at_the_right(qt_app, review_window) -> None:
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QPalette
+
+    w = review_window
+    w.show()
+    qt_app.processEvents()
+    strip, vp = w.strip, w.viewport
+    first, second = w.session.words()[:2]
+    width = strip.width()
+
+    def middle(word) -> int:
+        return round((vp.x_for(word.start, width) + vp.x_for(word.end, width)) / 2)
+
+    assert middle(first) > middle(second)
+    assert strip._hit_test(middle(first)) == ("body", first.ref)
+    assert strip._hit_test(vp.x_for(first.start, width) - 3) == ("start", first.ref)
+    QTest.mouseClick(strip, Qt.MouseButton.LeftButton, pos=QPoint(middle(first), 17))
+    assert strip.selected == first.ref
+    assert w.player.position() == pytest.approx(first.start)
+    image = strip.grab().toImage()
+    highlight = strip.palette().color(QPalette.ColorRole.Highlight)
+    assert image.pixelColor(middle(first), 6) == highlight
+    assert image.pixelColor(middle(second), 6) != highlight
+
+
+def test_the_nudge_row_tabs_from_the_right_in_arabic(qt_app, review_window) -> None:
+    bar = review_window.selection_bar
+    assert bar.minus_button.nextInFocusChain() is bar.plus_button
+    assert bar.plus_button.nextInFocusChain() is bar.snap_button
 
 
 def test_the_plus_button_sits_left_of_minus(qt_app, review_window) -> None:
