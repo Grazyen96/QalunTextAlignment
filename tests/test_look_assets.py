@@ -243,19 +243,39 @@ def test_seeding_copies_the_image_and_stores_it_beside_the_unsaved_project(
     "failure",
     [FileNotFoundError("gone"), ValueError("not an image"), PermissionError(errno.EACCES, "no")],
 )
-def test_seeding_falls_back_to_the_preset_background_when_the_image_cannot_be_copied(
+def test_seeding_keeps_the_original_image_when_it_cannot_be_copied(
     tmp_path: Path, monkeypatch, failure
 ) -> None:
+    """Spec §4: the job is still made, and the look still names the image, so the
+    preview and the render fall back to the palette's background and say why."""
+
     def refuse(source, folder):
         raise failure
 
     monkeypatch.setattr(look_assets, "copy_by_content", refuse)
     project = Project(audio=tmp_path / "dars.mp3", mode="lecture", cards=[])
-    look = _image_look(_png(tmp_path / "bg.png"))
+    look = _image_look(_png(tmp_path / "bg.png").resolve())
+
+    look_assets.seed_project_look(project, tmp_path / "out" / "job.qalun.json", look.to_dict())
+
+    assert project_look(project) == look
+    assert not look_dir_for(tmp_path / "out" / "job.qalun.json").exists()
+
+
+def test_a_seeded_look_whose_image_is_gone_reports_it_where_it_is_drawn(tmp_path: Path) -> None:
+    from qurantext.core.frame_renderer import frame_base_layer
+
+    project = Project(audio=tmp_path / "dars.mp3", mode="lecture", cards=[])
+    look = _image_look(tmp_path / "gone.png")
 
     look_assets.seed_project_look(project, tmp_path / "job.qalun.json", look.to_dict())
+    save_project(project, tmp_path / "job.qalun.json")
 
-    assert project_look(project) == PRESETS["ocean"]
+    seeded = project_look(load_project(tmp_path / "job.qalun.json"))
+    assert seeded.background.kind == "image"
+    assert seeded.background.image == (tmp_path / "gone.png").resolve()
+    layer = frame_base_layer(seeded, 108, 192, reserve_caption_band=False)
+    assert layer.warnings == ("image_missing",)
 
 
 def test_seeding_night_gold_leaves_the_style_alone(tmp_path: Path) -> None:

@@ -16,7 +16,6 @@ from pathlib import Path
 from qurantext.core.looks import (
     IMAGE_SUFFIXES,
     NIGHT_GOLD,
-    PRESETS,
     Look,
     look_from_style,
     merge_style,
@@ -82,8 +81,11 @@ def seed_project_look(project: Project, project_path: Path, style: dict) -> None
 
     The look's image is copied beside the project, as choosing it in the review
     would. An image that cannot be copied (gone, not an image, unreadable, a
-    folder that refuses it) leaves the look's preset background in its place:
-    a new job is never lost over its background.
+    folder that refuses it) is not a reason to lose a new job: the look keeps
+    naming the image where it was, so the preview and the render fall back to
+    the palette's background *and say so* — in the review window's warnings
+    strip, and in a render's look warnings (spec §4) — until the person picks
+    another image.
     """
     look = look_from_style(style)
     bg = look.background
@@ -91,9 +93,8 @@ def seed_project_look(project: Project, project_path: Path, style: dict) -> None
         try:
             copied = import_look_image(project_path, bg.image)
         except (ValueError, OSError):  # FileNotFoundError is an OSError
-            look = replace(look, background=PRESETS.get(look.base_preset, NIGHT_GOLD).background)
-        else:
-            look = replace(look, background=replace(bg, image=copied))
+            copied = bg.image  # the original, reported where it is used (see above)
+        look = replace(look, background=replace(bg, image=copied))
     set_project_look(project, look, project_dir=Path(project_path).parent)
 
 

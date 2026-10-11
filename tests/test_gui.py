@@ -699,20 +699,35 @@ def test_a_default_image_is_copied_beside_the_new_project(tmp_path, monkeypatch)
 
 
 def test_seeding_with_a_missing_default_image_still_creates_the_project(
-    tmp_path, monkeypatch
+    qt_app, tmp_path, monkeypatch
 ) -> None:
-    from qurantext.core.looks import PRESETS
+    """Spec §4: the job is made, and the review window says the image is gone."""
+    import html
+
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.player import FakePlayer
+    from qurantext.gui.review.window import ReviewWindow
     from qurantext.jobs.look_assets import project_look
     from qurantext.jobs.project import load_project
 
     jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
-    look = _image_look(tmp_path / "gone.png")
+    gone = (tmp_path / "gone.png").resolve()
+    look = _image_look(gone)
 
     project = jobs_module.run_matching(replace(spec, style=look.to_dict()))
 
     saved = load_project(project.path)
-    assert project_look(saved) == replace(look, background=PRESETS["sand"].background)
-    assert project_look(saved).background.image is None
+    assert project_look(saved) == look, "the look still names the image it could not copy"
+    spec.audio.unlink()  # no recording to read in the background
+    window = ReviewWindow(
+        saved,
+        player=FakePlayer(duration=2.0, now=lambda: 0.0),
+        prefs=Prefs(QSettings(str(tmp_path / "prefs.ini"), QSettings.Format.IniFormat)),
+    )
+    try:
+        assert html.escape(t("look.image_missing")) in window.warnings.text()
+    finally:
+        window.deleteLater()
 
 
 def test_a_rerun_with_unchanged_content_keeps_the_videos_own_look(tmp_path, monkeypatch) -> None:
