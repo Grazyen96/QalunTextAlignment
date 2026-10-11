@@ -32,9 +32,10 @@ import hashlib
 import os
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 from qurantext import __version__
-from qurantext.core.arabic import normalize_detection_ar
+from qurantext.core.arabic import ayah_text_with_marker, normalize_detection_ar
 from qurantext.core.quran_parser import parse_ayat
 from qurantext.core.quran_structure import parse_words
 from qurantext.data.citation_index import DEFAULT_NGRAM_N, build_citation_index
@@ -384,3 +385,47 @@ def surah_ayah_count(conn: sqlite3.Connection, surah_num: int) -> int:
     if row is None:
         raise ValueError(f"No surah {surah_num} in the store (expected 1-114).")
     return int(row["ayah_count"])
+
+
+def ayah_range_card(
+    conn: sqlite3.Connection, surah_num: int, from_ayah: int, to_ayah: int
+) -> dict[str, Any]:
+    """A card's reference and text for ayat *from_ayah*–*to_ayah* of *surah_num*.
+
+    Built exactly as detection builds a lecture card's text (each ayah with its
+    number marker, one per line), so a card the person picks by hand reads the
+    same as one the matcher found. The text always comes from the store: a card
+    names a reference, it never carries typed text.
+
+    Raises ``ValueError`` for an unknown surah, a range outside it, numbers
+    that are not whole, and a store whose ayat do not match its own ayah count
+    (a card with missing ayat would read as complete, or show nothing).
+    """
+    if any(isinstance(n, bool) or not isinstance(n, int) for n in (surah_num, from_ayah, to_ayah)):
+        raise ValueError(
+            f"Surah and ayah numbers must be whole numbers: {surah_num}:{from_ayah}-{to_ayah}."
+        )
+    count = surah_ayah_count(conn, surah_num)  # raises ValueError for an unknown surah
+    if not (1 <= from_ayah <= to_ayah <= count):
+        raise ValueError(
+            f"Ayat {from_ayah}–{to_ayah} are not in surah {surah_num} (it has {count})."
+        )
+    name = conn.execute("SELECT name FROM surahs WHERE surah_num = ?", (surah_num,)).fetchone()
+    rows = conn.execute(
+        "SELECT ayah_num, text_raw FROM ayat WHERE surah_num = ? AND ayah_num BETWEEN ? AND ? "
+        "ORDER BY ayah_num",
+        (surah_num, from_ayah, to_ayah),
+    ).fetchall()
+    if [int(r["ayah_num"]) for r in rows] != list(range(from_ayah, to_ayah + 1)):
+        raise ValueError(
+            f"The store is missing ayat of {surah_num}:{from_ayah}–{to_ayah}; rebuild it."
+        )
+    text = "\n".join(ayah_text_with_marker(r["text_raw"], int(r["ayah_num"])) for r in rows)
+    return {
+        "surah_num": int(surah_num),
+        "surah_name": str(name["name"]),
+        "from_ayah": int(from_ayah),
+        "to_ayah": int(to_ayah),
+        "text": text,
+        "full_text": text,
+    }

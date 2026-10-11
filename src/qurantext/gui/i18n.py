@@ -276,6 +276,11 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "session.card_follows_words": (
             "This card's times follow its words; retime the words instead."
         ),
+        "session.manual_lecture_only": "Ayah cards can only be placed by hand in a lecture.",
+        "session.manual_bad_reference": "Surah {surah} has no ayat {first}–{last}.",
+        "session.manual_store_unavailable": (
+            "Could not read the Quran store, so no ayah card was made: {details}"
+        ),
         "session.no_file": "This project has no file to write back to.",
         "look.title": "Look",
         "look.palette": "Palette",
@@ -569,6 +574,11 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "render.cancel": "إلغاء",
         "session.card_follows_words": (
             "توقيت هذه البطاقة يتبع كلماتها؛ عدِّل توقيت الكلمات بدلًا منها."
+        ),
+        "session.manual_lecture_only": "لا تُضاف بطاقات الآيات يدويًا إلا في الدروس.",
+        "session.manual_bad_reference": "لا تضمّ السورة {surah} الآيات {first}–{last}.",
+        "session.manual_store_unavailable": (
+            "تعذّرت قراءة قاعدة بيانات القرآن، فلم تُنشأ بطاقة الآية: {details}"
         ),
         "session.no_file": "ليس لهذا المشروع ملف يُحفظ فيه.",
         "look.title": "المظهر",

@@ -19,9 +19,9 @@
 - **Lecture projects only.** In recitation projects the button and menu items are absent, and the session raises `ValueError`.
 - Ayah text always comes from the store (`data/quran_db.py`, table `ayat.text_raw`), formatted with `core.arabic.ayah_text_with_marker(text_raw, ayah_num)`. Ayat are joined with `"\n"`, exactly as `core.lecture_matching.hydrate_merged_matches` does. This is a ruling on spec §3.1, which said "spaces": follow detection.
 - A hand-made card carries `"manual": True`, `confidence: 1.0` and `detected_text: ""`.
-- A hand-made card is **always** on screen, whatever its surah. The studied-surah rule (automatic or chosen) filters only detected cards. Manual cards still count toward the automatic guess.
+- A hand-made card is **always** on screen, whatever its surah. The studied-surah rule (automatic or chosen) filters only detected cards. Manual cards do **not** vote in the automatic guess (Phase 1 review ruling I1; spec §3.4), and the opening title names the first detected card's surah (ruling I2).
 - Reusing an existing card: if a card starts within **0.05 s** of the insert time, it is changed instead of a new one being added.
-- Minimum card length: **0.5 s**.
+- Minimum card length: **0.5 s**. An insert in a card's first half second, or less than half a second before the next card, changes that card instead (Phase 1 review, M2/M3); the minimum never makes a new card overlap the next one.
 - Every add or change is **one undo step**. It marks the project dirty and makes an existing render stale through the existing `content_hash()`, since cards are content.
 - Every user-facing string goes in `gui/i18n.py` in **both** `en` and `ar`. The new Arabic strings are added to the native-speaker review item in `docs/release-checklist.md`.
 - Interpreter: `/home/khalil/PycharmProjects/QuranText/venv/bin/python`. Ad-hoc scripts need `PYTHONPATH=src`, because the venv's editable install points at the main checkout. Check `free -m` before the full suite.
@@ -172,7 +172,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: the card dict shape, with the `"manual": True` key.
-- Produces: `cards_on_screen(cards, mode, studied_surah=None)` keeps every card whose `manual` is `True`, in lecture mode, under both the automatic and the chosen rule. Manual cards still count toward the automatic "heard longest" guess.
+- Produces: `cards_on_screen(cards, mode, studied_surah=None)` keeps every card whose `manual` is `True`, in lecture mode, under both the automatic and the chosen rule. Manual cards do not vote in the automatic "heard longest" guess (amended by ruling I1).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -271,6 +271,8 @@ Timing rules for `insert_manual_card(at, ...)`, where cards are `project.cards` 
    - `end = max(end, at + 0.5)`.
 4. If a card **contains** `at` (`start < at < end_time`), set its `end_time` to `at`.
 5. Build the card as `{**ayah_range_card(...), "start_time": round(at, 3), "end_time": round(end, 3), "confidence": 1.0, "detected_text": "", "manual": True}`, insert it, re-sort by `start_time`, and return its index.
+
+*Amended by the Phase 1 review (M1–M4, M6, M8):* rules 2–4 compare on the millisecond grid (so exactly 0.05 s counts); rule 2 also covers a playhead in a card's first 0.5 s and one less than 0.5 s before the next card's start (nearest start wins), so no trimmed or new card is under 0.5 s; the `at + 0.5` minimum applies only when there is no next card; a card whose times cannot be read is left alone; a missing, corrupt or old store and an invalid reference both surface as `ValueError` with a translated message (`session.manual_store_unavailable`, `session.manual_bad_reference`), so Task 5 catches `ValueError` alone; `change_card_ayah` refuses an index outside `0..len-1` with `IndexError`.
 
 `change_card_ayah` copies the card and keeps `start_time` and `end_time`. It replaces `surah_num`, `surah_name`, `from_ayah`, `to_ayah`, `text` and `full_text` with `ayah_range_card`'s values, and sets `detected_text: ""`, `confidence: 1.0` and `manual: True`. It drops `word_timings` and every key starting with `_matched` or `matched`.
 
