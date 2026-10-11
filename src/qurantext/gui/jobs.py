@@ -158,12 +158,13 @@ def _keep_earlier(destination: Path, derived: Project) -> Path | str | None:
     is always kept: what it held cannot be compared.
 
     The look and the output choices are compared on neither side (the output
-    choices, the studied surah among them, are the run's own and are written
-    either way), and when the content changed the earlier project's style (its
-    look) is carried into *derived*: a re-match
-    derives cards and captions only, and the look the person chose for this
-    video is not something it could have changed. The style's image path stays
-    valid, as the new project takes the earlier one's name and folder.
+    choices are the run's own and are written either way), and when the content
+    changed the earlier project's style (its look) is carried into *derived*: a
+    re-match derives cards and captions only, and the look the person chose for
+    this video is not something it could have changed. The style's image path
+    stays valid, as the new project takes the earlier one's name and folder.
+    For the same reason a studied surah the earlier project chose is carried
+    when this run left it to "Detect automatically" (``_with_earlier_surah``).
     """
     if not destination.exists():
         return None
@@ -182,7 +183,21 @@ def _keep_earlier(destination: Path, derived: Project) -> Path | str | None:
         return _UNCHANGED
     if earlier is not None:
         derived.style = copy.deepcopy(earlier.style)
+        set_job_settings(derived, _with_earlier_surah(job_settings(derived), earlier))
     return _set_aside(destination)
+
+
+def _with_earlier_surah(settings: JobSettings, earlier: Project) -> JobSettings:
+    """*settings*, keeping *earlier*'s studied surah when they leave it to the guess.
+
+    "Detect automatically" on the new-job screen is the default, not a decision
+    to undo one: a surah chosen in the review (or an earlier run) is the
+    person's, and a re-match cannot know better. A surah picked explicitly for
+    this run wins.
+    """
+    if settings.studied_surah is not None:
+        return settings
+    return replace(settings, studied_surah=job_settings(earlier).studied_surah)
 
 
 def match_path_for(spec: JobSpec) -> Path:
@@ -251,8 +266,9 @@ def run_matching(
         # Same content: leave the file alone (review state, render record and
         # all) unless this run chose differently, and then change only that.
         existing = load_project(destination)
-        if job_settings(existing) != job_settings(project):
-            set_job_settings(existing, job_settings(project))
+        chosen = _with_earlier_surah(job_settings(project), existing)
+        if job_settings(existing) != chosen:
+            set_job_settings(existing, chosen)
             save_project(existing, destination)
         return existing
     if isinstance(kept, Path):

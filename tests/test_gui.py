@@ -2197,10 +2197,10 @@ def test_the_chosen_studied_surah_reaches_the_jobs_project(tmp_path, monkeypatch
     assert job_settings(load_project(project.path)).studied_surah == 25
 
 
-def test_an_unchanged_rematch_with_another_surah_updates_only_the_choice(
+def test_an_unchanged_rematch_keeps_the_surah_unless_another_is_picked(
     tmp_path, monkeypatch
 ) -> None:
-    """The surah is an output choice: changing it must not set the reviewed project aside."""
+    """ "Detect automatically" leaves the project's surah; a picked one replaces only it."""
     from qurantext.jobs.project import job_settings, load_project, save_project
 
     jobs_module, spec = _lecture_setup(tmp_path, monkeypatch)
@@ -2208,13 +2208,50 @@ def test_an_unchanged_rematch_with_another_surah_updates_only_the_choice(
     reviewed = load_project(first.path)
     reviewed.mark_reviewed()
     save_project(reviewed, first.path)
+    before = first.path.read_bytes()
 
     project = jobs_module.run_matching(replace(spec, studied_surah=None))
-    assert job_settings(project).studied_surah is None
+    assert job_settings(project).studied_surah == 25
+    assert first.path.read_bytes() == before, "nothing changed, so nothing is written"
+
+    project = jobs_module.run_matching(replace(spec, studied_surah=17))
     saved = load_project(first.path)
-    assert job_settings(saved).studied_surah is None
-    assert saved.review["state"] == "reviewed"
+    assert job_settings(project).studied_surah == job_settings(saved).studied_surah == 17
+    assert saved.review["state"] == "reviewed", "the choice is an output choice, not content"
     assert not list(tmp_path.glob("*.qalun-backup.json"))
+
+
+def test_a_changed_rematch_keeps_the_surah_unless_another_is_picked(tmp_path, monkeypatch) -> None:
+    from qurantext.jobs.project import job_settings, load_project
+
+    jobs_module, spec = _lecture_setup(tmp_path, monkeypatch)
+    first = jobs_module.run_matching(spec)
+    match_path = tmp_path / "dars_lecture.json"
+
+    def new_content(end_time: float) -> None:
+        payload = json.loads(match_path.read_text(encoding="utf-8"))
+        payload["matches"][0]["end_time"] = end_time
+        match_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    new_content(3.0)
+    project = jobs_module.run_matching(replace(spec, studied_surah=None))
+    assert len(list(tmp_path.glob("*.qalun-backup.json"))) == 1, "the content did change"
+    assert job_settings(project).studied_surah == 25
+    assert job_settings(load_project(first.path)).studied_surah == 25
+
+    new_content(4.0)
+    project = jobs_module.run_matching(replace(spec, studied_surah=17))
+    assert job_settings(load_project(first.path)).studied_surah == 17
+
+
+def test_a_rematch_of_a_project_that_never_chose_still_detects(tmp_path, monkeypatch) -> None:
+    from qurantext.jobs.project import job_settings
+
+    jobs_module, spec = _lecture_setup(tmp_path, monkeypatch)
+    jobs_module.run_matching(replace(spec, studied_surah=None))
+    project = jobs_module.run_matching(replace(spec, studied_surah=None))
+    assert job_settings(project).studied_surah is None
+    assert "studied_surah" not in project.export
 
 
 def test_surah_names_come_from_a_built_store_and_nothing_breaks_without_one(
