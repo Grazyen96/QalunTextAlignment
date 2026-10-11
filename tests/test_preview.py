@@ -8,6 +8,7 @@ nearly free.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -138,18 +139,8 @@ def test_a_missing_match_file_says_so(tmp_path) -> None:
         render_preview(PreviewRequest(matches=tmp_path / "nope.json", output=tmp_path / "p.png"))
 
 
-def test_the_preview_colours_match_the_renderer(tmp_path) -> None:
-    """The PNG must not come out with its channels swapped.
-
-    render_frame_pillow hands back BGR for the encoder; a PNG wants RGB. The
-    card is a light grey on a near-black ground, so a swap would be invisible
-    there — check against the gold highlight instead, which is strongly warm.
-    """
-    import numpy as np
-    from PIL import Image
-
-    from qurantext.core.frame_renderer import COLOUR_HIGHLIGHT_WORD
-
+def _highlight_matches(tmp_path):
+    """One card whose middle word is highlighted at 1.5s."""
     matches = tmp_path / "m.json"
     matches.write_text(
         json.dumps(
@@ -177,9 +168,31 @@ def test_the_preview_colours_match_the_renderer(tmp_path) -> None:
         ),
         encoding="utf-8",
     )
+    return matches
+
+
+def _pixels(path):
+    import numpy as np
+    from PIL import Image
+
+    with Image.open(path) as image:
+        return np.array(image.convert("RGB")).reshape(-1, 3).astype(int)
+
+
+def test_the_preview_colours_match_the_renderer(tmp_path) -> None:
+    """The PNG must not come out with its channels swapped.
+
+    render_frame_pillow hands back BGR for the encoder; a PNG wants RGB. The
+    card is a light grey on a near-black ground, so a swap would be invisible
+    there — check against the gold highlight instead, which is strongly warm.
+    """
+    import numpy as np
+
+    from qurantext.core.frame_renderer import COLOUR_HIGHLIGHT_WORD
+
     result = render_preview(
         PreviewRequest(
-            matches=matches,
+            matches=_highlight_matches(tmp_path),
             output=tmp_path / "p.png",
             at=1.5,
             width=480,
@@ -187,9 +200,59 @@ def test_the_preview_colours_match_the_renderer(tmp_path) -> None:
             font_file=DEFAULT_FONT_PATH,
         )
     )
-    with Image.open(result.output) as image:
-        pixels = np.array(image.convert("RGB")).reshape(-1, 3).astype(int)
+    pixels = _pixels(result.output)
 
     gold = np.array(COLOUR_HIGHLIGHT_WORD[:3])
     distance = np.abs(pixels - gold).sum(axis=1)
     assert (distance < 40).any(), "the gold highlight is missing or its channels are swapped"
+
+
+def test_preview_uses_the_requested_look(tmp_path) -> None:
+    import numpy as np
+
+    from qurantext.core.frame_renderer import COLOUR_HIGHLIGHT_WORD
+    from qurantext.core.looks import NIGHT_GOLD
+
+    look = replace(NIGHT_GOLD, highlight_word=(255, 0, 255, 255))
+    result = render_preview(
+        PreviewRequest(
+            matches=_highlight_matches(tmp_path),
+            output=tmp_path / "p.png",
+            at=1.5,
+            width=480,
+            height=320,
+            font_file=DEFAULT_FONT_PATH,
+            look=look,
+        )
+    )
+    pixels = _pixels(result.output)
+
+    magenta = np.abs(pixels - np.array([255, 0, 255])).sum(axis=1)
+    gold = np.abs(pixels - np.array(COLOUR_HIGHLIGHT_WORD[:3])).sum(axis=1)
+    assert (magenta < 40).any(), "the requested highlight colour is missing"
+    assert not (gold < 40).any(), "the default gold highlight was drawn instead"
+    assert result.look_warnings == ()
+
+
+def test_preview_reports_a_missing_background_image(tmp_path) -> None:
+    from qurantext.core.looks import NIGHT_GOLD, Background
+
+    background = Background(
+        "image",
+        NIGHT_GOLD.background.colour,
+        NIGHT_GOLD.background.colour2,
+        image=tmp_path / "gone.png",
+    )
+    result = render_preview(
+        PreviewRequest(
+            matches=_matches(tmp_path),
+            output=tmp_path / "p.png",
+            at=3.0,
+            width=240,
+            height=180,
+            font_file=DEFAULT_FONT_PATH,
+            look=replace(NIGHT_GOLD, background=background),
+        )
+    )
+    assert result.look_warnings == ("image_missing",)
+    assert result.output.exists() and result.output.stat().st_size > 0

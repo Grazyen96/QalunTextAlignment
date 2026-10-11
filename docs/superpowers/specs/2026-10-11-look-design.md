@@ -85,13 +85,18 @@ A **Look** panel in the review window, beside the frame preview. Every change re
     `_store_path` and `_resolve_path` rule.
 - `contrast_ratio(fg, bg)` (WCAG 2.x) and `readability_warnings(look, background_mean) -> list[str]`,
   returning message keys rather than text.
-- `look_from_project_style(style: dict, base_dir) -> Look`: an empty dict gives `NIGHT_GOLD`.
+- `look_from_style(style: dict | None, *, base_dir=None) -> Look`: an empty dict gives `NIGHT_GOLD`.
+  `merge_style(style, look, *, relative_to=None) -> dict` writes a look into a style, keeping the
+  keys that are not a look's.
 
 ### 3.2 `qurantext/core/backgrounds.py` (new)
 
-- `base_layer(look, width, height) -> PIL.Image (RGBA)`: the background (built-in or image, then
-  blur, then dim) with the card panel and its border composited on top at the frame layout's card
-  box. The card box is passed in from the caller's `_frame_layout` result.
+- `base_layer(look, width, height, card_box, radius) -> BaseLayer`: the background (built-in or
+  image, then blur, then dim) with the card panel and its border composited on top at the frame
+  layout's card box. The card box and radius are passed in from the caller's `_frame_layout` result.
+  `BaseLayer` holds the RGBA `image` (shared: copy before drawing), the background's `mean` and the
+  `warnings` tuple. `frame_renderer.frame_base_layer(look, width, height, *, reserve_caption_band)`
+  computes the card box and radius for the review window.
 - The cache key is what the layer draws: `(look.background, look.card, look.card_border,
   look.base_preset, width, height, card_box, radius)`. `base_preset` is there because it picks the
   fallback background. Text and caption colours are not in the key, so editing them is a cache hit.
@@ -102,8 +107,9 @@ A **Look** panel in the review window, beside the frame preview. Every change re
   holds the photo cover-fitted to the frame, with its alpha kept and no blur applied. Blur and dim
   are applied to the frame-size image when the base layer is built, so a blur, dim or card-colour
   change never decodes the file again. Transparent areas of the photo show `background.colour`
-  (made opaque), composited in at layer build before blur and dim. A JPEG decodes at a reduced
-  scale (Pillow's `draft()`) when that still covers the frame.
+  (made opaque), composited in at layer build before blur and dim. A JPEG (including the
+  multi-picture "MPO" JPEGs phones and cameras write) decodes at a reduced scale (Pillow's
+  `draft()`) when that still covers the frame.
 - `background_mean(look, width, height) -> RGB` feeds the contrast check.
 - An image that is missing or fails to decode raises nothing. The layer uses the base preset's
   built-in background and reports the problem through a returned `warnings` list, or a sibling
@@ -111,8 +117,10 @@ A **Look** panel in the review window, beside the frame preview. Every change re
 
 ### 3.3 Renderer (`core/frame_renderer.py`)
 
-- `render_frame_pillow(..., look: Look = NIGHT_GOLD)`. The frame starts as a copy of
-  `base_layer(...)` instead of `new(COLOUR_BG)` plus `draw_rounded_rectangle`.
+- `render_frame_pillow(..., look: Look = NIGHT_GOLD, base: BaseLayer | None = None)`. The frame
+  starts as a copy of `base_layer(...)` instead of `new(COLOUR_BG)` plus `draw_rounded_rectangle`.
+  The export loop fetches the layer once before FFmpeg starts and hands it to every frame as `base`,
+  so a layer evicted from the shared cache mid-render is never rebuilt for later frames.
 - Every `COLOUR_*` use reads from `look`. This covers the header, body, highlight, subtle, debug,
   placeholder, caption strip, caption spoken, active and upcoming colours. The module constants stay
   as `NIGHT_GOLD`'s source values, for compatibility.
@@ -130,6 +138,10 @@ A **Look** panel in the review window, beside the frame preview. Every change re
   unchanged, because the slot already exists and unknown keys are already preserved.
 - `content_hash()` includes `style` **only when it is non-empty**. Changing the look marks a render
   stale, and every existing project keeps its current hash.
+- `jobs/look_assets.py` holds the project-side helpers: `project_look(project) -> Look`,
+  `set_project_look(project, look)` (choosing `NIGHT_GOLD` removes the look keys, so the style and
+  hash return to what they were), `has_own_look(project)` (the style holds a look key: `preset`,
+  `colours` or `background`) and `import_look_image(project_path, source) -> Path`.
 - Importing the user's image copies it into `<project stem>.look/<sha256[:12]>.<ext>` beside the
   project file, and the style stores the relative path. Moving or sharing the project folder keeps
   the image. Re-importing the same file reuses the same copy. Old copies are not garbage-collected:
@@ -137,7 +149,11 @@ A **Look** panel in the review window, beside the frame preview. Every change re
 - `RenderRequest` gains `look: Look = NIGHT_GOLD`. `jobs/render.py` builds it from the project, and
   the still-frame preview (`jobs/preview.py`) and the review window's `FrameView` pass the same look.
 - The CLI's render and preview commands get `--look <preset>`, with choices from `PRESETS`. It is
-  applied when the project has no style of its own.
+  applied when the project has no look of its own; when it has one, the project's look wins and the
+  CLI says it ignored `--look`. A render of the project's own look records the project's own hash,
+  whatever form its stored style takes.
+- A re-match whose content changed carries the earlier project's style (its look) into the new
+  project; the backup keeps the old file. The default look seeds only brand-new projects.
 
 ### 3.5 GUI
 

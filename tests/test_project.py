@@ -7,6 +7,7 @@ and read back from the store.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 
@@ -215,6 +216,30 @@ def test_a_render_is_stale_only_after_the_content_changes(tmp_path) -> None:
 
     reloaded.cards[0]["start_time"] = 0.5
     assert reloaded.render_is_stale is True
+
+
+def test_empty_style_keeps_the_existing_hash(tmp_path) -> None:
+    project = _project(tmp_path)
+    assert project.style == {}
+    payload = json.dumps(
+        {"cards": project.cards, "captions": [cue.to_dict() for cue in project.captions]},
+        sort_keys=True,
+        ensure_ascii=False,
+        default=str,
+    )
+    assert project.content_hash() == hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def test_a_look_change_makes_a_render_stale(tmp_path) -> None:
+    project = _project(tmp_path)
+    project.record_render(tmp_path / "v.mp4", preset="social", basmala_offset_s=0.0)
+    assert project.render_is_stale is False
+
+    project.style = {"preset": "emerald"}
+    assert project.render_is_stale is True
+
+    project.style = {}
+    assert project.render_is_stale is False
 
 
 def test_mark_reviewed_records_state_and_time(tmp_path) -> None:

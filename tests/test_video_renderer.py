@@ -933,3 +933,76 @@ def test_overlapping_captions_the_renderer_the_preview_and_the_review_agree(
     reviewed = session.project.captions[session.caption_at(at)].text
 
     assert rendered == previewed == reviewed == "second"
+
+
+def test_write_frame_video_hands_one_layer_to_every_frame(monkeypatch, tmp_path) -> None:
+    """The layer is fetched once; an eviction mid-render cannot rebuild it for later frames."""
+    import io
+
+    import numpy as np
+
+    from qurantext.core import backgrounds
+    from qurantext.core.looks import PRESETS
+
+    builds = []
+    real_base_layer = backgrounds.base_layer
+
+    def counting_base_layer(*args, **kwargs):
+        builds.append(args)
+        return real_base_layer(*args, **kwargs)
+
+    seen = []
+
+    def fake_frame(t, match, width, height, font_file, **kwargs):
+        seen.append(kwargs.get("base"))
+        backgrounds.clear_cache()  # another surface evicts the layer mid-render
+        return np.zeros((height, width, 3), np.uint8)
+
+    class _Encoder:
+        stdin = io.BytesIO()
+        returncode = 0
+
+        def wait(self):
+            return 0
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(backgrounds, "base_layer", counting_base_layer)
+    monkeypatch.setattr(frame_renderer, "render_frame_pillow", fake_frame)
+    monkeypatch.setattr(frame_renderer, "_start_frame_encoder", lambda *a, **k: _Encoder())
+    captions = [
+        {"start": 0.0, "end": 0.5, "text": "one"},
+        {"start": 0.5, "end": 1.0, "text": "two"},
+    ]
+    frame_renderer.write_frame_video(
+        [],
+        1.0,
+        tmp_path / "a.m4a",
+        tmp_path / "o.mp4",
+        32,
+        24,
+        10,
+        _BUNDLED_FONT,
+        captions=captions,
+        log_path=tmp_path / "enc.log",
+        look=PRESETS["ocean"],
+    )
+    backgrounds.clear_cache()
+    assert len(seen) >= 2
+    assert all(base is seen[0] for base in seen) and seen[0] is not None
+    assert len(builds) == 1
+
+
+@pytest.mark.skipif(not _BUNDLED_FONT.exists(), reason="needs the bundled font")
+def test_render_frame_pillow_draws_on_the_layer_it_is_handed() -> None:
+    import numpy as np
+
+    from qurantext.core.looks import NIGHT_GOLD, PRESETS
+
+    ocean = frame_renderer.frame_base_layer(PRESETS["ocean"], 120, 80, reserve_caption_band=True)
+    handed = render_frame_pillow(0.0, None, 120, 80, _BUNDLED_FONT, look=NIGHT_GOLD, base=ocean)
+    looked_up = render_frame_pillow(0.0, None, 120, 80, _BUNDLED_FONT, look=NIGHT_GOLD)
+    corner = np.array(ocean.image.convert("RGB"))[0, 0][::-1]  # the frame is BGR
+    assert tuple(handed[0, 0]) == tuple(corner)
+    assert tuple(handed[0, 0]) != tuple(looked_up[0, 0])

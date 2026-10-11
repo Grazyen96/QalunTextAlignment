@@ -245,6 +245,27 @@ def test_a_rotated_jpeg_decodes_reduced_and_upright(tmp_path: Path, monkeypatch)
     assert px[90, 25, 2] > 200 and px[90, 25, 0] < 60
 
 
+def test_a_phone_mpo_jpeg_decodes_reduced_too(tmp_path: Path, monkeypatch) -> None:
+    """Phones and cameras save multi-picture JPEGs, which Pillow names "MPO"."""
+    path = tmp_path / "phone.jpg"
+    first = Image.new("RGB", (800, 400), (255, 0, 0))
+    first.save(
+        path, format="MPO", save_all=True, append_images=[Image.new("RGB", (800, 400), "blue")]
+    )
+    assert Image.open(path).format == "MPO"
+    loaded = []
+    real_load = Image.Image.load
+
+    def spy(self):
+        loaded.append(self.size)
+        return real_load(self)
+
+    monkeypatch.setattr(Image.Image, "load", spy)
+    px = np.array(_image_layer(path, (100, 50)).image.convert("RGB")).astype(int)
+    assert (100, 50) in loaded and (800, 400) not in loaded  # 1/8 scale, never full size
+    assert px[25, 50, 0] > 200 and px[25, 50, 2] < 60  # the first picture, not the second
+
+
 @pytest.mark.parametrize(
     ("stored", "orientation", "target", "expected"),
     [

@@ -1146,6 +1146,7 @@ def render_frame_pillow(
     debug_detected_text: bool = False,
     reserve_caption_band: bool = True,
     look: Look = NIGHT_GOLD,
+    base: BaseLayer | None = None,
 ) -> Any:
     """Render one styled frame as a BGR numpy array for OpenCV.
 
@@ -1157,14 +1158,19 @@ def render_frame_pillow(
 
     *look* gives every colour and the background. The background and the card
     panel come from a cached base layer (see :mod:`qurantext.core.backgrounds`),
-    so each frame only draws its text on a copy of it.
+    so each frame only draws its text on a copy of it. *base* hands in that
+    layer (from :func:`frame_base_layer`, for this look, size and band), so a
+    whole render draws on the one layer it fetched up front even if another
+    surface evicts it from the cache meanwhile.
     """
     np, _, image_draw, _, _ = _frame_dependencies()
-    from qurantext.core.backgrounds import base_layer
 
     layout = _frame_layout(width, height, reserve_caption_band=reserve_caption_band)
-    radius = _card_radius(width, height)
-    image = base_layer(look, width, height, layout.card, radius).image.copy()
+    if base is None:
+        from qurantext.core.backgrounds import base_layer
+
+        base = base_layer(look, width, height, layout.card, _card_radius(width, height))
+    image = base.image.copy()
     draw = image_draw.Draw(image)
 
     if match is not None:
@@ -1431,11 +1437,11 @@ def write_frame_video(
     report_every = max(1, n_events // 10)
 
     # The layer every frame starts from, built (and any photo decoded) before
-    # FFmpeg starts; its warnings (a photo that could not be read, say) are the
-    # render's, as the frames saw them.
-    layer_warnings = frame_base_layer(
-        look, width, height, reserve_caption_band=reserve_caption_band
-    ).warnings
+    # FFmpeg starts and handed to every frame, so its warnings (a photo that
+    # could not be read, say) are the render's, as the frames saw them — even
+    # if the review window's preview evicts it from the shared cache meanwhile.
+    layer = frame_base_layer(look, width, height, reserve_caption_band=reserve_caption_band)
+    layer_warnings = layer.warnings
 
     encoder_log = log_path or output_path.with_suffix(".ffmpeg.log")
     encoder_log.parent.mkdir(parents=True, exist_ok=True)
@@ -1476,6 +1482,7 @@ def write_frame_video(
                 debug_detected_text=debug_detected_text,
                 reserve_caption_band=reserve_caption_band,
                 look=look,
+                base=layer,
             )
             # Serialise once, then hand the encoder the same bytes for every
             # frame this event covers. A latched card with no word highlight can

@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from qurantext.config.paths import QURAN_DB_PATH
+from qurantext.core.looks import NIGHT_GOLD, Look
 from qurantext.core.subtitles import (
     Cue,
     ayah_caption_cues,
@@ -72,6 +73,8 @@ class ExportRequest:
     captions: tuple[dict, ...] | None = None
     #: Ayah cards from a project file, used instead of the match file's.
     cards: tuple[dict, ...] | None = None
+    #: Colours and background of the video.
+    look: Look = NIGHT_GOLD
 
     def __post_init__(self) -> None:
         if self.subtitles not in SUBTITLE_MODES:
@@ -208,6 +211,7 @@ def export_job(
         title=request.title,
         captions=request.captions if burn_captions else (),
         cards=request.cards,
+        look=request.look,
     )
     render_result = render_video(render_request, progress=progress, cancel=cancel)
 
