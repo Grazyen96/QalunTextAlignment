@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from qurantext.core.subtitles import card_ref
-from qurantext.gui.i18n import ltr, t, time_span
+from qurantext.gui.i18n import is_rtl, ltr, t, time_span
 from qurantext.gui.review.session import CAPTION, CARD, ReviewSession
 
 __all__ = ["MANUAL_MARK", "SegmentList"]
@@ -47,6 +47,7 @@ _COLUMN_RETIMED = 3
 
 #: Marks a card placed or changed by hand, ahead of its reference.
 MANUAL_MARK = "✎"
+_RLM = "\u200f"
 
 
 class SegmentList(QTableWidget):
@@ -76,6 +77,12 @@ class SegmentList(QTableWidget):
         self._row_by_segment: dict[tuple[str, int], int] = {}
         #: The row :meth:`highlight_at` last marked as under the playhead.
         self._playhead_row: int | None = None
+        #: True while a click on a row seeks there: the playhead's row is then tinted but
+        #: not scrolled to, so the clicked row stays under the pointer (a double-click's
+        #: second press must land on the same cell to count as a double-click).
+        self._seeking_from_click = False
+        #: Whether a card's ayat may be changed from here; off while a render runs.
+        self._cards_editable = True
         self.cellClicked.connect(self._on_cell_clicked)
         self.cellDoubleClicked.connect(self._on_cell_double_clicked)
         self.itemChanged.connect(self._on_item_changed)
@@ -137,7 +144,9 @@ class SegmentList(QTableWidget):
 
         manual = kind == CARD and self._session.is_manual(index)
         if manual:
-            ref_text = f"{MANUAL_MARK} {ref_text}"
+            # In a right-to-left window an RLM leads, so the mark leads there too: the
+            # reference alone has no letter to set the cell's direction by.
+            ref_text = f"{_RLM if is_rtl() else ''}{MANUAL_MARK} {ref_text}"
         ref_item = self._set_item(row, _COLUMN_REF, ref_text, kind, index, editable=False)
         if manual:
             ref_item.setToolTip(t("segments.manual"))
@@ -182,7 +191,8 @@ class SegmentList(QTableWidget):
         tint = QColor(self.palette().highlight().color())
         tint.setAlpha(60)
         self._paint_row(row, QBrush(tint))
-        self.scrollToItem(self.item(row, _COLUMN_REF))
+        if not self._seeking_from_click:
+            self.scrollToItem(self.item(row, _COLUMN_REF))
 
     def _paint_row(self, row: int, brush: QBrush) -> None:
         # A background change is an itemChanged too; it is not a text edit.
@@ -230,7 +240,25 @@ class SegmentList(QTableWidget):
         if not 0 <= row < len(self._rows):
             return
         _kind, _index, start = self._rows[row]
-        self.seek_requested.emit(start)
+        # In a lecture the caption at a card's start is the playhead's row, listed after
+        # every card; scrolling to it would move another row under the pointer.
+        self._seeking_from_click = True
+        try:
+            self.seek_requested.emit(start)
+        finally:
+            self._seeking_from_click = False
+
+    def show_card(self, index: int) -> None:
+        """Select card *index*'s row and scroll it into view, as after the person changed it."""
+        row = self._row_by_segment.get((CARD, index))
+        if row is None:
+            return
+        self.selectRow(row)
+        self.scrollToItem(self.item(row, _COLUMN_REF))
+
+    def set_cards_editable(self, editable: bool) -> None:
+        """Offer changing a card's ayat (double-click, context menu) only while *editable*."""
+        self._cards_editable = editable
 
     def _lecture_card(self, row: int) -> int | None:
         """The card index at *row* when its ayat may be changed by hand (a lecture's), else None."""
@@ -241,25 +269,34 @@ class SegmentList(QTableWidget):
 
     def _on_cell_double_clicked(self, row: int, column: int) -> None:
         index = self._lecture_card(row) if column == _COLUMN_REF else None
-        if index is not None:
+        if index is not None and self._cards_editable:
             self.card_ayah_requested.emit(index)
 
     def context_menu_at(self, pos: QPoint) -> QMenu | None:
         """The menu for the row under *pos* (viewport coordinates), or None when it has none.
 
-        Only a lecture card's row has one, holding "Change ayah…".
+        Only a lecture card's row has one, holding "Change ayah…", which is
+        off while cards cannot be changed (a render is running).
         """
-        index = self._lecture_card(self.rowAt(pos.y()))
+        return self._menu_for_row(self.rowAt(pos.y()))
+
+    def _menu_for_row(self, row: int) -> QMenu | None:
+        index = self._lecture_card(row)
         if index is None:
             return None
         menu = QMenu(self)
         action = menu.addAction(t("segments.change_ayah"))
+        action.setEnabled(self._cards_editable)
         action.triggered.connect(lambda: self.card_ayah_requested.emit(index))
         return menu
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:  # noqa: N802 - Qt override
-        # A scroll area hands its viewport's event on, so the position is the viewport's.
-        menu = self.context_menu_at(event.pos())
+        if event.reason() == QContextMenuEvent.Reason.Keyboard:
+            # The menu key names no point: the menu is for the current row.
+            menu = self._menu_for_row(self.currentRow())
+        else:
+            # A scroll area hands its viewport's event on, so the position is the viewport's.
+            menu = self.context_menu_at(event.pos())
         if menu is None:
             event.ignore()
             return

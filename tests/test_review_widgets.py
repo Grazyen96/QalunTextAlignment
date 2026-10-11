@@ -1533,11 +1533,21 @@ def db(store):
     return store
 
 
+def _card_text(db, surah, first, last) -> str:
+    from contextlib import closing
+
+    from qurantext.data.quran_db import ayah_range_card, connect
+
+    with closing(connect(db)) as conn:
+        return ayah_range_card(conn, surah, first, last)["full_text"]
+
+
 def test_picker_defaults_and_preview(qt_app, db) -> None:
     from qurantext.gui.review.ayah_picker import AyahPicker
 
     picker = AyahPicker(surah=25, from_ayah=7, db_path=db)
     assert picker.choice() == (25, 7, 7)
+    assert picker.preview.text() == _card_text(db, 25, 7, 7), "the preview is the card's text"
     assert picker.preview.text().strip().endswith("٧")
     assert picker.ok_button.isEnabled()
 
@@ -1584,12 +1594,13 @@ def test_the_surah_box_lists_every_surah_by_name(qt_app, db) -> None:
 
 
 def test_a_long_range_preview_is_shortened(qt_app, db) -> None:
-    from qurantext.gui.i18n import t
+    from qurantext.gui.i18n import tn
     from qurantext.gui.review.ayah_picker import AyahPicker
 
     picker = AyahPicker(surah=25, from_ayah=1, to_ayah=20, db_path=db)
     assert picker.preview.text().count("\n") <= 6
-    assert picker.preview.text().endswith(t("ayah_picker.more", count=15))
+    assert picker.preview.text().endswith(tn("ayah_picker.more", 15))
+    assert picker.preview.text().endswith("…and 15 more")
 
 
 def test_the_preview_follows_the_spins(qt_app, db) -> None:
@@ -1597,8 +1608,10 @@ def test_the_preview_follows_the_spins(qt_app, db) -> None:
 
     picker = AyahPicker(surah=25, from_ayah=7, db_path=db)
     picker.from_spin.setValue(8)
-    assert picker.preview.text().strip().endswith("٨")
-    assert picker.preview.text().count("\n") == 0
+    assert picker.preview.text() == _card_text(db, 25, 8, 8)
+    picker.to_spin.setValue(10)
+    assert picker.preview.text() == _card_text(db, 25, 8, 10)
+    assert picker.preview.text().count("\n") == 2
 
 
 def test_no_store_disables_ok(qt_app, tmp_path) -> None:
@@ -1667,3 +1680,37 @@ def test_only_a_lecture_cards_ayah_cell_asks_to_change_it(qt_app) -> None:
     assert asked == [(0,)]
     caption_cell = table.visualItemRect(table.item(1, 0)).center()
     assert table.context_menu_at(caption_cell) is None
+
+
+def test_a_store_missing_a_surah_leaves_ok_off(qt_app, db, tmp_path) -> None:
+    """Readable but incomplete: the preview could be drawn, yet no card is chosen from it."""
+    import shutil
+    import sqlite3
+
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.ayah_picker import AyahPicker
+
+    partial = tmp_path / "partial.sqlite"
+    shutil.copyfile(db, partial)
+    conn = sqlite3.connect(partial)
+    with conn:
+        conn.execute("DELETE FROM surahs WHERE surah_num = 114")
+    conn.close()
+    picker = AyahPicker(surah=25, from_ayah=7, db_path=partial)
+    assert not picker.ok_button.isEnabled()
+    assert picker.preview.text() == t("ayah_picker.no_store")
+
+
+def test_a_hand_made_card_leads_with_its_mark_in_arabic(qt_app) -> None:
+    from pathlib import Path
+
+    from qurantext.gui.i18n import set_language
+    from qurantext.gui.review.segment_list import MANUAL_MARK, SegmentList
+    from qurantext.gui.review.session import ReviewSession
+    from qurantext.jobs.project import Project
+
+    card = {"surah_num": 25, "from_ayah": 8, "to_ayah": 9, "start_time": 1.0, "end_time": 2.0}
+    project = Project(audio=Path("d.mp3"), mode="lecture", cards=[dict(card, manual=True)])
+    set_language("ar")
+    table = SegmentList(ReviewSession(project))
+    assert table.item(0, 0).text() == f"\u200f{MANUAL_MARK} 25:8-9"

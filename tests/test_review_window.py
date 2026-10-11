@@ -1568,26 +1568,30 @@ def db(store):
     return store
 
 
-def _quoting_lecture_window(qt_app, tmp_path, db):
+def _quote(surah, ayah, start, end, text="نص"):
+    return {
+        "surah_num": surah,
+        "from_ayah": ayah,
+        "to_ayah": ayah,
+        "text": text,
+        "full_text": text,
+        "confidence": 0.9,
+        "start_time": start,
+        "end_time": end,
+    }
+
+
+def _quoting_lecture_window(qt_app, tmp_path, db, *, cards=None, captions=()):
     """A 100 s lecture quoting 25:7 at 10–20 s and 25:8 at 30–40 s (the session tests' lecture)."""
     from qurantext.gui.review.window import ReviewWindow
 
-    def card(ayah, start, text):
-        return {
-            "surah_num": 25,
-            "from_ayah": ayah,
-            "to_ayah": ayah,
-            "text": text,
-            "full_text": text,
-            "confidence": 0.9,
-            "start_time": start,
-            "end_time": start + 10.0,
-        }
-
+    if cards is None:
+        cards = [
+            _quote(25, 7, 10.0, 20.0, "وقالوا مال هذا الرسول"),
+            _quote(25, 8, 30.0, 40.0, "أو يلقى إليه كنز"),
+        ]
     project = Project(
-        audio=tmp_path / "missing.mp3",
-        mode="lecture",
-        cards=[card(7, 10.0, "وقالوا مال هذا الرسول"), card(8, 30.0, "أو يلقى إليه كنز")],
+        audio=tmp_path / "missing.mp3", mode="lecture", cards=cards, captions=list(captions)
     )
     save_project(project, tmp_path / "dars.qalun.json")
     window = ReviewWindow(project, player=FakePlayer(duration=100.0, now=_Now()), db_path=db)
@@ -1607,6 +1611,7 @@ def _picker_answers(monkeypatch, choice, *, accept=True) -> list:
         opened.append(
             (picker.surah_box.currentData(), picker.from_spin.value(), picker.to_spin.value())
         )
+        picker.playing_while_open = picker.parent().player.is_playing()
         return QDialog.DialogCode.Accepted if accept else QDialog.DialogCode.Rejected
 
     monkeypatch.setattr(AyahPicker, "exec", answer)
@@ -1646,15 +1651,86 @@ def test_show_ayah_inserts_at_the_playhead_and_redraws(qt_app, tmp_path, db, mon
     assert len(window.session.project.cards) == 2 and not window.session.dirty
 
 
-def test_show_ayah_before_any_card_opens_on_the_studied_surah(
+def test_show_ayah_before_any_card_opens_on_the_chosen_surah(
     qt_app, tmp_path, db, monkeypatch
 ) -> None:
     window = _quoting_lecture_window(qt_app, tmp_path, db)
-    window.studied_surah_box.setCurrentIndex(window.studied_surah_box.findData(25))
+    window.studied_surah_box.setCurrentIndex(window.studied_surah_box.findData(3))
+    opened = _picker_answers(monkeypatch, (25, 1, 1), accept=False)
+    window.seek(2.0)
+    window.show_ayah_button.click()
+    assert opened == [(3, 1, 1)], "the chosen surah, though 25 is the one heard"
+
+
+def test_show_ayah_before_any_card_opens_on_the_guessed_surah(
+    qt_app, tmp_path, db, monkeypatch
+) -> None:
+    """Left on "Detect automatically", the picker opens on the surah the cards keep to."""
+    cards = [_quote(2, 255, 5.0, 6.0), _quote(25, 7, 10.0, 20.0), _quote(25, 8, 30.0, 40.0)]
+    window = _quoting_lecture_window(qt_app, tmp_path, db, cards=cards)
+    assert window.session.studied_surah is None
     opened = _picker_answers(monkeypatch, (25, 1, 1), accept=False)
     window.seek(2.0)
     window.show_ayah_button.click()
     assert opened == [(25, 1, 1)]
+
+
+def test_show_ayah_with_no_surah_to_go_by_opens_on_al_fatiha(
+    qt_app, tmp_path, db, monkeypatch
+) -> None:
+    window = _quoting_lecture_window(qt_app, tmp_path, db, cards=[])
+    opened = _picker_answers(monkeypatch, (1, 1, 1), accept=False)
+    window.show_ayah_button.click()
+    assert opened == [(1, 1, 1)]
+
+
+@pytest.mark.parametrize("chosen", [None, 25])
+def test_show_ayah_opens_on_the_card_on_screen_not_a_hidden_quote(
+    qt_app, tmp_path, db, monkeypatch, chosen
+) -> None:
+    """A quote from another surah is off the card; the picker opens on what the frame shows."""
+    cards = [
+        _quote(25, 7, 10.0, 20.0),
+        _quote(2, 255, 22.0, 24.0),
+        _quote(25, 8, 40.0, 50.0),
+        _quote(25, 9, 60.0, 70.0),
+    ]
+    window = _quoting_lecture_window(qt_app, tmp_path, db, cards=cards)
+    if chosen is not None:
+        window.studied_surah_box.setCurrentIndex(window.studied_surah_box.findData(chosen))
+    opened = _picker_answers(monkeypatch, (25, 1, 1), accept=False)
+    window.seek(30.0)
+    window.show_ayah_button.click()
+    assert window.session.frame_inputs(30.0)[0]["from_ayah"] == 7
+    assert opened == [(25, 7, 7)]
+
+
+def test_show_ayah_opens_on_the_whole_range_on_screen(qt_app, tmp_path, db, monkeypatch) -> None:
+    cards = [dict(_quote(25, 7, 10.0, 20.0), to_ayah=9)]
+    window = _quoting_lecture_window(qt_app, tmp_path, db, cards=cards)
+    opened = _picker_answers(monkeypatch, (25, 1, 1), accept=False)
+    window.seek(15.0)
+    window.show_ayah_button.click()
+    assert opened == [(25, 7, 9)]
+
+
+def test_playback_pauses_while_the_picker_is_open(qt_app, tmp_path, db, monkeypatch) -> None:
+    from qurantext.gui.review.ayah_picker import AyahPicker
+
+    window = _quoting_lecture_window(qt_app, tmp_path, db)
+    _picker_answers(monkeypatch, (25, 7, 7), accept=False)
+    seen = []
+    answer = AyahPicker.exec
+
+    def watch(picker):
+        result = answer(picker)
+        seen.append(picker.playing_while_open)
+        return result
+
+    monkeypatch.setattr(AyahPicker, "exec", watch)
+    window.player.play()
+    window.show_ayah_button.click()
+    assert seen == [False] and not window.player.is_playing()
 
 
 def test_cancel_changes_nothing(qt_app, tmp_path, db, monkeypatch) -> None:
@@ -1726,3 +1802,121 @@ def test_a_manual_other_surah_card_shows_in_the_preview_under_a_chosen_surah(
     card, _caption, _band = window.session.frame_inputs(50.5)
     assert (card["surah_num"], card["from_ayah"]) == (2, 255)
     assert _frame_at(window, 50.5) != before
+
+
+def _send_mouse(widget, kind, point) -> None:
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QApplication
+
+    buttons = (
+        Qt.MouseButton.NoButton
+        if kind == QMouseEvent.Type.MouseButtonRelease
+        else Qt.MouseButton.LeftButton
+    )
+    event = QMouseEvent(
+        kind,
+        QPointF(point),
+        QPointF(widget.mapToGlobal(point)),
+        Qt.MouseButton.LeftButton,
+        buttons,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(widget, event)
+
+
+def test_a_real_double_click_on_a_cards_ayah_cell_opens_the_picker(
+    qt_app, tmp_path, db, monkeypatch
+) -> None:
+    """In a lecture the caption at a card's start is listed far below the cards.
+
+    The first click seeks to the card's start; if the list then scrolled to that
+    caption, the second press would land on another row and no double-click
+    would be seen (and the caption under it would be clicked instead).
+    """
+    from PySide6.QtCore import QEvent
+
+    from qurantext.jobs.project import CaptionCue
+
+    captions = [
+        CaptionCue(float(i), i + 1.0, f"w{i}", words=[{"word": f"w{i}", "start": i, "end": i + 1}])
+        for i in range(100)
+    ]
+    window = _quoting_lecture_window(qt_app, tmp_path, db, captions=captions)
+    window.resize(1280, 800)
+    window.show()
+    _spin(20)
+    opened = _picker_answers(monkeypatch, (25, 8, 8), accept=False)
+    table = window.segment_list
+    asked = []
+    table.card_ayah_requested.connect(asked.append)
+    viewport = table.viewport()
+    centre = table.visualItemRect(table.item(1, 0)).center()  # 25:8, at 30 s
+    for kind in (
+        QEvent.Type.MouseButtonPress,
+        QEvent.Type.MouseButtonRelease,
+        QEvent.Type.MouseButtonDblClick,
+        QEvent.Type.MouseButtonRelease,
+    ):
+        _send_mouse(viewport, kind, centre)
+    assert asked == [1] and opened == [(25, 8, 8)]
+    assert window.player.position() == 30.0, "the playhead stays at the card's start"
+    assert sorted({index.row() for index in table.selectedIndexes()}) == [1]
+    assert table.verticalScrollBar().value() == 0
+
+
+@pytest.mark.parametrize("language", ["en", "ar"])
+def test_a_lecture_window_fits_a_1280_px_screen_while_rendering(
+    qt_app, tmp_path, db, language
+) -> None:
+    from qurantext.gui.language import apply_language
+
+    apply_language(qt_app, language)
+    window = _quoting_lecture_window(qt_app, tmp_path, db)
+    window.show()
+    _spin(20)
+    assert window.minimumSizeHint().width() <= 1280
+    window._set_render_running(True)
+    try:
+        assert window.minimumSizeHint().width() <= 1280
+        assert not window.render_progress.isHidden() and not window.render_cancel_button.isHidden()
+    finally:
+        window._set_render_running(False)
+    assert not window.render_button.isHidden()
+
+
+def test_card_changes_wait_for_a_running_render(qt_app, tmp_path, db, monkeypatch) -> None:
+    window = _quoting_lecture_window(qt_app, tmp_path, db)
+    opened = _picker_answers(monkeypatch, (2, 255, 255))
+    table = window.segment_list
+    window._set_render_running(True)
+    try:
+        assert not window.show_ayah_button.isEnabled()
+        table.cellDoubleClicked.emit(0, 0)
+        menu = table.context_menu_at(table.visualItemRect(table.item(0, 0)).center())
+        assert not menu.actions()[0].isEnabled()
+        assert opened == []
+    finally:
+        window._set_render_running(False)
+    assert window.show_ayah_button.isEnabled()
+    menu = table.context_menu_at(table.visualItemRect(table.item(0, 0)).center())
+    assert menu.actions()[0].isEnabled()
+
+
+def test_the_card_placed_or_changed_is_selected_in_the_list(
+    qt_app, tmp_path, db, monkeypatch
+) -> None:
+    from qurantext.jobs.project import CaptionCue
+
+    captions = [CaptionCue(24.0, 28.0, "spoken", words=[])]
+    window = _quoting_lecture_window(qt_app, tmp_path, db, captions=captions)
+    _picker_answers(monkeypatch, (25, 9, 9))
+    table = window.segment_list
+    window.seek(25.0)
+    window.show_ayah_button.click()
+    assert sorted({index.row() for index in table.selectedIndexes()}) == [1]
+    assert table.item(1, 0).text().endswith("25:9")
+    table.selectRow(3)  # the caption
+    menu = table.context_menu_at(table.visualItemRect(table.item(2, 0)).center())
+    menu.actions()[0].trigger()
+    assert sorted({index.row() for index in table.selectedIndexes()}) == [2]

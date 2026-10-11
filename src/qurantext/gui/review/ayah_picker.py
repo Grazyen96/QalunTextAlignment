@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
 
 from qurantext.config.paths import DEFAULT_FONT_PATH, QURAN_DB_PATH
 from qurantext.data.quran_db import ayah_range_card, connect, list_surahs
-from qurantext.gui.i18n import plain_title, t
+from qurantext.gui.i18n import plain_title, t, tn
 from qurantext.gui.surahs import surah_label
 from qurantext.jobs.project import SURAH_COUNT
 
@@ -167,11 +167,14 @@ class AyahPicker(QDialog):
         """Show *surah*'s *from_ayah*–*to_ayah*, clamped to what the surah has."""
         if self._surahs is None:
             # No store: nothing to count ayat by or to preview, so nothing to choose.
-            for widget in (self.surah_box, self.from_spin, self.to_spin, self.ok_button):
+            for widget in (self.surah_box, self.from_spin, self.to_spin):
                 widget.setEnabled(False)
-            index = self.surah_box.findData(surah)
-            self.surah_box.setCurrentIndex(max(0, index))
-            self.preview.setText(t("ayah_picker.no_store"))
+            blocked = self.surah_box.blockSignals(True)
+            try:
+                self.surah_box.setCurrentIndex(max(0, self.surah_box.findData(surah)))
+            finally:
+                self.surah_box.blockSignals(blocked)
+            self._preview_unavailable()
             return
         blocked = self.surah_box.blockSignals(True)
         try:
@@ -225,6 +228,9 @@ class AyahPicker(QDialog):
 
     def _show_preview(self) -> None:
         """The card's text for the chosen range, the first few ayat of a long one."""
+        if self._surahs is None:
+            self._preview_unavailable()  # never a preview, nor OK, from a store not read
+            return
         surah, first, last = self.choice()
         try:
             conn = connect(self._db_path)
@@ -242,7 +248,7 @@ class AyahPicker(QDialog):
         lines = text.split("\n")
         if len(lines) > PREVIEW_LINES:
             more = len(lines) - PREVIEW_LINES
-            lines = [*lines[:PREVIEW_LINES], t("ayah_picker.more", count=more)]
+            lines = [*lines[:PREVIEW_LINES], tn("ayah_picker.more", more)]
         self.preview.setText("\n".join(lines))
         self.ok_button.setEnabled(True)
 

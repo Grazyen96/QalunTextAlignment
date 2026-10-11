@@ -990,3 +990,10 @@ def test_of_two_equally_near_cards_the_one_that_lasts_is_changed(lecture_session
     refs = _refs(lecture_session)
     assert i == 2 and refs[2] == (2, 255, 255, 30.02, 40.0, True)
     assert refs[1][:3] == (25, 8, 8) and not refs[1][5], "the flash card is left alone"
+
+
+def test_the_guessed_studied_surah_is_the_one_the_frame_keeps_to(lecture_session) -> None:
+    project = lecture_session.project
+    project.cards.insert(0, dict(project.cards[0], surah_num=2, start_time=1.0, end_time=2.0))
+    assert lecture_session.guessed_studied_surah == 25
+    assert ReviewSession(_recitation()).guessed_studied_surah is None

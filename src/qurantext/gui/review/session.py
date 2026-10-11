@@ -38,6 +38,7 @@ from qurantext.core.timing_edit import (
 )
 from qurantext.core.video_common import (
     cards_on_screen,
+    guessed_studied_surah,
     has_surah_cards,
     is_manual_card,
     validated_matches,
@@ -814,6 +815,18 @@ class ReviewSession:
     def studied_surah(self) -> int | None:
         """The surah a lecture's cards keep to; None while it is guessed."""
         return _studied_surah(self.project)
+
+    @property
+    def guessed_studied_surah(self) -> int | None:
+        """The surah a lecture's cards keep to while none is chosen, by number; else None.
+
+        The same guess the frame and the export make (``cards_on_screen``); None
+        outside a lecture and when no detected card names a surah by number.
+        """
+        if str(self.project.mode).lower() != "lecture":
+            return None
+        guess = guessed_studied_surah(self.project.cards)
+        return guess if isinstance(guess, int) and not isinstance(guess, bool) else None
 
     def set_studied_surah(self, surah: int | None) -> None:
         """Choose the surah a lecture's cards keep to (None: guess it); one undo step."""

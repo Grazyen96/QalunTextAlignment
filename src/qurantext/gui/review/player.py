@@ -267,7 +267,13 @@ class QtPlayer(Player):
         self._media_player.setPosition(int(seconds * 1000))
 
     def position(self) -> float:
-        return max(0.0, min(self._clock.position(), self._duration))
+        """The playhead, within the recording once its length is known.
+
+        Before that (a recording that is missing, or not read yet) the length
+        is 0, and clamping to it would put every edit made at the playhead at 0 s.
+        """
+        position = max(0.0, self._clock.position())
+        return min(position, self._duration) if self._duration > 0 else position
 
     def is_playing(self) -> bool:
         return self._media_player.playbackState() == self._playing_state
