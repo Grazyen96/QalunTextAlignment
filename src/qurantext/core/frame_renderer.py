@@ -12,6 +12,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from qurantext.core.backgrounds import BaseLayer, base_layer
+from qurantext.core.looks import NIGHT_GOLD, Look
 from qurantext.core.video_common import (
     ayah_label,
     get_audio_duration,
@@ -378,7 +380,11 @@ def paginate_lines(
 
 
 def draw_rounded_rectangle(
-    image: Any, box: tuple[int, int, int, int], radius: int, fill: tuple[int, int, int, int]
+    image: Any,
+    box: tuple[int, int, int, int],
+    radius: int,
+    fill: tuple[int, int, int, int],
+    outline: tuple[int, int, int, int] = COLOUR_CARD_BORDER,
 ) -> None:
     """Draw a semi-transparent rounded rectangle using Pillow."""
     _, image_module, image_draw, _, _ = _frame_dependencies()
@@ -386,7 +392,7 @@ def draw_rounded_rectangle(
     draw = image_draw.Draw(overlay, "RGBA")
 
     if hasattr(draw, "rounded_rectangle"):
-        draw.rounded_rectangle(box, radius=radius, fill=fill, outline=COLOUR_CARD_BORDER, width=2)
+        draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=2)
     else:
         x0, y0, x1, y1 = box
         draw.rectangle((x0 + radius, y0, x1 - radius, y1), fill=fill)
@@ -860,6 +866,8 @@ def _draw_ayah_card(
     height: int,
     font_file: Path,
     debug_detected_text: bool,
+    *,
+    look: Look = NIGHT_GOLD,
 ) -> None:
     """Draw the surah/ayah header plus the (paged, highlighted) ayah body."""
     content = _card_content(draw, match, layout, height, font_file, debug_detected_text)
@@ -887,7 +895,7 @@ def _draw_ayah_card(
         display_lines = body_pages[0] if body_pages else []
 
     draw_centered_multiline_text(
-        draw, [content.header_text], content.header_font, content.header_box, COLOUR_HEADER_TEXT, 0
+        draw, [content.header_text], content.header_font, content.header_box, look.header_text, 0
     )
 
     # _word_timings carries one entry per canonical (non-marker) word, aligned
@@ -907,9 +915,10 @@ def _draw_ayah_card(
         display_lines,
         content.body_font,
         content.body_box,
-        COLOUR_BODY_TEXT,
+        look.body_text,
         content.body_spacing,
         highlight_word_idx=_highlight_idx,
+        highlight_fill=look.highlight_word,
     )
 
     if debug_detected_text and content.debug_lines and content.debug_font is not None:
@@ -925,7 +934,7 @@ def _draw_ayah_card(
             (card_x0 + ((card_width - label_width) / 2), label_y),
             debug_label,
             font=label_font,
-            fill=COLOUR_SUBTLE,
+            fill=look.subtle,
             direction="rtl",
             align="center",
         )
@@ -940,7 +949,7 @@ def _draw_ayah_card(
             content.debug_lines,
             content.debug_font,
             debug_box,
-            COLOUR_DEBUG_TEXT,
+            look.debug_text,
             debug_spacing,
         )
 
@@ -952,6 +961,8 @@ def _draw_placeholder(
     height: int,
     font_file: Path,
     subtitle: str = "",
+    *,
+    look: Look = NIGHT_GOLD,
 ) -> None:
     """Draw the centre placeholder shown before the first ayah is detected.
 
@@ -974,7 +985,7 @@ def _draw_placeholder(
             min_size=max(18, int(height * PLACEHOLDER_FONT_MIN_RATIO)),
         )
         spacing = max(4, int(font.size * LINE_SPACING_RATIO))
-        draw_centered_multiline_text(draw, lines, font, box, COLOUR_PLACEHOLDER_TEXT, spacing)
+        draw_centered_multiline_text(draw, lines, font, box, look.placeholder_text, spacing)
         return
 
     inner_w = box[2] - box[0]
@@ -1011,10 +1022,10 @@ def _draw_placeholder(
     sub_box = (box[0], top + title_h + gap, box[2], top + title_h + gap + sub_h)
 
     draw_centered_multiline_text(
-        draw, title_lines, title_font, title_box, COLOUR_HEADER_TEXT, title_spacing
+        draw, title_lines, title_font, title_box, look.header_text, title_spacing
     )
     draw_centered_multiline_text(
-        draw, sub_lines, sub_font, sub_box, COLOUR_PLACEHOLDER_TEXT, sub_spacing
+        draw, sub_lines, sub_font, sub_box, look.placeholder_text, sub_spacing
     )
 
 
@@ -1053,6 +1064,7 @@ def _draw_caption(
     *,
     word_timings: list[dict[str, Any]] | None = None,
     t: float = 0.0,
+    look: Look = NIGHT_GOLD,
 ) -> None:
     """Draw the live-transcript caption inside the bottom band.
 
@@ -1066,7 +1078,7 @@ def _draw_caption(
 
     overlay = image_module.new("RGBA", image.size, (0, 0, 0, 0))
     overlay_draw = image_draw.Draw(overlay, "RGBA")
-    overlay_draw.rectangle((bx0, by0, bx1, by1), fill=COLOUR_CAPTION_BG)
+    overlay_draw.rectangle((bx0, by0, bx1, by1), fill=look.caption_bg)
     image.alpha_composite(overlay)
 
     pad_x = int(width * CAPTION_PADDING_X_RATIO)
@@ -1097,9 +1109,19 @@ def _draw_caption(
     )
     spacing = max(4, int(font.size * LINE_SPACING_RATIO))
     if word_timings:
-        draw_caption_progressive(draw, lines, font, text_box, spacing, local_active)
+        draw_caption_progressive(
+            draw,
+            lines,
+            font,
+            text_box,
+            spacing,
+            local_active,
+            spoken_fill=look.caption_text,
+            active_fill=look.caption_active,
+            upcoming_fill=look.caption_upcoming,
+        )
     else:
-        draw_centered_multiline_text(draw, lines, font, text_box, COLOUR_CAPTION_TEXT, spacing)
+        draw_centered_multiline_text(draw, lines, font, text_box, look.caption_text, spacing)
 
 
 def render_frame_pillow(
@@ -1115,6 +1137,7 @@ def render_frame_pillow(
     placeholder_subtitle: str = "",
     debug_detected_text: bool = False,
     reserve_caption_band: bool = True,
+    look: Look = NIGHT_GOLD,
 ) -> Any:
     """Render one styled frame as a BGR numpy array for OpenCV.
 
@@ -1123,17 +1146,19 @@ def render_frame_pillow(
     has been detected yet — and a bottom band showing the live transcript
     *caption_text* for the current moment. When *reserve_caption_band* is False
     the band is dropped and the card centres in the full frame.
-    """
-    np, image_module, image_draw, _, _ = _frame_dependencies()
-    image = image_module.new("RGBA", (width, height), COLOUR_BG)
-    layout = _frame_layout(width, height, reserve_caption_band=reserve_caption_band)
 
-    radius = max(18, int(min(width, height) * CARD_RADIUS_RATIO))
-    draw_rounded_rectangle(image, layout.card, radius, COLOUR_CARD)
+    *look* gives every colour and the background. The background and the card
+    panel come from a cached base layer (see :mod:`qurantext.core.backgrounds`),
+    so each frame only draws its text on a copy of it.
+    """
+    np, _, image_draw, _, _ = _frame_dependencies()
+    layout = _frame_layout(width, height, reserve_caption_band=reserve_caption_band)
+    radius = _card_radius(width, height)
+    image = base_layer(look, width, height, layout.card, radius).image.copy()
     draw = image_draw.Draw(image)
 
     if match is not None:
-        _draw_ayah_card(draw, t, match, layout, height, font_file, debug_detected_text)
+        _draw_ayah_card(draw, t, match, layout, height, font_file, debug_detected_text, look=look)
     else:
         _draw_placeholder(
             draw,
@@ -1142,6 +1167,7 @@ def render_frame_pillow(
             height,
             font_file,
             subtitle=placeholder_subtitle,
+            look=look,
         )
 
     if caption_text:
@@ -1155,11 +1181,24 @@ def render_frame_pillow(
             font_file,
             word_timings=caption_word_timings,
             t=t,
+            look=look,
         )
 
     rgb = image.convert("RGB")
     frame = np.array(rgb)
     return frame[:, :, ::-1].copy()
+
+
+def _card_radius(width: int, height: int) -> int:
+    return max(18, int(min(width, height) * CARD_RADIUS_RATIO))
+
+
+def frame_base_layer(
+    look: Look, width: int, height: int, *, reserve_caption_band: bool
+) -> BaseLayer:
+    """The cached background + card this look draws at this size (for the review window)."""
+    layout = _frame_layout(width, height, reserve_caption_band=reserve_caption_band)
+    return base_layer(look, width, height, layout.card, _card_radius(width, height))
 
 
 def _body_pages(
@@ -1266,7 +1305,8 @@ def write_frame_video(
     log_path: Path | None = None,
     progress: ProgressCallback | None = None,
     cancel: CancelToken | None = None,
-) -> None:
+    look: Look = NIGHT_GOLD,
+) -> tuple[str, ...]:
     """Render every frame and stream it into FFmpeg, producing the final MP4.
 
     The centre ayah card is *latched*: the most recently started match is shown
@@ -1415,6 +1455,7 @@ def write_frame_video(
                 placeholder_subtitle=placeholder_subtitle,
                 debug_detected_text=debug_detected_text,
                 reserve_caption_band=reserve_caption_band,
+                look=look,
             )
             # Serialise once, then hand the encoder the same bytes for every
             # frame this event covers. A latched card with no word highlight can
@@ -1468,6 +1509,10 @@ def write_frame_video(
         if not completed:
             output_path.unlink(missing_ok=True)
 
+    # The cached layer every frame was drawn from: its warnings (a photo that
+    # could not be read, say) are the render's.
+    return frame_base_layer(look, width, height, reserve_caption_band=reserve_caption_band).warnings
+
 
 def render_frame_video(
     audio_path: Path,
@@ -1483,8 +1528,15 @@ def render_frame_video(
     title: str = DEFAULT_PLACEHOLDER_TITLE,
     progress: ProgressCallback | None = None,
     cancel: CancelToken | None = None,
+    look: Look = NIGHT_GOLD,
+    look_warnings: list[str] | None = None,
 ) -> float:
-    """Render a styled frame-by-frame video with its audio. Returns the duration."""
+    """Render a styled frame-by-frame video with its audio. Returns the duration.
+
+    *look_warnings*, when given, is extended with the look's warning codes (a
+    background photo that could not be used, say), so the caller can show them
+    while the return value stays the duration.
+    """
     _frame_dependencies()
     _require_raqm_support()
     require_binary("ffmpeg", "Install FFmpeg and try again.")
@@ -1516,7 +1568,7 @@ def render_frame_video(
 
     try:
         report(progress, "render", "  Rendering frames and encoding H.264...")
-        write_frame_video(
+        codes = write_frame_video(
             valid_matches,
             duration,
             audio_path,
@@ -1531,7 +1583,10 @@ def render_frame_video(
             log_path=log_path,
             progress=progress,
             cancel=cancel,
+            look=look,
         )
+        if look_warnings is not None:
+            look_warnings.extend(codes)
     finally:
         if keep_temp:
             report(progress, "render", f"FFmpeg log kept at: {log_path}")

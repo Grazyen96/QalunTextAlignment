@@ -597,6 +597,106 @@ def test_write_frame_video_reports_ffmpeg_failure(tmp_path) -> None:
     assert "FFmpeg" in str(excinfo.value)
 
 
+# --- the look reaches every frame ----------------------------------------------
+
+
+@pytest.mark.skipif(not _BUNDLED_FONT.exists(), reason="bundled font missing")
+def test_render_frame_pillow_draws_the_highlight_in_the_looks_colour() -> None:
+    from dataclasses import replace
+
+    import numpy as np
+
+    from qurantext.core.looks import NIGHT_GOLD
+
+    magenta = (255, 0, 255, 255)
+    look = replace(NIGHT_GOLD, highlight_word=magenta)
+    match = {
+        "surah_name": "سُورَةُ الفُرقَانِ",
+        "from_ayah": 1,
+        "to_ayah": 1,
+        "_display_text": "تَبَٰرَكَ اَ۬لذِے نَزَّلَ",
+        "_start_time": 0.0,
+        "_end_time": 3.0,
+        "_word_timings": [
+            {"start": 0.0, "end": 1.0},
+            {"start": 1.0, "end": 2.0},
+            {"start": 2.0, "end": 3.0},
+        ],
+    }
+    frame = render_frame_pillow(
+        0.5, match, 540, 960, _BUNDLED_FONT, reserve_caption_band=False, look=look
+    )
+    bgr = np.array(frame)
+    assert ((bgr[:, :, 2] == 255) & (bgr[:, :, 1] == 0) & (bgr[:, :, 0] == 255)).any()
+
+
+@pytest.mark.skipif(
+    not (_FFMPEG and _FFPROBE and _BUNDLED_FONT.exists()),
+    reason="needs ffmpeg, ffprobe and the bundled font",
+)
+def test_write_frame_video_passes_the_look_to_every_frame(monkeypatch, tmp_path) -> None:
+    from qurantext.core.looks import PRESETS
+
+    seen = []
+    real = frame_renderer.render_frame_pillow
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("look"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(frame_renderer, "render_frame_pillow", spy)
+    audio = tmp_path / "silence.m4a"
+    subprocess.run(
+        [
+            _FFMPEG,
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=44100:cl=mono",
+            "-t",
+            "2",
+            "-c:a",
+            "aac",
+            str(audio),
+        ],
+        check=True,
+    )
+    matches = validated_matches(
+        [
+            {
+                "surah_num": 25,
+                "surah_name": "سُورَةُ الفُرقَانِ",
+                "from_ayah": 7,
+                "to_ayah": 7,
+                "full_text": "وَقَالُواْ مَالِ هَٰذَا اَ۬لرَّسُولِ",
+                "confidence": 0.9,
+                "start_time": 0.0,
+                "end_time": 2.0,
+            }
+        ],
+        bridge_gaps=False,
+    )
+
+    warnings = frame_renderer.write_frame_video(
+        matches,
+        2.0,
+        audio,
+        tmp_path / "out.mp4",
+        320,
+        240,
+        10,
+        _BUNDLED_FONT,
+        log_path=tmp_path / "enc.log",
+        look=PRESETS["ocean"],
+    )
+
+    assert seen and all(look is PRESETS["ocean"] for look in seen)
+    assert warnings == ()
+
+
 # --- locating helper binaries -------------------------------------------------
 
 

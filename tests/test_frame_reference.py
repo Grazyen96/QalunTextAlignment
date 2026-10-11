@@ -17,6 +17,7 @@ from PIL import features
 
 from qurantext.config.paths import DEFAULT_FONT_PATH
 from qurantext.core.frame_renderer import render_frame_pillow
+from qurantext.core.looks import NIGHT_GOLD, PRESETS
 
 FIXTURE = Path(__file__).parent / "fixtures" / "frame_reference.json"
 
@@ -93,3 +94,16 @@ def _reference() -> dict:
 @pytest.mark.parametrize("name", sorted(FRAMES))
 def test_frames_are_byte_identical_to_the_reference(name: str) -> None:
     assert digest(FRAMES[name]()) == _reference()[name]
+
+
+@pytest.mark.parametrize("name", sorted(FRAMES))
+def test_an_explicit_night_gold_is_the_reference_too(name: str) -> None:
+    assert digest(_frames(look=NIGHT_GOLD)[name]()) == _reference()[name]
+
+
+@pytest.mark.parametrize("preset", [p for p in PRESETS if p != "night_gold"])
+@pytest.mark.parametrize("name", sorted(FRAMES))
+def test_every_other_preset_renders_and_differs(preset: str, name: str) -> None:
+    frame = _frames(look=PRESETS[preset])[name]()
+    assert frame.shape[2] == 3
+    assert digest(frame) != digest(FRAMES[name]())
