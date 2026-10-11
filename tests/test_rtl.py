@@ -1,4 +1,4 @@
-"""The Arabic window: laid out right to left, except where time runs.
+"""The Arabic window: laid out right to left, and its timeline too, as in English.
 
 Every test here switches to Arabic itself, before building anything (a widget
 takes the application's direction when it is made); the autouse fixture in
@@ -145,6 +145,9 @@ def _texts(root: QWidget) -> Iterator[str]:
 
 
 def test_time_widgets_keep_left_to_right_and_the_rest_mirrors(qt_app, review_window) -> None:
+    # The timeline widgets are pinned left to right so Qt never mirrors them a
+    # second time: their right-to-left time axis is the viewport's mapping,
+    # the same in both languages.
     w = review_window
     pinned = (
         w.waveform,
@@ -162,19 +165,32 @@ def test_time_widgets_keep_left_to_right_and_the_rest_mirrors(qt_app, review_win
 
 def test_arrow_keys_step_time_the_same_way_in_arabic(qt_app, review_window) -> None:
     w = review_window
-    w.seek(5.0)
     QTest.keyClick(w, Qt.Key.Key_Left)
-    assert w.player.position() < 5.0  # Left is earlier on a left-to-right time axis
+    QTest.keyClick(w, Qt.Key.Key_Left)
+    assert w.strip.selected.word == 1  # Left is later on the right-to-left time axis
+    QTest.keyClick(w, Qt.Key.Key_Right)
+    assert w.strip.selected.word == 0
 
 
-def test_the_minus_button_sits_left_of_plus(qt_app, review_window) -> None:
+def test_the_timeline_runs_right_to_left_in_arabic(qt_app, review_window) -> None:
+    w = review_window
+    w.show()
+    qt_app.processEvents()
+    first, second = w.session.words()[:2]
+    width = w.strip.width()
+    assert w.viewport.x_for(first.start, width) > w.viewport.x_for(second.start, width)
+    assert w.viewport.t_for(width, width) == pytest.approx(w.viewport.start)
+
+
+def test_the_plus_button_sits_left_of_minus(qt_app, review_window) -> None:
     bar = review_window.selection_bar
     # The whole window, not the bar alone: a child of a hidden window stays
     # hidden, and the buttons' own row is only laid out once it shows.
     review_window.show()
     qt_app.processEvents()
-    assert bar.minus_button.x() < bar.plus_button.x()
-    assert bar.plus_button.x() < bar.snap_button.x()
+    # Earlier (−) on the right, the side of the past on the timeline.
+    assert bar.snap_button.x() < bar.plus_button.x()
+    assert bar.plus_button.x() < bar.minus_button.x()
 
 
 def test_segment_times_are_isolated_and_text_aligns_to_its_script(qt_app, review_window) -> None:

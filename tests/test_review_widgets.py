@@ -21,7 +21,27 @@ def test_viewport_maps_time_and_pixels(qt_app) -> None:
     vp.set_duration(100.0)
     vp.set_window(10.0, 20.0)
     assert vp.x_for(20.0, 400) == pytest.approx(200.0)
-    assert vp.t_for(100.0, 400) == pytest.approx(15.0)
+    # Right to left: a quarter of the way in from the left is three quarters through the window.
+    assert vp.t_for(100.0, 400) == pytest.approx(25.0)
+    assert vp.t_for(300.0, 400) == pytest.approx(15.0)
+
+
+def test_the_viewport_runs_right_to_left(qt_app) -> None:
+    vp = Viewport()
+    vp.set_duration(100.0)
+    vp.set_window(10.0, 20.0)
+    # The window's start is at the right edge, its end at the left.
+    assert vp.x_for(10.0, 400) == pytest.approx(400.0)
+    assert vp.x_for(30.0, 400) == pytest.approx(0.0)
+    assert vp.t_for(400.0, 400) == pytest.approx(10.0)
+    assert vp.t_for(0.0, 400) == pytest.approx(30.0)
+    # Later time lies further left.
+    assert vp.x_for(12.0, 400) > vp.x_for(13.0, 400)
+    # The two mappings undo each other both ways.
+    for x in (0.0, 1.0, 37.5, 200.0, 399.0, 400.0):
+        assert vp.x_for(vp.t_for(x, 400), 400) == pytest.approx(x)
+    for t in (10.0, 11.25, 20.0, 29.9, 30.0):
+        assert vp.t_for(vp.x_for(t, 400), 400) == pytest.approx(t)
 
 
 def test_viewport_clamps_and_zooms_around_an_anchor(qt_app) -> None:
@@ -56,6 +76,8 @@ def test_viewport_follows_the_playhead(qt_app) -> None:
     assert seen == []
     vp.follow(12.0)
     assert vp.start == pytest.approx(11.0)
+    # The followed playhead sits 10 % in from the right edge, the runway to its left.
+    assert vp.x_for(12.0, 500) == pytest.approx(450.0)
 
 
 def test_waveform_click_asks_to_seek(qt_app) -> None:
@@ -78,6 +100,56 @@ def test_waveform_click_asks_to_seek(qt_app) -> None:
     view.seek_requested.connect(asked.append)
     QTest.mouseClick(view, Qt.MouseButton.LeftButton, pos=QPoint(250, 45))
     assert asked and asked[0] == pytest.approx(5.0, abs=0.05)
+
+
+def test_a_click_at_the_waveforms_far_right_seeks_to_the_windows_start(qt_app) -> None:
+    from qurantext.gui.review.waveform_view import WaveformView
+
+    vp = Viewport()
+    vp.set_duration(100.0)
+    vp.set_window(30.0, 10.0)
+    view = WaveformView(vp)
+    view.resize(500, 90)
+    asked = []
+    view.seek_requested.connect(asked.append)
+    QTest.mouseClick(view, Qt.MouseButton.LeftButton, pos=QPoint(499, 45))
+    QTest.mouseClick(view, Qt.MouseButton.LeftButton, pos=QPoint(0, 45))
+    assert asked == [pytest.approx(30.0, abs=0.05), pytest.approx(40.0, abs=0.05)]
+
+
+def test_the_waveform_draws_the_windows_start_at_the_right(qt_app) -> None:
+    from PySide6.QtGui import QPalette
+
+    from qurantext.gui.review.waveform_view import WaveformView
+
+    # 10 s at 10 bins/s: loud for the first 5 s, silent after.
+    maxs = np.array([0.9] * 50 + [0.0] * 50, np.float32)
+    vp = Viewport()
+    vp.set_duration(10.0)
+    vp.set_window(0.0, 10.0)
+    view = WaveformView(vp)
+    view.resize(200, 90)
+    view.set_peaks(Peaks(mins=-maxs, maxs=maxs, rate=10.0, duration=10.0))
+    view.set_playhead(9.95)  # out of the way, at the far left
+    image = view.grab().toImage()
+    background = view.palette().color(QPalette.ColorRole.Window)
+    near_top = 10  # only a loud column reaches this high
+    assert image.pixelColor(150, near_top) != background, "the first 5 s are drawn on the right"
+    assert image.pixelColor(50, near_top) == background, "the silent last 5 s on the left"
+
+
+def test_a_playhead_at_the_windows_start_is_drawn(qt_app) -> None:
+    from qurantext.gui.colors import playhead_color
+    from qurantext.gui.review.waveform_view import WaveformView
+
+    vp = Viewport()
+    vp.set_duration(10.0)
+    vp.set_window(0.0, 10.0)
+    view = WaveformView(vp)
+    view.resize(200, 90)
+    view.set_playhead(0.0)
+    image = view.grab().toImage()
+    assert image.pixelColor(199, 45) == playhead_color(view.palette())
 
 
 def test_waveform_paints_without_peaks_and_with_gaps(qt_app) -> None:
@@ -126,16 +198,62 @@ def test_clicking_a_word_selects_it_and_seeks(qt_app) -> None:
     session, strip = _strip(qt_app)
     seeks = []
     strip.seek_requested.connect(seeks.append)
-    QTest.mouseClick(strip, Qt.MouseButton.LeftButton, pos=QPoint(250, 17))
+    QTest.mouseClick(strip, Qt.MouseButton.LeftButton, pos=QPoint(750, 17))  # 2.5 s
     assert strip.selected.word == 1 and seeks == [pytest.approx(2.0)]
+
+
+def test_the_first_word_is_drawn_at_the_right(qt_app) -> None:
+    session, strip = _strip(qt_app)
+    a, b, c = session.words()
+    # Right to left: a (1-2 s) spans x 800-900, b 700-800, c 600-700.
+    assert strip._hit_test(850) == ("body", a.ref)
+    assert strip._hit_test(750) == ("body", b.ref)
+    assert strip._hit_test(650) == ("body", c.ref)
+    assert strip._hit_test(150) is None  # 8.5 s: no word there
+    # A box's right edge is its start, its left edge its end.
+    assert strip._hit_test(900) == ("start", a.ref)
+    assert strip._hit_test(600) == ("end", c.ref)
+    # The selected word's fill covers its own box and not the earlier word's.
+    from PySide6.QtGui import QPalette
+
+    strip.select(b.ref)
+    image = strip.grab().toImage()
+    highlight = strip.palette().color(QPalette.ColorRole.Highlight)
+    assert image.pixelColor(720, 6) == highlight
+    assert image.pixelColor(880, 6) != highlight
+
+
+def test_dragging_a_words_right_edge_moves_its_start_and_left_edge_its_end(qt_app) -> None:
+    session, strip = _strip(qt_app)
+    # a (1-2 s) is x 800-900: its right edge (900, shared with no word) is its start.
+    QTest.mousePress(strip, Qt.MouseButton.LeftButton, pos=QPoint(900, 17))
+    QTest.mouseMove(strip, QPoint(880, 17))  # to the left: later
+    QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, pos=QPoint(880, 17))
+    a = session.words()[0]
+    assert (strip.selected, strip.last_edge) == (a.ref, "start")
+    assert a.start == pytest.approx(1.2, abs=0.02)
+    assert a.end == 2.0
+    # c (3-4 s) is x 600-700: its left edge (600) is its end; dragged left, it moves later.
+    QTest.mousePress(strip, Qt.MouseButton.LeftButton, pos=QPoint(600, 17))
+    QTest.mouseMove(strip, QPoint(550, 17))
+    QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, pos=QPoint(550, 17))
+    c = session.words()[2]
+    assert (strip.selected, strip.last_edge) == (c.ref, "end")
+    assert c.end == pytest.approx(4.5, abs=0.02)
+    assert c.start == 3.0
+    # A drag to the right makes the same edge earlier.
+    QTest.mousePress(strip, Qt.MouseButton.LeftButton, pos=QPoint(550, 17))
+    QTest.mouseMove(strip, QPoint(620, 17))
+    QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, pos=QPoint(620, 17))
+    assert session.words()[2].end == pytest.approx(3.8, abs=0.02)
 
 
 def test_dragging_an_edge_retimes_through_the_session_as_one_undo(qt_app) -> None:
     session, strip = _strip(qt_app)
-    QTest.mousePress(strip, Qt.MouseButton.LeftButton, pos=QPoint(200, 17))
-    for x in (210, 230, 250):
+    QTest.mousePress(strip, Qt.MouseButton.LeftButton, pos=QPoint(800, 17))
+    for x in (790, 770, 750):
         QTest.mouseMove(strip, QPoint(x, 17))
-    QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, pos=QPoint(250, 17))
+    QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, pos=QPoint(750, 17))
     words = session.words()
     assert words[1].start == pytest.approx(2.5, abs=0.02)
     assert words[0].end == pytest.approx(2.5, abs=0.02)
@@ -149,9 +267,9 @@ def test_dragging_an_edge_retimes_through_the_session_as_one_undo(qt_app) -> Non
 )
 def test_dragging_a_joined_edge_with_ctrl_or_alt_leaves_the_neighbour(qt_app, modifier) -> None:
     session, strip = _strip(qt_app)
-    QTest.mousePress(strip, Qt.MouseButton.LeftButton, modifier, QPoint(200, 17))
-    QTest.mouseMove(strip, QPoint(180, 17))
-    QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, modifier, QPoint(180, 17))
+    QTest.mousePress(strip, Qt.MouseButton.LeftButton, modifier, QPoint(800, 17))
+    QTest.mouseMove(strip, QPoint(820, 17))
+    QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, modifier, QPoint(820, 17))
     words = session.words()
     assert words[0].end == pytest.approx(1.8, abs=0.02)
     assert words[1].start == 2.0, "detached: the next word stays where it was"
@@ -160,11 +278,11 @@ def test_dragging_a_joined_edge_with_ctrl_or_alt_leaves_the_neighbour(qt_app, mo
 def test_shift_dragging_ripples_the_rest(qt_app) -> None:
     session, strip = _strip(qt_app)
     QTest.mousePress(
-        strip, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ShiftModifier, QPoint(250, 17)
+        strip, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ShiftModifier, QPoint(750, 17)
     )
-    QTest.mouseMove(strip, QPoint(300, 17))
+    QTest.mouseMove(strip, QPoint(700, 17))  # to the left: half a second later
     QTest.mouseRelease(
-        strip, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ShiftModifier, QPoint(300, 17)
+        strip, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ShiftModifier, QPoint(700, 17)
     )
     assert [w.start for w in session.words()] == pytest.approx([1.0, 2.5, 3.5], abs=0.02)
 
@@ -199,9 +317,9 @@ def test_losing_focus_mid_drag_closes_the_gesture(qt_app) -> None:
     container.show()
     qt_app.processEvents()
 
-    QTest.mousePress(strip, Qt.MouseButton.LeftButton, pos=QPoint(200, 17))
+    QTest.mousePress(strip, Qt.MouseButton.LeftButton, pos=QPoint(800, 17))
     assert strip.hasFocus(), "a press must give the strip real focus (ClickFocus policy)"
-    QTest.mouseMove(strip, QPoint(210, 17))
+    QTest.mouseMove(strip, QPoint(790, 17))
     assert session.can_undo  # the edge drag already opened a gesture
 
     other.setFocus(Qt.FocusReason.MouseFocusReason)
@@ -228,8 +346,9 @@ def test_an_edge_is_grabbed_from_eight_pixels_away(qt_app) -> None:
     session, strip = _strip(qt_app)
     first = session.words()[0]
     x_end = strip._viewport.x_for(first.end, strip.width())
-    assert strip._hit_test(x_end - 7) == ("end", first.ref)
-    assert strip._hit_test(x_end + 7)[0] in ("end", "start")
+    # Right to left, the first word's body lies to the right of its end.
+    assert strip._hit_test(x_end + 7) == ("end", first.ref)
+    assert strip._hit_test(x_end - 7)[0] in ("end", "start")
     assert strip.EDGE_PX == 8
 
 
@@ -247,7 +366,7 @@ def test_the_edge_under_the_pointer_is_highlighted_until_the_pointer_leaves(qt_a
     x_end = strip._viewport.x_for(first.end, strip.width())
     QTest.mouseMove(strip, QPoint(int(x_end), strip.height() // 2))
     assert strip.hovered_edge == ("end", first.ref)
-    QTest.mouseMove(strip, QPoint(int(x_end) + 40, strip.height() // 2))
+    QTest.mouseMove(strip, QPoint(int(x_end) - 40, strip.height() // 2))
     assert strip.hovered_edge is None
     QTest.mouseMove(strip, QPoint(int(x_end), strip.height() // 2))
     qt_app.sendEvent(strip, QEvent(QEvent.Type.Leave))
@@ -499,10 +618,10 @@ def test_the_playhead_row_is_marked_without_being_selected(qt_app) -> None:
 
 def test_an_edge_dragged_past_its_neighbour_and_back_leaves_the_neighbour(qt_app) -> None:
     session, strip = _strip(qt_app)
-    QTest.mousePress(strip, Qt.MouseButton.LeftButton, pos=QPoint(200, 17))
-    for x in (300, 350, 200):
+    QTest.mousePress(strip, Qt.MouseButton.LeftButton, pos=QPoint(800, 17))
+    for x in (700, 650, 800):
         QTest.mouseMove(strip, QPoint(x, 17))
-    QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, pos=QPoint(200, 17))
+    QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, pos=QPoint(800, 17))
     words = session.words()
     assert (words[0].end, words[1].start, words[1].end) == (2.0, 2.0, 3.0)
 
@@ -510,10 +629,10 @@ def test_an_edge_dragged_past_its_neighbour_and_back_leaves_the_neighbour(qt_app
 def test_a_ripple_dragged_past_the_clamp_and_back_ends_where_it_began(qt_app) -> None:
     session, strip = _strip(qt_app)
     shift = Qt.KeyboardModifier.ShiftModifier
-    QTest.mousePress(strip, Qt.MouseButton.LeftButton, shift, QPoint(350, 17))
-    for x in (100, 0, 350):
+    QTest.mousePress(strip, Qt.MouseButton.LeftButton, shift, QPoint(650, 17))
+    for x in (900, 1000, 650):
         QTest.mouseMove(strip, QPoint(x, 17))
-    QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, shift, QPoint(350, 17))
+    QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, shift, QPoint(650, 17))
     words = session.words()
     assert (words[1].end, words[2].start, words[2].end) == (3.0, 3.0, 4.0)
 

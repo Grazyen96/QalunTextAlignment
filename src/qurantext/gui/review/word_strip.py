@@ -12,6 +12,13 @@ the state the drag began in, so dragging back undoes what the way out did.
 The strip never writes a timing itself — every drag goes through
 :class:`ReviewSession`, which is the one place the rules about what an edit
 may do live.
+
+Time runs right to left (see :mod:`.viewport`), so a word's start is its box's
+right edge and its end the left one: dragging a box's right edge retimes its
+start, and a drag to the left moves an edge later. The edges and the ripple
+are worked out in time — the pointer's pixel goes through
+:meth:`Viewport.t_for` before anything is edited — so only the boxes and the
+hit-tests deal in screen sides, and they take left and right from the pixels.
 """
 
 from __future__ import annotations
@@ -155,6 +162,10 @@ class WordStrip(QWidget):
     # -- hit testing --------------------------------------------------------------
 
     def _edges(self) -> list[tuple]:
+        """Each visible word with its start's and its end's pixel, in time order.
+
+        Right to left, the start's pixel is the larger (the box's right edge).
+        """
         width = self.width()
         return [
             (tw, self._viewport.x_for(tw.start, width), self._viewport.x_for(tw.end, width))
@@ -174,13 +185,13 @@ class WordStrip(QWidget):
             _, later_start, _ = edges[i + 1]
             if abs(earlier_end - x) <= self.EDGE_PX and abs(later_start - x) <= self.EDGE_PX:
                 return "end", earlier.ref
-        for tw, x0, x1 in edges:
-            if abs(x0 - x) <= self.EDGE_PX:
+        for tw, x_start, x_end in edges:
+            if abs(x_start - x) <= self.EDGE_PX:
                 return "start", tw.ref
-            if abs(x1 - x) <= self.EDGE_PX:
+            if abs(x_end - x) <= self.EDGE_PX:
                 return "end", tw.ref
-        for tw, x0, x1 in edges:
-            if x0 <= x <= x1:
+        for tw, x_start, x_end in edges:
+            if x_end <= x <= x_start:
                 return "body", tw.ref
         return None
 
@@ -302,12 +313,13 @@ class WordStrip(QWidget):
             metrics = QFontMetrics(painter.font())
             playhead_ref = self._session.word_at(self._playhead)
             for tw in self._visible_words():
-                x0 = self._viewport.x_for(tw.start, width)
-                x1 = self._viewport.x_for(tw.end, width)
-                if x1 < 0 or x0 > width:
+                # Right to left: the end is the box's left edge, the start its right.
+                left = self._viewport.x_for(tw.end, width)
+                right = self._viewport.x_for(tw.start, width)
+                if right < 0 or left > width:
                     continue
-                box_width = max(2.0, x1 - x0)
-                rect = QRectF(x0, 2.0, box_width, height - 4.0)
+                box_width = max(2.0, right - left)
+                rect = QRectF(left, 2.0, box_width, height - 4.0)
                 self._paint_word(painter, metrics, rect, tw, tw.ref == playhead_ref, palette)
             handle = self._hover
             if isinstance(self._drag, _EdgeDrag):
@@ -374,6 +386,6 @@ class WordStrip(QWidget):
             selected = self._session.word(self._selected)
         except IndexError:
             return False
-        x0 = self._viewport.x_for(selected.start, width)
-        x1 = self._viewport.x_for(selected.end, width)
-        return x0 - 1.5 <= x <= x1 + 1.5
+        left = self._viewport.x_for(selected.end, width)
+        right = self._viewport.x_for(selected.start, width)
+        return left - 1.5 <= x <= right + 1.5

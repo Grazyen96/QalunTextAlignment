@@ -5,6 +5,11 @@ in that column's slice of time — many bins per column when zoomed out, at
 most one when zoomed in past the peak resolution. A click or drag anywhere on
 the widget asks to seek there; the widget never seeks itself, it only asks
 (the window wires ``seek_requested`` to the player and the viewport).
+
+Time runs right to left (see :mod:`.viewport`): the window's start is at the
+right edge. The columns are still reduced in time order and only drawn
+mirrored, and a gap band's rectangle is spanned from whichever of its two
+pixels is further left.
 """
 
 from __future__ import annotations
@@ -113,13 +118,17 @@ class WaveformView(QWidget):
                 self._paint_bars(painter, peaks, width, height, palette.windowText().color())
 
             for gap_start, gap_end in self._gaps:
-                x0 = self._viewport.x_for(gap_start, width)
-                x1 = self._viewport.x_for(gap_end, width)
-                painter.fillRect(int(x0), 0, max(1, int(x1 - x0)), height, _GAP_COLOR)
+                # The end is the left pixel: later time lies further left.
+                left = self._viewport.x_for(gap_end, width)
+                right = self._viewport.x_for(gap_start, width)
+                painter.fillRect(int(left), 0, max(1, int(right - left)), height, _GAP_COLOR)
 
-            playhead_x = self._viewport.x_for(self._playhead, width)
+            # The window's start maps to x == width, one past the last column:
+            # kept on the widget, a playhead at the start (where a review opens)
+            # is drawn rather than falling just off the right edge.
+            playhead_x = min(int(self._viewport.x_for(self._playhead, width)), width - 1)
             painter.setPen(playhead_color(palette))
-            painter.drawLine(int(playhead_x), 0, int(playhead_x), height)
+            painter.drawLine(playhead_x, 0, playhead_x, height)
         finally:
             painter.end()
 
@@ -133,21 +142,27 @@ class WaveformView(QWidget):
         mid = height / 2.0
         half = height / 2.0
         painter.setPen(color)
-        for x in range(width):
-            y_top = mid - float(col_max[x]) * half
-            y_bottom = mid - float(col_min[x]) * half
+        # Column i of the reduction is the i-th slice of time from the window's
+        # start, which right to left is the i-th pixel column from the right.
+        for i in range(width):
+            x = width - 1 - i
+            y_top = mid - float(col_max[i]) * half
+            y_bottom = mid - float(col_min[i]) * half
             painter.drawLine(x, int(y_top), x, int(y_bottom))
 
 
 def column_extremes(
     peaks: Peaks, start: float, span: float, width: int
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Each pixel column's min and max over the peak bins in its slice of ``[start, start+span]``.
+    """Each time slice's min and max over the peak bins in it, earliest slice first.
 
-    ``reduceat`` reduces from each index to the next, and the last index to
-    the end of the array — so without cutting the arrays at the window's end
-    the rightmost column would fold in the whole rest of the recording, and a
-    loud passage far off-screen would show as a spike at the right edge.
+    The *width* slices split ``[start, start+span]`` evenly, in time order;
+    the caller decides which pixel column draws which (right to left, the
+    first slice is the rightmost column). ``reduceat`` reduces from each index
+    to the next, and the last index to the end of the array — so without
+    cutting the arrays at the window's end the last slice would fold in the
+    whole rest of the recording, and a loud passage far off-screen would show
+    as a spike at the window's later edge.
     """
     n_bins = len(peaks.mins)
     edges_t = start + (np.arange(width + 1, dtype=np.float64) / width) * span

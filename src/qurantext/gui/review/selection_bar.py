@@ -36,13 +36,17 @@ class SelectionBar(QWidget):
         self.plus_button = QPushButton(t("review.plus"))
         self.snap_button = QPushButton(t("review.snap"))
         row.addWidget(self.label, 1)
-        # The buttons move time, and time runs left to right in every language:
-        # "earlier" stays on the left of "later". The label outside mirrors.
+        # The buttons move time, and the timeline runs right to left in every
+        # language: "earlier" (−50 ms) sits on the right, the side of the past,
+        # so the row reads "Snap | +50 ms | −50 ms" from the left. The row is
+        # pinned left to right and filled in that order, not pinned right to
+        # left: a right-to-left button would lay "−50 ms" out as "ms −50".
+        # The label outside mirrors with the language.
         self.nudge_row = QWidget()
         self.nudge_row.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         nudges = QHBoxLayout(self.nudge_row)
         nudges.setContentsMargins(0, 0, 0, 0)
-        for button in (self.minus_button, self.plus_button, self.snap_button):
+        for button in (self.snap_button, self.plus_button, self.minus_button):
             nudges.addWidget(button)
         row.addWidget(self.nudge_row)
         self.minus_button.clicked.connect(lambda: self.nudge_requested.emit(-NUDGE_S))

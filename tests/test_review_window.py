@@ -145,8 +145,8 @@ def test_it_opens_on_a_missing_recording_and_says_so(qt_app, tmp_path) -> None:
 def test_keyboard_steps_and_sets_edges_at_the_playhead(qt_app, tmp_path) -> None:
     window, player, _ = _window(qt_app, tmp_path)
     window.show()
-    QTest.keyClick(window, Qt.Key.Key_Right)
-    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Left)
+    QTest.keyClick(window, Qt.Key.Key_Left)
     assert window.strip.selected.word == 1
     player.seek(2.4)
     QTest.keyClick(window, Qt.Key.Key_BracketLeft)
@@ -155,10 +155,40 @@ def test_keyboard_steps_and_sets_edges_at_the_playhead(qt_app, tmp_path) -> None
     assert window.session.words()[1].start == 2.0
 
 
-def test_nudge_moves_the_end_by_fifty_milliseconds(qt_app, tmp_path) -> None:
+def test_left_steps_to_the_next_word_and_right_to_the_previous(qt_app, tmp_path) -> None:
+    window, player, _ = _window(qt_app, tmp_path)
+    window.show()
+    QTest.keyClick(window, Qt.Key.Key_Left)
+    assert window.strip.selected.word == 0, "from no selection, Left starts at the first word"
+    QTest.keyClick(window, Qt.Key.Key_Left)
+    assert window.strip.selected.word == 1
+    assert player.position() == pytest.approx(2.0)
+    QTest.keyClick(window, Qt.Key.Key_Right)
+    assert window.strip.selected.word == 0
+    assert player.position() == pytest.approx(1.0)
+    QTest.keyClick(window, Qt.Key.Key_Right)
+    assert window.strip.selected.word == 0, "nothing before the first word"
+
+
+def test_right_from_no_selection_starts_at_the_last_word(qt_app, tmp_path) -> None:
     window, _, _ = _window(qt_app, tmp_path)
     window.show()
     QTest.keyClick(window, Qt.Key.Key_Right)
+    assert window.strip.selected.word == 1
+
+
+def test_the_nudge_row_puts_earlier_on_the_right_in_english_too(qt_app, tmp_path) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    _spin(20)
+    bar = window.selection_bar
+    assert bar.snap_button.x() < bar.plus_button.x() < bar.minus_button.x()
+
+
+def test_nudge_moves_the_end_by_fifty_milliseconds(qt_app, tmp_path) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    QTest.keyClick(window, Qt.Key.Key_Left)
     QTest.keyClick(window, Qt.Key.Key_Period)
     assert window.session.words()[0].end == pytest.approx(2.05)
 
@@ -167,7 +197,7 @@ def test_a_nudge_and_its_opposite_leave_nothing_to_save(qt_app, tmp_path) -> Non
     window, _, _ = _window(qt_app, tmp_path)
     before = json.loads(json.dumps(window.session.project.cards))
     window.show()
-    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Left)
     QTest.keyClick(window, Qt.Key.Key_Period)
     assert window.session.words()[1].start == pytest.approx(2.05)
     QTest.keyClick(window, Qt.Key.Key_Comma)
@@ -179,7 +209,7 @@ def test_a_nudge_and_its_opposite_leave_nothing_to_save(qt_app, tmp_path) -> Non
 def test_ctrl_s_saves_and_the_title_loses_its_marker(qt_app, tmp_path) -> None:
     window, _, _ = _window(qt_app, tmp_path)
     window.show()
-    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Left)
     QTest.keyClick(window, Qt.Key.Key_Period)
     assert window.windowTitle().endswith("*")
     QTest.keyClick(window, Qt.Key.Key_S, Qt.KeyboardModifier.ControlModifier)
@@ -194,7 +224,7 @@ def test_ctrl_s_saves_and_the_title_loses_its_marker(qt_app, tmp_path) -> None:
 def test_closing_with_changes_asks(qt_app, tmp_path, monkeypatch, answer, closes, saved) -> None:
     window, _, _ = _window(qt_app, tmp_path)
     window.show()
-    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Left)
     QTest.keyClick(window, Qt.Key.Key_Period)
     monkeypatch.setattr(window, "_confirm_discard", lambda: answer)
     window.close()
@@ -211,7 +241,7 @@ def test_without_playback_the_window_still_edits(qt_app, tmp_path) -> None:
     window.show()
     assert not window.play_button.isEnabled()
     assert "no audio backend" in window.play_button.toolTip()
-    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Left)
     QTest.keyClick(window, Qt.Key.Key_Period)
     assert window.session.dirty
 
@@ -219,7 +249,7 @@ def test_without_playback_the_window_still_edits(qt_app, tmp_path) -> None:
 def test_shift_nudges_by_ten_milliseconds(qt_app, tmp_path) -> None:
     window, _, _ = _window(qt_app, tmp_path)
     window.show()
-    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Left)
     QTest.keyClick(window, Qt.Key.Key_Period, Qt.KeyboardModifier.ShiftModifier)
     assert window.session.words()[0].end == pytest.approx(2.01)
 
@@ -241,8 +271,8 @@ def test_gaps_are_listed_with_a_jump_and_rechecked_from_the_cached_levels(qt_app
     assert window.time_label.text() == "00:04.00"
 
     window._coverage_timer.setInterval(0)
-    QTest.keyClick(window, Qt.Key.Key_Right)
-    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Left)
+    QTest.keyClick(window, Qt.Key.Key_Left)
     player.seek(6.0)
     QTest.keyClick(window, Qt.Key.Key_BracketRight)
     assert _wait_for(lambda: "covered by a word" in window.warnings.text(), 1000)
@@ -338,7 +368,7 @@ def test_a_window_shown_again_after_closing_still_asks_about_changes(
     window.close()
     assert not window.isVisible()
     window.show()
-    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Left)
     QTest.keyClick(window, Qt.Key.Key_Period)
     asked = []
     monkeypatch.setattr(window, "_confirm_discard", lambda: asked.append(True) or "cancel")
@@ -361,7 +391,7 @@ def test_a_nudge_moves_the_edge_last_grabbed(qt_app, tmp_path) -> None:
     QTest.keyClick(window, Qt.Key.Key_Period)
     assert window.session.words()[0].start == pytest.approx(1.05)
     assert window.session.words()[0].end == pytest.approx(2.0)
-    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Left)
     assert strip.last_edge == "end"
 
 
@@ -552,7 +582,7 @@ def test_render_with_corrections_saves_then_renders_the_project(
 
     window, _, _ = _window(qt_app, tmp_path)
     window.show()
-    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Left)
     QTest.keyClick(window, Qt.Key.Key_Period)
     seen = {}
 
@@ -655,7 +685,7 @@ def test_render_disables_editing_actions_until_done(qt_app, tmp_path, monkeypatc
 
     window, _, _ = _window(qt_app, tmp_path)
     window.show()
-    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Left)
     QTest.keyClick(window, Qt.Key.Key_Period)
     seen = {}
 
@@ -740,7 +770,7 @@ def test_editing_is_blocked_everywhere_while_a_render_runs(qt_app, tmp_path, mon
 
     # An edit before the render starts, so Ctrl+Z during the block has
     # something real to (not) undo.
-    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Left)
     QTest.keyClick(window, Qt.Key.Key_Period)
     edited_end = window.session.words()[0].end
     caption_text_before = window.session.project.captions[0].text
@@ -887,7 +917,7 @@ def test_an_accepted_close_says_so_and_a_refused_one_does_not(
     window.show()
     closed = []
     window.closed.connect(lambda: closed.append(True))
-    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Left)
     QTest.keyClick(window, Qt.Key.Key_Period)
     monkeypatch.setattr(window, "_confirm_discard", lambda: "cancel")
     window.close()
@@ -901,7 +931,7 @@ def test_an_accepted_close_says_so_and_a_refused_one_does_not(
 def test_discard_puts_the_saved_state_back(qt_app, tmp_path, monkeypatch) -> None:
     window, _, _ = _window(qt_app, tmp_path)
     window.show()
-    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Left)
     QTest.keyClick(window, Qt.Key.Key_Period)
     assert window.session.dirty
     monkeypatch.setattr(window, "_confirm_discard", lambda: "discard")
@@ -1044,7 +1074,7 @@ def test_the_strip_says_the_recording_is_being_checked_until_the_levels_arrive(
 def test_saves_made_by_the_export_dialog_are_announced(qt_app, tmp_path) -> None:
     window, _, _ = _window(qt_app, tmp_path)
     window.show()
-    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Left)
     QTest.keyClick(window, Qt.Key.Key_Period)
     saved = []
     window.saved.connect(saved.append)
@@ -1166,7 +1196,7 @@ def test_shortcuts_follow_the_physical_key_on_an_arabic_layout(
     window, player, _ = _window(qt_app, tmp_path)
     window.show()
     for _ in range(word + 1):
-        QTest.keyClick(window, Qt.Key.Key_Right)
+        QTest.keyClick(window, Qt.Key.Key_Left)
     player.seek(2.4)
     modifiers = Qt.KeyboardModifier.ShiftModifier if shift else Qt.KeyboardModifier.NoModifier
     event = _layout_press(platform, latin, letter, modifiers)
@@ -1182,7 +1212,7 @@ def test_the_physical_key_table_is_read_for_this_platform(qt_app, tmp_path) -> N
 
     window, player, _ = _window(qt_app, tmp_path)
     window.show()
-    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Left)
     QApplication.sendEvent(window, _layout_press(_platform_family(), ".", "ز"))
     assert window.session.words()[0].end == pytest.approx(2.05)
 
@@ -1207,7 +1237,7 @@ def test_only_an_unmatched_non_latin_key_is_read_by_its_physical_place(
 
     window, _, _ = _window(qt_app, tmp_path)
     window.show()
-    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_Left)
     platform = _platform_family()
     (code,) = [c for c, k in SCANCODE_KEYS[platform].items() if k == Qt.Key.Key_Period]
     scan, virtual = (0, code) if platform == "macos" else (code, 0)
