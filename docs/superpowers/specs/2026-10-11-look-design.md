@@ -55,8 +55,8 @@ A **Look** panel in the review window, beside the frame preview. Every change re
     frame and centre-cropped, never stretched.
   - **Dim** (0–80 %, default 35 % for images, 0 for built-ins) lays black at that alpha over the
     background.
-  - **Blur** (0–20, default 0) is a Gaussian blur radius expressed as a percentage of 1 % of the frame
-    height, so it looks the same at every resolution.
+  - **Blur** (0–20, default 0) is a Gaussian blur whose radius is `value × frame_height / 1000` pixels,
+    so it looks the same at every resolution.
 - **Use for new videos** saves the current look as the user's default. **Reset** returns to
   `night_gold`.
 - Problems appear in the review window's existing warnings strip: an unreadable image, or an image
