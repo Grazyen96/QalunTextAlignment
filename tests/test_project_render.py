@@ -266,3 +266,18 @@ def test_an_explicit_look_is_rendered_and_named_in_the_recorded_hash(monkeypatch
     assert captured["look"] == PRESETS["ocean"]
     assert project.style == {}, "the project itself is not changed"
     assert project.render_is_stale is True
+
+
+def test_rendering_the_projects_own_look_explicitly_keeps_its_hash(monkeypatch, tmp_path) -> None:
+    """A hand-edited style is not rewritten into canonical form by an explicit equal look."""
+    from qurantext.jobs import project_render
+    from qurantext.jobs.look_assets import project_look
+
+    project = _fake_project(tmp_path)
+    project.style = {"preset": "emerald", "colours": {"highlight_word": "#f0f"}}
+    monkeypatch.setattr(project_render, "export_job", lambda *a, **k: _fake_result(tmp_path))
+    project_render.render_project(
+        project, tmp_path / "v.mp4", preset="social", look=project_look(project)
+    )
+    assert project.style == {"preset": "emerald", "colours": {"highlight_word": "#f0f"}}
+    assert project.render_is_stale is False

@@ -268,13 +268,23 @@ def _add_look_argument(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _resolve_look(args: argparse.Namespace, project: Project | None) -> Look:
-    """The project's look when it chose one, else ``--look``, else night gold."""
-    from qurantext.jobs.look_assets import project_look
+def _resolve_look(args: argparse.Namespace, project: Project | None) -> Look | None:
+    """The look ``--look`` asks for, or None when none overrides what is there.
 
-    if project is not None and project.style:
-        return project_look(project)
-    return LOOK_PRESETS[args.look] if getattr(args, "look", None) else NIGHT_GOLD
+    None means the project's own look (night gold when it never chose one, or
+    without a project). A project renders its stored style untouched then, so
+    the render records the project's own hash whatever form a hand-edited style
+    takes. ``--look`` applies only to a project with no look of its own; when
+    it has one, the project's wins and the person is told.
+    """
+    from qurantext.jobs.look_assets import has_own_look
+
+    chosen = getattr(args, "look", None)
+    if project is not None and has_own_look(project):
+        if chosen:
+            warn("Ignoring --look because the project has its own look.")
+        return None
+    return LOOK_PRESETS[chosen] if chosen else None
 
 
 def _run_preview(args: argparse.Namespace) -> int:
@@ -291,7 +301,7 @@ def _run_preview(args: argparse.Namespace) -> int:
             font_file=Path(args.font_file) if args.font_file else None,
             title=args.title,
             audio=Path(args.audio) if args.audio else None,
-            look=_resolve_look(args, None),
+            look=_resolve_look(args, None) or NIGHT_GOLD,
         )
     )
     for code in result.look_warnings:
@@ -335,6 +345,10 @@ def _run_generate_video(args: argparse.Namespace) -> int:
     if subtitles != "burn" and args.renderer != "frame":
         raise SystemExit("--subtitles only applies to the frame renderer.")
     if subtitles == "burn" and args.renderer == "ass":
+        if look is None and project is not None:
+            from qurantext.jobs.look_assets import project_look
+
+            look = project_look(project)
         run_video_generation(
             audio=args.audio,
             matches=args.matches,
@@ -350,7 +364,7 @@ def _run_generate_video(args: argparse.Namespace) -> int:
             keep_temp=args.keep_temp,
             debug_detected_text=args.debug_detected_text,
             title=getattr(args, "title", None),
-            look=look,
+            look=look or NIGHT_GOLD,
             progress=ConsoleProgress(),
         )
     else:
@@ -385,7 +399,7 @@ def _run_generate_video(args: argparse.Namespace) -> int:
                     fps=args.fps,
                     font_file=Path(args.font_file) if args.font_file else None,
                     title=getattr(args, "title", None),
-                    look=look,
+                    look=look or NIGHT_GOLD,
                 ),
                 progress=ConsoleProgress(),
             )

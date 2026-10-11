@@ -286,8 +286,102 @@ def test_the_look_resolves_from_the_project_style_then_the_flag(tmp_path) -> Non
     from qurantext.jobs.project import Project
 
     project = Project(audio=tmp_path / "a.mp3", matches=tmp_path / "m.json", cards=[])
-    assert _resolve_look(argparse.Namespace(look=None), None) == NIGHT_GOLD
+    # None: whatever the project holds (or night gold without one) is rendered untouched.
+    assert _resolve_look(argparse.Namespace(look=None), None) is None
     assert _resolve_look(argparse.Namespace(look="ocean"), None) == PRESETS["ocean"]
+    assert _resolve_look(argparse.Namespace(look=None), project) is None
+    assert _resolve_look(argparse.Namespace(look="ocean"), project) == PRESETS["ocean"]
+    project.style = {"future_option": 3}  # not a look: --look still applies
     assert _resolve_look(argparse.Namespace(look="ocean"), project) == PRESETS["ocean"]
     set_project_look(project, PRESETS["rose"])
-    assert _resolve_look(argparse.Namespace(look="ocean"), project) == PRESETS["rose"]
+    assert _resolve_look(argparse.Namespace(look="ocean"), project) is None
+    assert NIGHT_GOLD == PRESETS["night_gold"]
+
+
+def _cli_render(tmp_path, monkeypatch, style, *flags):
+    """Run ``generate-video --project`` with the export faked; return what it saw."""
+    from qurantext.cli.main import _run_generate_video
+    from qurantext.jobs import project_render
+    from qurantext.jobs.export import ExportResult
+    from qurantext.jobs.project import Project, save_project
+    from qurantext.jobs.render import RenderResult
+
+    project = Project(
+        audio=tmp_path / "a.mp3",
+        matches=tmp_path / "m.json",
+        mode="lecture",
+        cards=[{"surah_num": 25, "from_ayah": 7, "to_ayah": 7, "start_time": 0.0, "end_time": 2.0}],
+        style=style,
+    )
+    path = save_project(project, tmp_path / "job.qalun.json")
+    captured = {}
+
+    def fake_export_job(request, *, progress=None, cancel=None):
+        captured["look"] = request.look
+        video = Path(request.output)
+        return ExportResult(
+            video=video,
+            render=RenderResult(output=video, width=160, height=120, fps=8, duration_seconds=2.0),
+        )
+
+    monkeypatch.setattr(project_render, "export_job", fake_export_job)
+    args = build_cli_parser().parse_args(
+        ["generate-video", "--project", str(path), "--output", str(tmp_path / "v.mp4"), *flags]
+    )
+    assert _run_generate_video(args) == 0
+    return captured["look"], path
+
+
+@pytest.mark.parametrize(
+    "style",
+    [
+        {"preset": "emerald"},
+        {"preset": "emerald", "colours": {"highlight_word": "#ff00ff"}},
+        {"colours": 5},
+    ],
+)
+def test_a_cli_render_of_a_hand_edited_look_is_current(tmp_path, monkeypatch, style) -> None:
+    """The project's own style is rendered untouched, so the render records its own hash."""
+    from qurantext.jobs.look_assets import project_look
+    from qurantext.jobs.project import load_project
+
+    look, path = _cli_render(tmp_path, monkeypatch, dict(style))
+    saved = load_project(path)
+    assert look == project_look(saved)
+    assert saved.style == style
+    assert saved.render_is_stale is False
+
+
+def test_the_cli_says_it_ignored_look_when_the_project_has_its_own(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    from qurantext.core.looks import PRESETS
+    from qurantext.jobs.project import load_project
+
+    look, path = _cli_render(tmp_path, monkeypatch, {"preset": "emerald"}, "--look", "ocean")
+    assert look == PRESETS["emerald"]
+    assert "Ignoring --look" in capsys.readouterr().err
+    assert load_project(path).render_is_stale is False
+
+
+def test_the_cli_look_flag_applies_to_a_project_without_a_look(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    from qurantext.core.looks import PRESETS
+    from qurantext.jobs.project import load_project
+
+    look, path = _cli_render(tmp_path, monkeypatch, {"future_option": 3}, "--look", "ocean")
+    assert look == PRESETS["ocean"]
+    assert "Ignoring --look" not in capsys.readouterr().err
+    saved = load_project(path)
+    assert saved.style == {"future_option": 3}, "the project itself is not changed"
+    assert saved.render_is_stale is True, "the video shows a look the project does not hold"
+
+
+def test_a_cli_render_without_any_look_is_current(tmp_path, monkeypatch) -> None:
+    from qurantext.core.looks import NIGHT_GOLD
+    from qurantext.jobs.project import load_project
+
+    look, path = _cli_render(tmp_path, monkeypatch, {})
+    assert look == NIGHT_GOLD
+    assert load_project(path).render_is_stale is False

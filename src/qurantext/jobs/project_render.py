@@ -63,7 +63,9 @@ def render_project(
     *look* renders a look the project does not hold (the command line's
     ``--look`` on a project that never chose one). The project is not changed,
     but the recorded hash names that look, so the render reads as stale against
-    the project's own.
+    the project's own. A *look* equal to the project's own leaves the style as
+    stored: rewriting a hand-edited style into canonical form would record a
+    hash the project does not have, and the render would read stale at once.
     """
     if project.matches is None:
         raise ValueError(
@@ -76,9 +78,10 @@ def render_project(
         captions=copy.deepcopy(project.captions),
         style=copy.deepcopy(project.style),
     )
+    own = project_look(snapshot)
     if look is None:
-        look = project_look(snapshot)
-    else:
+        look = own
+    elif look != own:
         set_project_look(snapshot, look)
     rendered_hash = snapshot.content_hash()
     result = export_job(

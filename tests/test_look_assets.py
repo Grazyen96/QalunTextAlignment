@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import errno
+import hashlib
 from dataclasses import replace
 from pathlib import Path
 
@@ -7,7 +9,9 @@ import pytest
 from PIL import Image
 
 from qurantext.core.looks import NIGHT_GOLD, PRESETS, Background
+from qurantext.jobs import look_assets
 from qurantext.jobs.look_assets import (
+    has_own_look,
     import_look_image,
     look_dir_for,
     project_look,
@@ -97,3 +101,93 @@ def test_choosing_night_gold_keeps_keys_that_are_not_a_look(tmp_path: Path) -> N
     set_project_look(project, PRESETS["emerald"])
     set_project_look(project, NIGHT_GOLD)
     assert project.style == {"future_option": 3}
+
+
+class _Reader:
+    """A source handle that records its reads and can act after the first one."""
+
+    def __init__(self, handle, after_first_read=None, fail=False):
+        self._handle = handle
+        self._after = after_first_read
+        self._fail = fail
+        self.sizes: list[int] = []
+
+    def read(self, size=-1):
+        self.sizes.append(size)
+        if self._fail and len(self.sizes) > 1:
+            raise OSError(errno.ENOSPC, "No space left on device")
+        data = self._handle.read(size)
+        if self._after is not None:
+            after, self._after = self._after, None
+            after()
+        return data
+
+    def readinto(self, buffer):  # pragma: no cover - only if the copy switches API
+        raise AssertionError("expected read()")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self._handle.close()
+
+
+def _patch_source_open(monkeypatch, source: Path, **reader_kw) -> list[_Reader]:
+    readers: list[_Reader] = []
+    real_open = Path.open
+
+    def fake_open(self, mode="r", *args, **kwargs):
+        handle = real_open(self, mode, *args, **kwargs)
+        if Path(self) == source and "r" in mode:
+            readers.append(_Reader(handle, **reader_kw))
+            return readers[-1]
+        return handle
+
+    monkeypatch.setattr(Path, "open", fake_open)
+    return readers
+
+
+def test_import_names_the_copy_by_the_bytes_it_holds(tmp_path: Path, monkeypatch) -> None:
+    """A source that changes mid-import (a sync client still writing) gets a truthful name."""
+    source = _png(tmp_path / "bg.png")
+    monkeypatch.setattr(look_assets, "_CHUNK", 16)
+
+    def rewrite():
+        Image.new("RGB", (32, 32), (200, 10, 10)).save(source)
+
+    _patch_source_open(monkeypatch, source, after_first_read=rewrite)
+    copy = import_look_image(tmp_path / "job.qalun.json", source)
+    assert hashlib.sha256(copy.read_bytes()).hexdigest()[:12] == copy.stem
+
+
+def test_import_streams_the_source_in_chunks(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "big.png"
+    Image.effect_noise((256, 256), 64).convert("RGB").save(source)
+    expected = source.read_bytes()
+    readers = _patch_source_open(monkeypatch, source)
+    copy = import_look_image(tmp_path / "job.qalun.json", source)
+    monkeypatch.undo()
+    assert copy.read_bytes() == expected
+    sizes = [size for reader in readers for size in reader.sizes]
+    assert sizes and all(0 < size <= look_assets._CHUNK for size in sizes)
+
+
+def test_a_failed_import_leaves_no_partial_file(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "big.png"
+    Image.effect_noise((256, 256), 64).convert("RGB").save(source)
+    monkeypatch.setattr(look_assets, "_CHUNK", 1024)
+    _patch_source_open(monkeypatch, source, fail=True)
+    with pytest.raises(OSError):
+        import_look_image(tmp_path / "job.qalun.json", source)
+    folder = look_dir_for(tmp_path / "job.qalun.json")
+    assert not folder.exists() or list(folder.iterdir()) == []
+
+
+def test_a_look_is_its_own_only_when_the_style_holds_a_look_key(tmp_path: Path) -> None:
+    project = Project(audio=tmp_path / "a.mp3", cards=[])
+    assert not has_own_look(project)
+    project.style = {"future_option": 3}
+    assert not has_own_look(project)
+    for key in ("preset", "colours", "background"):
+        project.style = {key: "anything"}
+        assert has_own_look(project)
