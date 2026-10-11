@@ -726,3 +726,22 @@ def test_background_jobs_dropped_off_the_ui_thread_park_everything(qt_app, monke
     assert len(background._LINGERING) == 2, "the finished one is parked, not joined and dropped"
     assert background.join_lingering(5000), "the running one was cancelled"
     _spin_briefly(qt_app)
+
+
+def test_preview_follows_undo_of_a_look_change(qt_app) -> None:
+    from qurantext.config.paths import DEFAULT_FONT_PATH
+    from qurantext.core.looks import PRESETS
+    from qurantext.gui.review.frame_view import FrameView
+
+    if not DEFAULT_FONT_PATH.exists():
+        pytest.skip("needs the bundled font")
+    session, _ = _strip(qt_app)
+    view = FrameView(session)
+    view.show_at(0.0, force=True)
+    before = view.pixmap().toImage()
+    session.set_look(PRESETS["ink_on_paper"])
+    view.show_at(0.0, force=True)
+    assert view.pixmap().toImage() != before
+    session.undo()
+    view.show_at(0.0, force=True)
+    assert view.pixmap().toImage() == before

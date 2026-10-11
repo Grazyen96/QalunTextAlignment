@@ -114,6 +114,7 @@ class FrameView(QLabel):
                 title=title,
                 placeholder_subtitle=subtitle,
                 reserve_caption_band=reserve_band,
+                look=self._session.look,
             )
         except Exception as error:  # noqa: BLE001 - shown to the person, not raised
             self.clear()

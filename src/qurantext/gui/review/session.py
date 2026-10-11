@@ -4,8 +4,8 @@ Every gesture in the window â€” a drag, a nudge, a ripple, a corrected caption â
 ends up here, and every rule about what an edit may do lives in
 ``core.timing_edit``. The widgets only draw this object and forward what the
 person did. That keeps the rules testable without a screen, and it means undo
-is one mechanism for every kind of edit: a snapshot of the cards, captions and
-review state before each change.
+is one mechanism for every kind of edit: a snapshot of the cards, captions,
+review state and style (which holds the video's look) before each change.
 
 A drag is many small edits and must undo as one, so a gesture brackets them:
 one snapshot at the start, none while it runs, and none at all if the gesture
@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from qurantext.core.frame_renderer import CaptionTrack
+from qurantext.core.looks import Look
 from qurantext.core.timing_edit import (
     count_edited,
     cue_bounds,
@@ -33,6 +34,7 @@ from qurantext.core.timing_edit import (
 )
 from qurantext.core.video_common import validated_matches
 from qurantext.gui.i18n import t
+from qurantext.jobs.look_assets import project_look, set_project_look
 from qurantext.jobs.project import CaptionCue, Project, job_settings, save_project
 
 __all__ = ["CAPTION", "CARD", "ReviewSession", "TimelineWord", "WordRef"]
@@ -91,7 +93,7 @@ def _unflagged(words: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def _settled(cards: list, captions: list[CaptionCue], review: dict) -> tuple:
+def _settled(cards: list, captions: list[CaptionCue], review: dict, style: dict) -> tuple:
     """A state as a timing edit would leave it, for telling "no edit" from an edit.
 
     Every timing edit re-derives the card windows from their words (and snaps
@@ -104,7 +106,8 @@ def _settled(cards: list, captions: list[CaptionCue], review: dict) -> tuple:
     where they were was not retimed, whatever an edit on the way marked it.
     Cards without word timings pass through ``derive_card_windows`` untouched,
     and only a timing edit re-derives a timed card's window
-    (``set_card_times`` refuses them), so this holds in either mode.
+    (``set_card_times`` refuses them), so this holds in either mode. The style
+    is compared as is.
     """
     settled_cards = []
     for card in derive_card_windows(cards):
@@ -117,7 +120,7 @@ def _settled(cards: list, captions: list[CaptionCue], review: dict) -> tuple:
         if data.get("words"):
             data["words"] = _unflagged(data["words"])
         settled_captions.append(data)
-    return settled_cards, settled_captions, review
+    return settled_cards, settled_captions, review, style
 
 
 class ReviewSession:
@@ -134,6 +137,7 @@ class ReviewSession:
         #: gesture changes nothing (a click on a word), dropped if it edits.
         self._gesture_redo: list[tuple] = []
         self._revision = 0
+        self._look_cache: tuple[int, Look] | None = None
         self._saved_key = self._key()
         #: What :meth:`revert` puts back: the state as loaded, or as last saved.
         self._saved_snapshot = self._snapshot()
@@ -167,6 +171,13 @@ class ReviewSession:
     def can_redo(self) -> bool:
         return bool(self._redo)
 
+    @property
+    def look(self) -> Look:
+        """The look the preview draws with: the project's style, cached per revision."""
+        if self._look_cache is None or self._look_cache[0] != self._revision:
+            self._look_cache = (self._revision, project_look(self.project))
+        return self._look_cache[1]
+
     def _key(self) -> str:
         """A snapshot for the dirty check, with every word edge on the millisecond grid.
 
@@ -181,6 +192,7 @@ class ReviewSession:
                 "cards": [_normalized_card(card) for card in self.project.cards],
                 "captions": [_normalized_caption(cue) for cue in self.project.captions],
                 "review": self.project.review,
+                "style": self.project.style,
             },
             sort_keys=True,
             ensure_ascii=False,
@@ -192,13 +204,15 @@ class ReviewSession:
             copy.deepcopy(self.project.cards),
             copy.deepcopy(self.project.captions),
             copy.deepcopy(self.project.review),
+            copy.deepcopy(self.project.style),
         )
 
     def _restore(self, snapshot: tuple) -> None:
-        cards, captions, review = snapshot
+        cards, captions, review, style = snapshot
         self.project.cards = copy.deepcopy(cards)
         self.project.captions = copy.deepcopy(captions)
         self.project.review = copy.deepcopy(review)
+        self.project.style = copy.deepcopy(style)
 
     def _before_change(self) -> None:
         if not self._in_gesture:
@@ -526,6 +540,14 @@ class ReviewSession:
         self.project.mark_reviewed()
         self._changed()
 
+    def set_look(self, look: Look) -> None:
+        """Choose *look*; one undo step, or one per gesture while a slider is dragged."""
+        if look == self.look:
+            return
+        self._before_change()
+        set_project_look(self.project, look)
+        self._changed()
+
     # -- gestures and undo -----------------------------------------------------
 
     def begin_gesture(self) -> None:
@@ -596,7 +618,12 @@ class ReviewSession:
 
     def _settles_to(self, snapshot: tuple) -> bool:
         """Whether the current state is *snapshot* once both are settled."""
-        current = (self.project.cards, self.project.captions, self.project.review)
+        current = (
+            self.project.cards,
+            self.project.captions,
+            self.project.review,
+            self.project.style,
+        )
         return _settled(*current) == _settled(*snapshot)
 
     def _at_saved_times(self, ref: WordRef) -> bool:
@@ -605,7 +632,7 @@ class ReviewSession:
         False also when the saved state has no word there: then the two states
         differ in shape and cannot settle to each other anyway.
         """
-        cards, captions, _review = self._saved_snapshot
+        cards, captions, _review, _style = self._saved_snapshot
         if ref.kind == CARD:
             segments = [card.get("word_timings") or [] for card in cards]
         else:
@@ -617,11 +644,12 @@ class ReviewSession:
         return all(round(float(saved[k]), 3) == round(float(now[k]), 3) for k in ("start", "end"))
 
     def _is_exactly(self, snapshot: tuple) -> bool:
-        cards, captions, review = snapshot
+        cards, captions, review, style = snapshot
         return (
             cards == self.project.cards
             and captions == self.project.captions
             and review == self.project.review
+            and style == self.project.style
         )
 
     def undo(self) -> bool:
