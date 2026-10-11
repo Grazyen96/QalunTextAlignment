@@ -71,6 +71,42 @@ def test_from_dict_tolerates_junk_field_by_field() -> None:
     assert Look.from_dict({"preset": "no_such"}) == NIGHT_GOLD
 
 
+def _image_style(raw) -> dict:
+    data = PRESETS["emerald"].to_dict()
+    data["background"].update(kind="image", image=raw)
+    return data
+
+
+@pytest.mark.parametrize("raw", ["~nosuchuser_qalun/x.png", "a\x00b.png", "/tmp/a\x00b.png"])
+@pytest.mark.parametrize("base_dir", [None, Path("/tmp/project")])
+def test_from_dict_never_raises_on_a_junk_image_path(raw: str, base_dir) -> None:
+    look = Look.from_dict(_image_style(raw), base_dir=base_dir)
+    assert look.background == PRESETS["emerald"].background
+    assert look.body_text == PRESETS["emerald"].body_text
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["#-1-1-1", "#+F+F+F", "# 1 2 3", "#12345", "#1234567", "#GGGGGG", "123456", "#ABCDEF\n"],
+)
+def test_junk_hex_colours_fall_back(value: str) -> None:
+    data = NIGHT_GOLD.to_dict()
+    data["colours"]["body_text"] = value
+    data["background"]["colour"] = value
+    look = Look.from_dict(data)
+    assert look.body_text == NIGHT_GOLD.body_text
+    assert look.background.colour == NIGHT_GOLD.background.colour
+
+
+def test_hex_colours_accept_both_cases_and_an_alpha() -> None:
+    data = NIGHT_GOLD.to_dict()
+    data["colours"]["body_text"] = "#aBcDeF"
+    data["colours"]["header_text"] = "#01020380"
+    look = Look.from_dict(data)
+    assert look.body_text == (0xAB, 0xCD, 0xEF, 255)
+    assert look.header_text == (1, 2, 3, 0x80)
+
+
 def test_values_are_clamped() -> None:
     data = NIGHT_GOLD.to_dict()
     data["background"].update(kind="solid", dim=3.0, blur=-4)
@@ -87,6 +123,26 @@ def test_image_path_is_stored_relative_and_resolved_back(tmp_path: Path) -> None
     data = look.to_dict(relative_to=tmp_path)
     assert data["background"]["image"] == "job.look/abc.png"
     assert Look.from_dict(data, base_dir=tmp_path).background.image == image
+
+
+def test_an_image_outside_the_project_is_stored_absolute(tmp_path: Path) -> None:
+    """jobs/project.py's rule: relative only inside the folder, so moving the folder alone works."""
+    project = tmp_path / "project"
+    image = tmp_path / "Pictures" / "bg.jpg"
+    look = replace(
+        NIGHT_GOLD, background=Background("image", (0, 0, 0, 255), (0, 0, 0, 255), image, 0.35, 2)
+    )
+    data = look.to_dict(relative_to=project)
+    assert data["background"]["image"] == image.resolve().as_posix()
+    assert Look.from_dict(data, base_dir=tmp_path / "moved").background.image == image.resolve()
+
+
+def test_a_relative_image_without_a_base_dir_resolves_against_the_cwd(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    data = _image_style("bg.png")
+    assert Look.from_dict(data).background.image == (tmp_path / "bg.png").resolve()
 
 
 def test_an_image_background_without_a_path_falls_back() -> None:

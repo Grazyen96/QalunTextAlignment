@@ -12,7 +12,7 @@ No Qt here: the renderer and the jobs use this, and they import no Qt.
 
 from __future__ import annotations
 
-import os
+import re
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import Any
@@ -149,7 +149,11 @@ def _parse_background(data: Any, fallback: Background, base_dir: Path | None) ->
         raw = data.get("image")
         if not isinstance(raw, str) or not raw:
             return fallback
-        image = _resolve_path(raw, base_dir)
+        try:
+            image = _resolve_path(raw, base_dir)
+        except (OSError, ValueError, RuntimeError):
+            # "~nosuchuser/…", a NUL byte, a symlink loop: junk opens as the preset.
+            return fallback
     return Background(
         kind=kind,
         colour=_parse_hex(data.get("colour")) or fallback.colour,
@@ -164,13 +168,14 @@ def _hex(colour: RGBA) -> str:
     return "#" + "".join(f"{channel:02X}" for channel in colour)
 
 
+_HEX = re.compile(r"#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?")
+
+
 def _parse_hex(value: Any) -> RGBA | None:
-    if not isinstance(value, str) or len(value) not in (7, 9) or not value.startswith("#"):
+    """``#RRGGBB`` or ``#RRGGBBAA``; anything else (signs, spaces, short forms) is junk."""
+    if not isinstance(value, str) or not _HEX.fullmatch(value):
         return None
-    try:
-        channels = [int(value[i : i + 2], 16) for i in range(1, len(value), 2)]
-    except ValueError:
-        return None
+    channels = [int(value[i : i + 2], 16) for i in range(1, len(value), 2)]
     if len(channels) == 3:
         channels.append(255)
     return tuple(channels)  # type: ignore[return-value]
@@ -182,21 +187,31 @@ def _clamped(value: Any, low: float, high: float, fallback: float) -> float:
     return float(min(high, max(low, value)))
 
 
+# The same rule as jobs/project.py's _store_path/_resolve_path (core must not
+# import jobs): relative only when the image lies inside the project folder, so
+# moving the folder alone keeps it; anything outside is stored absolute.
+
+
 def _store_path(path: Path, relative_to: Path | None) -> str:
     """Relative to the project when it lies inside its folder, so the folder can move."""
+    try:
+        resolved = Path(path).expanduser().resolve()
+    except (OSError, ValueError, RuntimeError):
+        return str(path)
     if relative_to is not None:
         try:
-            return Path(os.path.relpath(path, relative_to)).as_posix()
-        except ValueError:  # another drive on Windows
+            return resolved.relative_to(Path(relative_to).resolve()).as_posix()
+        except (OSError, ValueError, RuntimeError):
             pass
-    return str(path)
+    return resolved.as_posix()
 
 
 def _resolve_path(value: str, base_dir: Path | None) -> Path:
-    path = Path(value).expanduser()
-    if not path.is_absolute() and base_dir is not None:
-        path = base_dir / path
-    return path.resolve() if path.is_absolute() else path
+    """May raise OSError, ValueError or RuntimeError on junk; the caller falls back."""
+    candidate = Path(value).expanduser()
+    if candidate.is_absolute() or base_dir is None:
+        return candidate.resolve()
+    return (Path(base_dir) / candidate).resolve()
 
 
 def merge_style(style: dict | None, look: Look, *, relative_to: Path | None = None) -> dict:
