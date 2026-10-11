@@ -276,6 +276,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "session.card_follows_words": (
             "This card's times follow its words; retime the words instead."
         ),
+        "session.manual_lecture_only": "Ayah cards can only be placed by hand in a lecture.",
         "session.no_file": "This project has no file to write back to.",
         "look.title": "Look",
         "look.palette": "Palette",
@@ -570,6 +571,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "session.card_follows_words": (
             "توقيت هذه البطاقة يتبع كلماتها؛ عدِّل توقيت الكلمات بدلًا منها."
         ),
+        "session.manual_lecture_only": "لا تُضاف بطاقات الآيات يدويًا إلا في الدروس.",
         "session.no_file": "ليس لهذا المشروع ملف يُحفظ فيه.",
         "look.title": "المظهر",
         "look.palette": "لوحة الألوان",

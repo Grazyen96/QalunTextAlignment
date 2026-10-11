@@ -22,6 +22,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from qurantext.config.paths import QURAN_DB_PATH
 from qurantext.core.frame_renderer import CaptionTrack
 from qurantext.core.looks import Look
 from qurantext.core.timing_edit import (
@@ -34,6 +35,7 @@ from qurantext.core.timing_edit import (
     ripple_in_cards,
 )
 from qurantext.core.video_common import cards_on_screen, has_surah_cards, validated_matches
+from qurantext.data.quran_db import ayah_range_card, connect
 from qurantext.gui.i18n import t
 from qurantext.jobs.look_assets import project_look, set_project_look
 from qurantext.jobs.project import (
@@ -149,6 +151,27 @@ def _settled(
             data["words"] = _unflagged(data["words"])
         settled_captions.append(data)
     return settled_cards, settled_captions, review, style, studied
+
+
+def _range_card(surah_num: int, from_ayah: int, to_ayah: int, db_path: Path) -> dict[str, Any]:
+    """The reference and text of an ayah range, read from the store at *db_path*."""
+    conn = connect(db_path)
+    try:
+        return ayah_range_card(conn, surah_num, from_ayah, to_ayah)
+    finally:
+        conn.close()
+
+
+def _changed_card(card: dict[str, Any], reference: dict[str, Any]) -> dict[str, Any]:
+    """*card* at its own times, showing *reference*, without what detection said about it."""
+    new = {
+        key: value
+        for key, value in card.items()
+        if key != "word_timings" and not key.startswith(("_matched", "matched"))
+    }
+    new.update(reference)
+    new.update(detected_text="", confidence=1.0, manual=True)
+    return new
 
 
 class ReviewSession:
@@ -569,6 +592,118 @@ class ReviewSession:
         del self.project.cards[index]
         if self.project.mode == "recitation":
             self.project.cards = derive_card_windows(self.project.cards)
+        self._changed()
+
+    def is_manual(self, index: int) -> bool:
+        """Whether card *index* was placed or changed by hand rather than detected."""
+        return bool(self.project.cards[index].get("manual"))
+
+    def insert_manual_card(
+        self,
+        at: float,
+        surah_num: int,
+        from_ayah: int,
+        to_ayah: int,
+        *,
+        db_path: Path = QURAN_DB_PATH,
+    ) -> int:
+        """Show ayat *from_ayah*–*to_ayah* of *surah_num* from *at*; one undo step.
+
+        Detection follows recitation, so it misses the ayah a teacher goes back
+        to and talks about without reciting it, and the person places that
+        card by hand at the playhead. The card holds until the next card
+        starts (or the recording ends), at least half a second; a card that is
+        on screen at *at* now ends there, so the new one is what shows. A
+        card already starting at *at* (within 0.05 s) is changed instead of
+        stacking a second card on it. Returns the card's index once the cards
+        are back in start order.
+
+        Raises ``ValueError`` outside a lecture or for a reference the store
+        does not have, and then nothing changed and there is nothing to undo.
+        """
+        self._require_lecture()
+        at = max(0.0, float(at))
+        if self.duration is not None:
+            at = max(0.0, min(at, float(self.duration) - 0.5))
+        # Before anything changes: a reference the store refuses is no edit.
+        reference = _range_card(surah_num, from_ayah, to_ayah, db_path)
+        cards = self.project.cards
+
+        def start_of(card: dict[str, Any]) -> float:
+            return float(card.get("start_time") or 0.0)
+
+        starting = [i for i, card in enumerate(cards) if abs(start_of(card) - at) <= 0.05]
+        if starting:
+            index = min(starting, key=lambda i: abs(start_of(cards[i]) - at))
+            self._replace_card(index, _changed_card(cards[index], reference))
+            return index
+
+        following = [start_of(card) for card in cards if start_of(card) > at]
+        if following:
+            end = min(following)
+        elif self.duration is not None:
+            end = float(self.duration)
+        else:
+            end = at + 10.0
+        end = max(end, at + 0.5)
+        new = {
+            **reference,
+            "start_time": round(at, 3),
+            "end_time": round(end, 3),
+            "confidence": 1.0,
+            "detected_text": "",
+            "manual": True,
+        }
+
+        self._before_change()
+        updated = []
+        for card in cards:
+            if start_of(card) < at < float(card.get("end_time") or 0.0):
+                card = {**card, "end_time": round(at, 3)}
+            updated.append(card)
+        updated.append(new)
+        updated.sort(key=start_of)
+        self.project.cards = updated
+        self._changed()
+        return next(i for i, card in enumerate(updated) if card is new)
+
+    def change_card_ayah(
+        self,
+        index: int,
+        surah_num: int,
+        from_ayah: int,
+        to_ayah: int,
+        *,
+        db_path: Path = QURAN_DB_PATH,
+    ) -> None:
+        """Make card *index* show ayat *from_ayah*–*to_ayah* of *surah_num*; one undo step.
+
+        The card stays where it is on the timeline: the person is correcting
+        which ayat the teacher meant (detection follows recitation, and a
+        teacher who goes back to an earlier ayah is easily matched to the
+        wrong one), not when it shows. What detection said about the old
+        reference — the heard text, its word timings, its match scores — no
+        longer describes the card and goes; the card is then the person's.
+
+        Raises ``ValueError`` outside a lecture or for a reference the store
+        does not have, and then nothing changed and there is nothing to undo.
+        """
+        self._require_lecture()
+        card = self.project.cards[index]
+        reference = _range_card(surah_num, from_ayah, to_ayah, db_path)
+        self._replace_card(index, _changed_card(card, reference))
+
+    def _require_lecture(self) -> None:
+        """Refuse a hand-made card outside a lecture: a recitation's cards tile its words."""
+        if str(self.project.mode).lower() != "lecture":
+            raise ValueError(t("session.manual_lecture_only"))
+
+    def _replace_card(self, index: int, new: dict[str, Any]) -> None:
+        """Put *new* in place of card *index* as one undo step; no step when nothing differs."""
+        if new == self.project.cards[index]:
+            return
+        self._before_change()
+        self.project.cards[index] = new
         self._changed()
 
     def remove_caption(self, index: int) -> None:

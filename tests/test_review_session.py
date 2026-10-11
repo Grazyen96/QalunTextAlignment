@@ -697,3 +697,135 @@ def test_a_chosen_surah_whose_only_card_cannot_be_drawn_is_reported() -> None:
     session = ReviewSession(project)
     session.set_studied_surah(2)
     assert session.missing_studied_surah == 2
+
+
+# -- hand-made ayah cards ------------------------------------------------------
+
+
+@pytest.fixture
+def db(store):
+    """The word-level store the suite builds once per module (``conftest.store``)."""
+    return store
+
+
+@pytest.fixture
+def lecture_session(tmp_path):
+    """A saved lecture quoting 25:7 at 10–20 s and 25:8 at 30–40 s, 100 s long."""
+    project = Project(
+        audio=tmp_path / "dars.mp3",
+        mode="lecture",
+        cards=[
+            {
+                "surah_num": 25,
+                "from_ayah": 7,
+                "to_ayah": 7,
+                "text": "وقالوا مال هذا الرسول",
+                "full_text": "وقالوا مال هذا الرسول",
+                "confidence": 0.9,
+                "start_time": 10.0,
+                "end_time": 20.0,
+            },
+            {
+                "surah_num": 25,
+                "from_ayah": 8,
+                "to_ayah": 8,
+                "text": "أو يلقى إليه كنز",
+                "full_text": "أو يلقى إليه كنز",
+                "confidence": 0.9,
+                "start_time": 30.0,
+                "end_time": 40.0,
+            },
+        ],
+    )
+    save_project(project, tmp_path / "dars.qalun.json")
+    return ReviewSession(load_project(project.path), duration=100.0)
+
+
+def _refs(session):
+    return [
+        (
+            c["surah_num"],
+            c["from_ayah"],
+            c["to_ayah"],
+            c["start_time"],
+            c["end_time"],
+            bool(c.get("manual")),
+        )
+        for c in session.project.cards
+    ]
+
+
+def test_insert_between_cards_runs_until_the_next(lecture_session, db):
+    i = lecture_session.insert_manual_card(25.0, 25, 7, 7, db_path=db)
+    assert _refs(lecture_session)[i] == (25, 7, 7, 25.0, 30.0, True)
+    assert lecture_session.dirty and lecture_session.can_undo
+
+
+def test_insert_inside_a_card_trims_it_and_one_undo_restores_both(lecture_session, db):
+    before = _refs(lecture_session)
+    lecture_session.insert_manual_card(15.0, 25, 5, 6, db_path=db)
+    refs = _refs(lecture_session)
+    assert refs[0][4] == 15.0  # 25:7 now ends at the playhead
+    assert refs[1] == (25, 5, 6, 15.0, 30.0, True)
+    assert lecture_session.undo()
+    assert _refs(lecture_session) == before and not lecture_session.dirty
+
+
+def test_insert_before_the_first_card(lecture_session, db):
+    i = lecture_session.insert_manual_card(2.0, 25, 1, 1, db_path=db)
+    assert i == 0 and _refs(lecture_session)[0] == (25, 1, 1, 2.0, 10.0, True)
+
+
+def test_insert_after_the_last_card_runs_to_the_end_of_the_recording(lecture_session, db):
+    i = lecture_session.insert_manual_card(50.0, 25, 9, 9, db_path=db)
+    assert _refs(lecture_session)[i][3:5] == (50.0, 100.0)
+
+
+def test_insert_at_the_very_end_still_lasts_half_a_second(lecture_session, db):
+    i = lecture_session.insert_manual_card(100.0, 25, 9, 9, db_path=db)
+    start, end = _refs(lecture_session)[i][3:5]
+    assert start == 99.5 and end == 100.0
+
+
+def test_insert_without_duration_or_next_card_lasts_ten_seconds(lecture_session, db):
+    lecture_session.duration = None
+    i = lecture_session.insert_manual_card(50.0, 25, 9, 9, db_path=db)
+    assert _refs(lecture_session)[i][3:5] == (50.0, 60.0)
+
+
+def test_insert_at_a_cards_start_changes_that_card(lecture_session, db):
+    i = lecture_session.insert_manual_card(30.03, 2, 255, 255, db_path=db)
+    assert len(lecture_session.project.cards) == 2
+    assert _refs(lecture_session)[i] == (2, 255, 255, 30.0, 40.0, True)
+    assert lecture_session.undo() and not lecture_session.can_undo
+
+
+def test_change_keeps_times_and_drops_detection_fields(lecture_session, db):
+    lecture_session.project.cards[0]["detected_text"] = "قال"
+    lecture_session.project.cards[0]["_matched_words"] = 3
+    lecture_session.change_card_ayah(0, 25, 3, 4, db_path=db)
+    card = lecture_session.project.cards[0]
+    assert (card["from_ayah"], card["to_ayah"]) == (3, 4)
+    assert (card["start_time"], card["end_time"]) == (10, 20)
+    assert card["manual"] is True and card["detected_text"] == "" and "_matched_words" not in card
+    assert lecture_session.is_manual(0)
+
+
+def test_invalid_reference_leaves_no_edit(lecture_session, db):
+    with pytest.raises(ValueError):
+        lecture_session.insert_manual_card(25.0, 25, 9, 7, db_path=db)
+    assert not lecture_session.can_undo and not lecture_session.dirty
+
+
+def test_recitation_projects_refuse_manual_cards(session, db):
+    # `session` is the module's existing recitation fixture
+    with pytest.raises(ValueError):
+        session.insert_manual_card(1.0, 25, 1, 1, db_path=db)
+    with pytest.raises(ValueError):
+        session.change_card_ayah(0, 25, 1, 1, db_path=db)
+
+
+def test_a_manual_card_makes_a_render_stale(lecture_session, db):
+    lecture_session.project.record_render(Path("v.mp4"), preset=None, basmala_offset_s=0.0)
+    lecture_session.insert_manual_card(25.0, 25, 7, 7, db_path=db)
+    assert lecture_session.project.render_is_stale
