@@ -231,9 +231,10 @@ def _decode_photo(path: Path, width: int, height: int) -> Image.Image:
     try:
         with Image.open(path) as source:
             orientation = _orientation(source)
-            if source.format == "JPEG":
+            if source.format in ("JPEG", "MPO"):
                 # Decode at 1/2, 1/4 or 1/8 scale when that still covers the
                 # frame: a phone photo then never decodes at full resolution.
+                # Phones and cameras often write multi-picture JPEGs ("MPO").
                 source.draft("RGB", _decode_size(source.size, orientation, (width, height)))
             if source.width * source.height > _MAX_DECODE_PIXELS:
                 raise _ImageProblem("image_unreadable")
