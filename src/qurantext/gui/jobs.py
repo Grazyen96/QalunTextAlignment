@@ -8,6 +8,7 @@ calls, so the window can put review between them.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -110,6 +111,9 @@ class JobOutcome:
     video: Path | None
     cards: int
     project: Path | None = None
+    #: What the look could not do (``image_missing``, ``image_unreadable``):
+    #: the video was made with the preset's background instead.
+    look_warnings: tuple[str, ...] = ()
 
 
 def _set_aside(path: Path) -> Path | None:
@@ -143,18 +147,27 @@ def _keep_earlier(destination: Path, derived: Project) -> Path | str | None:
     A re-match that yields the same cards and captions has nothing to lose, and a
     backup per run would bury the one that matters. A file that cannot be read
     is always kept: what it held cannot be compared.
+
+    The look is compared on neither side, and when the content changed the
+    earlier project's style (its look) is carried into *derived*: a re-match
+    derives cards and captions only, and the look the person chose for this
+    video is not something it could have changed. The style's image path stays
+    valid, as the new project takes the earlier one's name and folder.
     """
     if not destination.exists():
         return None
+    earlier: Project | None = None
     try:
-        # Compared without the look: a re-match derives cards and captions only,
-        # and a look the person chose is not something it could have changed.
-        earlier = replace(load_project(destination), style={})
-        unchanged = earlier.content_hash() == derived.content_hash()
+        earlier = load_project(destination)
+        unchanged = (
+            replace(earlier, style={}).content_hash() == replace(derived, style={}).content_hash()
+        )
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
-        unchanged = False
+        earlier, unchanged = None, False
     if unchanged:
         return _UNCHANGED
+    if earlier is not None:
+        derived.style = copy.deepcopy(earlier.style)
     return _set_aside(destination)
 
 
@@ -267,4 +280,5 @@ def run_render(
         video=result.video,
         cards=len(project.cards),
         project=project.path,
+        look_warnings=result.render.look_warnings if result.render is not None else (),
     )

@@ -571,6 +571,76 @@ def test_render_overrides_win_over_the_recorded_choices(tmp_path, monkeypatch) -
     assert seen["output"] == tmp_path / "x" / "clip.mp4"
 
 
+def test_render_carries_the_looks_warnings_to_the_outcome(tmp_path, monkeypatch) -> None:
+    """Spec §4: a missing or unreadable image at export reaches the window, not stderr only."""
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.jobs.export import ExportResult
+    from qurantext.jobs.project import Project
+    from qurantext.jobs.render import RenderResult
+
+    def fake_render_project(project, output, **kwargs):
+        render = RenderResult(
+            output=output,
+            width=8,
+            height=8,
+            fps=1,
+            duration_seconds=1.0,
+            look_warnings=("image_missing",),
+        )
+        return ExportResult(video=output, render=render)
+
+    monkeypatch.setattr(jobs_module, "render_project", fake_render_project)
+    project = Project(audio=tmp_path / "clip.m4a", matches=tmp_path / "clip_recitation.json")
+    assert jobs_module.run_render(project).look_warnings == ("image_missing",)
+
+
+def test_a_render_without_a_render_result_has_no_look_warnings(tmp_path, monkeypatch) -> None:
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.jobs.project import Project
+
+    _capture_render_project(jobs_module, monkeypatch, tmp_path)
+    project = Project(audio=tmp_path / "clip.m4a", matches=tmp_path / "clip_recitation.json")
+    assert jobs_module.run_render(project).look_warnings == ()
+
+
+def test_a_changed_rematch_keeps_the_videos_look(tmp_path, monkeypatch) -> None:
+    """The look is the person's choice for the video; matching cannot have changed it."""
+    from qurantext.core.looks import PRESETS
+    from qurantext.jobs.look_assets import project_look, set_project_look
+    from qurantext.jobs.project import load_project, save_project
+
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    first = jobs_module.run_matching(spec)
+    corrected = load_project(first.path)
+    corrected.cards[0]["start_time"] = 0.25
+    set_project_look(corrected, PRESETS["rose"])
+    corrected.style["note"] = "kept too"
+    save_project(corrected, first.path)
+    style = load_project(first.path).style
+
+    project = run_matching(spec)
+
+    assert list(tmp_path.glob("clip_recitation.*.qalun-backup.json")), "content changed"
+    assert project.cards[0]["start_time"] != 0.25
+    assert project.style == style
+    saved = load_project(first.path)
+    assert saved.style == style and project_look(saved) == PRESETS["rose"]
+
+
+def test_a_rematch_compares_without_the_look_on_both_sides(tmp_path, monkeypatch) -> None:
+    """Even a derived project that already carries a look counts as unchanged."""
+    from qurantext.core.looks import PRESETS
+    from qurantext.jobs.look_assets import set_project_look
+    from qurantext.jobs.project import Project, load_project
+
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    first = jobs_module.run_matching(spec)
+    derived = Project.from_match_file(tmp_path / "clip_recitation.json", spec.audio)
+    derived.mode = load_project(first.path).mode
+    set_project_look(derived, PRESETS["ocean"])
+    assert jobs_module._keep_earlier(first.path, derived) == jobs_module._UNCHANGED
+
+
 def test_start_renders_only_when_asked_to_right_away(tmp_path, monkeypatch) -> None:
     """The job Start runs: match, then render only when the job skips the review."""
     from qurantext.gui.main_window import _match_then_render
