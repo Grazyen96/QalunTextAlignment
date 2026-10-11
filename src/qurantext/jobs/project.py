@@ -46,6 +46,7 @@ __all__ = [
     "project_path_for",
     "save_project",
     "set_job_settings",
+    "studied_surah_choice",
 ]
 
 #: Bumped when the on-disk shape changes incompatibly.
@@ -55,6 +56,8 @@ SUPPORTED_VERSIONS = ("1", "2")
 REVIEW_STATES = ("needs_review", "reviewed")
 #: Where a job's subtitles go: in the picture, in files beside the video, or both.
 SUBTITLE_CHOICES = ("burn", "sidecar", "both")
+#: Surahs a lecture can be chosen to study.
+SURAH_COUNT = 114
 
 _KNOWN_KEYS = frozenset(
     {
@@ -264,10 +267,13 @@ class Project:
         )
 
     def content_hash(self) -> str:
-        """A digest of what a render depends on: the cards, the captions and a chosen look.
+        """A digest of what a render depends on: the cards, the captions, a chosen
+        look and a chosen studied surah.
 
-        The look joins the digest only once one is chosen, so a project from
-        before looks existed keeps its hash and its render stays current.
+        The look and the surah join the digest only once one is chosen, so a
+        project from before either existed keeps its hash and its render stays
+        current; choosing or changing the surah changes which cards the video
+        draws, so it leaves the render stale.
         """
         content: dict[str, Any] = {
             "cards": self.cards,
@@ -275,6 +281,9 @@ class Project:
         }
         if self.style:
             content["style"] = self.style
+        studied = studied_surah_choice(self.export.get("studied_surah"))
+        if studied is not None:
+            content["studied_surah"] = studied
         payload = json.dumps(content, sort_keys=True, ensure_ascii=False, default=str)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -355,6 +364,20 @@ class JobSettings:
     formats: tuple[str, ...] = ("srt",)
     #: Where the job's files go; None means the default videos folder.
     output_dir: Path | None = None
+    #: The surah a lecture's ayah cards keep to (1..114); None guesses it
+    #: (``core.video_common.cards_on_screen``). A recitation ignores it.
+    studied_surah: int | None = None
+
+
+def studied_surah_choice(value: Any) -> int | None:
+    """*value* as a studied surah, or None when it is not one.
+
+    The file can be hand-edited or written by a newer build, so anything other
+    than a whole number 1..114 means "guess it" rather than failing a render.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if 1 <= value <= SURAH_COUNT else None
 
 
 def job_settings(project: Project) -> JobSettings:
@@ -389,6 +412,7 @@ def job_settings(project: Project) -> JobSettings:
         subtitles=subtitles if subtitles in SUBTITLE_CHOICES else default.subtitles,
         formats=chosen or default.formats,
         output_dir=Path(output_dir) if isinstance(output_dir, str) and output_dir else None,
+        studied_surah=studied_surah_choice(export.get("studied_surah")),
     )
 
 
@@ -406,6 +430,13 @@ def set_job_settings(project: Project, settings: JobSettings) -> None:
         export["output_dir"] = Path(settings.output_dir).expanduser().resolve().as_posix()
     else:
         export.pop("output_dir", None)
+    # Absent rather than null when unset, so a project that never chose one
+    # reads exactly as it did before the choice existed.
+    studied = studied_surah_choice(settings.studied_surah)
+    if studied is not None:
+        export["studied_surah"] = studied
+    else:
+        export.pop("studied_surah", None)
     project.export = export
 
 

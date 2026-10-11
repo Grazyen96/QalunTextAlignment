@@ -1082,3 +1082,44 @@ def test_a_recitation_keeps_every_card() -> None:
     cards = [_card(25, 75, 0.0, 9.0), _card(26, 1, 9.0, 10.0)]
     assert cards_on_screen(cards, "recitation") == cards
     assert cards_on_screen(cards, None) == cards
+
+
+def test_a_chosen_surah_overrides_the_guess() -> None:
+    """The guess would keep al-Furqan (heard longest); the person said al-Isra."""
+    from qurantext.core.video_common import cards_on_screen
+
+    cards = [_card(25, 7, 0.0, 15.0), _card(17, 48, 15.0, 20.0), _card(25, 8, 20.0, 30.0)]
+    assert [c["surah_num"] for c in cards_on_screen(cards, "lecture")] == [25, 25]
+    assert [c["surah_num"] for c in cards_on_screen(cards, "lecture", 17)] == [17]
+
+
+def test_a_chosen_surah_applies_even_when_only_one_surah_was_heard() -> None:
+    from qurantext.core.video_common import cards_on_screen
+
+    cards = [_card(2, 255, 0.0, 9.0), _card(2, 256, 9.0, 10.0)]
+    assert cards_on_screen(cards, "lecture") == cards, "the guess keeps the only surah"
+    assert cards_on_screen(cards, "lecture", 25) == [], "the choice is obeyed as given"
+
+
+def test_a_chosen_surah_with_no_card_leaves_only_the_surah_less_ones() -> None:
+    from qurantext.core.video_common import cards_on_screen, has_surah_cards
+
+    preamble = {"kind": "preamble", "start_time": 0.0, "end_time": 2.0}
+    cards = [preamble, _card(25, 7, 2.0, 9.0), _card(17, 48, 9.0, 10.0)]
+    assert cards_on_screen(cards, "lecture", 1) == [preamble]
+    assert not has_surah_cards(cards, 1) and has_surah_cards(cards, 17)
+
+
+def test_a_chosen_surah_keeps_cards_without_a_surah() -> None:
+    from qurantext.core.video_common import cards_on_screen
+
+    preamble = {"kind": "preamble", "start_time": 0.0, "end_time": 2.0}
+    cards = [preamble, _card(25, 7, 2.0, 9.0), _card(17, 48, 9.0, 10.0)]
+    assert cards_on_screen(cards, "lecture", 17) == [preamble, cards[2]]
+
+
+def test_a_recitation_ignores_a_chosen_surah() -> None:
+    from qurantext.core.video_common import cards_on_screen
+
+    cards = [_card(25, 75, 0.0, 9.0), _card(26, 1, 9.0, 10.0)]
+    assert cards_on_screen(cards, "recitation", 26) == cards

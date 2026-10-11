@@ -24,7 +24,7 @@ from qurantext.core.subtitles import Cue, write_subtitles
 from qurantext.core.video_common import get_audio_duration
 from qurantext.jobs.export import ExportRequest, ExportResult, build_cues, export_job
 from qurantext.jobs.look_assets import project_look, set_project_look
-from qurantext.jobs.project import Project, save_project
+from qurantext.jobs.project import Project, job_settings, save_project, set_job_settings
 from qurantext.utils.progress import CancelToken, ProgressCallback
 
 __all__ = ["SUBTITLE_TIMELINES", "export_project_subtitles", "render_project"]
@@ -49,12 +49,13 @@ def render_project(
     title: str | None = None,
     db_path: Path = QURAN_DB_PATH,
     look: Look | None = None,
+    studied_surah: int | None = None,
     progress: ProgressCallback | None = None,
     cancel: CancelToken | None = None,
 ) -> ExportResult:
     """Render *project*, remember the render, and save the project if it has a file.
 
-    The cards, captions and style are copied before anything runs, and the
+    The cards, captions, style and output choices are copied before anything runs, and the
     render is made and hashed from that copy. A render can take minutes in a
     worker while the editor stays open; an edit made meanwhile — a retimed word
     or another look — is not in the video, so it must leave the render looking
@@ -66,6 +67,10 @@ def render_project(
     the project's own. A *look* equal to the project's own leaves the style as
     stored: rewriting a hand-edited style into canonical form would record a
     hash the project does not have, and the render would read stale at once.
+
+    *studied_surah* is the same kind of fallback (the command line's
+    ``--studied-surah``): it applies only when the project has not chosen one,
+    and then the recorded hash names it, as it does an override look.
     """
     if project.matches is None:
         raise ValueError(
@@ -77,12 +82,16 @@ def render_project(
         cards=copy.deepcopy(project.cards),
         captions=copy.deepcopy(project.captions),
         style=copy.deepcopy(project.style),
+        export=copy.deepcopy(project.export),
     )
     own = project_look(snapshot)
     if look is None:
         look = own
     elif look != own:
         set_project_look(snapshot, look)
+    settings = job_settings(snapshot)
+    if settings.studied_surah is None and studied_surah is not None:
+        set_job_settings(snapshot, replace(settings, studied_surah=studied_surah))
     rendered_hash = snapshot.content_hash()
     result = export_job(
         ExportRequest(
@@ -101,6 +110,7 @@ def render_project(
             captions=tuple(snapshot.caption_segments()),
             cards=tuple(snapshot.cards),
             look=look,
+            studied_surah=job_settings(snapshot).studied_surah,
         ),
         progress=progress,
         cancel=cancel,

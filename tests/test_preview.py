@@ -279,3 +279,57 @@ def test_a_lecture_keeps_the_studied_ayah_up_through_a_quote_from_another_surah(
         )
     )
     assert result.card == "25:8", "the quote from al-Isra stays in the captions, not on the card"
+
+
+def _lecture_quoting_al_isra(tmp_path):
+    path = _matches(tmp_path, mode="lecture")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    quote = dict(
+        payload["matches"][0], surah_num=17, surah_name="الإسراء", from_ayah=48, to_ayah=48
+    )
+    quote.update(start_time=6.5, end_time=7.5)
+    payload["matches"].insert(1, quote)
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_the_preview_draws_the_chosen_surah(tmp_path) -> None:
+    """At 7s the guess holds al-Furqan up; the person chose al-Isra, so its quote shows."""
+    result = render_preview(
+        PreviewRequest(
+            matches=_lecture_quoting_al_isra(tmp_path),
+            output=tmp_path / "p.png",
+            at=7.0,
+            width=240,
+            height=180,
+            font_file=DEFAULT_FONT_PATH,
+            studied_surah=17,
+        )
+    )
+    assert result.card == "17:48"
+
+
+def test_the_preview_cli_passes_the_studied_surah(tmp_path, capsys) -> None:
+    from qurantext.cli.main import build_parser
+
+    args = build_parser().parse_args(
+        [
+            "preview",
+            "--matches",
+            str(_lecture_quoting_al_isra(tmp_path)),
+            "--output",
+            str(tmp_path / "p.png"),
+            "--at",
+            "7",
+            "--width",
+            "240",
+            "--height",
+            "180",
+            "--font-file",
+            str(DEFAULT_FONT_PATH),
+            "--studied-surah",
+            "17",
+        ]
+    )
+    assert args.handler(args) == 0
+    assert "showing 17:48" in capsys.readouterr().out

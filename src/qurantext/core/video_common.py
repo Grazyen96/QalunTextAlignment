@@ -106,21 +106,36 @@ def _card_span(card: dict[str, Any]) -> tuple[float, float] | None:
     return start, end
 
 
-def cards_on_screen(cards: list[dict[str, Any]], mode: str | None) -> list[dict[str, Any]]:
+def cards_on_screen(
+    cards: list[dict[str, Any]], mode: str | None, studied_surah: int | None = None
+) -> list[dict[str, Any]]:
     """The cards a video draws, out of every card detected for a job.
 
-    A lecture's card shows the surah it studies — the one heard for the most
-    time, a tie going to the one heard first. Ayat the speaker quotes from
+    A lecture's card shows the surah it studies. Ayat the speaker quotes from
     another surah to explain it are left off the card, which keeps holding the
     studied ayah through the quote; they still appear in the captions, which
     carry everything said. Cards without a surah are kept. A recitation keeps
     every card, since it states its own range and quotes nothing.
+
+    *studied_surah* is the person's own choice (``JobSettings.studied_surah``)
+    and is obeyed as given — even when only one surah was heard, and even when
+    none of its ayat was, which leaves only the opening title card: the person
+    knows which surah the lecture is about better than a count of seconds does.
+    Without a choice the studied surah is guessed as the one heard for the most
+    time, a tie going to the one heard first.
 
     The export, the single-frame preview and the review window's live frame all
     call this, so none of them shows a card the others leave out.
     """
     if str(mode or "").lower() != "lecture":
         return list(cards)
+
+    if studied_surah is not None:
+        return [
+            card
+            for card in cards
+            if _card_surah(card) is None or card.get("surah_num") == studied_surah
+        ]
 
     heard: dict[int | str, float] = {}
     first: dict[int | str, float] = {}
@@ -137,6 +152,16 @@ def cards_on_screen(cards: list[dict[str, Any]], mode: str | None) -> list[dict[
 
     studied = max(heard, key=lambda surah: (heard[surah], -first[surah]))
     return [card for card in cards if _card_surah(card) in (None, studied)]
+
+
+def has_surah_cards(cards: list[dict[str, Any]], surah: int) -> bool:
+    """Whether any of *cards* is an ayah of *surah*.
+
+    A chosen studied surah with no card leaves a lecture with only its opening
+    title card, which the review window points out rather than leave a person
+    wondering where the ayat went.
+    """
+    return any(card.get("surah_num") == surah for card in cards)
 
 
 def warn(message: str) -> None:

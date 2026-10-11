@@ -75,6 +75,9 @@ class ExportRequest:
     cards: tuple[dict, ...] | None = None
     #: Colours and background of the video.
     look: Look = NIGHT_GOLD
+    #: The surah a lecture's cards keep to; None guesses it. The subtitles
+    #: are not affected: they carry everything said.
+    studied_surah: int | None = None
 
     def __post_init__(self) -> None:
         if self.subtitles not in SUBTITLE_MODES:
@@ -212,6 +215,7 @@ def export_job(
         captions=request.captions if burn_captions else (),
         cards=request.cards,
         look=request.look,
+        studied_surah=request.studied_surah,
     )
     render_result = render_video(render_request, progress=progress, cancel=cancel)
 

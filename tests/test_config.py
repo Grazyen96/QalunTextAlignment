@@ -298,8 +298,12 @@ def test_the_look_resolves_from_the_project_style_then_the_flag(tmp_path) -> Non
     assert NIGHT_GOLD == PRESETS["night_gold"]
 
 
-def _cli_render(tmp_path, monkeypatch, style, *flags):
-    """Run ``generate-video --project`` with the export faked; return what it saw."""
+def _cli_render(tmp_path, monkeypatch, style, *flags, seen=None):
+    """Run ``generate-video --project`` with the export faked; return what it saw.
+
+    *seen*, when given, is filled with what the faked export receives, on this
+    run and any later one in the same test.
+    """
     from qurantext.cli.main import _run_generate_video
     from qurantext.jobs import project_render
     from qurantext.jobs.export import ExportResult
@@ -314,10 +318,11 @@ def _cli_render(tmp_path, monkeypatch, style, *flags):
         style=style,
     )
     path = save_project(project, tmp_path / "job.qalun.json")
-    captured = {}
+    captured = seen if seen is not None else {}
 
     def fake_export_job(request, *, progress=None, cancel=None):
         captured["look"] = request.look
+        captured["studied_surah"] = request.studied_surah
         video = Path(request.output)
         return ExportResult(
             video=video,
@@ -385,3 +390,53 @@ def test_a_cli_render_without_any_look_is_current(tmp_path, monkeypatch) -> None
     look, path = _cli_render(tmp_path, monkeypatch, {})
     assert look == NIGHT_GOLD
     assert load_project(path).render_is_stale is False
+
+
+def test_the_studied_surah_flag_is_parsed_and_checked() -> None:
+    parser = build_cli_parser()
+    assert parser.parse_args(["preview", "--matches", "m.json"]).studied_surah is None
+    args = parser.parse_args(
+        ["generate-video", "--audio", "a.mp3", "--matches", "m.json", "--studied-surah", "25"]
+    )
+    assert args.studied_surah == 25
+    for bad in ("0", "115", "al-Furqan"):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["preview", "--matches", "m.json", "--studied-surah", bad])
+
+
+def test_the_cli_studied_surah_applies_to_a_project_without_one(tmp_path, monkeypatch) -> None:
+    from qurantext.jobs.project import load_project
+
+    seen = {}
+    _look, path = _cli_render(tmp_path, monkeypatch, {}, "--studied-surah", "17", seen=seen)
+    assert seen["studied_surah"] == 17
+    saved = load_project(path)
+    assert "studied_surah" not in saved.export, "the project itself is not changed"
+    assert saved.render_is_stale is True, "the video keeps to a surah the project did not choose"
+
+
+def test_the_projects_studied_surah_wins_over_the_flag(tmp_path, monkeypatch, capsys) -> None:
+    from qurantext.jobs.project import JobSettings, load_project, save_project, set_job_settings
+
+    seen = {}
+    _cli_render(tmp_path, monkeypatch, {}, seen=seen)
+    project = load_project(tmp_path / "job.qalun.json")
+    set_job_settings(project, JobSettings(studied_surah=25))
+    save_project(project, project.path)
+
+    from qurantext.cli.main import _run_generate_video
+
+    args = build_cli_parser().parse_args(
+        [
+            "generate-video",
+            "--project",
+            str(project.path),
+            "--output",
+            str(tmp_path / "v.mp4"),
+            "--studied-surah",
+            "17",
+        ]
+    )
+    assert _run_generate_video(args) == 0
+    assert seen["studied_surah"] == 25
+    assert "Ignoring --studied-surah" in capsys.readouterr().err

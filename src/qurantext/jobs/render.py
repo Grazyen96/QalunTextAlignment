@@ -87,6 +87,9 @@ class RenderRequest:
     cards: tuple[dict, ...] | None = None
     #: Colours and background of the frame renderer. The ass renderer ignores it.
     look: Look = NIGHT_GOLD
+    #: The surah a lecture's cards keep to; None guesses it
+    #: (``core.video_common.cards_on_screen``).
+    studied_surah: int | None = None
 
     def resolved_format(self) -> tuple[int, int, int]:
         """Return ``(width, height, fps)`` with preset and defaults applied."""
@@ -154,8 +157,16 @@ def render_video(
     )
     # A lecture's card keeps to the surah it studies; quotes from elsewhere
     # stay in the captions only.
-    matches = cards_on_screen(matches, load_matches_meta(matches_path).get("mode"))
-    if not matches:
+    detected = bool(matches)
+    matches = cards_on_screen(
+        matches, load_matches_meta(matches_path).get("mode"), request.studied_surah
+    )
+    if not matches and detected:
+        warn(
+            f"No ayah of the chosen surah {request.studied_surah} was found. Rendering "
+            "the opening title card only."
+        )
+    elif not matches:
         warn(
             "No matches were found in the match JSON. Rendering a dark video with the "
             "original audio and no ayah overlays."
