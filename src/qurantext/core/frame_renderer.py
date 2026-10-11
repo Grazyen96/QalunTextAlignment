@@ -10,9 +10,8 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from qurantext.core.backgrounds import BaseLayer, base_layer
 from qurantext.core.looks import NIGHT_GOLD, Look
 from qurantext.core.video_common import (
     ayah_label,
@@ -24,6 +23,9 @@ from qurantext.core.video_common import (
     warn,
 )
 from qurantext.utils.progress import CancelToken, ProgressCallback, report
+
+if TYPE_CHECKING:
+    from qurantext.core.backgrounds import BaseLayer
 
 COLOUR_BG = (10, 10, 12, 255)
 COLOUR_CARD = (36, 36, 42, 230)
@@ -103,6 +105,12 @@ def placeholder_lines(
 
 @lru_cache(maxsize=1)
 def _frame_dependencies() -> tuple[Any, Any, Any, Any, Any]:
+    """numpy and Pillow, imported on first use with a friendly error when missing.
+
+    :mod:`qurantext.core.backgrounds` imports Pillow at module level, so this
+    module imports it lazily too (inside the functions that draw) to keep
+    importing ``frame_renderer`` cheap and this error reachable.
+    """
     try:
         import numpy as np
     except ModuleNotFoundError as error:
@@ -1152,6 +1160,8 @@ def render_frame_pillow(
     so each frame only draws its text on a copy of it.
     """
     np, _, image_draw, _, _ = _frame_dependencies()
+    from qurantext.core.backgrounds import base_layer
+
     layout = _frame_layout(width, height, reserve_caption_band=reserve_caption_band)
     radius = _card_radius(width, height)
     image = base_layer(look, width, height, layout.card, radius).image.copy()
@@ -1197,6 +1207,9 @@ def frame_base_layer(
     look: Look, width: int, height: int, *, reserve_caption_band: bool
 ) -> BaseLayer:
     """The cached background + card this look draws at this size (for the review window)."""
+    _frame_dependencies()
+    from qurantext.core.backgrounds import base_layer
+
     layout = _frame_layout(width, height, reserve_caption_band=reserve_caption_band)
     return base_layer(look, width, height, layout.card, _card_radius(width, height))
 
@@ -1417,6 +1430,13 @@ def write_frame_video(
     n_events = len(events)
     report_every = max(1, n_events // 10)
 
+    # The layer every frame starts from, built (and any photo decoded) before
+    # FFmpeg starts; its warnings (a photo that could not be read, say) are the
+    # render's, as the frames saw them.
+    layer_warnings = frame_base_layer(
+        look, width, height, reserve_caption_band=reserve_caption_band
+    ).warnings
+
     encoder_log = log_path or output_path.with_suffix(".ffmpeg.log")
     encoder_log.parent.mkdir(parents=True, exist_ok=True)
     log_handle = encoder_log.open("wb")
@@ -1509,9 +1529,7 @@ def write_frame_video(
         if not completed:
             output_path.unlink(missing_ok=True)
 
-    # The cached layer every frame was drawn from: its warnings (a photo that
-    # could not be read, say) are the render's.
-    return frame_base_layer(look, width, height, reserve_caption_band=reserve_caption_band).warnings
+    return layer_warnings
 
 
 def render_frame_video(

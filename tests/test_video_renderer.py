@@ -697,6 +697,95 @@ def test_write_frame_video_passes_the_look_to_every_frame(monkeypatch, tmp_path)
     assert warnings == ()
 
 
+def test_write_frame_video_reports_the_warnings_its_frames_saw(monkeypatch, tmp_path) -> None:
+    """Taken before the encode: an image that appears mid-render does not erase the warning."""
+    import io
+    from dataclasses import replace
+
+    import numpy as np
+    from PIL import Image
+
+    from qurantext.core.backgrounds import clear_cache
+    from qurantext.core.looks import NIGHT_GOLD
+
+    clear_cache()
+    image = tmp_path / "bg.png"
+    look = replace(NIGHT_GOLD, background=replace(NIGHT_GOLD.background, kind="image", image=image))
+
+    def fake_frame(t, match, width, height, font_file, **kwargs):
+        Image.new("RGB", (8, 8), (255, 0, 0)).save(image)  # the photo turns up mid-render
+        return np.zeros((height, width, 3), np.uint8)
+
+    class _Encoder:
+        stdin = io.BytesIO()
+        returncode = 0
+
+        def wait(self):
+            return 0
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(frame_renderer, "render_frame_pillow", fake_frame)
+    monkeypatch.setattr(frame_renderer, "_start_frame_encoder", lambda *a, **k: _Encoder())
+    warnings = frame_renderer.write_frame_video(
+        [],
+        1.0,
+        tmp_path / "a.m4a",
+        tmp_path / "o.mp4",
+        32,
+        24,
+        10,
+        _BUNDLED_FONT,
+        log_path=tmp_path / "enc.log",
+        look=look,
+    )
+    clear_cache()
+    assert warnings == ("image_missing",)
+
+
+def test_render_frame_video_passes_the_look_and_collects_its_warnings(
+    monkeypatch, tmp_path
+) -> None:
+    from qurantext.core.looks import PRESETS
+
+    seen = {}
+
+    def fake_write(*args, **kwargs):
+        seen.update(kwargs)
+        return ("image_unreadable",)
+
+    monkeypatch.setattr(frame_renderer, "write_frame_video", fake_write)
+    monkeypatch.setattr(frame_renderer, "_require_raqm_support", lambda: None)
+    monkeypatch.setattr(frame_renderer, "require_binary", lambda *a, **k: None)
+    monkeypatch.setattr(frame_renderer, "get_audio_duration", lambda _path: 3.0)
+    collected: list[str] = ["earlier"]
+
+    duration = frame_renderer.render_frame_video(
+        tmp_path / "a.m4a",
+        [],
+        tmp_path / "o.mp4",
+        32,
+        24,
+        10,
+        _BUNDLED_FONT,
+        look=PRESETS["rose"],
+        look_warnings=collected,
+    )
+
+    assert duration == 3.0
+    assert seen["look"] is PRESETS["rose"]
+    assert collected == ["earlier", "image_unreadable"]
+    # Without a list the warnings are simply not collected; the return stays the duration.
+    assert (
+        frame_renderer.render_frame_video(
+            tmp_path / "a.m4a", [], tmp_path / "o.mp4", 32, 24, 10, _BUNDLED_FONT
+        )
+        == 3.0
+    )
+    assert seen["look"] is frame_renderer.NIGHT_GOLD
+
+
 # --- locating helper binaries -------------------------------------------------
 
 

@@ -17,7 +17,7 @@ from PIL import features
 
 from qurantext.config.paths import DEFAULT_FONT_PATH
 from qurantext.core.frame_renderer import render_frame_pillow
-from qurantext.core.looks import NIGHT_GOLD, PRESETS
+from qurantext.core.looks import COLOUR_FIELDS, NIGHT_GOLD, PRESETS
 
 FIXTURE = Path(__file__).parent / "fixtures" / "frame_reference.json"
 
@@ -107,3 +107,45 @@ def test_every_other_preset_renders_and_differs(preset: str, name: str) -> None:
     frame = _frames(look=PRESETS[preset])[name]()
     assert frame.shape[2] == 3
     assert digest(frame) != digest(FRAMES[name]())
+
+
+_MAGENTA = (255, 0, 255, 255)
+
+
+def _every_colour_use(look) -> list[str]:
+    """Frames that between them draw every colour: debug text, a timed caption, both placeholders."""
+    font = DEFAULT_FONT_PATH
+    frames = [
+        render_frame_pillow(
+            1.2,
+            {**_AYAH, "detected_text": "تبارك الذي نزل الفرقان"},
+            960,
+            540,
+            font,
+            caption_text="قال الشيخ في درسه اليوم",
+            caption_word_timings=_CAPTION_WT,
+            debug_detected_text=True,
+            look=look,
+        ),
+        _frames(look=look)["placeholder"](),
+        _frames(look=look)["placeholder_subtitle"](),
+    ]
+    return [digest(frame) for frame in frames]
+
+
+@pytest.mark.parametrize("name", [n for n in COLOUR_FIELDS if n != "frame_bg"])
+def test_every_colour_field_reaches_the_frame(name: str) -> None:
+    from dataclasses import replace
+
+    assert _every_colour_use(replace(NIGHT_GOLD, **{name: _MAGENTA})) != _every_colour_use(
+        NIGHT_GOLD
+    )
+
+
+def test_frame_bg_is_inert_the_background_draws_the_frame() -> None:
+    """``frame_bg`` is kept for the panel to mirror ``background.colour``; it draws nothing."""
+    from dataclasses import replace
+
+    assert _every_colour_use(replace(NIGHT_GOLD, frame_bg=_MAGENTA)) == _every_colour_use(
+        NIGHT_GOLD
+    )
