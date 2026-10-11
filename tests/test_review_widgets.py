@@ -1619,3 +1619,51 @@ def test_a_damaged_store_disables_ok(qt_app, tmp_path) -> None:
     picker = AyahPicker(surah=25, db_path=broken)
     assert not picker.ok_button.isEnabled()
     assert picker.preview.text() == t("ayah_picker.no_store")
+
+
+def test_a_hand_made_card_is_marked_in_the_segment_list(qt_app) -> None:
+    from pathlib import Path
+
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.segment_list import MANUAL_MARK, SegmentList
+    from qurantext.gui.review.session import ReviewSession
+    from qurantext.jobs.project import Project
+
+    detected = {
+        "surah_num": 25,
+        "from_ayah": 7,
+        "to_ayah": 7,
+        "full_text": "x",
+        "start_time": 1.0,
+        "end_time": 2.0,
+    }
+    manual = dict(detected, from_ayah=8, to_ayah=9, start_time=3.0, end_time=4.0, manual=True)
+    project = Project(audio=Path("d.mp3"), mode="lecture", cards=[detected, manual])
+    table = SegmentList(ReviewSession(project))
+    assert table.item(0, 0).text() == "25:7" and not table.item(0, 0).toolTip()
+    assert table.item(1, 0).text() == f"{MANUAL_MARK} 25:8-9"
+    assert table.item(1, 0).toolTip() == t("segments.manual")
+
+
+def test_only_a_lecture_cards_ayah_cell_asks_to_change_it(qt_app) -> None:
+    from pathlib import Path
+
+    from qurantext.gui.review.segment_list import SegmentList
+    from qurantext.gui.review.session import ReviewSession
+    from qurantext.jobs.project import CaptionCue, Project
+
+    card = {"surah_num": 25, "from_ayah": 7, "to_ayah": 7, "start_time": 1.0, "end_time": 2.0}
+    project = Project(
+        audio=Path("d.mp3"),
+        mode="lecture",
+        cards=[card],
+        captions=[CaptionCue(3.0, 4.0, "spoken", words=[])],
+    )
+    table = SegmentList(ReviewSession(project))
+    asked = _recorded(table.card_ayah_requested)
+    table.cellDoubleClicked.emit(0, 0)
+    table.cellDoubleClicked.emit(0, 2)  # the card's text
+    table.cellDoubleClicked.emit(1, 0)  # a caption
+    assert asked == [(0,)]
+    caption_cell = table.visualItemRect(table.item(1, 0)).center()
+    assert table.context_menu_at(caption_cell) is None

@@ -79,7 +79,8 @@ A hand-made card is an ordinary lecture card dict:
 - `surah_num`, `surah_name` (the store's header name), `from_ayah`, `to_ayah`;
 - `start_time`, `end_time` (seconds, rounded to milliseconds);
 - `full_text` and `text`: the canonical text of the range, built from the store exactly as detection
-  builds it (`core.arabic.ayah_text_with_marker` per ayah, joined with spaces);
+  builds it (`core.arabic.ayah_text_with_marker` per ayah, one per line, joined with `"\n"` as
+  detection joins them);
 - `confidence: 1.0`, `detected_text: ""`;
 - **`"manual": true`**.
 

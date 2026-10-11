@@ -42,7 +42,7 @@ from qurantext.core.video_common import (
     is_manual_card,
     validated_matches,
 )
-from qurantext.data.quran_db import ayah_range_card, connect
+from qurantext.data.quran_db import ayah_range_card, connect, surah_ayah_count
 from qurantext.gui.i18n import t
 from qurantext.jobs.look_assets import project_look, set_project_look
 from qurantext.jobs.project import (
@@ -183,11 +183,26 @@ def _range_card(surah_num: int, from_ayah: int, to_ayah: int, db_path: Path) -> 
     except sqlite3.Error as exc:
         raise ValueError(t("session.manual_store_unavailable", details=exc)) from exc
     except ValueError as exc:
+        if _in_surah(conn, surah_num, from_ayah, to_ayah):
+            # A sound reference the store has no text for: the store is damaged.
+            raise ValueError(t("session.manual_store_unavailable", details=exc)) from exc
         raise ValueError(
             t("session.manual_bad_reference", surah=surah_num, first=from_ayah, last=to_ayah)
         ) from exc
     finally:
         conn.close()
+
+
+def _in_surah(conn: sqlite3.Connection, surah_num: Any, from_ayah: Any, to_ayah: Any) -> bool:
+    """Whether *from_ayah*–*to_ayah* are whole ayat numbers within the store's count for the surah."""
+    numbers = (surah_num, from_ayah, to_ayah)
+    if any(isinstance(n, bool) or not isinstance(n, int) for n in numbers):
+        return False
+    try:
+        count = surah_ayah_count(conn, surah_num)
+    except (ValueError, sqlite3.Error):
+        return False
+    return 1 <= from_ayah <= to_ayah <= count
 
 
 def _ms(value: Any) -> int | None:
@@ -666,8 +681,8 @@ class ReviewSession:
         card instead of adding one beside it when it falls within 0.05 s of
         that card's start, in the first half second of a card on screen, or
         less than half a second before the next card starts. The nearest such
-        start wins. The changed card keeps its times (see
-        :meth:`change_card_ayah`).
+        start wins, and of two equally near, one that lasts half a second or
+        more. The changed card keeps its times (see :meth:`change_card_ayah`).
 
         Returns the card's index once the cards are back in start order.
         Raises ``ValueError`` outside a lecture, for a reference the store does
@@ -683,7 +698,9 @@ class ReviewSession:
         cards = self.project.cards
         at_ms = round(at * 1000)
 
-        nearby: list[tuple[int, int]] = []  # (distance, index) of cards *at* lands on
+        # (distance, shorter than half a second, index) of each card *at* lands on: at
+        # equal distance a card that lasts is changed rather than one that would flash.
+        nearby: list[tuple[int, bool, int]] = []
         for i, card in enumerate(cards):
             start = _ms(card.get("start_time"))
             if start is None:
@@ -692,9 +709,10 @@ class ReviewSession:
             end = _ms(card.get("end_time"))
             inside = end is not None and 0 < after < _MIN_CARD_MS and at_ms < end
             if abs(after) <= _SAME_START_MS or inside or -_MIN_CARD_MS < after < 0:
-                nearby.append((abs(after), i))
+                short = end is None or end - start < _MIN_CARD_MS
+                nearby.append((abs(after), short, i))
         if nearby:
-            index = min(nearby)[1]
+            index = min(nearby)[2]
             self._replace_card(index, _changed_card(cards[index], reference))
             return index
 

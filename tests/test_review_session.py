@@ -961,3 +961,32 @@ def test_a_bad_reference_is_reported_in_the_windows_language(lecture_session, db
         lecture_session.change_card_ayah(0, 25, 1, 99, db_path=db)
     assert "لا تضمّ السورة" in str(arabic.value) and "99" in str(arabic.value)
     assert not lecture_session.can_undo
+
+
+def test_a_store_missing_ayat_is_said_to_be_damaged(lecture_session, db, tmp_path):
+    """A sound reference the store has no text for is the store's fault, not the person's."""
+    import shutil
+    import sqlite3
+
+    damaged = tmp_path / "damaged.sqlite"
+    shutil.copyfile(db, damaged)
+    with sqlite3.connect(damaged) as conn:
+        conn.execute("DELETE FROM ayat WHERE surah_num = 25 AND ayah_num = 7")
+    conn.close()
+    with pytest.raises(ValueError, match="Could not read the Quran store"):
+        lecture_session.insert_manual_card(25.0, 25, 6, 8, db_path=damaged)
+    with pytest.raises(ValueError, match="Surah 25 has no ayat 80"):
+        lecture_session.insert_manual_card(25.0, 25, 80, 80, db_path=damaged)
+    assert not lecture_session.can_undo and not lecture_session.dirty
+
+
+def test_of_two_equally_near_cards_the_one_that_lasts_is_changed(lecture_session, db):
+    """At 30.0, a 20 ms card ending there and a card starting at 30.02 are equally near."""
+    lecture_session.project.cards[1]["start_time"] = 30.02
+    lecture_session.project.cards.insert(
+        1, {**lecture_session.project.cards[1], "start_time": 29.98, "end_time": 30.0}
+    )
+    i = lecture_session.insert_manual_card(30.0, 2, 255, 255, db_path=db)
+    refs = _refs(lecture_session)
+    assert i == 2 and refs[2] == (2, 255, 255, 30.02, 40.0, True)
+    assert refs[1][:3] == (25, 8, 8) and not refs[1][5], "the flash card is left alone"
