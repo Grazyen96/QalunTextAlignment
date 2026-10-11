@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from qurantext.config.settings import DEFAULT_VIDEO_FONT_FILE, VIDEO_PRESETS, get_settings
+from qurantext.core.looks import NIGHT_GOLD, Look
 from qurantext.core.video_common import (
     get_audio_duration,
     load_caption_segments,
@@ -40,6 +41,8 @@ class PreviewRequest:
     font_file: Path | None = None
     title: str | None = None
     audio: Path | None = None
+    #: Colours and background to draw the frame with.
+    look: Look = NIGHT_GOLD
 
     def resolved_size(self) -> tuple[int, int]:
         if self.preset is not None:
@@ -62,6 +65,9 @@ class PreviewResult:
     height: int
     #: The card visible at that moment, as ``25:7``, or None for the placeholder.
     card: str | None = None
+    #: Codes for what the look could not do (``image_missing``,
+    #: ``image_unreadable``); the frame then shows the preset's background.
+    look_warnings: tuple[str, ...] = ()
 
 
 def render_preview(request: PreviewRequest) -> PreviewResult:
@@ -70,6 +76,7 @@ def render_preview(request: PreviewRequest) -> PreviewResult:
         DEFAULT_PLACEHOLDER_TITLE,
         _frame_dependencies,
         active_caption_index,
+        frame_base_layer,
         placeholder_lines,
         render_frame_pillow,
     )
@@ -123,7 +130,12 @@ def render_preview(request: PreviewRequest) -> PreviewResult:
         title=title,
         placeholder_subtitle=placeholder_subtitle,
         reserve_caption_band=reserve_band,
+        look=request.look,
     )
+    # The layer the frame was drawn on is cached, so this is a lookup.
+    look_warnings = frame_base_layer(
+        request.look, width, height, reserve_caption_band=reserve_band
+    ).warnings
 
     # render_frame_pillow returns BGR for the encoder; PNG wants RGB.
     _, image_module, _, _, _ = _frame_dependencies()
@@ -137,4 +149,5 @@ def render_preview(request: PreviewRequest) -> PreviewResult:
         width=width,
         height=height,
         card=card_ref(card) if card else None,
+        look_warnings=tuple(look_warnings),
     )

@@ -23,7 +23,10 @@ from qurantext.config.settings import (
     get_settings,
 )
 from qurantext.core.coverage import find_uncovered_speech
+from qurantext.core.looks import NIGHT_GOLD, Look
+from qurantext.core.looks import PRESETS as LOOK_PRESETS
 from qurantext.core.subtitles import SUBTITLE_FORMATS
+from qurantext.core.video_common import warn
 from qurantext.data.citation_index import DEFAULT_NGRAM_N
 from qurantext.data.quran_db import build_quran_db, ensure_quran_db, list_surahs
 from qurantext.io.readers import load_json
@@ -31,6 +34,7 @@ from qurantext.jobs.export import SUBTITLE_MODES, ExportRequest, export_job
 from qurantext.jobs.preview import PreviewRequest, render_preview
 from qurantext.jobs.project import Project, load_project, project_path_for, save_project
 from qurantext.jobs.project_render import render_project
+from qurantext.jobs.render import look_warning_message
 from qurantext.pipelines.detection import run_detection, run_recitation_range
 from qurantext.pipelines.recitation import build_recitation_output_paths, run_word_alignment
 from qurantext.pipelines.video import run_video_generation
@@ -254,6 +258,25 @@ def _run_doctor(args: argparse.Namespace) -> int:
     return 1 if any(r.status == Status.FAIL for r in results) else 0
 
 
+def _add_look_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--look",
+        choices=list(LOOK_PRESETS),
+        default=None,
+        help="Colours and background of the frame renderer. A project's own look wins "
+        "when it has chosen one. Defaults to night_gold.",
+    )
+
+
+def _resolve_look(args: argparse.Namespace, project: Project | None) -> Look:
+    """The project's look when it chose one, else ``--look``, else night gold."""
+    from qurantext.jobs.look_assets import project_look
+
+    if project is not None and project.style:
+        return project_look(project)
+    return LOOK_PRESETS[args.look] if getattr(args, "look", None) else NIGHT_GOLD
+
+
 def _run_preview(args: argparse.Namespace) -> int:
     """Draw one frame, so a style can be judged without rendering the video."""
     output = args.output or str(Path(args.matches).with_suffix(".preview.png"))
@@ -268,8 +291,11 @@ def _run_preview(args: argparse.Namespace) -> int:
             font_file=Path(args.font_file) if args.font_file else None,
             title=args.title,
             audio=Path(args.audio) if args.audio else None,
+            look=_resolve_look(args, None),
         )
     )
+    for code in result.look_warnings:
+        warn(look_warning_message(code))
     card = result.card or "the opening placeholder"
     print(f"Preview saved to: {result.output}")
     print(f"  {result.width}×{result.height} at {result.at:.2f}s, showing {card}")
@@ -297,6 +323,7 @@ def _run_generate_video(args: argparse.Namespace) -> int:
         args.matches = args.matches or (str(project.matches) if project.matches else None)
     if not args.audio or not args.matches:
         raise SystemExit("generate-video needs --audio and --matches, or a --project.")
+    look = _resolve_look(args, project)
 
     _resolve_preset(args)
     output_path = args.output or _default_detection_output(
@@ -323,6 +350,7 @@ def _run_generate_video(args: argparse.Namespace) -> int:
             keep_temp=args.keep_temp,
             debug_detected_text=args.debug_detected_text,
             title=getattr(args, "title", None),
+            look=look,
             progress=ConsoleProgress(),
         )
     else:
@@ -340,6 +368,7 @@ def _run_generate_video(args: argparse.Namespace) -> int:
                 fps=args.fps,
                 font_file=Path(args.font_file) if args.font_file else None,
                 title=getattr(args, "title", None),
+                look=look,
                 progress=ConsoleProgress(),
             )
         else:
@@ -356,6 +385,7 @@ def _run_generate_video(args: argparse.Namespace) -> int:
                     fps=args.fps,
                     font_file=Path(args.font_file) if args.font_file else None,
                     title=getattr(args, "title", None),
+                    look=look,
                 ),
                 progress=ConsoleProgress(),
             )
@@ -660,6 +690,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=["srt"],
         help="Formats to write alongside the video when subtitles are not burned in.",
     )
+    _add_look_argument(video_parser)
     video_parser.add_argument("--keep-temp", action="store_true")
     video_parser.add_argument("--debug-detected-text", action="store_true")
     video_parser.set_defaults(handler=_run_generate_video)
@@ -690,6 +721,7 @@ def build_parser() -> argparse.ArgumentParser:
     preview_parser.add_argument("--height", type=int, default=None)
     preview_parser.add_argument("--font-file", default=None)
     preview_parser.add_argument("--title", default=None)
+    _add_look_argument(preview_parser)
     preview_parser.set_defaults(handler=_run_preview)
 
     surahs_parser = subparsers.add_parser(

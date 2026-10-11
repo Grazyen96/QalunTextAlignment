@@ -175,3 +175,94 @@ def test_export_on_the_video_timeline_matches_a_render_with_a_real_basmala(
         project, tmp_path / "out" / "clip", ("srt",), timeline="video", db_path=store
     )
     assert _first_cue(exported.read_text(encoding="utf-8-sig")) == _first_cue(sidecar)
+
+
+def _fake_project(tmp_path):
+    """The one-card project the snapshot test above builds."""
+    words = [{"word": "w", "start": 0.5, "end": 1.0}]
+    return Project(
+        audio=tmp_path / "a.mp3",
+        matches=tmp_path / "m.json",
+        cards=[
+            {
+                "surah_num": 25,
+                "from_ayah": 7,
+                "to_ayah": 7,
+                "start_time": 0.5,
+                "end_time": 2.0,
+                "word_timings": words,
+            }
+        ],
+    )
+
+
+def _fake_result(tmp_path):
+    from qurantext.jobs.export import ExportResult
+    from qurantext.jobs.render import RenderResult
+
+    video = tmp_path / "v.mp4"
+    return ExportResult(
+        video=video,
+        render=RenderResult(output=video, width=160, height=120, fps=8, duration_seconds=2.0),
+    )
+
+
+def test_project_render_passes_the_project_look(monkeypatch, tmp_path) -> None:
+    """The export receives exactly the look the review window shows."""
+    from qurantext.core.looks import PRESETS
+    from qurantext.jobs import project_render
+    from qurantext.jobs.look_assets import set_project_look
+
+    captured = {}
+
+    def fake_export_job(request, *, progress=None, cancel=None):
+        captured["look"] = request.look
+        return _fake_result(tmp_path)
+
+    monkeypatch.setattr(project_render, "export_job", fake_export_job)
+    project = _fake_project(tmp_path)
+    set_project_look(project, PRESETS["sand"])
+    project_render.render_project(project, tmp_path / "v.mp4", preset="social")
+    assert captured["look"] == PRESETS["sand"]
+
+
+def test_a_look_change_during_a_render_leaves_it_stale(monkeypatch, tmp_path) -> None:
+    """The look is snapshotted with the cards, so it behaves like them."""
+    from qurantext.core.looks import PRESETS
+    from qurantext.jobs import project_render
+    from qurantext.jobs.look_assets import set_project_look
+
+    project = _fake_project(tmp_path)
+    set_project_look(project, PRESETS["sand"])
+    captured = {}
+
+    def fake_export_job(request, *, progress=None, cancel=None):
+        set_project_look(project, PRESETS["ocean"])  # the user picks another look
+        captured["look"] = request.look
+        return _fake_result(tmp_path)
+
+    monkeypatch.setattr(project_render, "export_job", fake_export_job)
+    project_render.render_project(project, tmp_path / "v.mp4", preset="social")
+    assert captured["look"] == PRESETS["sand"], "rendered from the snapshot"
+    assert project.render_is_stale is True
+
+
+def test_an_explicit_look_is_rendered_and_named_in_the_recorded_hash(monkeypatch, tmp_path) -> None:
+    """A look the project does not hold makes the render stale against the project."""
+    from qurantext.core.looks import PRESETS
+    from qurantext.jobs import project_render
+
+    project = _fake_project(tmp_path)
+    captured = {}
+
+    def fake_export_job(request, *, progress=None, cancel=None):
+        captured["look"] = request.look
+        return _fake_result(tmp_path)
+
+    monkeypatch.setattr(project_render, "export_job", fake_export_job)
+    project_render.render_project(
+        project, tmp_path / "v.mp4", preset="social", look=PRESETS["ocean"]
+    )
+    assert captured["look"] == PRESETS["ocean"]
+    assert project.style == {}, "the project itself is not changed"
+    assert project.render_is_stale is True

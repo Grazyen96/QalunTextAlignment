@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from qurantext.core.looks import NIGHT_GOLD, Look
 from qurantext.jobs.render import RenderRequest, RenderResult, render_video
 from qurantext.utils.progress import CancelToken, ProgressCallback
 
@@ -32,6 +33,7 @@ def run_video_generation(
     debug_detected_text: bool = False,
     title: str | None = None,
     captions: tuple[dict, ...] | None = None,
+    look: Look = NIGHT_GOLD,
     progress: ProgressCallback | None = None,
     cancel: CancelToken | None = None,
 ) -> RenderResult:
@@ -53,5 +55,6 @@ def run_video_generation(
         debug_detected_text=debug_detected_text,
         keep_temp=keep_temp,
         captions=captions,
+        look=look,
     )
     return render_video(request, progress=progress, cancel=cancel)

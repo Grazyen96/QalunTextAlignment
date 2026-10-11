@@ -19,9 +19,11 @@ from pathlib import Path
 
 from qurantext.config.paths import QURAN_DB_PATH
 from qurantext.config.settings import VIDEO_PRESETS
+from qurantext.core.looks import Look
 from qurantext.core.subtitles import Cue, write_subtitles
 from qurantext.core.video_common import get_audio_duration
 from qurantext.jobs.export import ExportRequest, ExportResult, build_cues, export_job
+from qurantext.jobs.look_assets import project_look, set_project_look
 from qurantext.jobs.project import Project, save_project
 from qurantext.utils.progress import CancelToken, ProgressCallback
 
@@ -46,15 +48,22 @@ def render_project(
     font_file: Path | None = None,
     title: str | None = None,
     db_path: Path = QURAN_DB_PATH,
+    look: Look | None = None,
     progress: ProgressCallback | None = None,
     cancel: CancelToken | None = None,
 ) -> ExportResult:
     """Render *project*, remember the render, and save the project if it has a file.
 
-    The cards and captions are copied before anything runs, and the render is
-    made and hashed from that copy. A render can take minutes in a worker while
-    the editor stays open; an edit made meanwhile is not in the video, so it
-    must leave the render looking stale rather than be silently credited to it.
+    The cards, captions and style are copied before anything runs, and the
+    render is made and hashed from that copy. A render can take minutes in a
+    worker while the editor stays open; an edit made meanwhile — a retimed word
+    or another look — is not in the video, so it must leave the render looking
+    stale rather than be silently credited to it.
+
+    *look* renders a look the project does not hold (the command line's
+    ``--look`` on a project that never chose one). The project is not changed,
+    but the recorded hash names that look, so the render reads as stale against
+    the project's own.
     """
     if project.matches is None:
         raise ValueError(
@@ -65,7 +74,12 @@ def render_project(
         project,
         cards=copy.deepcopy(project.cards),
         captions=copy.deepcopy(project.captions),
+        style=copy.deepcopy(project.style),
     )
+    if look is None:
+        look = project_look(snapshot)
+    else:
+        set_project_look(snapshot, look)
     rendered_hash = snapshot.content_hash()
     result = export_job(
         ExportRequest(
@@ -83,6 +97,7 @@ def render_project(
             db_path=Path(db_path),
             captions=tuple(snapshot.caption_segments()),
             cards=tuple(snapshot.cards),
+            look=look,
         ),
         progress=progress,
         cancel=cancel,

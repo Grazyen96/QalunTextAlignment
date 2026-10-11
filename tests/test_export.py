@@ -318,3 +318,34 @@ def test_a_store_that_cannot_be_built_costs_the_subtitles_not_the_video(
     )
     assert result.video is not None and result.video.exists()
     assert result.subtitles == []
+
+
+def test_the_export_renders_with_its_look(tmp_path, no_basmala, monkeypatch) -> None:
+    """The look reaches the frame renderer, and its warnings come back on the result."""
+    from qurantext.core.looks import PRESETS
+    from qurantext.jobs import render as render_module
+
+    audio, matches = build_job(tmp_path)
+    seen = {}
+
+    def capture(audio_path, matches_list, output_path, *args, look, look_warnings, **kwargs):
+        seen["look"] = look
+        look_warnings.append("image_unreadable")
+        output_path.write_bytes(b"")
+        return 1.0
+
+    monkeypatch.setattr(render_module, "render_frame_video", capture)
+    result = export_job(
+        ExportRequest(
+            audio=audio,
+            matches=matches,
+            output=tmp_path / "v.mp4",
+            width=160,
+            height=120,
+            fps=8,
+            font_file=DEFAULT_FONT_PATH,
+            look=PRESETS["emerald"],
+        )
+    )
+    assert seen["look"] == PRESETS["emerald"]
+    assert result.render.look_warnings == ("image_unreadable",)

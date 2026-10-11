@@ -25,6 +25,7 @@ from qurantext.core.frame_renderer import (
     render_frame_video,
     validate_font_file,
 )
+from qurantext.core.looks import NIGHT_GOLD, Look
 from qurantext.core.video_common import (
     get_audio_duration,
     load_caption_segments,
@@ -36,9 +37,20 @@ from qurantext.core.video_common import (
 )
 from qurantext.utils.progress import CancelToken, ProgressCallback, report
 
-__all__ = ["RenderRequest", "RenderResult", "render_video"]
+__all__ = ["RenderRequest", "RenderResult", "look_warning_message", "render_video"]
 
 STAGE = "render"
+
+#: What each look warning code means to the person, said once per render.
+_LOOK_WARNINGS = {
+    "image_missing": "The background image is missing; the preset's background was used.",
+    "image_unreadable": "The background image could not be read; the preset's background was used.",
+}
+
+
+def look_warning_message(code: str) -> str:
+    """The sentence a person reads for a look warning *code*."""
+    return _LOOK_WARNINGS.get(code, f"The look could not be drawn as chosen ({code}).")
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +84,8 @@ class RenderRequest:
     #: a timing correction reach the video. The match file is still read for
     #: its metadata (the basmala splice needs it).
     cards: tuple[dict, ...] | None = None
+    #: Colours and background of the frame renderer. The ass renderer ignores it.
+    look: Look = NIGHT_GOLD
 
     def resolved_format(self) -> tuple[int, int, int]:
         """Return ``(width, height, fps)`` with preset and defaults applied."""
@@ -99,6 +113,9 @@ class RenderResult:
     caption_segments: int = 0
     #: Written by the ASS renderer only.
     ass_path: Path | None = None
+    #: Codes for what the look could not do (``image_missing``,
+    #: ``image_unreadable``); the render still finished with the preset's background.
+    look_warnings: tuple[str, ...] = ()
 
 
 def render_video(
@@ -144,6 +161,7 @@ def render_video(
 
     basmala_temp_audio: Path | None = None
     basmala_offset = 0.0
+    look_warnings: list[str] = []
     try:
         # Splice the shipped basmala before recitations that do not already open
         # with one, shifting every timing back by its duration (see core.basmala).
@@ -212,7 +230,11 @@ def render_video(
                 title=request.title or DEFAULT_PLACEHOLDER_TITLE,
                 progress=progress,
                 cancel=cancel,
+                look=request.look,
+                look_warnings=look_warnings,
             )
+            for code in look_warnings:
+                warn(look_warning_message(code))
             ass_path = None  # type: ignore[assignment]
     finally:
         # The concatenated basmala+recitation audio is a throwaway render input.
@@ -229,6 +251,7 @@ def render_video(
         basmala_offset_seconds=basmala_offset,
         caption_segments=caption_count,
         ass_path=ass_path,
+        look_warnings=tuple(look_warnings),
     )
 
 
@@ -239,6 +262,8 @@ def _warn_ignored_for_ass(request: RenderRequest, font_file_path: Path | None) -
         warn("Ignoring debug_detected_text because it only applies to the frame renderer.")
     if request.title:
         warn("Ignoring title because it only applies to the frame renderer.")
+    if request.look != NIGHT_GOLD:
+        warn("Ignoring the look because it only applies to the frame renderer.")
 
 
 def _resolve_frame_font(font_file_path: Path | None, progress: ProgressCallback | None) -> Path:

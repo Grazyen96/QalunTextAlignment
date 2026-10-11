@@ -259,3 +259,35 @@ def test_transcription_engine_defaults_and_reads_the_environment(monkeypatch) ->
     get_settings.cache_clear()
     assert get_settings().transcription.engine == "local"
     get_settings.cache_clear()
+
+
+def test_look_flag_is_parsed_and_rejects_unknown_names() -> None:
+    parser = build_cli_parser()
+    assert parser.parse_args(["preview", "--matches", "m.json", "--look", "ocean"]).look == "ocean"
+    args = parser.parse_args(
+        ["generate-video", "--audio", "a.mp3", "--matches", "m.json", "--look", "sand"]
+    )
+    assert args.look == "sand"
+    assert parser.parse_args(["preview", "--matches", "m.json"]).look is None
+    with pytest.raises(SystemExit):
+        parser.parse_args(["preview", "--matches", "m.json", "--look", "lava"])
+    with pytest.raises(SystemExit):
+        build_cli_parser().parse_args(
+            ["generate-video", "--audio", "a.mp3", "--matches", "m.json", "--look", "lava"]
+        )
+
+
+def test_the_look_resolves_from_the_project_style_then_the_flag(tmp_path) -> None:
+    import argparse
+
+    from qurantext.cli.main import _resolve_look
+    from qurantext.core.looks import NIGHT_GOLD, PRESETS
+    from qurantext.jobs.look_assets import set_project_look
+    from qurantext.jobs.project import Project
+
+    project = Project(audio=tmp_path / "a.mp3", matches=tmp_path / "m.json", cards=[])
+    assert _resolve_look(argparse.Namespace(look=None), None) == NIGHT_GOLD
+    assert _resolve_look(argparse.Namespace(look="ocean"), None) == PRESETS["ocean"]
+    assert _resolve_look(argparse.Namespace(look="ocean"), project) == PRESETS["ocean"]
+    set_project_look(project, PRESETS["rose"])
+    assert _resolve_look(argparse.Namespace(look="ocean"), project) == PRESETS["rose"]

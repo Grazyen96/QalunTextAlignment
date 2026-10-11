@@ -334,3 +334,57 @@ def test_render_reports_the_basmala_offset_when_it_splices_one(tmp_path) -> None
 
     assert result.basmala_offset_seconds > 0
     assert result.duration_seconds == pytest.approx(2.0 + result.basmala_offset_seconds, abs=0.3)
+
+
+# --- the look -----------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    not (_FFMPEG and _FFPROBE and _BUNDLED_FONT.exists()),
+    reason="needs ffmpeg, ffprobe and the bundled font",
+)
+def test_render_warns_and_reports_a_missing_background_image(tmp_path, no_basmala, capsys) -> None:
+    """A lost photo costs the background, not the render, and the person is told."""
+    from dataclasses import replace
+
+    from qurantext.core.looks import NIGHT_GOLD, Background
+
+    background = Background(
+        "image",
+        NIGHT_GOLD.background.colour,
+        NIGHT_GOLD.background.colour2,
+        image=tmp_path / "gone.png",
+    )
+    request = RenderRequest(
+        audio=_silent_audio(tmp_path),
+        matches=_matches_file(tmp_path),
+        output=tmp_path / "out.mp4",
+        width=320,
+        height=240,
+        fps=10,
+        font_file=_BUNDLED_FONT,
+        look=replace(NIGHT_GOLD, background=background),
+    )
+    result = render_video(request)
+
+    assert result.output.exists()
+    assert result.look_warnings == ("image_missing",)
+    assert "The background image is missing; the preset's background was used." in (
+        capsys.readouterr().err
+    )
+
+
+def test_the_ass_renderer_says_it_ignores_a_chosen_look(tmp_path, capsys) -> None:
+    from qurantext.core.looks import NIGHT_GOLD, PRESETS
+    from qurantext.jobs.render import _warn_ignored_for_ass
+
+    base = {
+        "audio": tmp_path / "a.m4a",
+        "matches": tmp_path / "m.json",
+        "output": tmp_path / "o.mp4",
+        "renderer": "ass",
+    }
+    _warn_ignored_for_ass(RenderRequest(**base, look=NIGHT_GOLD), None)
+    assert "look" not in capsys.readouterr().err
+    _warn_ignored_for_ass(RenderRequest(**base, look=PRESETS["ocean"]), None)
+    assert capsys.readouterr().err.count("Ignoring the look") == 1
