@@ -252,7 +252,7 @@ def test_the_version_is_written_down_once() -> None:
 def test_the_quran_font_and_text_are_kept_out_of_the_gpl_statement() -> None:
     """Their provenance and terms are not known yet, so nothing may present them as
     Qalun's own GPL-3.0 code, and the release waits until the owner confirms them."""
-    files = ("qaloon.10.ttf", "qaloon.10.woff2", "UthmanicQaloon1-Ver05.txt")
+    files = ("qaloon.10.ttf", "qaloon.10.woff2", "UthmanicQaloon1-v10.txt")
     phrase = "to be confirmed by the owner"
     notice = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
     section = " ".join(notice.split("## Quran text and font", 1)[1].split("\n## ", 1)[0].split())
@@ -269,7 +269,7 @@ def test_the_quran_font_and_text_are_kept_out_of_the_gpl_statement() -> None:
     for name in files:
         assert name in section
     checklist = (ROOT / "docs" / "release-checklist.md").read_text(encoding="utf-8")
-    assert "UthmanicQaloon1-Ver05.txt" in checklist and "qaloon.10" in checklist
+    assert "UthmanicQaloon1-v10.txt" in checklist and "qaloon.10" in checklist
 
 
 def test_the_release_checklist_holds_the_first_tag_on_what_code_cannot_settle() -> None:

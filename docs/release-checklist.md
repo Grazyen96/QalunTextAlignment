@@ -10,9 +10,10 @@ what was decided; later releases only re-check it when the thing it names change
 
 - [ ] **Quran font and text: confirm their source and terms before the first tag.**
       `src/qurantext/assets/fonts/qaloon.10.ttf`, `qaloon.10.woff2` and
-      `src/qurantext/assets/quran/UthmanicQaloon1-Ver05.txt` ship inside every app
-      zip, the Python package and `qalun-source.zip`. Their provenance is not
-      recorded, so `THIRD_PARTY_NOTICES.md`, the README, `pyproject.toml` and
+      `src/qurantext/assets/quran/UthmanicQaloon1-v10.txt` ship inside every app
+      zip, the Python package and `qalun-source.zip`. The text's source is
+      recorded (KFGQPC Qaloon v10, see `src/qurantext/assets/README.md`); its
+      terms and the font's provenance are not, so `THIRD_PARTY_NOTICES.md`, the README, `pyproject.toml` and
       `src/qurantext/assets/README.md` keep them out of Qalun's GPL statement as
       "third-party works, provenance and terms to be confirmed by the owner". Find
       out where each came from and on what terms it may be redistributed, with an

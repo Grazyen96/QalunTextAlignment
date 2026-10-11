@@ -194,3 +194,22 @@ def test_engine_defaults_to_local_and_round_trips(settings) -> None:
 def test_an_unknown_stored_engine_reads_as_local(settings) -> None:
     settings.setValue("engine", "cohere")
     assert Prefs(settings).engine == "local"
+
+
+def test_a_saved_choice_of_the_retired_bundled_text_reads_as_the_default(
+    settings, tmp_path
+) -> None:
+    """An older version bundled Ver05; choosing it saved its absolute path.
+
+    After the update that file is gone, so the saved choice reads as no
+    override and the bundled v10 text is used. A choice of any other missing
+    file is kept, as before (it may be on a drive that is not plugged in).
+    """
+    gone = tmp_path / "Qalun" / "_internal" / "qurantext" / "assets" / "quran"
+    gone = gone / "UthmanicQaloon1-Ver05.txt"
+    settings.setValue("quran_override", str(gone))
+    assert Prefs(settings).quran_override is None
+
+    elsewhere = tmp_path / "usb" / "UthmanicQaloon1-Ver05.txt"
+    settings.setValue("quran_override", str(elsewhere))
+    assert Prefs(settings).quran_override == elsewhere.resolve()

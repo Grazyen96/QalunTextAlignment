@@ -116,3 +116,24 @@ def test_resolve_quran_path_prefers_what_it_is_given(tmp_path) -> None:
 def test_a_path_that_does_not_exist_fails_clearly(tmp_path) -> None:
     with pytest.raises(FileNotFoundError, match="Quran text file not found"):
         paths.resolve_quran_path(tmp_path / "absent.txt")
+
+
+def test_a_saved_path_to_the_retired_ver05_text_reads_as_the_bundled_one(tmp_path) -> None:
+    """Ver05 was bundled before v10 and an older settings file may still name it.
+
+    The old file is gone after the update, so that path is the bundled text now;
+    a Ver05 copy of the person's own, outside the package, is left alone.
+    """
+    old_bundled = tmp_path / "_internal" / "qurantext" / "assets" / "quran"
+    gone = old_bundled / "UthmanicQaloon1-Ver05.txt"
+    assert paths.redirect_retired_quran(gone) == paths.DEFAULT_QURAN_PATH
+    assert paths.resolve_quran_path(gone) == paths.DEFAULT_QURAN_PATH
+
+    old_bundled.mkdir(parents=True)
+    gone.write_text("سُورَةُ الفَاتِحَةِ\n", encoding="utf-8")
+    assert paths.redirect_retired_quran(gone) == gone, "still there, so still the choice"
+
+    own = tmp_path / "input" / "quran" / "UthmanicQaloon1-Ver05.txt"
+    assert paths.redirect_retired_quran(own) == own
+    with pytest.raises(FileNotFoundError, match="Quran text file not found"):
+        paths.resolve_quran_path(own)

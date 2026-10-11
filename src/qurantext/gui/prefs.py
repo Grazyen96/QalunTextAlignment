@@ -18,6 +18,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings
 
+from qurantext.config.paths import redirect_retired_quran
 from qurantext.config.settings import ENGINES, VIDEO_PRESETS
 from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.gui.i18n import LANGUAGES
@@ -193,8 +194,16 @@ class Prefs:
 
     @property
     def quran_override(self) -> Path | None:
+        """The chosen Quran text, or None for the bundled one.
+
+        A saved choice of a text an earlier version bundled, now gone, reads as
+        None: the bundled text that replaced it is the default.
+        """
         value = self._settings.value("quran_override", "")
-        return Path(value).resolve() if isinstance(value, str) and value else None
+        if not (isinstance(value, str) and value):
+            return None
+        path = Path(value).resolve()
+        return None if redirect_retired_quran(path) != path else path
 
     @quran_override.setter
     def quran_override(self, value: Path | None) -> None:
