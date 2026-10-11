@@ -295,6 +295,19 @@ class Prefs:
     def to_ayah(self, value: int | None) -> None:
         self._write_optional_int("to_ayah", value)
 
+    # -- the last studied surah ------------------------------------------------
+    # Its own key: a lecture's "Detect automatically" or chosen surah must not
+    # move the recitation's surah and range, nor they it.
+
+    @property
+    def lecture_surah(self) -> int | None:
+        """The surah a new lecture's cards keep to; None is "Detect automatically"."""
+        return _as_positive_int(self._settings.value("lecture_surah"), _SURAH_COUNT)
+
+    @lecture_surah.setter
+    def lecture_surah(self, value: int | None) -> None:
+        self._write_optional_int("lecture_surah", value)
+
     def _write_optional_int(self, key: str, value: int | None) -> None:
         self._settings.setValue(key, "" if value is None else int(value))
         self._settings.sync()

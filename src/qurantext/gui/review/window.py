@@ -72,6 +72,12 @@ from qurantext.gui.review.warnings_strip import WarningsStrip
 from qurantext.gui.review.waveform_view import WaveformView
 from qurantext.gui.review.word_strip import WordStrip
 from qurantext.gui.review.zoom_slider import ZoomSlider
+from qurantext.gui.surahs import (
+    fill_studied_surah_box,
+    select_studied_surah,
+    stored_surah_names,
+    surah_label,
+)
 from qurantext.jobs.project import Project, job_settings
 from qurantext.utils.progress import CancelToken, ProgressEvent
 
@@ -282,6 +288,20 @@ class ReviewWindow(QMainWindow):
         )
         for button in buttons:
             toolbar.addWidget(button)
+        # A lecture's cards keep to one surah; which one is the person's to say.
+        self.studied_surah_label = QLabel(t("review.studied_surah"))
+        self.studied_surah_box = QComboBox()
+        self.studied_surah_box.setToolTip(t("review.studied_surah.tip"))
+        self._surah_names = self._known_surah_names()
+        fill_studied_surah_box(self.studied_surah_box, self._surah_names)
+        select_studied_surah(self.studied_surah_box, self.session.studied_surah)
+        self.studied_surah_label.setBuddy(self.studied_surah_box)
+        lecture = str(self.session.project.mode).lower() == "lecture"
+        self.studied_surah_label.setVisible(lecture)
+        self.studied_surah_box.setVisible(lecture)
+        toolbar.addSpacing(12)
+        toolbar.addWidget(self.studied_surah_label)
+        toolbar.addWidget(self.studied_surah_box)
         toolbar.addStretch(1)
         toolbar.addWidget(self.export_button)
         toolbar.addWidget(self.render_button)
@@ -397,6 +417,7 @@ class ReviewWindow(QMainWindow):
         self.segment_list.itemChanged.connect(self._after_caption_edit)
         self.play_button.clicked.connect(self.toggle_play)
         self.rate_combo.currentIndexChanged.connect(self._on_rate)
+        self.studied_surah_box.currentIndexChanged.connect(self._on_studied_surah)
         self.selection_bar.nudge_requested.connect(self._nudge)
         self.selection_bar.snap_requested.connect(self._snap_to_playhead)
         self.player.playing_changed.connect(self._on_playing_changed)
@@ -704,6 +725,20 @@ class ReviewWindow(QMainWindow):
         self._sync_state()
         self.frame_view.show_at(self.player.position(), force=True)
 
+    def _known_surah_names(self) -> dict[int, str]:
+        """Surah names for the picker: the store's, else whatever the cards carry."""
+        names = stored_surah_names()
+        for card in self.session.project.cards:
+            num, name = card.get("surah_num"), card.get("surah_name")
+            if isinstance(num, int) and name:
+                names.setdefault(num, str(name))
+        return names
+
+    def _on_studied_surah(self) -> None:
+        """The surah on the cards changed: one undoable edit, and the frame redrawn."""
+        self.session.set_studied_surah(self.studied_surah_box.currentData())
+        self._after_look_change()
+
     def _segment_counts(self) -> tuple[int, int]:
         project = self.session.project
         return len(project.cards), len(project.captions)
@@ -740,6 +775,22 @@ class ReviewWindow(QMainWindow):
         title = t("review.title", name=self._audio.stem)
         self.setWindowTitle(plain_title(f"{title} *" if session.dirty else title))
         self._show_selection(self.strip.selected)
+        self._show_studied_surah()
+
+    def _show_studied_surah(self) -> None:
+        """Bring the picker back in line after undo, redo, discard or save, and say
+        when the chosen surah has no card (the video then shows only its title card)."""
+        blocked = self.studied_surah_box.blockSignals(True)
+        try:
+            select_studied_surah(self.studied_surah_box, self.session.studied_surah)
+        finally:
+            self.studied_surah_box.blockSignals(blocked)
+        missing = self.session.missing_studied_surah
+        self.warnings.set_surah_notice(
+            t("review.studied_surah_missing", surah=surah_label(missing, self._surah_names))
+            if missing is not None
+            else None
+        )
 
     def _update_remove_button(self) -> None:
         """Offer Remove only for a selected row, and never during a render."""

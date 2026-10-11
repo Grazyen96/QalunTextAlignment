@@ -40,6 +40,7 @@ from qurantext.data.quran_db import ensure_quran_db, list_surahs
 from qurantext.gui.i18n import path_text, plain_title, t, tn
 from qurantext.gui.jobs import JobSpec
 from qurantext.gui.prefs import Prefs
+from qurantext.gui.surahs import fill_studied_surah_box, select_studied_surah
 from qurantext.jobs.project import SUBTITLE_CHOICES
 
 __all__ = ["AUDIO_SUFFIXES", "NewJobPanel"]
@@ -190,6 +191,13 @@ class NewJobPanel(QWidget):
         self.surah_box = QComboBox()
         self.surah_box.currentIndexChanged.connect(self._surah_changed)
         form.addRow(t("home.surah"), self.surah_box)
+        # A lecture's own picker, in the same place: which surah its cards keep
+        # to. Separate from the recitation's, which also sets the ayat range.
+        self.studied_surah_box = QComboBox()
+        self.studied_surah_box.setToolTip(t("home.studied_surah.tip"))
+        fill_studied_surah_box(self.studied_surah_box, {})
+        self.studied_surah_box.currentIndexChanged.connect(self._studied_surah_changed)
+        form.addRow(t("home.surah"), self.studied_surah_box)
 
         range_row = QHBoxLayout()
         range_row.setContentsMargins(0, 0, 0, 0)
@@ -420,7 +428,11 @@ class NewJobPanel(QWidget):
         self._refresh()
 
     def _restore_range(self) -> None:
-        """Select the remembered surah and range, clamped to that surah's ayat."""
+        """Select the remembered surahs (a lecture's and a recitation's) and range.
+
+        The range is clamped to that surah's ayat.
+        """
+        select_studied_surah(self.studied_surah_box, self._prefs.lecture_surah)
         surah_num = self._prefs.surah_num
         if surah_num is None:
             return
@@ -440,6 +452,8 @@ class NewJobPanel(QWidget):
     def _fill_surahs(self) -> None:
         """List every surah from the store, or say in the picker why there are none."""
         self.surah_box.clear()
+        # Numbers only until the store is read: a lecture can still choose.
+        fill_studied_surah_box(self.studied_surah_box, {})
         quran = self._effective_quran()
         if quran is None:
             self.surah_box.addItem(t("home.quran_missing"), None)
@@ -459,6 +473,9 @@ class NewJobPanel(QWidget):
             return
 
         self.surah_box.setEnabled(True)
+        fill_studied_surah_box(
+            self.studied_surah_box, {int(s["surah_num"]): str(s["name"]) for s in surahs}
+        )
         for surah in surahs:
             self.surah_box.addItem(
                 tn(
@@ -597,14 +614,23 @@ class NewJobPanel(QWidget):
         self._refresh()
 
     def _set_mode_visibility(self, recitation: bool) -> None:
-        self.surah_box.setVisible(recitation)
-        self.range_widget.setVisible(recitation)
+        shown = {
+            self.surah_box: recitation,
+            self.range_widget: recitation,
+            self.studied_surah_box: not recitation,
+        }
         form = self.surah_box.parentWidget().layout() if self.surah_box.parentWidget() else None
-        if isinstance(form, QFormLayout):
-            for widget in (self.surah_box, self.range_widget):
+        for widget, visible in shown.items():
+            widget.setVisible(visible)
+            if isinstance(form, QFormLayout):
                 label = form.labelForField(widget)
                 if label is not None:
-                    label.setVisible(recitation)
+                    label.setVisible(visible)
+
+    def _studied_surah_changed(self) -> None:
+        if self._restoring_range:
+            return
+        self._prefs.lecture_surah = self.studied_surah_box.currentData()
 
     def _surah_changed(self) -> None:
         surah = self.surah_box.currentData()
@@ -739,6 +765,7 @@ class NewJobPanel(QWidget):
             engine=self._current_engine(),
             output_dir=self._output_dir,
             style=self._prefs.default_look_style(),
+            studied_surah=None if recitation else self.studied_surah_box.currentData(),
         )
 
     def problem(self) -> str | None:
@@ -760,6 +787,7 @@ class NewJobPanel(QWidget):
             self.recitation_button,
             self.lecture_button,
             self.surah_box,
+            self.studied_surah_box,
             self.range_widget,
             self.preset_box,
             self.more_button,

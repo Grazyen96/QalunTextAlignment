@@ -85,6 +85,13 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
             "one": "{num}. {name}  ({count} ayah)",
             "other": "{num}. {name}  ({count} ayat)",
         },
+        "surah.detect": "Detect automatically",
+        "surah.item": "{num}. {name}",
+        "surah.number": "Surah {num}",
+        "home.studied_surah.tip": (
+            "The ayah cards show only this surah; ayat quoted from other surahs stay "
+            "in the subtitles. Detect automatically picks the surah heard the longest."
+        ),
         "home.filter.audio": "Audio and video",
         "home.filter.text": "Text files",
         "home.filter.all": "All files",
@@ -201,6 +208,15 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.pause": "Pause",
         "review.rate": "{rate:g}×",
         "review.zoom": "Zoom",
+        "review.studied_surah": "Surah on the cards",
+        "review.studied_surah.tip": (
+            "The ayah cards show only this surah; ayat quoted from other surahs stay "
+            "in the subtitles."
+        ),
+        "review.studied_surah_missing": (
+            "No ayah of the chosen surah ({surah}) was found, so the video shows only "
+            "its opening title card."
+        ),
         "review.snap": "Snap to playhead",
         "review.minus": "−50 ms",
         "review.plus": "+50 ms",
@@ -346,6 +362,14 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
             "many": "{num}. {name}  ({count} آية)",
             "other": "{num}. {name}  ({count} آية)",
         },
+        "surah.detect": "تحديد تلقائي",
+        # Only values: the RLM lays the item out right to left, number first.
+        "surah.item": "\u200f{num}. {name}",
+        "surah.number": "سورة {num}",
+        "home.studied_surah.tip": (
+            "لا تعرض بطاقات الآيات إلا هذه السورة، وتبقى الآيات المستشهد بها من سور "
+            "أخرى في الترجمة النصية. التحديد التلقائي يختار السورة الأطول سماعًا."
+        ),
         "home.filter.audio": "ملفات الصوت والفيديو",
         "home.filter.text": "ملفات نصية",
         "home.filter.all": "كل الملفات",
@@ -464,6 +488,15 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.pause": "أوقف مؤقتًا",
         "review.rate": "\u2066{rate:g}×\u2069",
         "review.zoom": "التكبير",
+        "review.studied_surah": "السورة على البطاقات",
+        "review.studied_surah.tip": (
+            "لا تعرض بطاقات الآيات إلا هذه السورة، وتبقى الآيات المستشهد بها من سور "
+            "أخرى في الترجمة النصية."
+        ),
+        "review.studied_surah_missing": (
+            "لم يُعثر على أي آية من السورة المختارة ({surah})، فلا يعرض الفيديو "
+            "سوى بطاقة العنوان الافتتاحية."
+        ),
         "review.snap": "اضبط على مؤشر التشغيل",
         "review.minus": "\u2066−50\u2069 م.ث",
         "review.plus": "\u2066+50\u2069 م.ث",

@@ -2154,3 +2154,74 @@ def test_the_review_window_gets_the_main_window_s_prefs(real_reviews, prefs, tmp
     real_reviews._open_review(path)
     review = real_reviews._review_of(path)
     assert review is not None and review._prefs is prefs
+
+
+# --- a lecture's studied surah ------------------------------------------------
+
+
+def _lecture_setup(tmp_path, monkeypatch):
+    from qurantext.gui import jobs as jobs_module
+
+    (tmp_path / "dars_lecture.json").write_text(
+        json.dumps(
+            {
+                "matches": [
+                    {
+                        "surah_num": 25,
+                        "from_ayah": 7,
+                        "to_ayah": 7,
+                        "full_text": "x",
+                        "start_time": 0.0,
+                        "end_time": 2.0,
+                    }
+                ],
+                "meta": {"mode": "lecture"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(jobs_module, "run_detection", lambda **kwargs: {"matches": []})
+    audio = tmp_path / "dars.m4a"
+    audio.write_bytes(b"")
+    return jobs_module, JobSpec(
+        audio=audio, quran=QURAN_FILE, mode="lecture", output_dir=tmp_path, studied_surah=25
+    )
+
+
+def test_the_chosen_studied_surah_reaches_the_jobs_project(tmp_path, monkeypatch) -> None:
+    from qurantext.jobs.project import job_settings, load_project
+
+    jobs_module, spec = _lecture_setup(tmp_path, monkeypatch)
+    assert spec.settings.studied_surah == 25
+    project = jobs_module.run_matching(spec)
+    assert job_settings(load_project(project.path)).studied_surah == 25
+
+
+def test_an_unchanged_rematch_with_another_surah_updates_only_the_choice(
+    tmp_path, monkeypatch
+) -> None:
+    """The surah is an output choice: changing it must not set the reviewed project aside."""
+    from qurantext.jobs.project import job_settings, load_project, save_project
+
+    jobs_module, spec = _lecture_setup(tmp_path, monkeypatch)
+    first = jobs_module.run_matching(spec)
+    reviewed = load_project(first.path)
+    reviewed.mark_reviewed()
+    save_project(reviewed, first.path)
+
+    project = jobs_module.run_matching(replace(spec, studied_surah=None))
+    assert job_settings(project).studied_surah is None
+    saved = load_project(first.path)
+    assert job_settings(saved).studied_surah is None
+    assert saved.review["state"] == "reviewed"
+    assert not list(tmp_path.glob("*.qalun-backup.json"))
+
+
+def test_surah_names_come_from_a_built_store_and_nothing_breaks_without_one(
+    tmp_path, store
+) -> None:
+    from qurantext.gui.surahs import stored_surah_names
+
+    names = stored_surah_names(store)
+    assert len(names) == 114 and names[1]
+    assert stored_surah_names(tmp_path / "never-built.sqlite") == {}

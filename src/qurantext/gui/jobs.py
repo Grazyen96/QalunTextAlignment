@@ -68,6 +68,9 @@ class JobSpec:
     #: person's default look); empty for Night gold. A re-match never uses it:
     #: the video already has its own look.
     style: dict = field(default_factory=dict)
+    #: The surah a lecture's cards keep to; None guesses it. A recitation
+    #: states its range instead and ignores this.
+    studied_surah: int | None = None
 
     @property
     def settings(self) -> JobSettings:
@@ -77,6 +80,7 @@ class JobSpec:
             subtitles=self.subtitles,
             formats=tuple(self.formats),
             output_dir=Path(self.output_dir) if self.output_dir else None,
+            studied_surah=self.studied_surah if self.mode == "lecture" else None,
         )
 
     @property
@@ -153,8 +157,10 @@ def _keep_earlier(destination: Path, derived: Project) -> Path | str | None:
     backup per run would bury the one that matters. A file that cannot be read
     is always kept: what it held cannot be compared.
 
-    The look is compared on neither side, and when the content changed the
-    earlier project's style (its look) is carried into *derived*: a re-match
+    The look and the output choices are compared on neither side (the output
+    choices, the studied surah among them, are the run's own and are written
+    either way), and when the content changed the earlier project's style (its
+    look) is carried into *derived*: a re-match
     derives cards and captions only, and the look the person chose for this
     video is not something it could have changed. The style's image path stays
     valid, as the new project takes the earlier one's name and folder.
@@ -164,8 +170,11 @@ def _keep_earlier(destination: Path, derived: Project) -> Path | str | None:
     earlier: Project | None = None
     try:
         earlier = load_project(destination)
+        # Content only: the look and the output choices (the studied surah
+        # among them) are not what matching derives.
         unchanged = (
-            replace(earlier, style={}).content_hash() == replace(derived, style={}).content_hash()
+            replace(earlier, style={}, export={}).content_hash()
+            == replace(derived, style={}, export={}).content_hash()
         )
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         earlier, unchanged = None, False

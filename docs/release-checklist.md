@@ -177,6 +177,12 @@ this is the only place anyone hears each platform's build recognise speech.
     `look.low_contrast`, and the image lines `look.image_failed`, `look.image_missing` and
     `look.image_unreadable`. A list of colour names in `look.low_contrast` is joined
     with «، ».
+  - a lecture's studied surah, read on the new-job screen in lecture mode and in the
+    review window's toolbar: `surah.detect` («تحديد تلقائي»: is «اكتشاف تلقائي» or
+    «تلقائيًا» better?), `surah.number` («سورة 25»), `review.studied_surah` («السورة على
+    البطاقات»), the two tooltips `home.studied_surah.tip` and `review.studied_surah.tip`
+    («الآيات المستشهد بها»، «الأطول سماعًا»), and the warning
+    `review.studied_surah_missing` («بطاقة العنوان الافتتاحية»).
 - [ ] Keep every direction mark: the U+2066…U+2069 isolates and the U+200F marks,
       written as `\u2066`-style escapes in the source. The tests fail if a key goes
       missing.

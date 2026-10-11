@@ -607,3 +607,84 @@ def test_the_live_frame_of_a_lecture_skips_a_quote_from_another_surah() -> None:
     card, _caption, _band = session.frame_inputs(8.7)
     assert (card["surah_num"], card["from_ayah"]) == (1, 1)
     assert len(session.project.cards) == 2, "the quote stays in the project, only off the card"
+
+
+# -- the studied surah -----------------------------------------------------------
+
+
+def _lecture_with_a_quote(tmp_path=None):
+    project = _lecture()
+    studied = project.cards[0]
+    project.cards.append(
+        dict(studied, surah_num=2, from_ayah=255, to_ayah=255, start_time=8.5, end_time=9.0)
+    )
+    if tmp_path is not None:
+        save_project(project, tmp_path / "dars.qalun.json")
+    return project
+
+
+def test_the_live_frame_follows_the_chosen_surah() -> None:
+    session = ReviewSession(_lecture_with_a_quote())
+    assert session.studied_surah is None
+    session.set_studied_surah(2)
+    card, _caption, _band = session.frame_inputs(8.7)
+    assert (card["surah_num"], card["from_ayah"]) == (2, 255)
+    assert session.frame_inputs(6.0)[0] is None, "al-Fatiha is off the card now"
+
+
+def test_choosing_a_surah_is_one_undo_step_and_makes_the_session_dirty() -> None:
+    session = ReviewSession(_lecture_with_a_quote())
+    session.set_studied_surah(2)
+    assert session.studied_surah == 2 and session.dirty and session.can_undo
+    assert session.project.export["studied_surah"] == 2
+    assert session.undo()
+    assert session.studied_surah is None and not session.dirty
+    assert "studied_surah" not in session.project.export
+    assert session.redo()
+    assert session.studied_surah == 2 and session.dirty
+
+
+def test_choosing_the_same_surah_is_no_edit() -> None:
+    session = ReviewSession(_lecture_with_a_quote())
+    session.set_studied_surah(None)
+    assert not session.can_undo and not session.dirty
+
+
+def test_save_and_revert_include_the_studied_surah(tmp_path) -> None:
+    from qurantext.jobs.project import job_settings
+
+    session = ReviewSession(load_project(_lecture_with_a_quote(tmp_path).path))
+    session.set_studied_surah(1)
+    session.save()
+    assert job_settings(load_project(session.project.path)).studied_surah == 1
+    session.set_studied_surah(2)
+    session.revert()
+    assert session.studied_surah == 1 and not session.dirty
+
+
+def test_undoing_a_retime_keeps_a_surah_chosen_before_it() -> None:
+    """Each undo step puts back exactly what it took, the surah choice among it."""
+    session = ReviewSession(_lecture_with_a_quote())
+    session.set_studied_surah(2)
+    ref = session.words(CAPTION)[0].ref
+    session.retime(ref, end=0.9)
+    assert session.undo()
+    assert session.studied_surah == 2
+    assert session.undo()
+    assert session.studied_surah is None
+
+
+def test_a_chosen_surah_with_no_card_is_reported() -> None:
+    session = ReviewSession(_lecture_with_a_quote())
+    assert session.missing_studied_surah is None
+    session.set_studied_surah(2)
+    assert session.missing_studied_surah is None
+    session.set_studied_surah(114)
+    assert session.missing_studied_surah == 114
+    assert session.validated_cards() == [], "only the opening title card is left"
+
+
+def test_a_recitation_never_reports_a_missing_surah() -> None:
+    project = _recitation()
+    project.export["studied_surah"] = 114
+    assert ReviewSession(project).missing_studied_surah is None
