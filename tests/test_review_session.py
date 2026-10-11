@@ -829,3 +829,135 @@ def test_a_manual_card_makes_a_render_stale(lecture_session, db):
     lecture_session.project.record_render(Path("v.mp4"), preset=None, basmala_offset_s=0.0)
     lecture_session.insert_manual_card(25.0, 25, 7, 7, db_path=db)
     assert lecture_session.project.render_is_stale
+
+
+def _store_text(db, surah, first, last):
+    from contextlib import closing
+
+    from qurantext.data.quran_db import ayah_range_card, connect
+
+    with closing(connect(db)) as conn:
+        return ayah_range_card(conn, surah, first, last)
+
+
+def test_an_inserted_card_carries_the_stores_text_and_no_detection(lecture_session, db):
+    i = lecture_session.insert_manual_card(25.0, 25, 5, 6, db_path=db)
+    card = lecture_session.project.cards[i]
+    expected = _store_text(db, 25, 5, 6)
+    assert {key: card[key] for key in expected} == expected
+    assert card["confidence"] == 1.0 and card["detected_text"] == ""
+    assert lecture_session.is_manual(i)
+
+
+def test_a_change_is_one_undo_step_that_restores_the_detected_card(lecture_session, db):
+    before = copy.deepcopy(lecture_session.project.cards)
+    lecture_session.change_card_ayah(1, 25, 3, 3, db_path=db)
+    assert lecture_session.dirty and lecture_session.can_undo
+    assert lecture_session.undo() and not lecture_session.can_undo
+    assert lecture_session.project.cards == before and not lecture_session.dirty
+    assert lecture_session.redo() and lecture_session.project.cards[1]["from_ayah"] == 3
+
+
+def test_a_change_drops_the_word_timings(lecture_session, db):
+    lecture_session.project.cards[0]["word_timings"] = [_w("a", 10.0, 11.0)]
+    lecture_session.project.cards[0]["matched_words"] = 1
+    lecture_session.change_card_ayah(0, 25, 3, 3, db_path=db)
+    card = lecture_session.project.cards[0]
+    assert "word_timings" not in card and "matched_words" not in card
+
+
+def test_exactly_five_hundredths_from_a_start_still_changes_that_card(lecture_session, db):
+    """Compared on the millisecond grid: ``abs(30.0 - 30.05)`` is 0.0500000000000007."""
+    i = lecture_session.insert_manual_card(30.05, 2, 255, 255, db_path=db)
+    assert len(lecture_session.project.cards) == 2
+    assert _refs(lecture_session)[i] == (2, 255, 255, 30.0, 40.0, True)
+
+
+def test_an_insert_in_a_cards_first_half_second_changes_that_card(lecture_session, db):
+    """Trimming 25:8 to 30.0–30.3 would flash it for a few frames before the new card."""
+    i = lecture_session.insert_manual_card(30.3, 25, 1, 1, db_path=db)
+    assert len(lecture_session.project.cards) == 2
+    assert _refs(lecture_session)[i] == (25, 1, 1, 30.0, 40.0, True)
+    assert lecture_session.undo() and not lecture_session.can_undo
+
+
+def test_an_insert_just_before_the_next_card_changes_that_card(lecture_session, db):
+    """A new card from 29.8 to 30.0 would flash too; the next card shows the ayah instead."""
+    i = lecture_session.insert_manual_card(29.8, 25, 1, 1, db_path=db)
+    assert len(lecture_session.project.cards) == 2
+    assert _refs(lecture_session)[i] == (25, 1, 1, 30.0, 40.0, True)
+
+
+def test_a_trimmed_card_keeps_at_least_half_a_second(lecture_session, db):
+    lecture_session.insert_manual_card(30.5, 25, 1, 1, db_path=db)
+    refs = _refs(lecture_session)
+    assert refs[1][3:5] == (30.0, 30.5) and refs[2][3:5] == (30.5, 100.0)
+
+
+def test_a_new_card_ends_where_the_next_begins_without_overlap(lecture_session, db):
+    i = lecture_session.insert_manual_card(29.4, 25, 1, 1, db_path=db)
+    assert _refs(lecture_session)[i][3:5] == (29.4, 30.0)
+
+
+def test_the_nearest_start_is_the_card_changed(lecture_session, db):
+    lecture_session.project.cards.insert(
+        1, {**lecture_session.project.cards[1], "start_time": 29.98, "end_time": 30.0}
+    )
+    i = lecture_session.insert_manual_card(30.01, 25, 1, 1, db_path=db)
+    assert i == 2 and _refs(lecture_session)[2][:3] == (25, 1, 1)
+    assert not _refs(lecture_session)[1][5]
+
+
+def test_every_card_on_screen_at_the_playhead_is_trimmed(lecture_session, db):
+    """Lecture quotes can overlap; each one showing at the playhead ends there."""
+    lecture_session.project.cards.insert(
+        1, {**lecture_session.project.cards[0], "start_time": 12.0}
+    )
+    i = lecture_session.insert_manual_card(15.0, 25, 1, 1, db_path=db)
+    refs = _refs(lecture_session)
+    assert refs[0][3:5] == (10.0, 15.0) and refs[1][3:5] == (12.0, 15.0)
+    assert refs[i] == (25, 1, 1, 15.0, 30.0, True)
+
+
+def test_a_card_with_an_unreadable_end_is_left_alone_and_the_insert_is_one_step(
+    lecture_session, db
+):
+    lecture_session.project.cards[0]["end_time"] = "soon"
+    before = copy.deepcopy(lecture_session.project.cards)
+    lecture_session.insert_manual_card(15.0, 25, 1, 1, db_path=db)
+    assert lecture_session.project.cards[0]["end_time"] == "soon"
+    assert lecture_session.undo() and not lecture_session.can_undo
+    assert lecture_session.project.cards == before
+
+
+def test_a_negative_index_is_refused(lecture_session, db):
+    with pytest.raises(IndexError):
+        lecture_session.change_card_ayah(-1, 25, 1, 1, db_path=db)
+    assert not lecture_session.can_undo and not lecture_session.dirty
+
+
+@pytest.mark.parametrize("broken", ["missing", "corrupt"])
+def test_a_store_that_cannot_be_read_is_a_value_error_and_no_edit(
+    lecture_session, tmp_path, broken
+):
+    path = tmp_path / "quran.sqlite"
+    if broken == "corrupt":
+        path.write_bytes(b"not a database at all")
+    with pytest.raises(ValueError, match="Could not read the Quran store"):
+        lecture_session.insert_manual_card(25.0, 25, 1, 1, db_path=path)
+    with pytest.raises(ValueError, match="Could not read the Quran store"):
+        lecture_session.change_card_ayah(0, 25, 1, 1, db_path=path)
+    assert not lecture_session.can_undo and not lecture_session.dirty
+
+
+def test_a_bad_reference_is_reported_in_the_windows_language(lecture_session, db):
+    from qurantext.gui import i18n
+
+    with pytest.raises(ValueError) as english:
+        lecture_session.insert_manual_card(25.0, 25, 9, 7, db_path=db)
+    assert "Surah 25 has no ayat 9" in str(english.value)
+    i18n.set_language("ar")
+    with pytest.raises(ValueError) as arabic:
+        lecture_session.change_card_ayah(0, 25, 1, 99, db_path=db)
+    assert "لا تضمّ السورة" in str(arabic.value) and "99" in str(arabic.value)
+    assert not lecture_session.can_undo

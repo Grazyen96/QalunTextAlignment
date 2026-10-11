@@ -1,6 +1,7 @@
 import json
 import shutil
 import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -1147,17 +1148,117 @@ def test_a_manual_card_is_kept_under_a_chosen_surah() -> None:
     assert [(c["surah_num"], c["from_ayah"]) for c in shown] == [(25, 7), (2, 255)]
 
 
-def test_manual_cards_still_count_toward_the_automatic_guess() -> None:
+def test_manual_cards_do_not_vote_in_the_automatic_guess() -> None:
     from qurantext.core.video_common import cards_on_screen
 
     cards = [
         _card(25, 7, 0.0, 10.0),
-        {**_card(2, 255, 10.0, 60.0), "manual": True},  # heard longest
+        {**_card(2, 255, 10.0, 60.0), "manual": True},  # on screen longest, but by hand
         _card(25, 8, 60.0, 65.0),
+        _card(3, 1, 65.0, 66.0),  # a detected quote: hidden, so a guess was made
     ]
     shown = cards_on_screen(cards, "lecture")
-    # Surah 2 is the guess, so the detected surah-25 cards are hidden; the manual one shows.
-    assert [(c["surah_num"], c["from_ayah"]) for c in shown] == [(2, 255)]
+    assert [(c["surah_num"], c["from_ayah"]) for c in shown] == [(25, 7), (2, 255), (25, 8)]
+
+
+def _explained_lecture() -> list[dict]:
+    """15 detected 10 s quotes of surah 25, then 2:255 placed by hand for 5 minutes."""
+    cards = [_card(25, 1 + i, 20.0 * i, 20.0 * i + 10.0) for i in range(15)]
+    cards.append({**_card(2, 255, 300.0, 600.0), "manual": True})
+    return cards
+
+
+def test_one_long_manual_cross_reference_does_not_hide_the_detected_quotes() -> None:
+    """The review's case: a 300 s explanation card outweighs 150 s of quotes if it votes."""
+    from qurantext.core.video_common import cards_on_screen
+
+    shown = cards_on_screen(_explained_lecture(), "lecture")
+    refs = [(c["surah_num"], c["from_ayah"]) for c in shown]
+    assert refs == [(25, 1 + i) for i in range(15)] + [(2, 255)]
+
+
+def test_the_review_session_keeps_the_detected_quotes_beside_a_long_manual_card() -> None:
+    from qurantext.gui.review.session import ReviewSession
+    from qurantext.jobs.project import Project
+
+    session = ReviewSession(
+        Project(audio=Path("dars.mp3"), mode="lecture", cards=_explained_lecture())
+    )
+    refs = [(c["surah_num"], c["from_ayah"]) for c in session.validated_cards()]
+    assert refs == [(25, 1 + i) for i in range(15)] + [(2, 255)]
+
+
+def test_only_a_json_true_makes_a_card_manual_everywhere() -> None:
+    """One predicate: the window's mark and the video's filter agree on ``"manual": 1``."""
+    from qurantext.core.video_common import cards_on_screen, is_manual_card
+    from qurantext.gui.review.session import ReviewSession
+    from qurantext.jobs.project import Project
+
+    cards = [_card(25, 7, 0.0, 30.0), {**_card(2, 255, 30.0, 35.0), "manual": 1}]
+    assert not is_manual_card(cards[1])
+    assert (
+        ReviewSession(Project(audio=Path("a.mp3"), mode="lecture", cards=cards)).is_manual(1)
+        is False
+    )
+    assert cards_on_screen(cards, "lecture", studied_surah=25) == [cards[0]]
+
+
+def _intro_cards() -> list[dict]:
+    """Surah 25's detected 7–10, with 2:255 placed by hand before them."""
+    return [
+        {**_card(2, 255, 5.0, 9.0, name="سورة البقرة"), "manual": True},
+        _card(25, 7, 10.0, 20.0, name="سورة الفرقان"),
+        _card(25, 10, 20.0, 30.0, name="سورة الفرقان"),
+    ]
+
+
+@pytest.mark.parametrize("studied", [25, None], ids=["chosen", "guessed"])
+def test_the_opening_title_announces_the_detected_surah_not_a_manual_card_before_it(
+    studied,
+) -> None:
+    from qurantext.core.frame_renderer import placeholder_lines
+    from qurantext.core.video_common import cards_on_screen, validated_matches
+
+    shown = cards_on_screen(
+        validated_matches(_intro_cards(), bridge_gaps=False), "lecture", studied
+    )
+    assert placeholder_lines(shown, reserve_caption_band=True) == (
+        "سورة الفرقان",
+        "تدبر الآيات من الآية 7 إلى الآية 10",
+    )
+
+
+def test_the_opening_title_falls_back_to_manual_cards_when_no_detected_card_names_a_surah() -> None:
+    from qurantext.core.video_common import lecture_intro_lines
+
+    preamble = {"kind": "preamble", "_start_time": 0.0}
+    manual = {
+        "surah_name": "سورة البقرة",
+        "from_ayah": 255,
+        "to_ayah": 256,
+        "_start_time": 5.0,
+        "manual": True,
+    }
+    assert lecture_intro_lines([preamble, manual]) == (
+        "سورة البقرة",
+        "تدبر الآيات من الآية 255 إلى الآية 256",
+    )
+
+
+def test_a_manual_card_of_the_announced_surah_widens_the_span() -> None:
+    from qurantext.core.video_common import lecture_intro_lines
+
+    matches = [
+        {"surah_name": "سورة الفرقان", "from_ayah": 7, "to_ayah": 7, "_start_time": 1.0},
+        {
+            "surah_name": "سورة الفرقان",
+            "from_ayah": 3,
+            "to_ayah": 3,
+            "_start_time": 9.0,
+            "manual": True,
+        },
+    ]
+    assert lecture_intro_lines(matches) == ("سورة الفرقان", "تدبر الآيات من الآية 3 إلى الآية 7")
 
 
 _MANUAL_LECTURE = [

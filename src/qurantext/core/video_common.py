@@ -53,15 +53,23 @@ def lecture_intro_lines(matches: list[dict[str, Any]]) -> tuple[str, str] | None
     detected ayah, plus the span from the lowest to the highest ayah number
     found within that surah (e.g. ``"تدبر الآيات من الآية 7 إلى الآية 11"``).
     Returns ``None`` when no ayah numbering is available to announce.
+
+    A card placed by hand (:func:`is_manual_card`) is shown whatever its surah,
+    so the first card may be a cross-reference the teacher explains with; the
+    detected cards are the studied surah's (``cards_on_screen`` keeps them to
+    it), so the surah is taken from them. Hand-made cards name it only in a
+    lecture where no detected card names one, and a hand-made card of the
+    announced surah still widens the span.
     """
     ordered = sorted(matches, key=lambda m: float(m.get("_start_time", math.inf)))
 
-    surah_name = ""
-    for match in ordered:
+    def named(match: dict[str, Any]) -> str:
         name = str(match.get("surah_name") or "").strip()
-        if name and isinstance(match.get("from_ayah"), int):
-            surah_name = name
-            break
+        return name if name and isinstance(match.get("from_ayah"), int) else ""
+
+    detected = [named(m) for m in ordered if not is_manual_card(m)]
+    by_hand = [named(m) for m in ordered if is_manual_card(m)]
+    surah_name = next((name for name in detected + by_hand if name), "")
     if not surah_name:
         return None
 
@@ -95,7 +103,12 @@ def _card_surah(card: dict[str, Any]) -> int | str | None:
     return str(card.get("surah_name") or "").strip() or None
 
 
-def _is_manual(card: dict[str, Any]) -> bool:
+def is_manual_card(card: dict[str, Any]) -> bool:
+    """Whether the person placed *card* by hand (or changed its ayat by hand).
+
+    Only a JSON ``true`` counts, as the review session writes it: the one test
+    the export, the preview, the review window and its card list all share.
+    """
     return card.get("manual") is True
 
 
@@ -138,8 +151,11 @@ def cards_on_screen(
     knows which surah the lecture is about better than a count of seconds does.
     Without a choice the studied surah is guessed as the one heard for the most
     time, a tie going to the one heard first. A card the person placed by hand
-    (``manual``) is their own choice too, so this filter never hides it; it
-    still counts toward the guess.
+    (``manual``) is their own choice too, so this filter never hides it; nor
+    does it vote in the guess. A hand-made card lasts until the next card —
+    often minutes of explanation — where a detected quote lasts only its
+    recitation, so one cross-reference placed by hand would otherwise outweigh
+    every detected quote and hide them all.
 
     The export, the single-frame preview and the review window's live frame all
     call this, so none of them shows a card the others leave out.
@@ -151,7 +167,7 @@ def cards_on_screen(
         return [
             card
             for card in cards
-            if _is_manual(card)
+            if is_manual_card(card)
             or _card_surah(card) is None
             or card.get("surah_num") == studied_surah
         ]
@@ -161,7 +177,7 @@ def cards_on_screen(
     for card in cards:
         surah = _card_surah(card)
         span = _card_span(card)
-        if surah is None or span is None:
+        if surah is None or span is None or is_manual_card(card):
             continue
         start, end = span
         heard[surah] = heard.get(surah, 0.0) + max(0.0, end - start)
@@ -170,7 +186,7 @@ def cards_on_screen(
         return list(cards)
 
     studied = max(heard, key=lambda surah: (heard[surah], -first[surah]))
-    return [card for card in cards if _is_manual(card) or _card_surah(card) in (None, studied)]
+    return [card for card in cards if is_manual_card(card) or _card_surah(card) in (None, studied)]
 
 
 def has_surah_cards(cards: list[dict[str, Any]], surah: int) -> bool:

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import shutil
 import sqlite3
+from contextlib import closing
+from pathlib import Path
 
 import pytest
 
@@ -155,13 +158,19 @@ def test_list_surahs_gives_a_picker_everything_it_needs(tmp_path) -> None:
         conn.close()
 
 
+def _range_card(db: str | Path, surah: object, start: object, end: object) -> dict:
+    """``ayah_range_card`` on a connection that is closed again, whatever happens."""
+    with closing(connect(db)) as conn:
+        return ayah_range_card(conn, surah, start, end)
+
+
 def test_a_single_ayah_card_matches_detection(db: str) -> None:
-    conn = connect(db)
-    card = ayah_range_card(conn, 25, 7, 7)
-    raw = conn.execute(
-        "SELECT text_raw FROM ayat WHERE surah_num = 25 AND ayah_num = 7"
-    ).fetchone()["text_raw"]
-    name = conn.execute("SELECT name FROM surahs WHERE surah_num = 25").fetchone()["name"]
+    with closing(connect(db)) as conn:
+        card = ayah_range_card(conn, 25, 7, 7)
+        raw = conn.execute(
+            "SELECT text_raw FROM ayat WHERE surah_num = 25 AND ayah_num = 7"
+        ).fetchone()["text_raw"]
+        name = conn.execute("SELECT name FROM surahs WHERE surah_num = 25").fetchone()["name"]
     assert card == {
         "surah_num": 25,
         "surah_name": name,
@@ -173,7 +182,7 @@ def test_a_single_ayah_card_matches_detection(db: str) -> None:
 
 
 def test_a_range_joins_ayat_with_newlines_like_detection(db: str) -> None:
-    card = ayah_range_card(connect(db), 25, 7, 9)
+    card = _range_card(db, 25, 7, 9)
     lines = card["full_text"].split("\n")
     assert len(lines) == 3
     assert lines[0].endswith(" ٧") and lines[2].endswith(" ٩")
@@ -185,4 +194,25 @@ def test_a_range_joins_ayat_with_newlines_like_detection(db: str) -> None:
 )
 def test_invalid_ranges_raise(db: str, surah: int, start: int, end: int) -> None:
     with pytest.raises(ValueError):
-        ayah_range_card(connect(db), surah, start, end)
+        _range_card(db, surah, start, end)
+
+
+@pytest.mark.parametrize("surah, start, end", [(25, 7.5, 8), (25.0, 7, 7), (25, True, 1)])
+def test_numbers_that_are_not_whole_raise(
+    db: str, surah: object, start: object, end: object
+) -> None:
+    with pytest.raises(ValueError):
+        _range_card(db, surah, start, end)
+
+
+def test_a_store_missing_an_ayah_raises_rather_than_return_short_text(
+    db: str, tmp_path: Path
+) -> None:
+    broken = tmp_path / "quran.sqlite"
+    shutil.copyfile(db, broken)
+    with closing(sqlite3.connect(broken)) as conn:
+        conn.execute("DELETE FROM ayat WHERE surah_num = 25 AND ayah_num = 8")
+        conn.commit()
+    assert _range_card(broken, 25, 7, 7)["from_ayah"] == 7
+    with pytest.raises(ValueError, match="missing ayat"):
+        _range_card(broken, 25, 7, 9)

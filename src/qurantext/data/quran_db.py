@@ -396,7 +396,15 @@ def ayah_range_card(
     number marker, one per line), so a card the person picks by hand reads the
     same as one the matcher found. The text always comes from the store: a card
     names a reference, it never carries typed text.
+
+    Raises ``ValueError`` for an unknown surah, a range outside it, numbers
+    that are not whole, and a store whose ayat do not match its own ayah count
+    (a card with missing ayat would read as complete, or show nothing).
     """
+    if any(isinstance(n, bool) or not isinstance(n, int) for n in (surah_num, from_ayah, to_ayah)):
+        raise ValueError(
+            f"Surah and ayah numbers must be whole numbers: {surah_num}:{from_ayah}-{to_ayah}."
+        )
     count = surah_ayah_count(conn, surah_num)  # raises ValueError for an unknown surah
     if not (1 <= from_ayah <= to_ayah <= count):
         raise ValueError(
@@ -408,6 +416,10 @@ def ayah_range_card(
         "ORDER BY ayah_num",
         (surah_num, from_ayah, to_ayah),
     ).fetchall()
+    if [int(r["ayah_num"]) for r in rows] != list(range(from_ayah, to_ayah + 1)):
+        raise ValueError(
+            f"The store is missing ayat of {surah_num}:{from_ayah}–{to_ayah}; rebuild it."
+        )
     text = "\n".join(ayah_text_with_marker(r["text_raw"], int(r["ayah_num"])) for r in rows)
     return {
         "surah_num": int(surah_num),

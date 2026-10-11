@@ -18,6 +18,8 @@ from __future__ import annotations
 import bisect
 import copy
 import json
+import math
+import sqlite3
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -34,7 +36,12 @@ from qurantext.core.timing_edit import (
     ripple,
     ripple_in_cards,
 )
-from qurantext.core.video_common import cards_on_screen, has_surah_cards, validated_matches
+from qurantext.core.video_common import (
+    cards_on_screen,
+    has_surah_cards,
+    is_manual_card,
+    validated_matches,
+)
 from qurantext.data.quran_db import ayah_range_card, connect
 from qurantext.gui.i18n import t
 from qurantext.jobs.look_assets import project_look, set_project_look
@@ -153,13 +160,47 @@ def _settled(
     return settled_cards, settled_captions, review, style, studied
 
 
+#: The shortest time a card the person places stays on screen, in milliseconds.
+_MIN_CARD_MS = 500
+#: How near a card's start an insert lands "on" it, in milliseconds.
+_SAME_START_MS = 50
+
+
 def _range_card(surah_num: int, from_ayah: int, to_ayah: int, db_path: Path) -> dict[str, Any]:
-    """The reference and text of an ayah range, read from the store at *db_path*."""
-    conn = connect(db_path)
+    """The reference and text of an ayah range, read from the store at *db_path*.
+
+    Every failure is a ``ValueError`` with a message in the window's language,
+    so the window has one exception to catch and a message to show: a range
+    the surah does not have, and a store that is missing, unreadable or of an
+    older build.
+    """
+    try:
+        conn = connect(db_path)
+    except (OSError, sqlite3.Error) as exc:
+        raise ValueError(t("session.manual_store_unavailable", details=exc)) from exc
     try:
         return ayah_range_card(conn, surah_num, from_ayah, to_ayah)
+    except sqlite3.Error as exc:
+        raise ValueError(t("session.manual_store_unavailable", details=exc)) from exc
+    except ValueError as exc:
+        raise ValueError(
+            t("session.manual_bad_reference", surah=surah_num, first=from_ayah, last=to_ayah)
+        ) from exc
     finally:
         conn.close()
+
+
+def _ms(value: Any) -> int | None:
+    """A card time in whole milliseconds, or None when it is not a usable time.
+
+    Insert rules compare on the millisecond grid the cards are stored on, so
+    "within 0.05 s" holds at exactly 0.05 s, which float subtraction misses.
+    """
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return None
+    return round(seconds * 1000) if math.isfinite(seconds) else None
 
 
 def _changed_card(card: dict[str, Any], reference: dict[str, Any]) -> dict[str, Any]:
@@ -595,8 +636,13 @@ class ReviewSession:
         self._changed()
 
     def is_manual(self, index: int) -> bool:
-        """Whether card *index* was placed or changed by hand rather than detected."""
-        return bool(self.project.cards[index].get("manual"))
+        """Whether card *index* was placed or changed by hand rather than detected.
+
+        The same test the video uses to keep the card on screen
+        (``core.video_common.is_manual_card``), so the window's mark and the
+        video never disagree about a card.
+        """
+        return is_manual_card(self.project.cards[index])
 
     def insert_manual_card(
         self,
@@ -612,57 +658,75 @@ class ReviewSession:
         Detection follows recitation, so it misses the ayah a teacher goes back
         to and talks about without reciting it, and the person places that
         card by hand at the playhead. The card holds until the next card
-        starts (or the recording ends), at least half a second; a card that is
-        on screen at *at* now ends there, so the new one is what shows. A
-        card already starting at *at* (within 0.05 s) is changed instead of
-        stacking a second card on it. Returns the card's index once the cards
-        are back in start order.
+        starts, or the recording ends; a card that is on screen at *at* now
+        ends there, so the new one is what shows.
 
-        Raises ``ValueError`` outside a lecture or for a reference the store
-        does not have, and then nothing changed and there is nothing to undo.
+        No card the person places, or trims, lasts under half a second: one
+        would flash its ayah for a frame or two. So *at* changes an existing
+        card instead of adding one beside it when it falls within 0.05 s of
+        that card's start, in the first half second of a card on screen, or
+        less than half a second before the next card starts. The nearest such
+        start wins. The changed card keeps its times (see
+        :meth:`change_card_ayah`).
+
+        Returns the card's index once the cards are back in start order.
+        Raises ``ValueError`` outside a lecture, for a reference the store does
+        not have, or when the store cannot be read; then nothing changed and
+        there is nothing to undo.
         """
         self._require_lecture()
         at = max(0.0, float(at))
         if self.duration is not None:
-            at = max(0.0, min(at, float(self.duration) - 0.5))
+            at = max(0.0, min(at, float(self.duration) - _MIN_CARD_MS / 1000))
         # Before anything changes: a reference the store refuses is no edit.
         reference = _range_card(surah_num, from_ayah, to_ayah, db_path)
         cards = self.project.cards
+        at_ms = round(at * 1000)
 
-        def start_of(card: dict[str, Any]) -> float:
-            return float(card.get("start_time") or 0.0)
-
-        starting = [i for i, card in enumerate(cards) if abs(start_of(card) - at) <= 0.05]
-        if starting:
-            index = min(starting, key=lambda i: abs(start_of(cards[i]) - at))
+        nearby: list[tuple[int, int]] = []  # (distance, index) of cards *at* lands on
+        for i, card in enumerate(cards):
+            start = _ms(card.get("start_time"))
+            if start is None:
+                continue
+            after = at_ms - start  # how far into the card *at* falls
+            end = _ms(card.get("end_time"))
+            inside = end is not None and 0 < after < _MIN_CARD_MS and at_ms < end
+            if abs(after) <= _SAME_START_MS or inside or -_MIN_CARD_MS < after < 0:
+                nearby.append((abs(after), i))
+        if nearby:
+            index = min(nearby)[1]
             self._replace_card(index, _changed_card(cards[index], reference))
             return index
 
-        following = [start_of(card) for card in cards if start_of(card) > at]
+        following = [
+            start
+            for start in (_ms(card.get("start_time")) for card in cards)
+            if start is not None and start > at_ms
+        ]
         if following:
-            end = min(following)
+            end_ms = min(following)  # at least half a second away (see above)
         elif self.duration is not None:
-            end = float(self.duration)
+            end_ms = max(round(float(self.duration) * 1000), at_ms + _MIN_CARD_MS)
         else:
-            end = at + 10.0
-        end = max(end, at + 0.5)
+            end_ms = at_ms + 10_000
         new = {
             **reference,
-            "start_time": round(at, 3),
-            "end_time": round(end, 3),
+            "start_time": at_ms / 1000,
+            "end_time": end_ms / 1000,
             "confidence": 1.0,
             "detected_text": "",
             "manual": True,
         }
-
-        self._before_change()
         updated = []
         for card in cards:
-            if start_of(card) < at < float(card.get("end_time") or 0.0):
-                card = {**card, "end_time": round(at, 3)}
+            start, end = _ms(card.get("start_time")), _ms(card.get("end_time"))
+            if start is not None and end is not None and start < at_ms < end:
+                card = {**card, "end_time": at_ms / 1000}  # half a second or more (see above)
             updated.append(card)
         updated.append(new)
-        updated.sort(key=start_of)
+        updated.sort(key=lambda card: _ms(card.get("start_time")) or 0)
+
+        self._before_change()
         self.project.cards = updated
         self._changed()
         return next(i for i, card in enumerate(updated) if card is new)
@@ -685,10 +749,14 @@ class ReviewSession:
         reference — the heard text, its word timings, its match scores — no
         longer describes the card and goes; the card is then the person's.
 
-        Raises ``ValueError`` outside a lecture or for a reference the store
-        does not have, and then nothing changed and there is nothing to undo.
+        Raises ``IndexError`` for an index that is not a card (a negative one
+        included: it would silently change a card from the end), and
+        ``ValueError`` as :meth:`insert_manual_card` does; then nothing changed
+        and there is nothing to undo.
         """
         self._require_lecture()
+        if not 0 <= index < len(self.project.cards):
+            raise IndexError(f"No card {index}; the project has {len(self.project.cards)}.")
         card = self.project.cards[index]
         reference = _range_card(surah_num, from_ayah, to_ayah, db_path)
         self._replace_card(index, _changed_card(card, reference))

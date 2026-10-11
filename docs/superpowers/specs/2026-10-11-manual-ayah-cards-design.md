@@ -55,6 +55,11 @@ Out of scope:
   - If the playhead falls inside an existing card, that card now ends at the playhead.
   - If a card already starts within 0.05 s of the playhead, the picker *changes* that card instead of
     adding one beside it.
+  - No card the person places or trims lasts under 0.5 s (amended after the Phase 1 review). A
+    playhead in a card's first half second, or less than half a second before the next card starts,
+    also changes that card (the nearest start wins), instead of trimming it to a sliver or adding a
+    card that flashes. The 0.5 s minimum otherwise applies only at the end of the recording, so a new
+    card never overlaps the next one.
 - **Change an existing card:** double-click its Ayah cell in the segment list, or right-click → **"Change
   ayah…"**. The picker opens with the card's current surah and range. On OK the card's reference and
   text change; its times stay.
@@ -107,7 +112,16 @@ data layer. It returns the reference and text fields above from the bundled stor
 
 `video_common.cards_on_screen(cards, mode, studied_surah)` keeps every card with `"manual": true`,
 whatever its surah. The studied-surah rule — automatic or chosen — applies to detected cards only.
-Manual cards still count toward the automatic "heard longest" guess.
+Manual cards do **not** vote in the automatic "heard longest" guess (amended after the Phase 1
+review): a hand-made card lasts until the next card, often minutes of explanation, where a detected
+quote lasts only its recitation, so one cross-reference placed by hand would otherwise flip the guess
+and hide every detected card of the surah being studied. They are shown regardless, so they need no
+vote. A lecture made mostly of hand-made cards is guessed from its detected cards only; the person
+can still choose the surah.
+
+The lecture's opening title announces the surah of the first *detected* card that names one, with the
+span of that surah's cards (hand-made ones included). Hand-made cards name the surah only when no
+detected card does, so a cross-reference placed before the first quote does not retitle the lecture.
 
 The export, the single-frame preview and the review window already share this function, so they
 cannot disagree.
