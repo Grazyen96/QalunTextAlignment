@@ -281,3 +281,122 @@ def test_rendering_the_projects_own_look_explicitly_keeps_its_hash(monkeypatch, 
     )
     assert project.style == {"preset": "emerald", "colours": {"highlight_word": "#f0f"}}
     assert project.render_is_stale is False
+
+
+def _lecture_with_a_quote(tmp_path):
+    """A lecture on al-Furqan that quotes al-Isra once, said in its captions too."""
+    import json
+
+    from qurantext.jobs.project import CaptionCue
+
+    audio, matches = build_job(tmp_path)
+    payload = json.loads(matches.read_text(encoding="utf-8"))
+    payload["meta"]["mode"] = "lecture"
+    matches.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    project = Project.from_match_file(matches, audio)
+    studied = project.cards[0]
+    project.cards.append(
+        dict(studied, surah_num=17, surah_name="الإسراء", from_ayah=48, to_ayah=48)
+        | {"start_time": 5.0, "end_time": 5.5, "word_timings": []}
+    )
+    project.captions = [
+        CaptionCue(start=0.0, end=4.0, text="الدرس في الفرقان"),
+        CaptionCue(start=5.0, end=5.5, text="كما قال في الإسراء"),
+    ]
+    save_project(project, tmp_path / "job.qalun.json")
+    return project
+
+
+def test_the_export_draws_only_the_chosen_surah_and_subtitles_keep_everything(
+    tmp_path, store, no_basmala, monkeypatch
+) -> None:
+    """The person chose al-Isra: its quote is the only card, every caption stays."""
+    from qurantext.jobs import render as render_module
+    from qurantext.jobs.project import JobSettings, job_settings, set_job_settings
+
+    project = _lecture_with_a_quote(tmp_path)
+    set_job_settings(project, JobSettings(studied_surah=17))
+    seen = {}
+
+    def capture(audio_path, cards, output_path, *args, **kwargs):
+        seen["cards"] = cards
+        output_path.write_bytes(b"")
+        return 6.0
+
+    monkeypatch.setattr(render_module, "render_frame_video", capture)
+    result = render_project(
+        project,
+        tmp_path / "v.mp4",
+        subtitles="sidecar",
+        formats=("srt",),
+        width=160,
+        height=120,
+        fps=8,
+        font_file=DEFAULT_FONT_PATH,
+        db_path=store,
+    )
+    assert [card["surah_num"] for card in seen["cards"]] == [17], "the guess would draw 25"
+    srt = result.subtitles[0].read_text(encoding="utf-8-sig")
+    assert "الدرس في الفرقان" in srt and "كما قال في الإسراء" in srt
+    reloaded = load_project(project.path)
+    assert job_settings(reloaded).studied_surah == 17
+    assert reloaded.render_is_stale is False, "the render is credited with the choice"
+
+
+def test_the_projects_choice_wins_over_a_fallback_surah(monkeypatch, tmp_path) -> None:
+    from qurantext.jobs import project_render
+    from qurantext.jobs.project import JobSettings, set_job_settings
+
+    captured = []
+
+    def fake_export_job(request, *, progress=None, cancel=None):
+        captured.append(request.studied_surah)
+        return _fake_result(tmp_path)
+
+    monkeypatch.setattr(project_render, "export_job", fake_export_job)
+    project = _fake_project(tmp_path)
+    project.mode = "lecture"
+    project_render.render_project(project, tmp_path / "v.mp4", preset="social", studied_surah=2)
+    assert captured == [2]
+    assert project.export == {}, "a fallback does not change the project"
+    assert project.render_is_stale is True, "but the render is named for it"
+
+    set_job_settings(project, JobSettings(studied_surah=25))
+    project_render.render_project(project, tmp_path / "v.mp4", preset="social", studied_surah=2)
+    assert captured == [2, 25]
+    assert project.render_is_stale is False
+
+
+def test_a_fallback_surah_leaves_a_recitations_render_current(monkeypatch, tmp_path) -> None:
+    """A recitation draws every card whatever the surah, so the flag changes nothing."""
+    from qurantext.jobs import project_render
+
+    captured = []
+
+    def fake_export_job(request, *, progress=None, cancel=None):
+        captured.append(request.studied_surah)
+        return _fake_result(tmp_path)
+
+    monkeypatch.setattr(project_render, "export_job", fake_export_job)
+    project = _fake_project(tmp_path)  # a recitation
+    project_render.render_project(project, tmp_path / "v.mp4", preset="social", studied_surah=5)
+    assert captured == [None]
+    assert project.render_is_stale is False
+
+
+def test_a_render_says_when_the_chosen_surah_has_no_card(tmp_path, no_basmala, monkeypatch) -> None:
+    from qurantext.jobs import render as render_module
+    from qurantext.jobs.project import JobSettings, set_job_settings
+
+    project = _lecture_with_a_quote(tmp_path)
+    monkeypatch.setattr(
+        render_module,
+        "render_frame_video",
+        lambda audio, cards, output, *a, **k: output.write_bytes(b"") or 6.0,
+    )
+    result = render_project(project, tmp_path / "v.mp4", width=160, height=120, fps=8)
+    assert result.render.studied_surah_missing is None
+
+    set_job_settings(project, JobSettings(studied_surah=114))
+    result = render_project(project, tmp_path / "v.mp4", width=160, height=120, fps=8)
+    assert result.render.studied_surah_missing == 114

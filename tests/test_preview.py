@@ -256,3 +256,144 @@ def test_preview_reports_a_missing_background_image(tmp_path) -> None:
     )
     assert result.look_warnings == ("image_missing",)
     assert result.output.exists() and result.output.stat().st_size > 0
+
+
+def test_a_lecture_keeps_the_studied_ayah_up_through_a_quote_from_another_surah(tmp_path) -> None:
+    path = _matches(tmp_path, mode="lecture")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    quote = dict(
+        payload["matches"][0], surah_num=17, surah_name="الإسراء", from_ayah=48, to_ayah=48
+    )
+    quote.update(start_time=6.5, end_time=7.5)
+    payload["matches"].insert(1, quote)
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    result = render_preview(
+        PreviewRequest(
+            matches=path,
+            output=tmp_path / "p.png",
+            at=7.0,
+            width=240,
+            height=180,
+            font_file=DEFAULT_FONT_PATH,
+        )
+    )
+    assert result.card == "25:8", "the quote from al-Isra stays in the captions, not on the card"
+
+
+def _lecture_quoting_al_isra(tmp_path):
+    path = _matches(tmp_path, mode="lecture")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    quote = dict(
+        payload["matches"][0], surah_num=17, surah_name="الإسراء", from_ayah=48, to_ayah=48
+    )
+    quote.update(start_time=6.5, end_time=7.5)
+    payload["matches"].insert(1, quote)
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_the_preview_draws_the_chosen_surah(tmp_path) -> None:
+    """At 7s the guess holds al-Furqan up; the person chose al-Isra, so its quote shows."""
+    result = render_preview(
+        PreviewRequest(
+            matches=_lecture_quoting_al_isra(tmp_path),
+            output=tmp_path / "p.png",
+            at=7.0,
+            width=240,
+            height=180,
+            font_file=DEFAULT_FONT_PATH,
+            studied_surah=17,
+        )
+    )
+    assert result.card == "17:48"
+
+
+def test_the_preview_cli_passes_the_studied_surah(tmp_path, capsys) -> None:
+    from qurantext.cli.main import build_parser
+
+    args = build_parser().parse_args(
+        [
+            "preview",
+            "--matches",
+            str(_lecture_quoting_al_isra(tmp_path)),
+            "--output",
+            str(tmp_path / "p.png"),
+            "--at",
+            "7",
+            "--width",
+            "240",
+            "--height",
+            "180",
+            "--font-file",
+            str(DEFAULT_FONT_PATH),
+            "--studied-surah",
+            "17",
+        ]
+    )
+    assert args.handler(args) == 0
+    assert "showing 17:48" in capsys.readouterr().out
+
+
+def _project_beside(matches, *, mode="lecture", studied_surah=None):
+    from qurantext.jobs.project import (
+        JobSettings,
+        Project,
+        project_path_for,
+        save_project,
+        set_job_settings,
+    )
+
+    project = Project(audio=matches.with_suffix(".mp3"), mode=mode, matches=matches)
+    set_job_settings(project, JobSettings(studied_surah=studied_surah))
+    save_project(project, project_path_for(matches))
+
+
+def _cli_preview(matches, tmp_path, *flags):
+    from qurantext.cli.main import build_parser
+
+    args = build_parser().parse_args(
+        [
+            "preview",
+            "--matches",
+            str(matches),
+            "--output",
+            str(tmp_path / "p.png"),
+            "--at",
+            "7",
+            "--width",
+            "240",
+            "--height",
+            "180",
+            "--font-file",
+            str(DEFAULT_FONT_PATH),
+            *flags,
+        ]
+    )
+    assert args.handler(args) == 0
+
+
+def test_the_preview_cli_follows_the_surah_of_the_project_beside_the_matches(
+    tmp_path, capsys
+) -> None:
+    """Chosen in the review and saved: the preview shows what the export will."""
+    matches = _lecture_quoting_al_isra(tmp_path)
+    _project_beside(matches, studied_surah=17)
+    _cli_preview(matches, tmp_path)
+    assert "showing 17:48" in capsys.readouterr().out
+
+    _cli_preview(matches, tmp_path, "--studied-surah", "25")
+    captured = capsys.readouterr()
+    assert "showing 17:48" in captured.out, "the project's own choice wins"
+    assert "Ignoring --studied-surah" in captured.err
+
+
+def test_the_preview_cli_flag_applies_when_the_project_beside_has_no_choice(
+    tmp_path, capsys
+) -> None:
+    matches = _lecture_quoting_al_isra(tmp_path)
+    _project_beside(matches)
+    _cli_preview(matches, tmp_path)
+    assert "showing 25:8" in capsys.readouterr().out, "no choice: the guess"
+    _cli_preview(matches, tmp_path, "--studied-surah", "17")
+    assert "showing 17:48" in capsys.readouterr().out

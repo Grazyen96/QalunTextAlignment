@@ -1310,3 +1310,50 @@ def test_the_engine_cannot_change_while_a_job_runs(qt_app, prefs, store) -> None
     assert not any(button.isEnabled() for button in panel.engine_buttons.values())
     panel.set_running(False)
     assert all(button.isEnabled() for button in panel.engine_buttons.values())
+
+
+# -- a lecture's studied surah ------------------------------------------------------
+
+
+def test_a_lecture_offers_the_surah_picker_detecting_by_default(qt_app, prefs, store) -> None:
+    panel = _panel(prefs, store)
+    panel.show()
+    panel.lecture_button.setChecked(True)
+    box = panel.studied_surah_box
+    assert box.isVisible() and not panel.surah_box.isVisible()
+    assert not panel.range_widget.isVisible(), "a lecture states no ayat range"
+    assert panel._form.labelForField(box).isVisible()
+    assert box.count() == 115
+    assert box.currentIndex() == 0 and box.currentText() == t("surah.detect")
+    assert box.itemText(box.findData(25)).startswith("25. "), "named from the store"
+    assert box.itemText(box.findData(25)) != t("surah.number", num=25)
+    assert panel.spec().studied_surah is None
+
+    panel.recitation_button.setChecked(True)
+    assert not box.isVisible() and panel.surah_box.isVisible()
+
+
+def test_the_lecture_surah_is_remembered_apart_from_the_recitations(
+    qt_app, prefs, store, tmp_path
+) -> None:
+    panel = _panel(prefs, store)
+    _select_surah(panel, 2)
+    panel.lecture_button.setChecked(True)
+    panel.studied_surah_box.setCurrentIndex(panel.studied_surah_box.findData(25))
+    assert prefs.lecture_surah == 25 and prefs.surah_num == 2
+
+    fresh = _panel(Prefs(QSettings(str(tmp_path / "prefs.ini"), QSettings.Format.IniFormat)), store)
+    assert fresh.studied_surah_box.currentData() == 25
+    assert fresh.spec().studied_surah == 25
+    assert fresh.surah_box.currentData()["surah_num"] == 2
+
+    fresh.studied_surah_box.setCurrentIndex(0)
+    assert prefs.lecture_surah is None
+
+
+def test_a_recitation_spec_carries_no_studied_surah(qt_app, prefs, store) -> None:
+    prefs.lecture_surah = 25
+    panel = _panel(prefs, store)
+    panel.recitation_button.setChecked(True)
+    assert panel.spec().studied_surah is None
+    assert panel.spec().settings.studied_surah is None

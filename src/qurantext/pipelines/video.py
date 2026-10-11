@@ -34,6 +34,7 @@ def run_video_generation(
     title: str | None = None,
     captions: tuple[dict, ...] | None = None,
     look: Look = NIGHT_GOLD,
+    studied_surah: int | None = None,
     progress: ProgressCallback | None = None,
     cancel: CancelToken | None = None,
 ) -> RenderResult:
@@ -56,5 +57,6 @@ def run_video_generation(
         keep_temp=keep_temp,
         captions=captions,
         look=look,
+        studied_surah=studied_surah,
     )
     return render_video(request, progress=progress, cancel=cancel)

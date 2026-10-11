@@ -1006,3 +1006,239 @@ def test_render_frame_pillow_draws_on_the_layer_it_is_handed() -> None:
     corner = np.array(ocean.image.convert("RGB"))[0, 0][::-1]  # the frame is BGR
     assert tuple(handed[0, 0]) == tuple(corner)
     assert tuple(handed[0, 0]) != tuple(looked_up[0, 0])
+
+
+def _card(surah, ayah, start, end, name=None):
+    return {
+        "surah_num": surah,
+        "surah_name": name or f"surah {surah}",
+        "from_ayah": ayah,
+        "to_ayah": ayah,
+        "full_text": f"{surah}:{ayah}",
+        "start_time": start,
+        "end_time": end,
+    }
+
+
+def test_a_lecture_shows_only_the_surah_it_studies() -> None:
+    """A quote from another surah explains the ayah at hand; it is not the ayah at hand."""
+    from qurantext.core.video_common import cards_on_screen
+
+    cards = [
+        _card(17, 23, 0.0, 4.0),  # an opening quote, before the studied surah starts
+        _card(25, 7, 5.0, 15.0),
+        _card(17, 48, 16.0, 20.0),
+        _card(25, 8, 21.0, 30.0),
+    ]
+    assert [(c["surah_num"], c["from_ayah"]) for c in cards_on_screen(cards, "lecture")] == [
+        (25, 7),
+        (25, 8),
+    ]
+
+
+def test_the_studied_surah_is_the_one_with_the_most_time_not_the_most_cards() -> None:
+    from qurantext.core.video_common import cards_on_screen
+
+    cards = [
+        _card(2, 255, 0.0, 1.0),
+        _card(2, 256, 1.0, 2.0),
+        _card(2, 257, 2.0, 3.0),
+        _card(25, 7, 3.0, 20.0),
+    ]
+    assert [c["surah_num"] for c in cards_on_screen(cards, "lecture")] == [25]
+
+
+def test_a_tie_goes_to_the_surah_heard_first() -> None:
+    from qurantext.core.video_common import cards_on_screen
+
+    cards = [_card(25, 7, 0.0, 5.0), _card(17, 48, 5.0, 10.0)]
+    assert [c["surah_num"] for c in cards_on_screen(cards, "lecture")] == [25]
+
+
+def test_validated_cards_are_filtered_by_their_own_times() -> None:
+    from qurantext.core.video_common import cards_on_screen
+
+    cards = validated_matches(
+        [
+            dict(_card(25, 7, 0.0, 9.0), full_text="x"),
+            dict(_card(17, 48, 9.0, 10.0), full_text="y"),
+        ],
+        bridge_gaps=False,
+    )
+    assert [c["surah_num"] for c in cards_on_screen(cards, "lecture")] == [25]
+
+
+def test_cards_without_a_surah_are_kept() -> None:
+    from qurantext.core.video_common import cards_on_screen
+
+    preamble = {"kind": "preamble", "start_time": 0.0, "end_time": 2.0}
+    cards = [preamble, _card(25, 7, 2.0, 9.0), _card(17, 48, 9.0, 10.0)]
+    assert cards_on_screen(cards, "lecture") == cards[:2]
+
+
+def test_a_recitation_keeps_every_card() -> None:
+    """A recitation states its own range; nothing in it is a quotation."""
+    from qurantext.core.video_common import cards_on_screen
+
+    cards = [_card(25, 75, 0.0, 9.0), _card(26, 1, 9.0, 10.0)]
+    assert cards_on_screen(cards, "recitation") == cards
+    assert cards_on_screen(cards, None) == cards
+
+
+def test_a_chosen_surah_overrides_the_guess() -> None:
+    """The guess would keep al-Furqan (heard longest); the person said al-Isra."""
+    from qurantext.core.video_common import cards_on_screen
+
+    cards = [_card(25, 7, 0.0, 15.0), _card(17, 48, 15.0, 20.0), _card(25, 8, 20.0, 30.0)]
+    assert [c["surah_num"] for c in cards_on_screen(cards, "lecture")] == [25, 25]
+    assert [c["surah_num"] for c in cards_on_screen(cards, "lecture", 17)] == [17]
+
+
+def test_a_chosen_surah_applies_even_when_only_one_surah_was_heard() -> None:
+    from qurantext.core.video_common import cards_on_screen
+
+    cards = [_card(2, 255, 0.0, 9.0), _card(2, 256, 9.0, 10.0)]
+    assert cards_on_screen(cards, "lecture") == cards, "the guess keeps the only surah"
+    assert cards_on_screen(cards, "lecture", 25) == [], "the choice is obeyed as given"
+
+
+def test_a_chosen_surah_with_no_card_leaves_only_the_surah_less_ones() -> None:
+    from qurantext.core.video_common import cards_on_screen, has_surah_cards
+
+    preamble = {"kind": "preamble", "start_time": 0.0, "end_time": 2.0}
+    cards = [preamble, _card(25, 7, 2.0, 9.0), _card(17, 48, 9.0, 10.0)]
+    assert cards_on_screen(cards, "lecture", 1) == [preamble]
+    assert not has_surah_cards(cards, 1) and has_surah_cards(cards, 17)
+
+
+def test_a_chosen_surah_keeps_cards_without_a_surah() -> None:
+    from qurantext.core.video_common import cards_on_screen
+
+    preamble = {"kind": "preamble", "start_time": 0.0, "end_time": 2.0}
+    cards = [preamble, _card(25, 7, 2.0, 9.0), _card(17, 48, 9.0, 10.0)]
+    assert cards_on_screen(cards, "lecture", 17) == [preamble, cards[2]]
+
+
+def test_a_recitation_ignores_a_chosen_surah() -> None:
+    from qurantext.core.video_common import cards_on_screen
+
+    cards = [_card(25, 75, 0.0, 9.0), _card(26, 1, 9.0, 10.0)]
+    assert cards_on_screen(cards, "recitation", 26) == cards
+
+
+# The shapes a review fuzz found the export and the review disagreeing on: a card
+# with no time on screen, and one with no text, both counted toward the guess in
+# the export (which picks before validating) but not in the review (after).
+_DEGENERATE_LECTURE = [
+    dict(_card(2, 1, 0.0, 0.0), full_text="a"),
+    dict(_card(1, 1, 3.0, 3.0), full_text="b"),
+    dict(_card(1, 2, 5.0, 5.0), full_text="c"),
+    dict(_card(2, 2, 5.0, 7.0), full_text="d"),
+    dict(_card(3, 1, 1.0, 3.0), full_text="e"),
+    dict(_card(2, 3, 7.0, 7.5), full_text=""),  # no display text
+]
+
+
+@pytest.mark.parametrize("chosen", [None, 1, 2, 3])
+def test_picking_before_or_after_validation_keeps_the_same_cards(chosen, capsys) -> None:
+    from qurantext.core.video_common import cards_on_screen
+
+    def ids(cards):
+        return sorted((c["surah_num"], c["from_ayah"]) for c in cards)
+
+    cards = [dict(c) for c in _DEGENERATE_LECTURE]
+    export = validated_matches(cards_on_screen(cards, "lecture", chosen), bridge_gaps=False)
+    review = cards_on_screen(validated_matches(cards, bridge_gaps=False), "lecture", chosen)
+    assert ids(export) == ids(review)
+    if chosen is None:
+        assert ids(review) == [(3, 1)], "a tie of 2s each goes to al-Imran's first hearing"
+
+
+def test_a_chosen_surah_whose_only_cards_cannot_be_drawn_counts_as_missing() -> None:
+    from qurantext.core.video_common import has_surah_cards
+
+    assert not has_surah_cards(_DEGENERATE_LECTURE, 1), "both of its cards last no time"
+    assert has_surah_cards(_DEGENERATE_LECTURE, 2)
+
+
+@pytest.mark.skipif(not _BUNDLED_FONT.exists(), reason="bundled font not present")
+@pytest.mark.parametrize("chosen", [None, 2])
+def test_the_export_the_preview_and_the_review_show_the_same_lecture_card(
+    tmp_path, monkeypatch, no_basmala, chosen
+) -> None:
+    """One lecture, one rule: every surface draws the same card at the same moment."""
+    import io
+
+    import numpy as np
+
+    from qurantext.core.subtitles import card_ref
+    from qurantext.gui.review.session import ReviewSession
+    from qurantext.jobs.preview import PreviewRequest, render_preview
+    from qurantext.jobs.project import Project
+    from qurantext.jobs.render import RenderRequest, render_video
+    from tests.media_helpers import MEDIA_AVAILABLE, MEDIA_REASON, build_job
+
+    if not MEDIA_AVAILABLE:
+        pytest.skip(MEDIA_REASON)
+    audio, matches = build_job(tmp_path, seconds=8.0)
+    matches.write_text(
+        json.dumps({"matches": _DEGENERATE_LECTURE, "meta": {"mode": "lecture"}}),
+        encoding="utf-8",
+    )
+    drawn: list[tuple[float, str | None]] = []
+
+    def fake_frame(t, match, width, height, font_file, **kwargs):
+        drawn.append((t, card_ref(match) if match else None))
+        return np.zeros((height, width, 3), np.uint8)
+
+    class _Encoder:
+        stdin = io.BytesIO()
+        returncode = 0
+
+        def wait(self):
+            return 0
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(frame_renderer, "render_frame_pillow", fake_frame)
+    monkeypatch.setattr(frame_renderer, "_start_frame_encoder", lambda *a, **k: _Encoder())
+    render_video(
+        RenderRequest(
+            audio=audio,
+            matches=matches,
+            output=tmp_path / "v.mp4",
+            width=32,
+            height=24,
+            fps=10,
+            font_file=_BUNDLED_FONT,
+            studied_surah=chosen,
+        )
+    )
+    rendered = list(drawn)
+    project = Project(
+        audio=audio,
+        mode="lecture",
+        cards=[dict(c) for c in _DEGENERATE_LECTURE],
+        export={} if chosen is None else {"studied_surah": chosen},
+    )
+    session = ReviewSession(project)
+
+    for at in (0.55, 2.05, 4.05, 6.05, 7.75):
+        exported = [ref for t, ref in rendered if t <= at + 1e-9][-1]
+        previewed = render_preview(
+            PreviewRequest(
+                matches=matches,
+                output=tmp_path / "p.png",
+                at=at,
+                width=32,
+                height=24,
+                font_file=_BUNDLED_FONT,
+                studied_surah=chosen,
+            )
+        ).card
+        card = session.frame_inputs(at)[0]
+        reviewed = card_ref(card) if card else None
+        assert exported == previewed == reviewed, at
+    expected = "3:1" if chosen is None else "2:2"
+    assert reviewed == expected

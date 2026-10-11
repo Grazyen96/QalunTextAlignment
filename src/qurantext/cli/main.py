@@ -32,7 +32,14 @@ from qurantext.data.quran_db import build_quran_db, ensure_quran_db, list_surahs
 from qurantext.io.readers import load_json
 from qurantext.jobs.export import SUBTITLE_MODES, ExportRequest, export_job
 from qurantext.jobs.preview import PreviewRequest, render_preview
-from qurantext.jobs.project import Project, load_project, project_path_for, save_project
+from qurantext.jobs.project import (
+    SURAH_COUNT,
+    Project,
+    job_settings,
+    load_project,
+    project_path_for,
+    save_project,
+)
 from qurantext.jobs.project_render import render_project
 from qurantext.jobs.render import look_warning_message
 from qurantext.pipelines.detection import run_detection, run_recitation_range
@@ -287,9 +294,74 @@ def _resolve_look(args: argparse.Namespace, project: Project | None) -> Look | N
     return LOOK_PRESETS[chosen] if chosen else None
 
 
+def _surah_number(value: str) -> int:
+    """argparse type for a surah number, 1..114."""
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a surah number.") from None
+    if not 1 <= number <= SURAH_COUNT:
+        raise argparse.ArgumentTypeError(f"A surah number is 1-{SURAH_COUNT}, got {number}.")
+    return number
+
+
+def _add_studied_surah_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--studied-surah",
+        type=_surah_number,
+        default=None,
+        metavar="N",
+        help="Lecture only: the surah the ayah cards keep to (1-114); ayat quoted from "
+        "other surahs stay in the subtitles. A project's own choice wins when it has "
+        "made one: generate-video reads it from --project, preview from the project "
+        "file beside --matches (for the surah only; its cards and look still come from "
+        "the match file and --look). Defaults to the surah heard for the most time.",
+    )
+
+
+def _resolve_studied_surah(args: argparse.Namespace, project: Project | None) -> int | None:
+    """The studied surah to render with: the project's own choice, else ``--studied-surah``.
+
+    A recitation project ignores it (it draws every card), and says so.
+    """
+    chosen = getattr(args, "studied_surah", None)
+    if project is not None and str(project.mode).lower() != "lecture":
+        if chosen is not None:
+            warn("Ignoring --studied-surah because the project is a recitation.")
+        return None
+    own = job_settings(project).studied_surah if project is not None else None
+    if own is not None:
+        if chosen is not None and chosen != own:
+            warn(f"Ignoring --studied-surah because the project has chosen surah {own}.")
+        return own
+    return chosen
+
+
+def _project_beside(matches: Path) -> Project | None:
+    """The project the window keeps beside *matches* (``project_path_for``), if it has one.
+
+    None when there is none, or when it cannot be read (said, not raised): the
+    preview still draws from the match file.
+    """
+    path = project_path_for(matches)
+    if not path.is_file():
+        return None
+    try:
+        return load_project(path)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        warn(f"Could not read the project beside the match file ({error}); ignoring it.")
+        return None
+
+
 def _run_preview(args: argparse.Namespace) -> int:
-    """Draw one frame, so a style can be judged without rendering the video."""
+    """Draw one frame, so a style can be judged without rendering the video.
+
+    The cards and the look come from the match file and ``--look``. Only the
+    studied surah follows the project beside the match file, when there is
+    one, so a surah chosen in the review shows here as it does in the video.
+    """
     output = args.output or str(Path(args.matches).with_suffix(".preview.png"))
+    studied_surah = _resolve_studied_surah(args, _project_beside(Path(args.matches)))
     result = render_preview(
         PreviewRequest(
             matches=Path(args.matches),
@@ -302,6 +374,7 @@ def _run_preview(args: argparse.Namespace) -> int:
             title=args.title,
             audio=Path(args.audio) if args.audio else None,
             look=_resolve_look(args, None) or NIGHT_GOLD,
+            studied_surah=studied_surah,
         )
     )
     for code in result.look_warnings:
@@ -334,6 +407,7 @@ def _run_generate_video(args: argparse.Namespace) -> int:
     if not args.audio or not args.matches:
         raise SystemExit("generate-video needs --audio and --matches, or a --project.")
     look = _resolve_look(args, project)
+    studied_surah = _resolve_studied_surah(args, project)
 
     _resolve_preset(args)
     output_path = args.output or _default_detection_output(
@@ -365,6 +439,7 @@ def _run_generate_video(args: argparse.Namespace) -> int:
             debug_detected_text=args.debug_detected_text,
             title=getattr(args, "title", None),
             look=look or NIGHT_GOLD,
+            studied_surah=studied_surah,
             progress=ConsoleProgress(),
         )
     else:
@@ -383,6 +458,7 @@ def _run_generate_video(args: argparse.Namespace) -> int:
                 font_file=Path(args.font_file) if args.font_file else None,
                 title=getattr(args, "title", None),
                 look=look,
+                studied_surah=studied_surah,
                 progress=ConsoleProgress(),
             )
         else:
@@ -400,6 +476,7 @@ def _run_generate_video(args: argparse.Namespace) -> int:
                     font_file=Path(args.font_file) if args.font_file else None,
                     title=getattr(args, "title", None),
                     look=look or NIGHT_GOLD,
+                    studied_surah=studied_surah,
                 ),
                 progress=ConsoleProgress(),
             )
@@ -705,6 +782,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Formats to write alongside the video when subtitles are not burned in.",
     )
     _add_look_argument(video_parser)
+    _add_studied_surah_argument(video_parser)
     video_parser.add_argument("--keep-temp", action="store_true")
     video_parser.add_argument("--debug-detected-text", action="store_true")
     video_parser.set_defaults(handler=_run_generate_video)
@@ -736,6 +814,7 @@ def build_parser() -> argparse.ArgumentParser:
     preview_parser.add_argument("--font-file", default=None)
     preview_parser.add_argument("--title", default=None)
     _add_look_argument(preview_parser)
+    _add_studied_surah_argument(preview_parser)
     preview_parser.set_defaults(handler=_run_preview)
 
     surahs_parser = subparsers.add_parser(

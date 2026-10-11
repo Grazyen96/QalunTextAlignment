@@ -1462,3 +1462,98 @@ def test_a_window_without_prefs_never_touches_the_real_settings(qt_app, tmp_path
     window.look_panel.palette_buttons["rose"].click()
     window.look_panel.default_button.click()
     assert (tmp_path / "window-prefs.ini").is_file()
+
+
+# -- the surah on the cards ---------------------------------------------------------
+
+
+def _lecture_window(qt_app, tmp_path):
+    """A lecture on al-Fatiha that quotes al-Baqara once."""
+    from qurantext.gui.review.window import ReviewWindow
+    from qurantext.jobs.project import CaptionCue
+
+    studied = {
+        "surah_num": 1,
+        "surah_name": "الفاتحة",
+        "from_ayah": 1,
+        "to_ayah": 1,
+        "full_text": "x",
+        "confidence": 1.0,
+        "start_time": 1.0,
+        "end_time": 6.0,
+    }
+    quote = dict(
+        studied, surah_num=2, surah_name="البقرة", from_ayah=255, to_ayah=255, start_time=7.0
+    )
+    quote["end_time"] = 8.0
+    project = Project(
+        audio=tmp_path / "missing.mp3",
+        mode="lecture",
+        cards=[studied, quote],
+        captions=[CaptionCue(0.0, 2.0, "one", words=[{"word": "one", "start": 0.0, "end": 2.0}])],
+    )
+    save_project(project, tmp_path / "dars.qalun.json")
+    window = ReviewWindow(project, player=FakePlayer(duration=10.0, now=_Now()))
+    window.resize(1100, 800)
+    return window
+
+
+def test_the_surah_picker_is_offered_for_a_lecture_only(qt_app, tmp_path, monkeypatch) -> None:
+    from qurantext.gui.review import window as window_module
+
+    monkeypatch.setattr(window_module, "stored_surah_names", lambda: {})  # no store built
+    window = _lecture_window(qt_app, tmp_path)
+    box = window.studied_surah_box
+    assert not box.isHidden() and not window.studied_surah_label.isHidden()
+    assert box.count() == 115 and box.itemData(0) is None
+    assert box.itemText(0) == t("surah.detect") and box.currentIndex() == 0
+    assert "البقرة" in box.itemText(box.findData(2)), "without a store, named from the cards"
+    assert box.itemText(box.findData(3)) == t("surah.number", num=3)
+
+    recitation, _, _ = _window(qt_app, tmp_path)
+    assert recitation.studied_surah_box.isHidden()
+
+
+def test_choosing_the_surah_redraws_the_frame_and_marks_the_job_unsaved(
+    qt_app, tmp_path, monkeypatch
+) -> None:
+    window = _lecture_window(qt_app, tmp_path)
+    redraws = []
+    monkeypatch.setattr(window.frame_view, "show_at", lambda t, force=False: redraws.append(force))
+    box = window.studied_surah_box
+    box.setCurrentIndex(box.findData(2))
+    assert window.session.studied_surah == 2
+    assert redraws == [True]
+    assert window.session.frame_inputs(7.5)[0]["surah_num"] == 2
+    assert window.session.frame_inputs(3.0)[0] is None, "al-Fatiha left the card"
+    assert window.windowTitle().endswith("*") and window.save_button.isEnabled()
+    assert window.undo_button.isEnabled()
+
+
+def test_undo_redo_save_and_discard_bring_the_picker_along(qt_app, tmp_path) -> None:
+    window = _lecture_window(qt_app, tmp_path)
+    box = window.studied_surah_box
+    box.setCurrentIndex(box.findData(2))
+    window.undo()
+    assert box.currentData() is None and window.session.studied_surah is None
+    window.redo()
+    assert box.currentData() == 2
+    assert window.save()
+    assert load_project(window.session.project.path).export["studied_surah"] == 2
+    assert box.currentData() == 2 and not window.save_button.isEnabled()
+    box.setCurrentIndex(box.findData(1))
+    window.session.revert()  # what Discard does on close
+    window._after_edit()
+    assert box.currentData() == 2 and window.session.studied_surah == 2
+
+
+def test_a_chosen_surah_with_no_card_is_said_in_the_warnings(qt_app, tmp_path) -> None:
+    window = _lecture_window(qt_app, tmp_path)
+    box = window.studied_surah_box
+    box.setCurrentIndex(box.findData(114))
+    _spin(20)
+    text = html.unescape(window.warnings.text())
+    assert "114" in text and "opening title card" in text
+    assert window.warnings.isVisibleTo(window)
+    box.setCurrentIndex(0)
+    assert "opening title card" not in html.unescape(window.warnings.text())

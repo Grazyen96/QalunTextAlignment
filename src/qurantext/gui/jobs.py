@@ -68,6 +68,9 @@ class JobSpec:
     #: person's default look); empty for Night gold. A re-match never uses it:
     #: the video already has its own look.
     style: dict = field(default_factory=dict)
+    #: The surah a lecture's cards keep to; None guesses it. A recitation
+    #: states its range instead and ignores this.
+    studied_surah: int | None = None
 
     @property
     def settings(self) -> JobSettings:
@@ -77,6 +80,7 @@ class JobSpec:
             subtitles=self.subtitles,
             formats=tuple(self.formats),
             output_dir=Path(self.output_dir) if self.output_dir else None,
+            studied_surah=self.studied_surah if self.mode == "lecture" else None,
         )
 
     @property
@@ -119,6 +123,9 @@ class JobOutcome:
     #: What the look could not do (``image_missing``, ``image_unreadable``):
     #: the video was made with the preset's background instead.
     look_warnings: tuple[str, ...] = ()
+    #: The chosen studied surah when none of its ayat had a card, so the video
+    #: shows only its opening title card; None otherwise.
+    studied_surah_missing: int | None = None
 
 
 def _set_aside(path: Path) -> Path | None:
@@ -153,19 +160,25 @@ def _keep_earlier(destination: Path, derived: Project) -> Path | str | None:
     backup per run would bury the one that matters. A file that cannot be read
     is always kept: what it held cannot be compared.
 
-    The look is compared on neither side, and when the content changed the
-    earlier project's style (its look) is carried into *derived*: a re-match
-    derives cards and captions only, and the look the person chose for this
-    video is not something it could have changed. The style's image path stays
-    valid, as the new project takes the earlier one's name and folder.
+    The look and the output choices are compared on neither side (the output
+    choices are the run's own and are written either way), and when the content
+    changed the earlier project's style (its look) is carried into *derived*: a
+    re-match derives cards and captions only, and the look the person chose for
+    this video is not something it could have changed. The style's image path
+    stays valid, as the new project takes the earlier one's name and folder.
+    For the same reason a studied surah the earlier project chose is carried
+    when this run left it to "Detect automatically" (``_with_earlier_surah``).
     """
     if not destination.exists():
         return None
     earlier: Project | None = None
     try:
         earlier = load_project(destination)
+        # Content only: the look and the output choices (the studied surah
+        # among them) are not what matching derives.
         unchanged = (
-            replace(earlier, style={}).content_hash() == replace(derived, style={}).content_hash()
+            replace(earlier, style={}, export={}).content_hash()
+            == replace(derived, style={}, export={}).content_hash()
         )
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         earlier, unchanged = None, False
@@ -173,7 +186,21 @@ def _keep_earlier(destination: Path, derived: Project) -> Path | str | None:
         return _UNCHANGED
     if earlier is not None:
         derived.style = copy.deepcopy(earlier.style)
+        set_job_settings(derived, _with_earlier_surah(job_settings(derived), earlier))
     return _set_aside(destination)
+
+
+def _with_earlier_surah(settings: JobSettings, earlier: Project) -> JobSettings:
+    """*settings*, keeping *earlier*'s studied surah when they leave it to the guess.
+
+    "Detect automatically" on the new-job screen is the default, not a decision
+    to undo one: a surah chosen in the review (or an earlier run) is the
+    person's, and a re-match cannot know better. A surah picked explicitly for
+    this run wins.
+    """
+    if settings.studied_surah is not None:
+        return settings
+    return replace(settings, studied_surah=job_settings(earlier).studied_surah)
 
 
 def match_path_for(spec: JobSpec) -> Path:
@@ -242,8 +269,9 @@ def run_matching(
         # Same content: leave the file alone (review state, render record and
         # all) unless this run chose differently, and then change only that.
         existing = load_project(destination)
-        if job_settings(existing) != job_settings(project):
-            set_job_settings(existing, job_settings(project))
+        chosen = _with_earlier_surah(job_settings(project), existing)
+        if job_settings(existing) != chosen:
+            set_job_settings(existing, chosen)
             save_project(existing, destination)
         return existing
     if isinstance(kept, Path):
@@ -289,4 +317,7 @@ def run_render(
         cards=len(project.cards),
         project=project.path,
         look_warnings=result.render.look_warnings if result.render is not None else (),
+        studied_surah_missing=(
+            result.render.studied_surah_missing if result.render is not None else None
+        ),
     )

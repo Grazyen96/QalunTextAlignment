@@ -2154,3 +2154,168 @@ def test_the_review_window_gets_the_main_window_s_prefs(real_reviews, prefs, tmp
     real_reviews._open_review(path)
     review = real_reviews._review_of(path)
     assert review is not None and review._prefs is prefs
+
+
+# --- a lecture's studied surah ------------------------------------------------
+
+
+def _lecture_setup(tmp_path, monkeypatch):
+    from qurantext.gui import jobs as jobs_module
+
+    (tmp_path / "dars_lecture.json").write_text(
+        json.dumps(
+            {
+                "matches": [
+                    {
+                        "surah_num": 25,
+                        "from_ayah": 7,
+                        "to_ayah": 7,
+                        "full_text": "x",
+                        "start_time": 0.0,
+                        "end_time": 2.0,
+                    }
+                ],
+                "meta": {"mode": "lecture"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(jobs_module, "run_detection", lambda **kwargs: {"matches": []})
+    audio = tmp_path / "dars.m4a"
+    audio.write_bytes(b"")
+    return jobs_module, JobSpec(
+        audio=audio, quran=QURAN_FILE, mode="lecture", output_dir=tmp_path, studied_surah=25
+    )
+
+
+def test_the_chosen_studied_surah_reaches_the_jobs_project(tmp_path, monkeypatch) -> None:
+    from qurantext.jobs.project import job_settings, load_project
+
+    jobs_module, spec = _lecture_setup(tmp_path, monkeypatch)
+    assert spec.settings.studied_surah == 25
+    project = jobs_module.run_matching(spec)
+    assert job_settings(load_project(project.path)).studied_surah == 25
+
+
+def test_an_unchanged_rematch_keeps_the_surah_unless_another_is_picked(
+    tmp_path, monkeypatch
+) -> None:
+    """ "Detect automatically" leaves the project's surah; a picked one replaces only it."""
+    from qurantext.jobs.project import job_settings, load_project, save_project
+
+    jobs_module, spec = _lecture_setup(tmp_path, monkeypatch)
+    first = jobs_module.run_matching(spec)
+    reviewed = load_project(first.path)
+    reviewed.mark_reviewed()
+    save_project(reviewed, first.path)
+    before = first.path.read_bytes()
+
+    project = jobs_module.run_matching(replace(spec, studied_surah=None))
+    assert job_settings(project).studied_surah == 25
+    assert first.path.read_bytes() == before, "nothing changed, so nothing is written"
+
+    project = jobs_module.run_matching(replace(spec, studied_surah=17))
+    saved = load_project(first.path)
+    assert job_settings(project).studied_surah == job_settings(saved).studied_surah == 17
+    assert saved.review["state"] == "reviewed", "the choice is an output choice, not content"
+    assert not list(tmp_path.glob("*.qalun-backup.json"))
+
+
+def test_a_changed_rematch_keeps_the_surah_unless_another_is_picked(tmp_path, monkeypatch) -> None:
+    from qurantext.jobs.project import job_settings, load_project
+
+    jobs_module, spec = _lecture_setup(tmp_path, monkeypatch)
+    first = jobs_module.run_matching(spec)
+    match_path = tmp_path / "dars_lecture.json"
+
+    def new_content(end_time: float) -> None:
+        payload = json.loads(match_path.read_text(encoding="utf-8"))
+        payload["matches"][0]["end_time"] = end_time
+        match_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    new_content(3.0)
+    project = jobs_module.run_matching(replace(spec, studied_surah=None))
+    assert len(list(tmp_path.glob("*.qalun-backup.json"))) == 1, "the content did change"
+    assert job_settings(project).studied_surah == 25
+    assert job_settings(load_project(first.path)).studied_surah == 25
+
+    new_content(4.0)
+    project = jobs_module.run_matching(replace(spec, studied_surah=17))
+    assert job_settings(load_project(first.path)).studied_surah == 17
+
+
+def test_a_rematch_of_a_project_that_never_chose_still_detects(tmp_path, monkeypatch) -> None:
+    from qurantext.jobs.project import job_settings
+
+    jobs_module, spec = _lecture_setup(tmp_path, monkeypatch)
+    jobs_module.run_matching(replace(spec, studied_surah=None))
+    project = jobs_module.run_matching(replace(spec, studied_surah=None))
+    assert job_settings(project).studied_surah is None
+    assert "studied_surah" not in project.export
+
+
+def test_surah_names_come_from_a_built_store_and_nothing_breaks_without_one(
+    tmp_path, store
+) -> None:
+    from qurantext.gui.surahs import stored_surah_names
+
+    names = stored_surah_names(store)
+    assert len(names) == 114 and names[1]
+    assert stored_surah_names(tmp_path / "never-built.sqlite") == {}
+
+
+def test_run_render_hands_on_a_missing_studied_surah(tmp_path, monkeypatch) -> None:
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.jobs.export import ExportResult
+    from qurantext.jobs.project import Project
+    from qurantext.jobs.render import RenderResult
+
+    video = tmp_path / "v.mp4"
+    monkeypatch.setattr(
+        jobs_module,
+        "render_project",
+        lambda project, output, **kwargs: ExportResult(
+            video=video,
+            render=RenderResult(
+                output=video,
+                width=1,
+                height=1,
+                fps=1,
+                duration_seconds=1.0,
+                studied_surah_missing=114,
+            ),
+        ),
+    )
+    project = Project(audio=tmp_path / "a.mp3", mode="lecture", matches=tmp_path / "m.json")
+    assert jobs_module.run_render(project).studied_surah_missing == 114
+
+
+def test_render_right_away_says_the_chosen_surah_has_no_card(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    """The review would have said it; a job that skips the review says it on the status line."""
+    from qurantext.gui import main_window as module
+    from qurantext.gui.jobs import JobOutcome
+
+    _fake_matching(monkeypatch)
+    monkeypatch.setattr(module, "stored_surah_names", lambda: {114: "الناس"})
+
+    def fake_render(project, *, progress=None, cancel=None):
+        return JobOutcome(
+            matches=project.matches,
+            video=tmp_path / "a.mp4",
+            cards=1,
+            look_warnings=("image_missing",),
+            studied_surah_missing=114,
+        )
+
+    monkeypatch.setattr(module, "run_render", fake_render)
+
+    _run_start(qt_app, home, _spec(tmp_path, output_dir=tmp_path / "jobs", render_right_away=True))
+
+    rendered = module.t("home.finished.rendered", path=module.path_text(tmp_path / "a.mp4"))
+    missing = module.t(
+        "review.studied_surah_missing", surah=module.t("surah.item", num=114, name="الناس")
+    )
+    said = home.new_job.status_label.text()
+    assert said == f"{rendered} {module.t('look.image_missing')} {missing}"

@@ -88,6 +88,94 @@ def lecture_intro_lines(matches: list[dict[str, Any]]) -> tuple[str, str] | None
     return surah_name, line
 
 
+def _card_surah(card: dict[str, Any]) -> int | str | None:
+    surah_num = card.get("surah_num")
+    if isinstance(surah_num, int):
+        return surah_num
+    return str(card.get("surah_name") or "").strip() or None
+
+
+def _card_span(card: dict[str, Any]) -> tuple[float, float] | None:
+    """The card's time on screen, or None for a card ``validated_matches`` drops.
+
+    The export picks the studied surah before validating its cards and the
+    preview and the review after, so a card validation would drop must count
+    for nothing here, or the two orders could guess different surahs.
+    """
+    try:
+        start = float(card.get("_start_time", card.get("start_time")))
+        end = float(card.get("_end_time", card.get("end_time")))
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(start) and math.isfinite(end)) or end <= start:
+        return None
+    if "_display_text" not in card:
+        try:
+            _match_display_text(card, 0)
+        except ValueError:
+            return None
+    return start, end
+
+
+def cards_on_screen(
+    cards: list[dict[str, Any]], mode: str | None, studied_surah: int | None = None
+) -> list[dict[str, Any]]:
+    """The cards a video draws, out of every card detected for a job.
+
+    A lecture's card shows the surah it studies. Ayat the speaker quotes from
+    another surah to explain it are left off the card, which keeps holding the
+    studied ayah through the quote; they still appear in the captions, which
+    carry everything said. Cards without a surah are kept. A recitation keeps
+    every card, since it states its own range and quotes nothing.
+
+    *studied_surah* is the person's own choice (``JobSettings.studied_surah``)
+    and is obeyed as given — even when only one surah was heard, and even when
+    none of its ayat was, which leaves only the opening title card: the person
+    knows which surah the lecture is about better than a count of seconds does.
+    Without a choice the studied surah is guessed as the one heard for the most
+    time, a tie going to the one heard first.
+
+    The export, the single-frame preview and the review window's live frame all
+    call this, so none of them shows a card the others leave out.
+    """
+    if str(mode or "").lower() != "lecture":
+        return list(cards)
+
+    if studied_surah is not None:
+        return [
+            card
+            for card in cards
+            if _card_surah(card) is None or card.get("surah_num") == studied_surah
+        ]
+
+    heard: dict[int | str, float] = {}
+    first: dict[int | str, float] = {}
+    for card in cards:
+        surah = _card_surah(card)
+        span = _card_span(card)
+        if surah is None or span is None:
+            continue
+        start, end = span
+        heard[surah] = heard.get(surah, 0.0) + max(0.0, end - start)
+        first[surah] = min(first.get(surah, math.inf), start)
+    if len(heard) <= 1:
+        return list(cards)
+
+    studied = max(heard, key=lambda surah: (heard[surah], -first[surah]))
+    return [card for card in cards if _card_surah(card) in (None, studied)]
+
+
+def has_surah_cards(cards: list[dict[str, Any]], surah: int) -> bool:
+    """Whether any of *cards* is an ayah of *surah* that the video can draw.
+
+    A chosen studied surah with no such card leaves a lecture with only its
+    opening title card, which the review window and a finished render point
+    out rather than leave a person wondering where the ayat went. A card
+    validation would drop (no time on screen, no text) does not count.
+    """
+    return any(card.get("surah_num") == surah and _card_span(card) is not None for card in cards)
+
+
 def warn(message: str) -> None:
     print(f"WARNING: {message}", file=sys.stderr)
 

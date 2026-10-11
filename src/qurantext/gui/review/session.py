@@ -5,7 +5,8 @@ ends up here, and every rule about what an edit may do lives in
 ``core.timing_edit``. The widgets only draw this object and forward what the
 person did. That keeps the rules testable without a screen, and it means undo
 is one mechanism for every kind of edit: a snapshot of the cards, captions,
-review state and style (which holds the video's look) before each change.
+review state, style (which holds the video's look) and the lecture's chosen
+studied surah before each change.
 
 A drag is many small edits and must undo as one, so a gesture brackets them:
 one snapshot at the start, none while it runs, and none at all if the gesture
@@ -32,10 +33,16 @@ from qurantext.core.timing_edit import (
     ripple,
     ripple_in_cards,
 )
-from qurantext.core.video_common import validated_matches
+from qurantext.core.video_common import cards_on_screen, has_surah_cards, validated_matches
 from qurantext.gui.i18n import t
 from qurantext.jobs.look_assets import project_look, set_project_look
-from qurantext.jobs.project import CaptionCue, Project, job_settings, save_project
+from qurantext.jobs.project import (
+    CaptionCue,
+    Project,
+    job_settings,
+    save_project,
+    studied_surah_choice,
+)
 
 __all__ = ["CAPTION", "CARD", "ReviewSession", "TimelineWord", "WordRef"]
 
@@ -93,7 +100,28 @@ def _unflagged(words: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def _settled(cards: list, captions: list[CaptionCue], review: dict, style: dict) -> tuple:
+def _studied_surah(project: Project) -> int | None:
+    """The project's chosen studied surah, None when it guesses (``JobSettings``)."""
+    return studied_surah_choice(project.export.get("studied_surah"))
+
+
+def _set_studied_surah(project: Project, surah: int | None) -> None:
+    """Write only the studied surah into ``project.export``.
+
+    Not through ``set_job_settings``: that writes every output choice, and an
+    undo of the surah must not add a preset the project never stored.
+    """
+    export = dict(project.export)
+    if surah is None:
+        export.pop("studied_surah", None)
+    else:
+        export["studied_surah"] = surah
+    project.export = export
+
+
+def _settled(
+    cards: list, captions: list[CaptionCue], review: dict, style: dict, studied: int | None
+) -> tuple:
     """A state as a timing edit would leave it, for telling "no edit" from an edit.
 
     Every timing edit re-derives the card windows from their words (and snaps
@@ -107,7 +135,7 @@ def _settled(cards: list, captions: list[CaptionCue], review: dict, style: dict)
     Cards without word timings pass through ``derive_card_windows`` untouched,
     and only a timing edit re-derives a timed card's window
     (``set_card_times`` refuses them), so this holds in either mode. The style
-    is compared as is.
+    and the studied surah are compared as they are.
     """
     settled_cards = []
     for card in derive_card_windows(cards):
@@ -120,7 +148,7 @@ def _settled(cards: list, captions: list[CaptionCue], review: dict, style: dict)
         if data.get("words"):
             data["words"] = _unflagged(data["words"])
         settled_captions.append(data)
-    return settled_cards, settled_captions, review, style
+    return settled_cards, settled_captions, review, style, studied
 
 
 class ReviewSession:
@@ -193,6 +221,7 @@ class ReviewSession:
                 "captions": [_normalized_caption(cue) for cue in self.project.captions],
                 "review": self.project.review,
                 "style": self.project.style,
+                "studied_surah": _studied_surah(self.project),
             },
             sort_keys=True,
             ensure_ascii=False,
@@ -205,14 +234,17 @@ class ReviewSession:
             copy.deepcopy(self.project.captions),
             copy.deepcopy(self.project.review),
             copy.deepcopy(self.project.style),
+            _studied_surah(self.project),
         )
 
     def _restore(self, snapshot: tuple) -> None:
-        cards, captions, review, style = snapshot
+        cards, captions, review, style, studied = snapshot
         self.project.cards = copy.deepcopy(cards)
         self.project.captions = copy.deepcopy(captions)
         self.project.review = copy.deepcopy(review)
         self.project.style = copy.deepcopy(style)
+        if _studied_surah(self.project) != studied:
+            _set_studied_surah(self.project, studied)
 
     def _before_change(self) -> None:
         if not self._in_gesture:
@@ -359,7 +391,11 @@ class ReviewSession:
         return [{"start": tw.start, "end": tw.end} for tw in self.words()]
 
     def validated_cards(self) -> list[dict[str, Any]]:
-        """The cards as the frame renderer sees them: enriched, sorted by start time.
+        """The cards as the frame renderer draws them: enriched, sorted by start time.
+
+        A lecture's quotes from other surahs are left out, as the export leaves
+        them out (``core.video_common.cards_on_screen``), keeping to the
+        project's chosen studied surah when it has one.
 
         Cached per revision — ``frame_inputs`` is built from this, and a
         caller that also needs to mirror the renderer's own logic exactly
@@ -368,7 +404,11 @@ class ReviewSession:
         re-running ``validated_matches`` itself.
         """
         if self._validated is None or self._validated[0] != self._revision:
-            cards = validated_matches(copy.deepcopy(self.project.cards), bridge_gaps=False)
+            cards = cards_on_screen(
+                validated_matches(copy.deepcopy(self.project.cards), bridge_gaps=False),
+                self.project.mode,
+                self.studied_surah,
+            )
             cards.sort(key=lambda card: float(card["_start_time"]))
             self._validated = (self._revision, cards)
         return self._validated[1]
@@ -549,6 +589,34 @@ class ReviewSession:
         set_project_look(self.project, look)
         self._changed()
 
+    @property
+    def studied_surah(self) -> int | None:
+        """The surah a lecture's cards keep to; None while it is guessed."""
+        return _studied_surah(self.project)
+
+    def set_studied_surah(self, surah: int | None) -> None:
+        """Choose the surah a lecture's cards keep to (None: guess it); one undo step."""
+        surah = studied_surah_choice(surah)
+        if surah == self.studied_surah:
+            return
+        self._before_change()
+        _set_studied_surah(self.project, surah)
+        self._changed()
+
+    @property
+    def missing_studied_surah(self) -> int | None:
+        """The chosen studied surah when no card the frame draws is one of its ayat.
+
+        The video then shows only its opening title card, which the window
+        says rather than leave the person looking for the ayat. Judged on the
+        cards the frame draws (``validated_cards``), so a card validation drops
+        does not hide the warning.
+        """
+        surah = self.studied_surah
+        if surah is None or str(self.project.mode).lower() != "lecture":
+            return None
+        return None if has_surah_cards(self.validated_cards(), surah) else surah
+
     # -- gestures and undo -----------------------------------------------------
 
     def begin_gesture(self) -> None:
@@ -624,6 +692,7 @@ class ReviewSession:
             self.project.captions,
             self.project.review,
             self.project.style,
+            _studied_surah(self.project),
         )
         return _settled(*current) == _settled(*snapshot)
 
@@ -633,7 +702,7 @@ class ReviewSession:
         False also when the saved state has no word there: then the two states
         differ in shape and cannot settle to each other anyway.
         """
-        cards, captions, _review, _style = self._saved_snapshot
+        cards, captions, _review, _style, _studied = self._saved_snapshot
         if ref.kind == CARD:
             segments = [card.get("word_timings") or [] for card in cards]
         else:
@@ -645,12 +714,13 @@ class ReviewSession:
         return all(round(float(saved[k]), 3) == round(float(now[k]), 3) for k in ("start", "end"))
 
     def _is_exactly(self, snapshot: tuple) -> bool:
-        cards, captions, review, style = snapshot
+        cards, captions, review, style, studied = snapshot
         return (
             cards == self.project.cards
             and captions == self.project.captions
             and review == self.project.review
             and style == self.project.style
+            and studied == _studied_surah(self.project)
         )
 
     def undo(self) -> bool:

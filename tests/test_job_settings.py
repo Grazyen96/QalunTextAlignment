@@ -128,3 +128,41 @@ def test_an_invalid_render_preset_falls_back_to_the_default() -> None:
 def test_a_render_with_no_preset_falls_back_to_the_default() -> None:
     project = Project(audio=Path("a.mp3"), render={"preset": None})
     assert job_settings(project).preset == "social"
+
+
+# -- the studied surah ---------------------------------------------------------
+
+
+def test_a_studied_surah_survives_a_save_and_a_load(tmp_path) -> None:
+    project = Project(audio=tmp_path / "a.mp3", mode="lecture")
+    set_job_settings(project, JobSettings(studied_surah=25))
+    path = save_project(project, tmp_path / "a.qalun.json")
+    assert json.loads(path.read_text(encoding="utf-8"))["export"]["studied_surah"] == 25
+    assert job_settings(load_project(path)).studied_surah == 25
+
+
+def test_detect_automatically_leaves_no_key_behind() -> None:
+    """Unset is absent, so a project that never chose reads as it did before the choice."""
+    project = Project(audio=Path("a.mp3"), export={"studied_surah": 25})
+    set_job_settings(project, JobSettings(studied_surah=None))
+    assert "studied_surah" not in project.export
+
+
+@pytest.mark.parametrize("value", [0, 115, -1, "25", 25.0, True, None, [25], {"n": 25}])
+def test_anything_but_a_surah_number_reads_as_detect(value) -> None:
+    project = Project(audio=Path("a.mp3"), export={"studied_surah": value})
+    assert job_settings(project).studied_surah is None
+
+
+def test_a_studied_surah_joins_the_hash_only_once_chosen() -> None:
+    project = Project(audio=Path("a.mp3"), mode="lecture", cards=[{"surah_num": 25}])
+    before = project.content_hash()
+    set_job_settings(project, JobSettings())
+    assert project.content_hash() == before, "an old project keeps its hash"
+    set_job_settings(project, JobSettings(studied_surah=25))
+    chosen = project.content_hash()
+    assert chosen != before, "choosing a surah makes the last render stale"
+    set_job_settings(project, JobSettings(studied_surah=17))
+    assert project.content_hash() not in (before, chosen), "so does changing it"
+    project.export["studied_surah"] = "nonsense"
+    assert project.content_hash() == before, "an unreadable choice is no choice"
