@@ -5,6 +5,13 @@ between seconds and pixels lives in one place: change the window here (by
 scrolling, zooming or following the playhead) and every widget connected to
 :attr:`Viewport.changed` repaints against the new numbers. No widget owns a
 `Viewport`'s state; they only read it and ask it to move.
+
+Time runs right to left, in both interface languages: the window's start sits
+at the right edge and later time lies further left, so an ayah's words read in
+their own order along the strip. Because every widget converts through
+:meth:`Viewport.x_for` and :meth:`Viewport.t_for`, the direction lives here
+alone; a widget that needs a box's left and right edges takes them from the
+pixels (the end's pixel is the left one), never from the times' order.
 """
 
 from __future__ import annotations
@@ -81,20 +88,25 @@ class Viewport(QObject):
 
         While *t* stays inside ``[start, start + span)`` nothing happens. When
         it steps outside, the window pages so *t* sits 10 % of the way in from
-        the left — enough runway ahead of the playhead to see what is coming.
+        the window's start (the right edge) — enough runway ahead of the
+        playhead, to its left, to see what is coming.
         """
         if self.start <= t < self.start + self.span:
             return
         self._apply_window(t - 0.1 * self.span, self.span)
 
     def x_for(self, t: float, width: float) -> float:
-        """The pixel column for time *t* in a widget *width* pixels wide."""
+        """The pixel column for time *t* in a widget *width* pixels wide.
+
+        Right to left: ``start`` maps to *width* (the right edge) and
+        ``start + span`` to 0, so a later time has a smaller x.
+        """
         if self.span <= 0:
-            return 0.0
-        return (t - self.start) / self.span * width
+            return float(width)
+        return (1.0 - (t - self.start) / self.span) * width
 
     def t_for(self, x: float, width: float) -> float:
-        """The time at pixel column *x* in a widget *width* pixels wide."""
+        """The time at pixel column *x* in a widget *width* pixels wide (the inverse of x_for)."""
         if width <= 0:
             return self.start
-        return self.start + (x / width) * self.span
+        return self.start + (1.0 - x / width) * self.span

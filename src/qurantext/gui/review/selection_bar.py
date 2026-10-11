@@ -36,13 +36,27 @@ class SelectionBar(QWidget):
         self.plus_button = QPushButton(t("review.plus"))
         self.snap_button = QPushButton(t("review.snap"))
         row.addWidget(self.label, 1)
-        # The buttons move time, and time runs left to right in every language:
-        # "earlier" stays on the left of "later". The label outside mirrors.
+        # The buttons move time, and the timeline runs right to left in every
+        # language: "earlier" (−50 ms) sits on the right, the side of the past,
+        # so the row reads "Snap | +50 ms | −50 ms" from the left. The row is
+        # pinned left to right and filled in that order, not pinned right to
+        # left: a right-to-left button would lay "−50 ms" out as "ms −50".
+        # The label outside mirrors with the language.
         self.nudge_row = QWidget()
         self.nudge_row.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         nudges = QHBoxLayout(self.nudge_row)
         nudges.setContentsMargins(0, 0, 0, 0)
-        for button in (self.minus_button, self.plus_button, self.snap_button):
+        on_screen = (self.snap_button, self.plus_button, self.minus_button)
+        # Tab walks the row the way the interface reads: from the left in
+        # English (Snap, +, −), from the right in Arabic (−, +, Snap). Qt
+        # chains the buttons in the order they join the row, and
+        # QWidget.setTabOrder will not move one that already leads it, so they
+        # join in reading order before the layout places them. A review is
+        # built in one language and rebuilt to change it, so this is decided once.
+        reading = on_screen[::-1] if self.isRightToLeft() else on_screen
+        for button in reading:
+            button.setParent(self.nudge_row)
+        for button in on_screen:
             nudges.addWidget(button)
         row.addWidget(self.nudge_row)
         self.minus_button.clicked.connect(lambda: self.nudge_requested.emit(-NUDGE_S))

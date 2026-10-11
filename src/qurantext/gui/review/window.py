@@ -356,7 +356,7 @@ class ReviewWindow(QMainWindow):
         transport = QHBoxLayout()
         self.play_button = QPushButton(t("review.play"))
         # The transport row mirrors (Play leads on the right in Arabic); the
-        # clock is a time field and reads left to right, as time does.
+        # clock is a number and reads left to right, as numbers do here.
         self.time_label = QLabel(clock(0.0))
         self.time_label.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         self.rate_combo = QComboBox()
@@ -410,14 +410,19 @@ class ReviewWindow(QMainWindow):
     def _bind_keys(self) -> None:
         bindings: list[tuple[str, Callable[[], None]]] = [
             ("Space", self.toggle_play),
-            ("Left", partial(self._step, -1)),
-            ("Right", partial(self._step, 1)),
+            # The timeline runs right to left, so the arrows follow it on
+            # screen: Left goes to the next (later) word, Right to the previous.
+            ("Left", partial(self._step, 1)),
+            ("Right", partial(self._step, -1)),
             ("[", self._set_start_at_playhead),
             ("]", self._set_end_at_playhead),
-            (",", partial(self._nudge, -NUDGE_S)),
-            (".", partial(self._nudge, NUDGE_S)),
-            ("Shift+,", partial(self._nudge, -_FINE_NUDGE_S)),
-            ("Shift+.", partial(self._nudge, _FINE_NUDGE_S)),
+            # The nudges match their keys' < and > to the screen: "," moves the
+            # edge left, which on the right-to-left timeline is later, and "."
+            # moves it right, earlier.
+            (",", partial(self._nudge, NUDGE_S)),
+            (".", partial(self._nudge, -NUDGE_S)),
+            ("Shift+,", partial(self._nudge, _FINE_NUDGE_S)),
+            ("Shift+.", partial(self._nudge, -_FINE_NUDGE_S)),
             ("Ctrl+Z", self.undo),
             ("Ctrl+Shift+Z", self.redo),
             ("Ctrl+S", self.save),
@@ -449,8 +454,8 @@ class ReviewWindow(QMainWindow):
             button.setToolTip(t("review.tip", action=button.text(), keys=shown))
         self.play_button.setToolTip(self._play_tip())
         bar = self.selection_bar
-        bar.minus_button.setToolTip(t("review.tip_fine", action=bar.minus_button.text(), keys=","))
-        bar.plus_button.setToolTip(t("review.tip_fine", action=bar.plus_button.text(), keys="."))
+        bar.minus_button.setToolTip(t("review.tip_fine", action=bar.minus_button.text(), keys="."))
+        bar.plus_button.setToolTip(t("review.tip_fine", action=bar.plus_button.text(), keys=","))
 
     def _play_tip(self) -> str:
         """The play button's tip for its current action.

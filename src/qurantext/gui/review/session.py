@@ -413,12 +413,13 @@ class ReviewSession:
     ) -> None:
         """Move *ref*'s edge; one it shared with the neighbour takes the neighbour's along.
 
-        ``keep_joined`` is what makes a nudge reversible: ``.`` pushes the next
-        word's start, and ``,`` brings it back instead of leaving a gap. Pass
-        False to move the edge alone (a neighbour is then only ever pushed), which
-        is how a gap is opened between two joined words. An edit that puts
-        everything back where it was last saved is settled back to exactly that
-        state (see :meth:`_settle`), so it does not read as unsaved.
+        ``keep_joined`` is what makes a nudge reversible: ``,`` (later) pushes
+        the next word's start, and ``.`` (earlier) brings it back instead of
+        leaving a gap. Pass False to move the edge alone (a neighbour is then
+        only ever pushed), which is how a gap is opened between two joined
+        words. An edit that puts everything back where it was last saved is
+        settled back to exactly that state (see :meth:`_settle`), so it does
+        not read as unsaved.
         """
         self._before_change()
         if ref.kind == CARD:
