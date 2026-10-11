@@ -195,6 +195,8 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "segments.retimed": "Retimed words",
         "segments.speech": "Speech",
         "segments.locked": "Quran text is read from the store and cannot be edited here.",
+        "segments.change_ayah": "Change ayah…",
+        "segments.manual": "Placed by hand",
         "review.title": "Review — {name}",
         "review.save": "Save",
         "review.undo": "Undo",
@@ -212,6 +214,10 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.studied_surah.tip": (
             "The ayah cards show only this surah; ayat quoted from other surahs stay "
             "in the subtitles."
+        ),
+        "review.show_ayah": "Show ayah… from here",
+        "review.show_ayah.tip": (
+            "From the playhead on, the card shows the ayat you choose, until the next card."
         ),
         "review.studied_surah_missing": (
             "No ayah of the chosen surah ({surah}) was found, so the video shows only "
@@ -282,6 +288,12 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
             "Could not read the Quran store, so no ayah card was made: {details}"
         ),
         "session.no_file": "This project has no file to write back to.",
+        "ayah_picker.title": "Choose the ayat for this card",
+        "ayah_picker.surah": "Surah",
+        "ayah_picker.from": "From ayah",
+        "ayah_picker.to": "To ayah",
+        "ayah_picker.more": {"one": "…and {count} more", "other": "…and {count} more"},
+        "ayah_picker.no_store": "The Quran text is not ready yet, so no ayah can be chosen.",
         "look.title": "Look",
         "look.palette": "Palette",
         "look.preset.night_gold": "Night gold",
@@ -480,6 +492,8 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "segments.retimed": "كلمات أُعيد توقيتها",
         "segments.speech": "كلام",
         "segments.locked": "يُقرأ نص القرآن من قاعدة البيانات ولا يمكن تعديله هنا.",
+        "segments.change_ayah": "غيّر الآية…",
+        "segments.manual": "وُضعت يدويًا",
         "review.title": "مراجعة — {name}",
         "review.save": "احفظ",
         "review.undo": "تراجع",
@@ -497,6 +511,10 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.studied_surah.tip": (
             "لا تعرض بطاقات الآيات إلا هذه السورة، وتبقى الآيات المستشهد بها من سور "
             "أخرى في الترجمة النصية."
+        ),
+        "review.show_ayah": "اعرض آية… من هنا",
+        "review.show_ayah.tip": (
+            "من موضع التشغيل فصاعدًا تعرض البطاقة الآيات التي تختارها حتى البطاقة التالية."
         ),
         "review.studied_surah_missing": (
             "لم يُعثر على أي آية من السورة المختارة ({surah})، فلا يعرض الفيديو "
@@ -581,6 +599,19 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
             "تعذّرت قراءة قاعدة بيانات القرآن، فلم تُنشأ بطاقة الآية: {details}"
         ),
         "session.no_file": "ليس لهذا المشروع ملف يُحفظ فيه.",
+        "ayah_picker.title": "اختر آيات هذه البطاقة",
+        "ayah_picker.surah": "السورة",
+        "ayah_picker.from": "من الآية",
+        "ayah_picker.to": "إلى الآية",
+        "ayah_picker.more": {
+            "zero": "…ولا آيات أخرى",
+            "one": "…وآية أخرى",
+            "two": "…وآيتان أخريان",
+            "few": "…و{count} آيات أخرى",
+            "many": "…و{count} آية أخرى",
+            "other": "…و{count} آية أخرى",
+        },
+        "ayah_picker.no_store": "نص القرآن غير جاهز بعد، فلا يمكن اختيار آية.",
         "look.title": "المظهر",
         "look.palette": "لوحة الألوان",
         "look.preset.night_gold": "ذهبي ليلي",

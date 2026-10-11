@@ -298,6 +298,10 @@ def test_the_counted_strings_agree_with_their_number_in_arabic() -> None:
         assert tn("home.cards", 11) == f"{_FSI}11{_PDI} بطاقة"
         assert tn("home.cards", 100) == f"{_FSI}100{_PDI} بطاقة"
         assert tn("export.done", 12, names="a.srt") == f"كُتب {_FSI}12{_PDI} ملفًا: {_FSI}a.srt{_PDI}"
+        assert tn("ayah_picker.more", 1) == "…وآية أخرى"
+        assert tn("ayah_picker.more", 2) == "…وآيتان أخريان"
+        assert tn("ayah_picker.more", 3) == f"…و{_FSI}3{_PDI} آيات أخرى"
+        assert tn("ayah_picker.more", 15) == f"…و{_FSI}15{_PDI} آية أخرى"
     finally:
         set_language("en")
 

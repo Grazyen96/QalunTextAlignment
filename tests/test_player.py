@@ -107,3 +107,13 @@ def test_qt_player_loads_when_multimedia_is_installed(qt_app, tmp_path) -> None:
     from qurantext.gui.review.player import QtPlayer, create_player
 
     assert isinstance(create_player(), QtPlayer)
+
+
+def test_a_qt_player_with_no_recording_keeps_the_playhead_where_it_was_put(qt_app) -> None:
+    """With nothing loaded the length is 0; clamping to it put every edit at 0 s."""
+    pytest.importorskip("PySide6.QtMultimedia")
+    from qurantext.gui.review.player import QtPlayer
+
+    player = QtPlayer()
+    player.seek(25.0)
+    assert player.position() == pytest.approx(25.0)

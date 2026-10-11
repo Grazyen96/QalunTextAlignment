@@ -183,6 +183,16 @@ this is the only place anyone hears each platform's build recognise speech.
     البطاقات»), the two tooltips `home.studied_surah.tip` and `review.studied_surah.tip`
     («الآيات المستشهد بها»، «الأطول سماعًا»), and the warning
     `review.studied_surah_missing` («بطاقة العنوان الافتتاحية»).
+  - hand-made ayah cards in a lecture, read in the review window (the button beside
+    Play, the segment list) and the ayah picker: the button `review.show_ayah` («اعرض
+    آية… من هنا») and its tooltip `review.show_ayah.tip` («من موضع التشغيل فصاعدًا»), the
+    context-menu entry `segments.change_ayah` («غيّر الآية…»), the ✎ tooltip
+    `segments.manual` («وُضعت يدويًا»), the picker's `ayah_picker.title`,
+    `ayah_picker.surah`, `ayah_picker.from`, `ayah_picker.to`, the six plural forms of
+    `ayah_picker.more` («…وآية أخرى»، «…وآيتان أخريان»، «…و3 آيات أخرى»، «…و15 آية
+    أخرى», shown under a preview of more than five ayat) and `ayah_picker.no_store`, and the three
+    errors `session.manual_lecture_only`, `session.manual_bad_reference` («لا تضمّ
+    السورة 25 الآيات 1–99») and `session.manual_store_unavailable`.
 - [ ] Keep every direction mark: the U+2066…U+2069 isolates and the U+200F marks,
       written as `\u2066`-style escapes in the source. The tests fail if a key goes
       missing.

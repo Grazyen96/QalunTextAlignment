@@ -172,6 +172,18 @@ def cards_on_screen(
             or card.get("surah_num") == studied_surah
         ]
 
+    heard, first = _heard_surahs(cards)
+    if len(heard) <= 1:
+        return list(cards)
+
+    studied = max(heard, key=lambda surah: (heard[surah], -first[surah]))
+    return [card for card in cards if is_manual_card(card) or _card_surah(card) in (None, studied)]
+
+
+def _heard_surahs(
+    cards: list[dict[str, Any]],
+) -> tuple[dict[int | str, float], dict[int | str, float]]:
+    """How long each surah is heard in *cards*' detected ayat, and when it is first heard."""
     heard: dict[int | str, float] = {}
     first: dict[int | str, float] = {}
     for card in cards:
@@ -182,11 +194,20 @@ def cards_on_screen(
         start, end = span
         heard[surah] = heard.get(surah, 0.0) + max(0.0, end - start)
         first[surah] = min(first.get(surah, math.inf), start)
-    if len(heard) <= 1:
-        return list(cards)
+    return heard, first
 
-    studied = max(heard, key=lambda surah: (heard[surah], -first[surah]))
-    return [card for card in cards if is_manual_card(card) or _card_surah(card) in (None, studied)]
+
+def guessed_studied_surah(cards: list[dict[str, Any]]) -> int | str | None:
+    """The surah :func:`cards_on_screen` guesses a lecture studies when none is chosen.
+
+    The one heard for the most time in the detected cards, a tie going to the
+    one heard first; None when no detected card names a surah. A surah known
+    only by its name comes back as that name.
+    """
+    heard, first = _heard_surahs(cards)
+    if not heard:
+        return None
+    return max(heard, key=lambda surah: (heard[surah], -first[surah]))
 
 
 def has_surah_cards(cards: list[dict[str, Any]], surah: int) -> bool:

@@ -38,6 +38,7 @@ from PySide6.QtGui import QCloseEvent, QKeyEvent, QKeySequence, QShortcut, QShow
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
+    QDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -51,6 +52,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from qurantext.config.paths import QURAN_DB_PATH
 from qurantext.config.settings import VIDEO_PRESETS
 from qurantext.core.coverage import speech_levels, uncovered_from_levels
 from qurantext.core.waveform import Peaks, load_or_compute_peaks, peaks_path_for
@@ -59,6 +61,7 @@ from qurantext.gui.files import show_in_folder
 from qurantext.gui.i18n import clock, path_text, plain_title, t
 from qurantext.gui.jobs import JobOutcome
 from qurantext.gui.prefs import Prefs
+from qurantext.gui.review.ayah_picker import AyahPicker
 from qurantext.gui.review.background import BackgroundJobs
 from qurantext.gui.review.export_dialog import ExportDialog
 from qurantext.gui.review.frame_view import FrameView
@@ -170,6 +173,12 @@ def _is_portrait(project: Project) -> bool:
     return height >= width
 
 
+def _card_number(card: dict, key: str) -> int | None:
+    """A card's surah or ayah number when it has a usable one (a preamble card has none)."""
+    value = card.get(key)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
 def _content_end(project: Project) -> float:
     """The latest time any card or caption reaches: a timeline length before the audio is read."""
     ends = [float(card.get("end_time") or 0.0) for card in project.cards]
@@ -197,9 +206,12 @@ class ReviewWindow(QMainWindow):
         player: Player | None = None,
         prefs: Prefs | None = None,
         parent: QWidget | None = None,
+        db_path: Path = QURAN_DB_PATH,
     ) -> None:
         super().__init__(parent)
         self.session = ReviewSession(project)
+        #: The Quran store a hand-made card's text is read from.
+        self._db_path = db_path
         #: Where "Use for new videos" keeps the default look.
         self._prefs = prefs if prefs is not None else Prefs()
         self.player = player if player is not None else create_player(self)
@@ -382,9 +394,17 @@ class ReviewWindow(QMainWindow):
         self.rate_combo = QComboBox()
         for rate in RATES:
             self.rate_combo.addItem(t("review.rate", rate=rate), rate)
+        # Detection misses the ayah a teacher talks about without reciting it; the
+        # person shows it by hand from the playhead on, so the button sits by the
+        # playhead's own controls (and off the toolbar, which a render fills).
+        self.show_ayah_button = QPushButton(t("review.show_ayah"))
+        self.show_ayah_button.setToolTip(t("review.show_ayah.tip"))
+        self.show_ayah_button.setVisible(str(self.session.project.mode).lower() == "lecture")
         transport.addWidget(self.play_button)
         transport.addWidget(self.time_label)
         transport.addWidget(self.rate_combo)
+        transport.addSpacing(12)
+        transport.addWidget(self.show_ayah_button)
         transport.addStretch(1)
         right.addLayout(transport)
 
@@ -410,6 +430,8 @@ class ReviewWindow(QMainWindow):
         self.strip.selection_changed.connect(self._show_selection)
         self.strip.edited.connect(self._after_edit)
         self.segment_list.seek_requested.connect(self.seek)
+        self.segment_list.card_ayah_requested.connect(self._change_card_ayah)
+        self.show_ayah_button.clicked.connect(self._show_ayah_from_here)
         # Remove is offered only while a row is selected. Only the button: a full _sync_state
         # here would mark a removal as seen before _drop_stale_selection could act on it.
         self.segment_list.itemSelectionChanged.connect(self._update_remove_button)
@@ -684,6 +706,88 @@ class ReviewWindow(QMainWindow):
         if self._levels is not None:
             self._coverage_timer.start()
 
+    def _show_ayah_from_here(self) -> None:
+        """Ask which ayat to show from the playhead on, and place that card.
+
+        The picker opens on the card the frame shows there (its surah and
+        range), which is what the person is looking at when they decide it is
+        wrong or missing. Before the first card it opens on the lecture's
+        studied surah, chosen or else guessed, at its first ayah: the ayah a
+        teacher goes back to is most often in the surah being studied. Cancel
+        changes nothing.
+        """
+        if self._rendering:
+            return
+        at = self.player.position()
+        on_screen = self.session.frame_inputs(at)[0] or {}
+        surah = _card_number(on_screen, "surah_num")
+        first = _card_number(on_screen, "from_ayah") if surah else None
+        last = _card_number(on_screen, "to_ayah") if first else None
+        choice = self._ask_ayat(surah or self._studied_surah_guess(), first or 1, last)
+        if choice is not None:
+            self._edit_card(
+                t("review.show_ayah"),
+                lambda: self.session.insert_manual_card(at, *choice, db_path=self._db_path),
+            )
+
+    def _change_card_ayah(self, index: int) -> None:
+        """Ask which ayat card *index* shows, keeping its times; Cancel changes nothing."""
+        if self._rendering or not 0 <= index < len(self.session.project.cards):
+            return
+        card = self.session.project.cards[index]
+        surah = _card_number(card, "surah_num")
+        first = _card_number(card, "from_ayah") if surah else None
+        last = _card_number(card, "to_ayah") if first else None
+        choice = self._ask_ayat(surah or self._studied_surah_guess(), first or 1, last)
+        if choice is not None:
+            self._edit_card(
+                t("segments.change_ayah"),
+                lambda: self._changed_card_index(index, choice),
+            )
+
+    def _changed_card_index(self, index: int, choice: tuple[int, int, int]) -> int:
+        self.session.change_card_ayah(index, *choice, db_path=self._db_path)
+        return index
+
+    def _studied_surah_guess(self) -> int:
+        """The surah chosen for the cards, else the one guessed for them, else al-Fatiha."""
+        return self.session.studied_surah or self.session.guessed_studied_surah or 1
+
+    def _ask_ayat(self, surah: int, first: int, last: int | None) -> tuple[int, int, int] | None:
+        """The ``(surah, from_ayah, to_ayah)`` the person picks, or None when they cancel.
+
+        Playback pauses while the picker is open, so the frame redrawn after
+        OK is still the moment the card was placed at, not a later one past it.
+        """
+        if self.player.is_playing():
+            self.player.pause()
+        picker = AyahPicker(self, surah=surah, from_ayah=first, to_ayah=last, db_path=self._db_path)
+        try:
+            if picker.exec() != QDialog.DialogCode.Accepted:
+                return None
+            return picker.choice()
+        finally:
+            picker.deleteLater()
+
+    def _edit_card(self, title: str, edit: Callable[[], int | None]) -> None:
+        """Run a card edit, then bring every view along and show the card in the list.
+
+        The session raises one ``ValueError``, in the window's language, for a
+        reference the store does not have and for a store it cannot read;
+        nothing changed then, so there is nothing to redraw, only the reason
+        to say.
+        """
+        try:
+            index = edit()
+        except ValueError as error:
+            QMessageBox.warning(self, plain_title(title), str(error))
+            return
+        self._after_edit()
+        if index is not None:
+            # In a lecture the playhead's row is a caption, listed after every card:
+            # without this the card just placed or changed may be out of sight.
+            self.segment_list.show_card(index)
+
     def undo(self) -> None:
         if self._rendering:
             return
@@ -772,6 +876,7 @@ class ReviewWindow(QMainWindow):
         self.reviewed_button.setEnabled(
             session.project.review.get("state") != "reviewed" and editable
         )
+        self.show_ayah_button.setEnabled(editable)
         title = t("review.title", name=self._audio.stem)
         self.setWindowTitle(plain_title(f"{title} *" if session.dirty else title))
         self._show_selection(self.strip.selected)
@@ -884,9 +989,13 @@ class ReviewWindow(QMainWindow):
     def _set_render_running(self, running: bool) -> None:
         self._rendering = running
         self.render_button.setEnabled(not running)
+        # The progress bar and Cancel take the button's place, so the toolbar keeps
+        # its width and the window fits a 1280 px screen while a render runs.
+        self.render_button.setVisible(not running)
         self.export_button.setEnabled(not running)
         self.strip.setEnabled(not running)
         self.selection_bar.setEnabled(not running)
+        self.segment_list.set_cards_editable(not running)
         if running:
             self._segment_list_edit_triggers = self.segment_list.editTriggers()
             self.segment_list.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)

@@ -125,7 +125,11 @@ word's start or end at the playhead; Save (Ctrl+S) writes the correction, Undo
 and Redo step back and forth through them, and a gap the recording covers but
 no word does is flagged so it does not go unnoticed. Render makes the video
 once the timing looks right; Export writes the corrected subtitles on their
-own.
+own. In a lecture, "Show ayah… from here" (beside Play) puts the ayat you pick
+on the card from the playhead until the next card — for the ayah a teacher goes
+back to and explains without reciting it — and a double-click on a card's Ayah
+cell (or "Change ayah…" in its menu) changes which ayat it shows. The text
+always comes from the Quran store, and a card placed by hand is marked ✎.
 
 **More options**, folded away since most jobs don't need them: a Quran text
 other than the certified one that ships with the app, subtitles burned into
