@@ -7,7 +7,9 @@ import sqlite3
 import pytest
 
 from qurantext.config.paths import DEFAULT_QURAN_PATH
+from qurantext.core.arabic import ayah_text_with_marker
 from qurantext.data.quran_db import (
+    ayah_range_card,
     build_quran_db,
     connect,
     db_matches_source,
@@ -151,3 +153,36 @@ def test_list_surahs_gives_a_picker_everything_it_needs(tmp_path) -> None:
             surah_ayah_count(conn, 999)
     finally:
         conn.close()
+
+
+def test_a_single_ayah_card_matches_detection(db: str) -> None:
+    conn = connect(db)
+    card = ayah_range_card(conn, 25, 7, 7)
+    raw = conn.execute(
+        "SELECT text_raw FROM ayat WHERE surah_num = 25 AND ayah_num = 7"
+    ).fetchone()["text_raw"]
+    name = conn.execute("SELECT name FROM surahs WHERE surah_num = 25").fetchone()["name"]
+    assert card == {
+        "surah_num": 25,
+        "surah_name": name,
+        "from_ayah": 7,
+        "to_ayah": 7,
+        "text": ayah_text_with_marker(raw, 7),
+        "full_text": ayah_text_with_marker(raw, 7),
+    }
+
+
+def test_a_range_joins_ayat_with_newlines_like_detection(db: str) -> None:
+    card = ayah_range_card(connect(db), 25, 7, 9)
+    lines = card["full_text"].split("\n")
+    assert len(lines) == 3
+    assert lines[0].endswith(" ٧") and lines[2].endswith(" ٩")
+    assert card["text"] == card["full_text"]
+
+
+@pytest.mark.parametrize(
+    "surah, start, end", [(0, 1, 1), (115, 1, 1), (25, 0, 1), (25, 9, 7), (25, 1, 78)]
+)
+def test_invalid_ranges_raise(db: str, surah: int, start: int, end: int) -> None:
+    with pytest.raises(ValueError):
+        ayah_range_card(connect(db), surah, start, end)
