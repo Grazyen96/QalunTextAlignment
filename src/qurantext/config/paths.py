@@ -47,11 +47,13 @@ __all__ = [
     "RECITATIONS_INPUT_DIR",
     "RECITATION_MATCHING_OUTPUT_DIR",
     "REQUIRED_DIRECTORIES",
+    "RETIRED_QURAN_NAMES",
     "VIDEOS_OUTPUT_DIR",
     "WHISPERX_TRANSCRIPTS_OUTPUT_DIR",
     "bundled_asset",
     "checkout_root",
     "ensure_required_directories",
+    "redirect_retired_quran",
     "user_cache_dir",
     "user_data_dir",
 ]
@@ -123,7 +125,7 @@ def resolve_quran_path(explicit: str | Path | None = None) -> Path:
     get subtly wrong output rather than an obvious failure.
     """
     if explicit is not None:
-        path = Path(explicit).expanduser()
+        path = redirect_retired_quran(Path(explicit).expanduser())
         if not path.is_file():
             raise FileNotFoundError(f"Quran text file not found: {path}")
         return path.resolve()
@@ -180,7 +182,28 @@ DEFAULT_FONT_PATH = bundled_asset("fonts/qaloon.10.ttf")
 #: from this — the store, the citation index, the ayah text on screen — so the
 #: app carries it rather than asking each user to find a copy and hoping the
 #: riwaya and the ayah numbering match.
-DEFAULT_QURAN_PATH = bundled_asset("quran/UthmanicQaloon1-Ver05.txt")
+DEFAULT_QURAN_PATH = bundled_asset("quran/UthmanicQaloon1-v10.txt")
+#: Texts an earlier version bundled in place of ``DEFAULT_QURAN_PATH``.
+RETIRED_QURAN_NAMES = frozenset({"UthmanicQaloon1-Ver05.txt"})
+
+
+def redirect_retired_quran(path: str | Path) -> Path:
+    """The bundled text for a saved path to a bundled text that is no longer shipped.
+
+    An older version wrote the bundled file's absolute path into the person's
+    settings when they picked it. After an update that file is gone and its
+    replacement sits beside it under a new name; any other path, and a retired
+    file that is still there, is returned unchanged.
+    """
+    path = Path(path)
+    if (
+        path.name in RETIRED_QURAN_NAMES
+        and path.parent.parts[-3:] == ("qurantext", "assets", "quran")
+        and not path.is_file()
+    ):
+        return DEFAULT_QURAN_PATH
+    return path
+
 
 REQUIRED_DIRECTORIES = (
     INPUT_DIR,

@@ -10,7 +10,7 @@ resolves its default font into the Python installation directory.
 
 - `fonts/qaloon.10.ttf` — the Qalun face the frame renderer draws with.
 - `fonts/qaloon.10.woff2` — the same face for web use.
-- `quran/UthmanicQaloon1-Ver05.txt` — the certified Qalun text everything is
+- `quran/UthmanicQaloon1-v10.txt` — the certified Qalun text everything is
   built from: the store, the citation index, the ayah text on screen.
 
 The Quran text ships for more than convenience. The parser expects this file's
@@ -18,12 +18,31 @@ exact conventions, and the ayah numbering has to be the Madani counting the rest
 of the data assumes, so "bring your own text" is a way to get subtly wrong
 output rather than an obvious failure.
 
+## Where the Quran text comes from
+
+`quran/UthmanicQaloon1-v10.txt` is the KFGQPC (King Fahd Glorious Quran
+Printing Complex) Qaloon text v10, obtained via `thetruetruth/quran-data-kfgqpc`
+at commit e35e7b5 (`qaloon/data/QaloonData_v10.json`, sha256
+`18465c40ebeec40a92eb98745c9b89796ac6e31f6e93988883dfb6602faaea95`) and
+converted by `tools/convert_mushaf_v10.py`. v10 is the edition the bundled
+`qaloon.10` font was drawn for, with the pause marks the font has glyphs for.
+
+The converter keeps the layout of the KFGQPC Ver05 text Qalun shipped before
+(`UthmanicQaloon1-Ver05.txt`, now only in git history): its surah headers,
+basmala lines, page breaks, ayah markers and line breaks, with the v10 words in
+place of the Ver05 ones. The parser is unchanged and every word keeps its page
+and line. The letters of every ayah are the same in both editions; v10 adds
+pause marks, places some ۞ and ۩ differently, writes alef maksura where Ver05
+writes yeh, and splits two words Ver05 ran together (41:46 «مَا مِنَّا», 41:50
+«وَنَـَٔا بِجَانِبِهِۦۖ»). KFGQPC's Ver05 attribution footer, which named that
+edition's version number, is not carried over.
+
 ## Licence: not Qalun's
 
 The font (`fonts/qaloon.10.ttf`, `fonts/qaloon.10.woff2`) and the Quran text
-(`quran/UthmanicQaloon1-Ver05.txt`) are third-party works. Qalun's own licence,
+(`quran/UthmanicQaloon1-v10.txt`) are third-party works. Qalun's own licence,
 GPL-3.0-only, does not cover them, even though they ship inside the package,
 the app and its source zip. Their provenance and terms are to be confirmed by
 the owner; until then `THIRD_PARTY_NOTICES.md` says so, and the release
 checklist holds the first release until they are confirmed and written down
-there.
+there. The text's source is recorded above; its terms are not.

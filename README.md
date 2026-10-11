@@ -435,7 +435,6 @@ From audio:
 
 ```bash
 python3 -m qurantext range-match \
-  --quran input/quran/UthmanicQaloon1-Ver05.txt \
   --audio input/recitations/example.mp3
 ```
 
@@ -443,7 +442,6 @@ From an existing WhisperX transcript:
 
 ```bash
 python3 -m qurantext range-match \
-  --quran input/quran/UthmanicQaloon1-Ver05.txt \
   --whisperx-json output/whisperx_transcripts/example_whisperx_raw.json
 ```
 
@@ -463,7 +461,6 @@ From audio:
 
 ```bash
 python3 -m qurantext lecture-match \
-  --quran input/quran/UthmanicQaloon1-Ver05.txt \
   --audio input/lectures/example.mp3
 ```
 
@@ -471,7 +468,6 @@ From an existing WhisperX transcript:
 
 ```bash
 python3 -m qurantext lecture-match \
-  --quran input/quran/UthmanicQaloon1-Ver05.txt \
   --whisperx-json output/whisperx_transcripts/example_whisperx_raw.json
 ```
 
@@ -490,7 +486,6 @@ detect and the job becomes alignment over known text.
 
 ```bash
 python3 -m qurantext recitation-match \
-  --quran input/quran/UthmanicQaloon1-Ver05.txt \
   --audio input/recitations/example.mp3 \
   --surah-num 25 --from-ayah 7 --to-ayah 11
 ```
@@ -513,7 +508,6 @@ From audio:
 
 ```bash
 python3 -m qurantext recitation-match \
-  --quran input/quran/UthmanicQaloon1-Ver05.txt \
   --audio input/recitations/example.mp3
 ```
 
@@ -521,7 +515,6 @@ From an existing WhisperX transcript:
 
 ```bash
 python3 -m qurantext recitation-match \
-  --quran input/quran/UthmanicQaloon1-Ver05.txt \
   --whisperx-json output/whisperx_transcripts/example_whisperx_raw.json
 ```
 
@@ -586,7 +579,6 @@ python3 -m qurantext generate-video \
 
 ```bash
 python3 -m qurantext run-all \
-  --quran input/quran/UthmanicQaloon1-Ver05.txt \
   --audio input/lectures/example.mp3 \
   --mode lecture
 ```
@@ -595,7 +587,6 @@ With video rendering:
 
 ```bash
 python3 -m qurantext run-all \
-  --quran input/quran/UthmanicQaloon1-Ver05.txt \
   --audio input/lectures/example.mp3 \
   --mode lecture \
   --render-video \
@@ -620,7 +611,6 @@ Example:
 
 ```bash
 python3 -m qurantext recitation-match \
-  --quran input/quran/UthmanicQaloon1-Ver05.txt \
   --whisperx-json output/whisperx_transcripts/example_whisperx_raw.json
 ```
 
@@ -628,7 +618,6 @@ python3 -m qurantext recitation-match \
 
 ```bash
 python3 -m qurantext range-match \
-  --quran input/quran/UthmanicQaloon1-Ver05.txt \
   --audio input/recitations/example.mp3 \
   --surah "سُورَةُ الفُرقَانِ"
 ```
@@ -720,6 +709,6 @@ Linux the ALSA library). The bundled components, the speech model and their
 licences are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 The licence does not cover the bundled Quran font (`qaloon.10.ttf`,
-`qaloon.10.woff2`) or the Quran text (`UthmanicQaloon1-Ver05.txt`). They are
+`qaloon.10.woff2`) or the Quran text (`UthmanicQaloon1-v10.txt`). They are
 third-party works, their provenance and terms to be confirmed by the owner;
 see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

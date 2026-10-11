@@ -75,7 +75,8 @@ def test_golden_parse_of_shipped_qalun_file() -> None:
     #       false-skip (see is_ayah_marker / _is_basmala).
     assert len(ayat) == 6214
 
-    # The footer must NOT appear as a verse, and An-Nās ends at ayah 6.
+    # An-Nās ends at ayah 6. The shipped v10 file has no footer any more; the
+    # zero-padded footer marker is covered in test_quran_parser.py.
     annas = sorted(a["ayah_num"] for a in ayat if a["surah_num"] == 114)
     assert annas == [1, 2, 3, 4, 5, 6], "An-Nās must have exactly 6 ayat, no footer phantom"
 

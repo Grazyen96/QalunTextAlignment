@@ -46,12 +46,18 @@ These files ship inside the app, the Python package and `qalun-source.zip`:
 
 - `qurantext/assets/fonts/qaloon.10.ttf` and `qaloon.10.woff2`: the Qalun
   Quran font;
-- `qurantext/assets/quran/UthmanicQaloon1-Ver05.txt`: the Quran text in the
+- `qurantext/assets/quran/UthmanicQaloon1-v10.txt`: the Quran text in the
   Qalun riwaya.
 
 They are third-party works and are **not** licensed under the GPL by Qalun's
 licence statement above. Their provenance and terms are to be confirmed by the
 owner, and will be stated here.
+
+The Quran text is the KFGQPC (King Fahd Glorious Quran Printing Complex) Qaloon
+text v10, obtained via `thetruetruth/quran-data-kfgqpc` at commit e35e7b5
+(`qaloon/data/QaloonData_v10.json`) and converted by
+`tools/convert_mushaf_v10.py`. Its source is recorded here; the terms on which it
+may be redistributed are not, and are to be confirmed by the owner.
 
 ## Speech recognition model
 

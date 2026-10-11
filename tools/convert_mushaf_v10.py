@@ -59,15 +59,14 @@ DEFAULT_OUT = (
 )
 
 AYAH_COUNT = 6214
-SURAH_COUNT = 114
-NBSP = " "
+NBSP = "\u00a0"
 RUB_EL_HIZB = "۞"
 BOM_UTF16_LE = b"\xff\xfe"
 NEWLINE = "\r\n"
 
-_LETTER_RE = re.compile(r"[ء-ي]")
-_MARKER_RE = re.compile(r"^[٠-٩]+$")
-_TANWIN = ("ً", "ٌ", "ٍ")
+_LETTER_RE = re.compile(r"[\u0621-\u064a]")
+_MARKER_RE = re.compile(r"^[\u0660-\u0669]+$")
+_TANWIN = ("\u064b", "\u064c", "\u064d")
 _BASMALA_SKELETON = "بسماللهالرحمنالرحيم"
 _HEADER_WORD = "سورة"
 
@@ -78,12 +77,12 @@ class ConversionError(RuntimeError):
 
 def skeleton(text: str) -> str:
     """The letters of *text* alone, for matching words across the two editions."""
-    text = text.replace("ى", "ي").replace("ـ", "")
-    return "".join(ch for ch in text if "ء" <= ch <= "ي")
+    text = text.replace("\u0649", "\u064a").replace("\u0640", "")
+    return "".join(ch for ch in text if "\u0621" <= ch <= "\u064a")
 
 
 def _is_marker(token: str) -> bool:
-    return bool(_MARKER_RE.match(token)) and not token.startswith("٠")
+    return bool(_MARKER_RE.match(token)) and not token.startswith("\u0660")
 
 
 def _marker_value(token: str) -> int:
@@ -97,12 +96,12 @@ def _is_header(line: str) -> bool:
         and len(tokens) <= 4
         and not any(mark in tokens[0] for mark in _TANWIN)
         and skeleton(tokens[0]) == _HEADER_WORD
-        and not any(_is_marker(tok) or re.search(r"[٠-٩]", tok) for tok in tokens)
+        and not re.search(r"[\u0660-\u0669]", line)
     )
 
 
 def _is_basmala(line: str) -> bool:
-    return skeleton(line) == _BASMALA_SKELETON and not re.search(r"[٠-٩]", line)
+    return skeleton(line) == _BASMALA_SKELETON and not re.search(r"[\u0660-\u0669]", line)
 
 
 def load_v10(json_path: Path) -> dict[tuple[int, int], list[str]]:
@@ -141,7 +140,9 @@ def read_ver05(ver05_path: Path) -> list[str]:
     return text.split(NEWLINE)
 
 
-def _place(key, slots, v10_words):
+def _place(
+    key: tuple[int, int], slots: list[tuple[int, int, str]], v10_words: list[str]
+) -> list[list[str]]:
     """Assign each v10 word to the Ver05 word whose letters it starts in."""
     v05_skel = [skeleton(word) for _, _, word in slots]
     v10_skel = [skeleton(word) for word in v10_words]
@@ -157,7 +158,7 @@ def _place(key, slots, v10_words):
     placed: list[list[str]] = [[] for _ in slots]
     offset = 0
     slot = 0
-    for word, s in zip(v10_words, v10_skel):
+    for word, s in zip(v10_words, v10_skel, strict=True):
         while slot + 1 < len(starts) and starts[slot + 1] <= offset:
             slot += 1
         placed[slot].append(word)
@@ -168,7 +169,7 @@ def _place(key, slots, v10_words):
 
 
 def convert(v10: dict[tuple[int, int], list[str]], lines: list[str]) -> str:
-    # Per line, the replacement for each whitespace-separated token (None = keep).
+    # Per line, the new text for each whitespace-separated token that changes.
     replacements: dict[int, dict[int, str]] = {}
     slots: list[tuple[int, int, str]] = []
     surah = 0
@@ -197,7 +198,8 @@ def convert(v10: dict[tuple[int, int], list[str]], lines: list[str]) -> str:
                 key = (surah, ayah)
                 if _marker_value(token) != ayah or key not in v10 or not slots:
                     raise ConversionError(f"line {line_no + 1}: unexpected marker for {key}")
-                for (l_no, t_no, _), words in zip(slots, _place(key, slots, v10[key])):
+                placed = _place(key, slots, v10[key])
+                for (l_no, t_no, _), words in zip(slots, placed, strict=True):
                     replacements.setdefault(l_no, {})[t_no] = " ".join(words)
                 seen.add(key)
                 slots = []
@@ -207,7 +209,7 @@ def convert(v10: dict[tuple[int, int], list[str]], lines: list[str]) -> str:
             else:
                 raise ConversionError(f"line {line_no + 1}: unrecognised token {token!r}")
 
-    if surah != SURAH_COUNT or seen != set(v10):
+    if surah != len({s for s, _ in v10}) or seen != set(v10):
         raise ConversionError(f"Ver05 covers {len(seen)} ayat in {surah} surahs")
 
     out: list[str] = []
