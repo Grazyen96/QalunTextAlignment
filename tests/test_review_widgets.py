@@ -745,3 +745,274 @@ def test_preview_follows_undo_of_a_look_change(qt_app) -> None:
     session.undo()
     view.show_at(0.0, force=True)
     assert view.pixmap().toImage() == before
+
+
+# -- the Look panel ----------------------------------------------------------------
+
+
+@pytest.fixture()
+def session(tmp_path):
+    """A saved project's session: the panel copies a chosen image beside its file."""
+    from qurantext.gui.review.session import ReviewSession
+    from qurantext.jobs.project import Project, load_project, save_project
+
+    cards = [
+        {
+            "surah_num": 25,
+            "from_ayah": 7,
+            "to_ayah": 7,
+            "full_text": "a b",
+            "confidence": 1.0,
+            "start_time": 0.0,
+            "end_time": 10.0,
+            "word_timings": [
+                {"word": "a", "start": 1.0, "end": 2.0},
+                {"word": "b", "start": 2.0, "end": 3.0},
+            ],
+        }
+    ]
+    path = save_project(Project(audio=tmp_path / "a.mp3", cards=cards), tmp_path / "a.qalun.json")
+    return ReviewSession(load_project(path))
+
+
+def _panel(session, prefs):
+    from qurantext.gui.review.look_panel import LookPanel
+
+    return LookPanel(session, prefs=prefs, frame_size=(270, 480), reserve_caption_band=False)
+
+
+def _recorded(signal) -> list:
+    seen: list = []
+    signal.connect(lambda *args: seen.append(args))
+    return seen
+
+
+def test_choosing_a_palette_sets_the_session_look(qt_app, session, prefs) -> None:
+    from qurantext.core.looks import PRESETS
+
+    panel = _panel(session, prefs)
+    changed = _recorded(panel.look_changed)
+    panel.palette_buttons["emerald"].click()
+    assert changed
+    assert session.look == PRESETS["emerald"]
+    assert panel.status_label.text() == "Emerald"
+
+
+def test_customise_is_folded_away_until_opened(qt_app, session, prefs) -> None:
+    panel = _panel(session, prefs)
+    panel.show()
+    assert not panel.colour_buttons["body_text"].isVisible()
+    panel.customise_toggle.click()
+    assert panel.colour_buttons["body_text"].isVisible()
+
+
+def test_one_customised_colour_reads_as_custom(qt_app, session, prefs, monkeypatch) -> None:
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QColorDialog
+
+    monkeypatch.setattr(QColorDialog, "getColor", lambda *a, **k: QColor(10, 200, 30, 255))
+    panel = _panel(session, prefs)
+    changed = _recorded(panel.look_changed)
+    panel.colour_buttons["highlight_word"].click()
+    assert changed
+    assert session.look.highlight_word == (10, 200, 30, 255)
+    assert "Night gold" in panel.status_label.text() and session.look.base_preset == "night_gold"
+    assert panel.status_label.text() == "Custom (from Night gold)"
+
+
+def test_a_cancelled_colour_dialog_changes_nothing(qt_app, session, prefs, monkeypatch) -> None:
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QColorDialog
+
+    monkeypatch.setattr(QColorDialog, "getColor", lambda *a, **k: QColor())
+    panel = _panel(session, prefs)
+    changed = _recorded(panel.look_changed)
+    panel.colour_buttons["card"].click()
+    assert not changed and not session.can_undo
+
+
+def test_low_contrast_shows_a_warning_that_names_the_part(
+    qt_app, session, prefs, monkeypatch
+) -> None:
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QColorDialog
+
+    monkeypatch.setattr(QColorDialog, "getColor", lambda *a, **k: QColor(40, 40, 46, 255))
+    panel = _panel(session, prefs)
+    panel.show()
+    assert not panel.contrast_label.isVisible()
+    panel.colour_buttons["body_text"].click()
+    assert panel.contrast_label.isVisible() and "Ayah text" in panel.contrast_label.text()
+
+
+def test_a_dim_drag_is_one_undo_step(qt_app, session, prefs) -> None:
+    from qurantext.core.looks import NIGHT_GOLD
+
+    panel = _panel(session, prefs)
+    panel.dim_slider.sliderPressed.emit()
+    for v in (10, 20, 30):
+        panel.dim_slider.setValue(v)
+    panel.dim_slider.sliderReleased.emit()
+    assert session.look.background.dim == 0.3
+    assert session.undo() and session.look == NIGHT_GOLD
+    assert not session.can_undo
+
+
+def test_an_opacity_drag_sets_the_card_alpha_as_one_undo_step(qt_app, session, prefs) -> None:
+    from qurantext.core.looks import NIGHT_GOLD
+
+    panel = _panel(session, prefs)
+    panel.opacity_slider.sliderPressed.emit()
+    for v in (80, 60, 50):
+        panel.opacity_slider.setValue(v)
+    panel.opacity_slider.sliderReleased.emit()
+    assert session.look.card == (*NIGHT_GOLD.card[:3], 128)
+    assert session.undo() and session.look == NIGHT_GOLD
+
+
+def test_a_built_in_background_keeps_the_colours_and_clears_dim(qt_app, session, prefs) -> None:
+    from qurantext.core.looks import PRESETS
+
+    panel = _panel(session, prefs)
+    panel.palette_buttons["ocean"].click()
+    panel.dim_slider.setValue(40)
+    combo = panel.background_combo
+    combo.setCurrentIndex(combo.findData("solid"))
+    bg = session.look.background
+    frame_bg = PRESETS["ocean"].frame_bg
+    assert (bg.kind, bg.colour, bg.colour2, bg.dim) == ("solid", frame_bg, frame_bg, 0.0)
+    assert session.look.frame_bg == bg.colour
+    combo.setCurrentIndex(combo.findData("pattern_stars"))
+    bg = session.look.background
+    assert bg.kind == "pattern_stars" and bg.colour == frame_bg and bg.colour2 != bg.colour
+
+
+def test_choosing_an_image_copies_it_beside_the_project(
+    qt_app, session, prefs, tmp_path, monkeypatch
+) -> None:
+    from PIL import Image
+    from PySide6.QtWidgets import QFileDialog
+
+    src = tmp_path / "photo.png"
+    Image.new("RGB", (20, 20), (200, 10, 10)).save(src)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(src), ""))
+    panel = _panel(session, prefs)
+    panel.image_button.click()
+    bg = session.look.background
+    assert bg.kind == "image" and bg.dim == 0.35
+    assert bg.image.parent.name.endswith(".look") and bg.image.is_file()
+    assert panel.background_combo.currentData() == "image"
+    assert panel.dim_slider.value() == 35
+
+
+def test_choosing_image_in_the_list_runs_the_same_flow(
+    qt_app, session, prefs, tmp_path, monkeypatch
+) -> None:
+    from PySide6.QtWidgets import QFileDialog
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: ("", ""))
+    panel = _panel(session, prefs)
+    combo = panel.background_combo
+    combo.setCurrentIndex(combo.findData("image"))
+    assert not session.can_undo, "a cancelled choice is no edit"
+    assert combo.currentData() == "solid", "the list goes back to what the look has"
+
+
+def test_an_image_that_cannot_be_used_says_so(
+    qt_app, session, prefs, tmp_path, monkeypatch
+) -> None:
+    from PySide6.QtWidgets import QFileDialog
+
+    gone = tmp_path / "gone.png"
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(gone), ""))
+    panel = _panel(session, prefs)
+    notices = _recorded(panel.notice)
+    panel.image_button.click()
+    assert notices == [("gone.png could not be used as a background.",)]
+    assert not session.can_undo
+
+
+def test_a_missing_image_is_reported(qt_app, session, prefs, tmp_path, monkeypatch) -> None:
+    from PIL import Image
+    from PySide6.QtWidgets import QFileDialog
+
+    src = tmp_path / "photo.png"
+    Image.new("RGB", (20, 20), (200, 10, 10)).save(src)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(src), ""))
+    panel = _panel(session, prefs)
+    panel.image_button.click()
+    session.look.background.image.unlink()
+    notices = _recorded(panel.notice)
+    panel.blur_slider.setValue(5)
+    assert (
+        "The background image is missing; the palette's background is shown instead.",
+    ) in notices
+
+
+def test_a_project_without_a_file_cannot_take_an_image(qt_app, prefs) -> None:
+    from pathlib import Path
+
+    from qurantext.gui.review.session import ReviewSession
+    from qurantext.jobs.project import Project
+
+    panel = _panel(ReviewSession(Project(audio=Path("a.mp3"))), prefs)
+    assert not panel.image_button.isEnabled()
+    assert panel.image_button.toolTip() == "This project has no file to write back to."
+
+
+def test_use_for_new_videos_saves_the_default(qt_app, session, prefs) -> None:
+    from qurantext.core.looks import PRESETS
+
+    panel = _panel(session, prefs)
+    messages = _recorded(panel.message)
+    panel.palette_buttons["rose"].click()
+    panel.default_button.click()
+    assert prefs.default_look == PRESETS["rose"]
+    assert messages == [("New videos will start with this look.",)]
+
+
+def test_a_default_that_cannot_be_saved_says_why(qt_app, session, prefs, monkeypatch) -> None:
+    from qurantext.gui.prefs import Prefs
+
+    def refuse(self, look):
+        raise OSError("read-only")
+
+    monkeypatch.setattr(Prefs, "save_default_look", refuse)
+    panel = _panel(session, prefs)
+    notices = _recorded(panel.notice)
+    panel.default_button.click()
+    assert notices and "could not be used" in notices[0][0]
+
+
+def test_reset_returns_to_night_gold(qt_app, session, prefs) -> None:
+    from qurantext.core.looks import NIGHT_GOLD
+
+    panel = _panel(session, prefs)
+    panel.palette_buttons["sand"].click()
+    panel.reset_button.click()
+    assert session.look == NIGHT_GOLD
+
+
+def test_refresh_follows_undo_without_emitting(qt_app, session, prefs) -> None:
+    panel = _panel(session, prefs)
+    panel.palette_buttons["ocean"].click()
+    session.undo()
+    changed = _recorded(panel.look_changed)
+    panel.refresh()
+    assert not changed
+    assert panel.status_label.text() == "Night gold"
+    assert panel.palette_buttons["night_gold"].isChecked()
+    assert not panel.palette_buttons["ocean"].isChecked()
+
+
+def test_the_swatches_keep_their_order_in_arabic(qt_app, session, prefs) -> None:
+    from qurantext.gui import i18n
+
+    i18n.set_language("ar")
+    panel = _panel(session, prefs)
+    panel.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+    panel.resize(260, 900)
+    panel.show()
+    _spin_briefly(qt_app)
+    xs = [panel.palette_buttons[name].x() for name in ("night_gold", "emerald", "sand")]
+    assert xs == sorted(xs)

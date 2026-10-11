@@ -11,13 +11,6 @@ pytest.importorskip("PySide6", reason="the window needs Qt: pip install 'qurante
 from qurantext.gui.prefs import Prefs
 
 
-@pytest.fixture()
-def settings(tmp_path):
-    from PySide6.QtCore import QSettings
-
-    return QSettings(str(tmp_path / "prefs.ini"), QSettings.Format.IniFormat)
-
-
 def test_defaults_on_an_empty_ini(settings) -> None:
     prefs = Prefs(settings)
     assert prefs.mode == "recitation"

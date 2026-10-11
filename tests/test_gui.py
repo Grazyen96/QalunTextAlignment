@@ -1625,7 +1625,9 @@ def real_reviews(qt_app, prefs, monkeypatch):
 
     real = module.ReviewWindow
     monkeypatch.setattr(
-        module, "ReviewWindow", lambda project: real(project, player=FakePlayer(duration=10.0))
+        module,
+        "ReviewWindow",
+        lambda project, **kw: real(project, player=FakePlayer(duration=10.0), **kw),
     )
     main = module.MainWindow(prefs=prefs)
     yield main
@@ -2100,3 +2102,40 @@ def test_the_engine_choice_reaches_detection_too(tmp_path, monkeypatch) -> None:
 
 def test_a_spec_transcribes_locally_unless_told_otherwise(tmp_path) -> None:
     assert _spec(tmp_path).engine == "local"
+
+
+def test_render_right_away_says_what_the_look_could_not_do(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui import main_window as module
+    from qurantext.gui.jobs import JobOutcome
+
+    _fake_matching(monkeypatch)
+
+    def fake_render(project, *, progress=None, cancel=None):
+        return JobOutcome(
+            matches=project.matches,
+            video=tmp_path / "a.mp4",
+            cards=1,
+            look_warnings=("image_missing",),
+        )
+
+    monkeypatch.setattr(module, "run_render", fake_render)
+
+    _run_start(qt_app, home, _spec(tmp_path, output_dir=tmp_path / "jobs", render_right_away=True))
+
+    rendered = module.t("home.finished.rendered", path=module.path_text(tmp_path / "a.mp4"))
+    said = home.new_job.status_label.text()
+    assert said == f"{rendered} {module.t('look.image_missing')}"
+
+
+def test_the_review_window_gets_the_main_window_s_prefs(real_reviews, prefs, tmp_path) -> None:
+    """ "Use for new videos" writes where the home window reads its settings."""
+    from qurantext.jobs.project import Project, save_project
+
+    path = save_project(
+        Project(audio=tmp_path / "a.mp3", cards=[_card()]), tmp_path / "a.qalun.json"
+    )
+    real_reviews._open_review(path)
+    review = real_reviews._review_of(path)
+    assert review is not None and review._prefs is prefs
