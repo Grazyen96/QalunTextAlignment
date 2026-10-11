@@ -218,6 +218,26 @@ lecture; it was faster on NVIDIA's transcripts in every case. This is the cost
 the comment in `pipelines/detection.py` describes, and it is removed by giving
 the range up front.
 
+**Update, 10 October 2026: the matcher now skips hopeless candidates.**
+Profiling lecture 44–49 showed `partial_ratio` (pure-Python `difflib`) was 98%
+of matching time, about 125 of 127 s. On that lecture, 94.6% of the
+candidates it scored could not reach the 0.78 threshold even with a perfect
+fuzzy score, and a further 1.9% could not reach the 0.90 short-phrase bar.
+`score_upper_bound` in `core/lecture_matching.py` computes that ceiling from
+the score's cheap terms (recall and precision) and skips those candidates
+before the fuzzy step. The results are byte-identical to before: same match
+files, same meta. Measured with the three runs in parallel:
+
+| | before | after | |
+|---|---|---|---|
+| lecture 7–11 (`lecture-match`) | 30.7 s | 2.2 s | 14× |
+| lecture 44–49 (`lecture-match`) | 52.0 s | 2.2 s | 24× |
+| `alFurqanCut`, 5 min, no stated range (`recitation-match`) | 92.6 s | 12.6 s | 7.4× |
+
+The app's recitation path (a stated range, then alignment, about 5 s for a
+full surah) never ran this loop and is unchanged. `rapidfuzz` and a process
+pool were not needed.
+
 ## sherpa-onnx parity (Phase 0 of the local engine)
 
 The model exported with `tools/export_local_model` (NeMo 3.0.0) and run through
