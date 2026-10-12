@@ -2895,3 +2895,39 @@ def test_start_hands_the_seed_notices_on_with_the_job(tmp_path, monkeypatch) -> 
     )
 
     assert finished.notices == (t("episode.seed.missing", part=t("episode.part.outro")),)
+
+
+def test_a_default_clip_is_kept_while_a_job_started_with_it_runs(
+    qt_app, home, prefs, reviews, tmp_path, monkeypatch
+) -> None:
+    """Choosing another default intro mid-job must not delete the one the job will copy."""
+    import threading
+
+    from qurantext.gui import main_window as module
+    from qurantext.jobs.project import load_project
+
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    first, second = tmp_path / "one.mp4", tmp_path / "two.mp4"
+    first.write_bytes(b"first intro")
+    second.write_bytes(b"second intro")
+    prefs.save_default_episode(first, None)
+    started_with = prefs.default_episode[0]
+    release = threading.Event()
+    finish = _blocked_until(
+        release,
+        finish=lambda spec: module._Finished(
+            load_project(_saved_job(Path(spec.output_dir), Path(spec.audio).stem))
+        ),
+    )
+    monkeypatch.setattr(module, "_match_then_render", finish)
+
+    spec = _spec(tmp_path, output_dir=tmp_path / "jobs", episode_defaults=(str(started_with), None))
+    home.new_job.start_requested.emit(spec)
+    _spin_until(qt_app, lambda: home._cancel is not None)
+    prefs.save_default_episode(second, None)  # in a review's Episode dialog, say
+    assert started_with.read_bytes() == b"first intro"
+
+    release.set()
+    _spin_until(qt_app, lambda: home._cancel is None)
+    assert not started_with.exists(), "let go once the job ended"
+    assert prefs.default_episode[0].read_bytes() == b"second intro"

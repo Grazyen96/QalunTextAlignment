@@ -348,3 +348,40 @@ def test_a_replaced_default_clip_is_removed_from_app_data(settings, tmp_path, mo
 
     prefs.save_default_episode(None, None)
     assert list(folder.iterdir()) == []
+
+
+def test_a_default_clip_a_running_job_holds_is_kept_until_it_ends(settings, tmp_path, monkeypatch):
+    """A new lecture's matching copies the default intro beside it only when it ends.
+
+    Choosing another default meanwhile must not delete the one that job was
+    started with; it goes once the job lets go of it.
+    """
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    prefs = Prefs(settings)
+    first, second = tmp_path / "one.mp4", tmp_path / "two.mp4"
+    first.write_bytes(b"first intro")
+    second.write_bytes(b"second intro")
+    prefs.save_default_episode(first, None)
+    held = prefs.default_episode
+
+    release = prefs.hold_default_clips(held)
+    prefs.save_default_episode(second, None)
+    assert held[0].read_bytes() == b"first intro", "deleted under the running job"
+    assert prefs.default_episode[0].read_bytes() == b"second intro"
+
+    release()
+    assert not held[0].exists(), "let go once the job ended"
+    assert prefs.default_episode[0].read_bytes() == b"second intro"
+    release()  # a second release changes nothing
+
+
+def test_a_held_clip_that_is_still_the_default_stays(settings, tmp_path, monkeypatch):
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    prefs = Prefs(settings)
+    clip = tmp_path / "one.mp4"
+    clip.write_bytes(b"intro")
+    prefs.save_default_episode(clip, None)
+    release = prefs.hold_default_clips(prefs.default_episode)
+    release()
+    assert prefs.default_episode[0].read_bytes() == b"intro"
+    assert prefs.hold_default_clips((None, None)) is not None

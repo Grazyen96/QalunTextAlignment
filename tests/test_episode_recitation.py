@@ -283,3 +283,62 @@ def test_two_renders_of_one_recitation_write_separate_files(monkeypatch, recitat
     recitation_video(recitation_project.path)
     recitation_video(recitation_project.path)
     assert len(set(outputs)) == 2 and default_video_path(recitation_project) not in outputs
+
+
+def test_a_newer_render_of_the_recitation_is_not_moved_over(monkeypatch, recitation_project):
+    """Its own review rendered it again while the episode's render ran: that one is kept."""
+    import os
+
+    earlier = Path(recitation_project.render["video"])
+    earlier.write_bytes(b"earlier render")
+    os.utime(earlier, ns=(1_000_000_000, 1_000_000_000))
+    _make_stale(recitation_project)
+
+    def review_renders_meanwhile():
+        earlier.write_bytes(b"the review's newer render")
+
+    _fake_export(monkeypatch, during=review_renders_meanwhile)
+    with pytest.raises(EpisodeError) as raised:
+        recitation_video(recitation_project.path)
+    assert raised.value.key == "episode.error.recitation_changed"
+    assert raised.value.fmt == {"name": earlier.name}
+    assert earlier.read_bytes() == b"the review's newer render"
+    leftovers = [p.name for p in earlier.parent.iterdir() if p.name.endswith(".part.mp4")]
+    assert leftovers == [], "the episode's own render is removed"
+
+
+def test_a_recitation_target_that_appears_meanwhile_is_not_moved_over(
+    monkeypatch, recitation_project
+):
+    earlier = Path(recitation_project.render["video"])
+    earlier.unlink()
+    _make_stale(recitation_project)
+    _fake_export(monkeypatch, during=lambda: earlier.write_bytes(b"someone else's"))
+    with pytest.raises(EpisodeError) as raised:
+        recitation_video(recitation_project.path)
+    assert raised.value.key == "episode.error.recitation_changed"
+    assert earlier.read_bytes() == b"someone else's"
+
+
+def test_a_locked_recitation_video_is_said_in_a_sentence(monkeypatch, recitation_project):
+    """Windows refuses to replace a file a player has open: "[WinError 32] …"."""
+    from qurantext.gui.i18n import t
+
+    earlier = Path(recitation_project.render["video"])
+    _make_stale(recitation_project)
+    _fake_export(monkeypatch)
+    real_replace = Path.replace
+
+    def locked(self, target):
+        if Path(target) == earlier:
+            raise PermissionError(13, "[WinError 32] The process cannot access the file")
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", locked)
+    with pytest.raises(EpisodeError) as raised:
+        recitation_video(recitation_project.path)
+    assert raised.value.key == "episode.error.locked"
+    said = t(raised.value.key, **raised.value.fmt)
+    assert earlier.name in said and "WinError" not in said
+    leftovers = [p.name for p in earlier.parent.iterdir() if p.name.endswith(".part.mp4")]
+    assert leftovers == []

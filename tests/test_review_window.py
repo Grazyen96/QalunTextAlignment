@@ -511,6 +511,9 @@ def test_export_writes_the_chosen_formats_and_saves_first(qt_app, tmp_path, stor
         ("Tafsir 25.7-11", ["Tafsir 25.7-11.srt", "Tafsir 25.7-11.vtt"]),
         ("Dars 12.10.2024", ["Dars 12.10.2024.srt", "Dars 12.10.2024.vtt"]),
         ("talk.srt", ["talk.srt", "talk.vtt"]),
+        # The video's own name typed in: its suffix goes, as a subtitle suffix does.
+        ("talk.mp4", ["talk.srt", "talk.vtt"]),
+        ("Tafsir 25.7-11.MOV", ["Tafsir 25.7-11.srt", "Tafsir 25.7-11.vtt"]),
     ],
 )
 def test_export_keeps_every_dot_in_the_name(qt_app, tmp_path, monkeypatch, typed, written) -> None:

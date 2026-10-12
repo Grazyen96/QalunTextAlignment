@@ -694,3 +694,27 @@ def test_the_lecture_keeps_its_colours_whatever_comes_first(tmp_path, monkeypatc
     for name, a, b in zip("YUV", source, joined, strict=True):
         shift = float(np.abs(a - b).mean())
         assert shift < 1.0, f"{name} moved by {shift:.2f} levels on average"
+
+
+def test_an_episode_open_in_another_program_is_said_in_a_sentence(tmp_path, monkeypatch):
+    """Windows refuses to replace a file a player has open: "[WinError 32] …"."""
+    from qurantext.gui.i18n import t
+
+    clip = _make(tmp_path / "a.mp4")
+    out = tmp_path / "ep.mp4"
+    out.write_bytes(b"the episode a player has open")
+    real_replace = Path.replace
+
+    def locked(self, target):
+        if Path(target) == out:
+            raise PermissionError(13, "[WinError 32] The process cannot access the file")
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", locked)
+    with pytest.raises(EpisodeError) as error:
+        assemble_episode([clip], out, lecture_index=0, width=640, height=360, fps=25)
+    assert error.value.key == "episode.error.locked" and error.value.fmt == {"name": "ep.mp4"}
+    said = t(error.value.key, **error.value.fmt)
+    assert "ep.mp4" in said and "WinError" not in said
+    assert out.read_bytes() == b"the episode a player has open"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["a.mp4", "ep.mp4"], "no partial file"

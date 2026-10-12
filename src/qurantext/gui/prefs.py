@@ -15,6 +15,9 @@ never crash the window.
 from __future__ import annotations
 
 import json
+import threading
+from collections import Counter
+from collections.abc import Callable, Iterable
 from dataclasses import replace
 from pathlib import Path
 
@@ -35,6 +38,19 @@ _MODES = ("recitation", "lecture")
 
 #: How many surahs there are: a remembered surah outside 1..114 is not one.
 _SURAH_COUNT = 114
+
+#: Default clips a running job was started with (``hold_default_clips``), each
+#: with how many jobs hold it. A new lecture's matching copies its default
+#: intro and outro beside it only when matching ends, so a default replaced
+#: meanwhile must stay on disk until then. Shared by every ``Prefs``: the
+#: window and its reviews may hold different ones over the same folder.
+_HELD_CLIPS: Counter[Path] = Counter()
+_HELD_LOCK = threading.Lock()
+
+
+def _held_clips() -> set[str]:
+    with _HELD_LOCK:
+        return {str(path) for path, count in _HELD_CLIPS.items() if count > 0}
 
 
 def _as_positive_int(value: object, highest: int | None = None) -> int | None:
@@ -305,7 +321,37 @@ class Prefs:
         value = {"intro": stored(intro), "outro": stored(outro)}
         self._settings.setValue("default_episode", json.dumps(value))
         self._settings.sync()
-        _remove_clips_but(folder, {v for v in value.values() if v is not None})
+        kept = {v for v in value.values() if v is not None}
+        _remove_clips_but(folder, kept | _held_clips())
+
+    def hold_default_clips(self, clips: Iterable[Path | None]) -> Callable[[], None]:
+        """Keep *clips* (a job's ``episode_defaults``) on disk until the returned call.
+
+        A job started with these defaults copies them later; another default
+        chosen meanwhile replaces them in the settings but does not delete
+        them. The returned function lets go (once; a second call does nothing)
+        and removes what no default and no other job names any more.
+        """
+        held = [Path(clip).resolve() for clip in clips if clip]
+        with _HELD_LOCK:
+            _HELD_CLIPS.update(held)
+        released = False
+
+        def release() -> None:
+            nonlocal released
+            if released:
+                return
+            released = True
+            with _HELD_LOCK:
+                _HELD_CLIPS.subtract(held)
+                for path in held:
+                    if _HELD_CLIPS[path] <= 0:
+                        del _HELD_CLIPS[path]
+            if held:
+                defaults = {str(clip.resolve()) for clip in self.default_episode if clip}
+                _remove_clips_but(user_data_dir() / "episode", defaults | _held_clips())
+
+        return release
 
     # -- more_options_open --------------------------------------------------
 

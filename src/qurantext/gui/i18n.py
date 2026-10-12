@@ -354,6 +354,14 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
             "The {part} clip is not a video Qalun can read, so the episode was not made."
         ),
         "episode.error.cancelled": "The episode was cancelled; the lecture video is kept.",
+        "episode.error.recitation_changed": (
+            "The recitation's video \u2068{name}\u2069 was rendered again while the episode "
+            "was being made, so the episode was not made. Render again to use the new one."
+        ),
+        "episode.error.locked": (
+            "\u2068{name}\u2069 could not be replaced: it may be open in another program, "
+            "such as a video player. Close it and render again."
+        ),
         "episode.part.intro": "intro",
         "episode.part.outro": "outro",
         "episode.seed.missing": (
@@ -700,8 +708,10 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "look.image_failed": "تعذّر استخدام \u2068{name}\u2069 خلفيةً.",
         "look.image_missing": "صورة الخلفية مفقودة؛ تُعرض خلفية اللوحة بدلًا منها.",
         "look.image_unreadable": "تعذّرت قراءة صورة الخلفية؛ تُعرض خلفية اللوحة بدلًا منها.",
-        "episode.error.missing": "المقطع {name} مفقود، فلم تُصنع الحلقة.",
-        "episode.error.not_video": "{name} ليس فيديو يستطيع قالون قراءته، فلم تُصنع الحلقة.",
+        "episode.error.missing": "المقطع \u2068{name}\u2069 مفقود، فلم تُصنع الحلقة.",
+        "episode.error.not_video": (
+            "\u2068{name}\u2069 ليس فيديو يستطيع قالون قراءته، فلم تُصنع الحلقة."
+        ),
         "episode.error.recitation": "تعذّر استخدام مهمة التلاوة: {reason}",
         "episode.error.ffmpeg": "فشل تجميع الحلقة: {reason}",
         "episode.error.subtitles": "صُنعت الحلقة، لكن تعذّرت كتابة ملفات ترجمتها النصية: {reason}",
@@ -710,6 +720,14 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
             "مقطع \u2068{part}\u2069 ليس فيديو يستطيع قالون قراءته، فلم تُصنع الحلقة."
         ),
         "episode.error.cancelled": "أُلغيت الحلقة، وبقي فيديو المحاضرة كما هو.",
+        "episode.error.recitation_changed": (
+            "أُعيد إخراج فيديو التلاوة \u2068{name}\u2069 أثناء صنع الحلقة، فلم تُصنع الحلقة. "
+            "أعد الإخراج لاستخدام الجديد."
+        ),
+        "episode.error.locked": (
+            "تعذّر استبدال \u2068{name}\u2069: قد يكون مفتوحًا في برنامج آخر "
+            "كمشغّل فيديو. أغلقه ثم أعد الإخراج."
+        ),
         "episode.part.intro": "المقدمة",
         "episode.part.outro": "الخاتمة",
         "episode.seed.missing": (

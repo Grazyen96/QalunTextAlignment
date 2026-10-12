@@ -12,6 +12,7 @@ review windows it opens — one per project.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
@@ -140,6 +141,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(plain_title(t("app.title")))
 
         self._cancel: CancelToken | None = None
+        #: Lets go of the default intro and outro the running job was started
+        #: with, which ``Prefs`` keeps on disk until then (``hold_default_clips``).
+        self._release_clips: Callable[[], None] | None = None
         #: Runs the matching/render job off the UI thread.
         self._jobs = BackgroundJobs(self)
         #: Set once the window was closed while a job ran: the window is hidden,
@@ -306,6 +310,9 @@ class MainWindow(QMainWindow):
         self.new_job.set_running(True)
         self.new_job.set_progress(None, starting)
         self.job_list.set_running(Path(spec.audio).name, starting)
+        # A new lecture copies these when its matching ends; a default chosen
+        # meanwhile (in a review's Episode dialog) must not delete them first.
+        self._release_clips = self._prefs.hold_default_clips(spec.episode_defaults)
 
         # The job may be a closure; every callback is a bound method, so it
         # runs on this (the UI) thread rather than the worker's.
@@ -439,6 +446,9 @@ class MainWindow(QMainWindow):
         self.job_list.end_running()
 
     def _on_done(self) -> None:
+        if self._release_clips is not None:
+            self._release_clips()
+            self._release_clips = None
         if self._closing:
             # The job's thread has quit (or is about to): join it, then leave.
             self._cancel = None
