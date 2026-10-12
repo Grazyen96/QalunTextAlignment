@@ -1,13 +1,17 @@
 # QuranText
 
-QuranText helps you take Arabic audio or existing WhisperX transcripts and do four main things:
+QuranText (the package; the app's window is called **Qalun**) takes Arabic
+audio, or an existing WhisperX transcript, and does four main things:
 
-1. **Transcribe audio** on this computer with a local speech model (WhisperX on Replicate is optional).
+1. **Transcribe audio** on this computer with a local speech model (WhisperX on
+   Replicate is optional).
 2. **Detect a recitation range** by finding the first and last ayah in a recitation.
 3. **Detect Quran mentions inside lecture audio** and return timestamped spans.
 4. **Render timestamped Quran videos** from lecture or recitation match results.
 
-The project uses a `src/` package layout and keeps the older root scripts as thin compatibility wrappers.
+It ships as a desktop app (Qalun, built with PySide6) and as a command-line
+tool. The project uses a `src/` package layout and keeps the older root scripts
+as thin compatibility wrappers.
 
 ## Python Version
 
@@ -15,17 +19,38 @@ Python 3.10+ is required.
 
 ## What QuranText Can Do
 
-Use QuranText when you have one of these starting points:
+You can start from audio only, from a saved WhisperX JSON transcript (no
+retranscribing), or from a match JSON result (to render a video).
 
-- **Audio only** and you want Quran matching.
-- **A saved WhisperX JSON transcript** and you want matching without retranscribing.
-- **A match JSON result** and you want to render a video.
+**The app (Qalun)**
+
+- Transcribes on this computer with NVIDIA's FastConformer Arabic model, run by
+  sherpa-onnx and downloaded once on first use. WhisperX on Replicate is an
+  optional choice that uploads the recording; there is no automatic fallback
+  between the two.
+- Matches a recitation (detected or stated range) or a lecture (the Quran
+  ayat quoted in it) against the bundled Quran text: KFGQPC's Qaloon text v10,
+  converted by `tools/convert_mushaf_v10.py`. Videos draw it in the bundled
+  Qaloon font; the generated intro and outro write their titles in Amiri.
+- A review window to correct word timing and subtitles, change the ayah cards
+  (including cards placed by hand), choose the video's look and set up an episode
+  (intro, recitation, lecture, outro) before anything is rendered.
+- Renders MP4 videos and writes subtitles as SRT, WebVTT or ASS files.
+- Generates an intro and an outro in the lecture's own look, the outro with a
+  QR code for a tracked link.
+- English and Arabic interface; an error log you can send when something goes
+  wrong.
+
+**The command line** does the same matching and rendering without the window:
+`transcribe`, `range-match`, `lecture-match`, `recitation-match`,
+`generate-video`, `run-all`, plus `project`, `preview`, `check-timing`,
+`surahs`, `build-db`, `doctor` and the legacy `word-align`.
 
 Typical workflows:
 
-- **Recitation audio** → detect the first and last ayah in the recited range.
-- **Recitation audio** → detect the range and generate timestamped display spans.
-- **Lecture audio** → find places where Quran ayat were mentioned.
+- **Recitation audio** → detect the first and last ayah, or give the range and
+  time the ayat inside it.
+- **Lecture audio** → find the places where Quran ayat were mentioned.
 - **Lecture or recitation match JSON** → render an MP4 overlay video.
 
 ## Installation
@@ -120,16 +145,45 @@ job transcribed on this computer downloads the speech model once (about
 110 MB), shown as its own stage. Matching done, the review opens automatically
 so corrections happen before anything is rendered.
 
-**The review, in brief.** Play the recording, step word by word, and nudge a
-word's start or end at the playhead; Save (Ctrl+S) writes the correction, Undo
-and Redo step back and forth through them, and a gap the recording covers but
-no word does is flagged so it does not go unnoticed. Render makes the video
-once the timing looks right; Export writes the corrected subtitles on their
-own. In a lecture, "Show ayah… from here" (beside Play) puts the ayat you pick
-on the card from the playhead until the next card — for the ayah a teacher goes
-back to and explains without reciting it — and a double-click on a card's Ayah
-cell (or "Change ayah…" in its menu) changes which ayat it shows. The text
-always comes from the Quran store, and a card placed by hand is marked ✎.
+**The review window.** Matching done, the review opens automatically so
+corrections happen before anything is rendered.
+
+- *Timing.* Play the recording, step word by word, and nudge a word's start or
+  end at the playhead. Save (Ctrl+S) writes the correction, Undo and Redo step
+  back and forth through them, and a gap the recording covers but no word does
+  is flagged so it does not go unnoticed. The timeline (the waveform and the
+  word strip) always runs right to left, in both interface languages, so an
+  ayah's words read in their own order: the recording's start is on the right,
+  ← steps to the next word and → to the previous, and `,` / `.` nudge the
+  selected edge left (later) / right (earlier). Times and numbers stay Western
+  digits, left to right.
+- *Surah on the cards.* In a lecture the card shows one surah, the one it
+  studies ("Surah on the cards", automatic by default). Ayat quoted from other
+  surahs stay in the subtitles.
+- *Cards by hand.* "Show ayah… from here" (beside Play) puts the ayat you pick
+  on the card from the playhead until the next card, for the ayah a teacher
+  goes back to and explains without reciting it. A double-click on a card's Ayah
+  cell (or "Change ayah…" in its menu) changes which ayat it shows. The text
+  always comes from the Quran store, and a card placed by hand is marked ✎.
+- *Look.* See below.
+- *Render and Export.* Render makes the video once the timing looks right;
+  Export writes the corrected subtitles on their own.
+- *Episode.* See below.
+
+**Look: palettes and backgrounds.** The Look panel beside the frame preview
+redraws the preview with every change, and the export looks like the preview.
+Pick one of six palettes: Night gold (the default, and the look of a project
+that never chose one), Emerald, Sand, Ink on paper (a light card with dark
+text), Ocean and Rose. "Customise" opens pickers for the individual colours
+(text, highlighted word, titles, the card and its opacity, the captions and the
+background colour); a warning shows when a text colour is hard to read against
+the card, and never blocks. The background covers the whole frame, with the card
+on top: a solid colour, a gradient, one of three patterns (Stars, Lattice,
+Arches) or your own image, which can be dimmed and blurred to keep the text
+readable. A look is saved per video; "Use for new videos" makes the current one
+the default for jobs started afterwards. From the command line, `--look` on
+`generate-video` and `preview` takes the palette's name (`night_gold`, ...). The
+separate ASS renderer keeps its own white-text style.
 
 **Episode: intro, recitation and outro.** In a lecture's review, "Episode…"
 (beside Render) chooses what plays around the lecture: an intro clip, the video
@@ -144,10 +198,8 @@ lecture starts in it. The lecture's own video is kept whatever happens to the
 episode: a clip gone missing, or a cancel during the joining, is said in the
 review and the episode is simply not written. The clips are copied beside the
 project (`<name>.qalun.episode/`), so the folder can be moved with them inside;
-the recitation is only referenced. An intro or outro you choose (or remove) in
-the dialog becomes what new lectures start with; a part you leave alone keeps
-its default, so setting only a lecture's recitation never clears the channel's
-intro. The review shows "Episode: on" when any part is set. Clips copied beside
+the recitation is only referenced. What you change in the dialog also becomes the default for
+new lectures (see below). The review shows "Episode: on" when any part is set. Clips copied beside
 a project stay there after an Undo or a Remove (Redo needs them back); delete
 the `.qalun.episode` folder's unused files by hand if it grows.
 
@@ -156,8 +208,7 @@ the `.qalun.episode` folder's unused files by hand if it grows.
 In the Episode dialog the intro and the outro are each **None**, **My clip** or
 **Generated**. A generated part is drawn by Qalun in the lecture's own look, at
 its size, while the episode is made, and kept beside the project
-(`generated-intro-<hash>.mp4`) until something it is made from changes. A line above OK and Cancel reminds you
-that what you change in the dialog also becomes the default for new lectures.
+(`generated-intro-<hash>.mp4`) until something it is made from changes.
 
 - **The intro** shows a name you type (your channel or the speaker) above the
   lecture's surah and ayat, read from its cards: «سورة الفرقان، الآيات ٤٤–٤٩».
@@ -218,12 +269,8 @@ job list keeps finding it.
 **Language.** The window is in English or Arabic. It follows the system's
 language until you choose one at the bottom of the home window, and remembers
 that choice from then on (switching waits until no review is open and no job
-is running). Arabic lays the window out right to left. In both languages the
-review window's timeline — the waveform and the word strip — runs right to
-left, so an ayah's words read in their own order: the recording's start is on
-the right, ← steps to the next word and → to the previous, and `,` / `.` nudge
-the selected edge left (later) / right (earlier). Times and numbers read left
-to right and stay Western digits in both. The Arabic text is a draft awaiting
+is running). Arabic lays the window out right to left; the review timeline runs
+right to left in both languages (see above). The Arabic text is a draft awaiting
 review by a native speaker.
 
 **Where settings live.** The window's settings (the language, the last choices
@@ -239,6 +286,14 @@ settings for an app named Qalun:
 Deleting it resets the window to how it was on the first run. Nothing on disk
 is touched: hidden jobs come back into the list, and jobs written to a folder of
 their own drop out of it until a new job uses that folder again.
+
+**The log file.** Errors the window would otherwise hide are written to
+`qalun.log` in the `logs` folder of the app's data folder (on Linux
+`~/.local/share/qalun/logs/`; `%LOCALAPPDATA%\Qalun\logs` on Windows,
+`~/Library/Application Support/Qalun/logs` on macOS). It keeps 1 MB and three
+older copies, and only warnings and worse. "Open log folder" at the bottom of
+the home window opens it, and `qurantext doctor` (or `qalun --doctor`) prints
+the log's path. It is the file to send when something goes wrong.
 
 Qt is an optional dependency, so the command line installs without it. Running
 `qalun` without it prints one line telling you what to install.
@@ -318,6 +373,10 @@ src/qurantext/
   config/              Paths, settings, environment loading
   core/                Quran parsing, matching, lecture matching, shared video helpers, and renderer modules
   io/                  JSON/transcript readers and writers
+  jobs/                Job catalogue, episode and generated intro/outro steps, export
+  gui/                 The Qalun window (home and review)
+  data/                The SQLite Quran store
+  assets/              Bundled Quran text (KFGQPC Qaloon v10) and fonts (Qaloon, Amiri)
   pipelines/           End-to-end workflows
   services/            Transcription engines (local model, WhisperX on Replicate) and the model store
   utils/               Small generic helpers
@@ -591,7 +650,7 @@ Measured on a 19-minute recitation of Al-Furqan, against searching for the range
 Faster and better, because the search was never the right question. Use
 `python3 -m qurantext surahs --quran ...` to list surah numbers and ayah counts.
 
-### 8. Detect recitation range plus timestamped ayah spans
+### 5. Detect recitation range plus timestamped ayah spans
 
 From audio:
 
@@ -609,7 +668,7 @@ python3 -m qurantext recitation-match \
 
 This mode first detects the overall recitation range, then emits forward-moving timestamped spans inside that range.
 
-### 5. Render a video from match output
+### 6. Render a video from match output
 
 ASS renderer:
 
@@ -630,7 +689,7 @@ python3 -m qurantext generate-video \
   --matches output/recitation_matching/example_recitation.json \
   --output output/videos/example_frame.mp4 \
   --renderer frame \
-  --font-file fonts/qaloon.10.ttf \
+  --font-file src/qurantext/assets/fonts/qaloon.10.ttf \
   --width 1920 \
   --height 1080 \
   --fps 25
@@ -644,7 +703,7 @@ python3 render_ayat_video.py \
   --matches recitation_result.json \
   --output test2-recitation-alfurquan-frame.mp4 \
   --renderer frame \
-  --font-file fonts/qaloon.10.ttf \
+  --font-file src/qurantext/assets/fonts/qaloon.10.ttf \
   --width 1920 \
   --height 1080 \
   --fps 25
@@ -658,13 +717,13 @@ python3 -m qurantext generate-video \
   --matches recitation_result.json \
   --output test2-recitation-alfurquan-frame.mp4 \
   --renderer frame \
-  --font-file fonts/qaloon.10.ttf \
+  --font-file src/qurantext/assets/fonts/qaloon.10.ttf \
   --width 1920 \
   --height 1080 \
   --fps 25
 ```
 
-### 6. Run transcription + matching in one command
+### 7. Run transcription + matching in one command
 
 ```bash
 python3 -m qurantext run-all \
@@ -682,7 +741,7 @@ python3 -m qurantext run-all \
   --font-name "Amiri"
 ```
 
-### 7. Legacy word-level alignment workflow
+### 8. Legacy word-level alignment workflow
 
 ```bash
 python3 -m qurantext word-align \
@@ -719,7 +778,7 @@ python3 -m qurantext generate-video \
   --matches recitation_result.json \
   --output output/videos/alFurqan-frame.mp4 \
   --renderer frame \
-  --font-file fonts/qaloon.10.ttf
+  --font-file src/qurantext/assets/fonts/qaloon.10.ttf
 ```
 
 ## Backward-Compatible Script Wrappers
