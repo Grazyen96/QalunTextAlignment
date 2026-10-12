@@ -24,7 +24,7 @@ from qurantext.jobs.episode import (
     episode_path_for,
     recitation_video,
 )
-from qurantext.jobs.episode_assets import project_episode
+from qurantext.jobs.episode_assets import project_episode, seed_project_episode
 from qurantext.jobs.look_assets import seed_project_look
 from qurantext.jobs.project import (
     JobSettings,
@@ -81,6 +81,10 @@ class JobSpec:
     #: The surah a lecture's cards keep to; None guesses it. A recitation
     #: states its range instead and ignores this.
     studied_surah: int | None = None
+    #: The intro and outro a brand-new lecture starts with (the person's
+    #: default episode), as absolute paths; None for a part not set. Like the
+    #: look, a re-match never uses them, and a recitation ignores them.
+    episode_defaults: tuple[str | None, str | None] = (None, None)
 
     @property
     def settings(self) -> JobSettings:
@@ -176,12 +180,14 @@ def _keep_earlier(destination: Path, derived: Project) -> Path | str | None:
     backup per run would bury the one that matters. A file that cannot be read
     is always kept: what it held cannot be compared.
 
-    The look and the output choices are compared on neither side (the output
-    choices are the run's own and are written either way), and when the content
-    changed the earlier project's style (its look) is carried into *derived*: a
-    re-match derives cards and captions only, and the look the person chose for
-    this video is not something it could have changed. The style's image path
-    stays valid, as the new project takes the earlier one's name and folder.
+    The look, the episode and the output choices are compared on neither side
+    (the output choices are the run's own and are written either way), and when
+    the content changed the earlier project's style (its look) and episode are
+    carried into *derived*: a re-match derives cards and captions only, and the
+    look and the intro, recitation and outro the person chose for this video
+    are not something it could have changed. The style's image path and the
+    episode's clip paths stay valid, as the new project takes the earlier one's
+    name and folder.
     For the same reason a studied surah the earlier project chose is carried
     when this run left it to "Detect automatically" (``_with_earlier_surah``).
     """
@@ -190,11 +196,11 @@ def _keep_earlier(destination: Path, derived: Project) -> Path | str | None:
     earlier: Project | None = None
     try:
         earlier = load_project(destination)
-        # Content only: the look and the output choices (the studied surah
-        # among them) are not what matching derives.
+        # Content only: the look, the episode and the output choices (the
+        # studied surah among them) are not what matching derives.
         unchanged = (
-            replace(earlier, style={}, export={}).content_hash()
-            == replace(derived, style={}, export={}).content_hash()
+            replace(earlier, style={}, export={}, episode={}).content_hash()
+            == replace(derived, style={}, export={}, episode={}).content_hash()
         )
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         earlier, unchanged = None, False
@@ -202,6 +208,7 @@ def _keep_earlier(destination: Path, derived: Project) -> Path | str | None:
         return _UNCHANGED
     if earlier is not None:
         derived.style = copy.deepcopy(earlier.style)
+        derived.episode = copy.deepcopy(earlier.episode)
         set_job_settings(derived, _with_earlier_surah(job_settings(derived), earlier))
     return _set_aside(destination)
 
@@ -292,9 +299,16 @@ def run_matching(
         return existing
     if isinstance(kept, Path):
         report(progress, "detect", t("job.progress.kept", name=kept.name), translated=True)
-    elif kept is None and spec.style:
-        # Nothing was there: a brand-new video starts with the default look.
-        seed_project_look(project, destination, spec.style)
+    elif kept is None:
+        # Nothing was there: a brand-new video starts with the default look,
+        # and a brand-new lecture with the default intro and outro.
+        if spec.style:
+            seed_project_look(project, destination, spec.style)
+        if spec.mode == "lecture" and any(spec.episode_defaults):
+            intro, outro = (Path(clip) if clip else None for clip in spec.episode_defaults)
+            # A default clip that is gone is left out, and said as the backup is.
+            for key, fmt in seed_project_episode(project, destination, intro, outro):
+                report(progress, "detect", t(key, **fmt), translated=True)
     save_project(project, destination)
     return project
 

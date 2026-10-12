@@ -199,7 +199,9 @@ this is the only place anyone hears each platform's build recognise speech.
     a lecture render reports it: the four errors `episode.error.missing` («المقطع … مفقود،
     فلم تُصنع الحلقة»), `episode.error.not_video`, `episode.error.recitation` and
     `episode.error.ffmpeg` («فشل تجميع الحلقة»), and `episode.error.subtitles` («صُنعت الحلقة،
-    لكن تعذّرت كتابة ملفات ترجمتها النصية»). Is «الحلقة» the right word for the episode?
+    لكن تعذّرت كتابة ملفات ترجمتها النصية»), and the two notices a new lecture's default
+    intro or outro can give, `episode.seed.missing` («المقطع الافتراضي … مفقود، فتبدأ هذه
+    المحاضرة بدونه») and `episode.seed.failed`. Is «الحلقة» the right word for the episode?
 - [ ] Keep every direction mark: the U+2066…U+2069 isolates and the U+200F marks,
       written as `\u2066`-style escapes in the source. The tests fail if a key goes
       missing.

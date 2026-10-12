@@ -348,6 +348,13 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "episode.error.subtitles": (
             "The episode was made, but its subtitle files could not be written: {reason}"
         ),
+        "episode.seed.missing": (
+            "The default clip \u2068{name}\u2069 is missing, so this lecture starts without it."
+        ),
+        "episode.seed.failed": (
+            "The default clip \u2068{name}\u2069 could not be copied beside this lecture, "
+            "so it starts without it."
+        ),
     },
     # Drafted for the first release; a native speaker must review every line
     # before it ships (spec §4). Keep the order and grouping of "en".
@@ -669,6 +676,8 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "episode.error.recitation": "تعذّر استخدام مهمة التلاوة: {reason}",
         "episode.error.ffmpeg": "فشل تجميع الحلقة: {reason}",
         "episode.error.subtitles": "صُنعت الحلقة، لكن تعذّرت كتابة ملفات ترجمتها النصية: {reason}",
+        "episode.seed.missing": "المقطع الافتراضي {name} مفقود، فتبدأ هذه المحاضرة بدونه.",
+        "episode.seed.failed": "تعذّر نسخ المقطع الافتراضي {name} بجانب هذه المحاضرة، فتبدأ بدونه.",
     },
 }
 LANGUAGES = tuple(STRINGS)

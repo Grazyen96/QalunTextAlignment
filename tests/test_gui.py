@@ -2541,3 +2541,141 @@ def test_episode_subtitles_that_cannot_be_written_keep_the_episode(tmp_path, mon
     assert outcome.episode_video is not None
     assert outcome.episode_error == t("episode.error.subtitles", reason="No space left on device")
     assert project.render["episode"]["lecture_offset"] == 5.0
+
+
+# --- the default episode a new lecture starts with -------------------------------
+
+
+def _default_clips(tmp_path) -> tuple[Path, Path]:
+    folder = tmp_path / "app-data" / "episode"
+    folder.mkdir(parents=True)
+    intro, outro = folder / "intro.mp4", folder / "outro.mov"
+    intro.write_bytes(b"intro clip")
+    outro.write_bytes(b"outro clip")
+    return intro, outro
+
+
+def test_a_new_lecture_job_is_seeded_with_the_default_episode(tmp_path, monkeypatch) -> None:
+    from qurantext.jobs.episode_assets import episode_dir_for, project_episode
+    from qurantext.jobs.project import load_project
+
+    intro, outro = _default_clips(tmp_path)
+    jobs_module, spec = _lecture_setup(tmp_path, monkeypatch)
+    spec = replace(spec, episode_defaults=(str(intro), str(outro)))
+    events: list[ProgressEvent] = []
+    project = jobs_module.run_matching(spec, progress=events.append)
+
+    saved = project_episode(load_project(project.path))
+    assert saved.intro.parent == episode_dir_for(project.path)
+    assert saved.intro.read_bytes() == b"intro clip" and saved.intro != intro
+    assert saved.outro.parent == episode_dir_for(project.path)
+    assert saved.outro.read_bytes() == b"outro clip" and saved.outro.suffix == ".mov"
+    assert saved.recitation is None
+    assert not Path(project.episode["intro"]).is_absolute(), "moves with the project folder"
+    assert not [e for e in events if e.translated and e.stage == "detect" and "clip" in e.message]
+
+
+def test_a_missing_default_clip_is_skipped_with_a_notice(tmp_path, monkeypatch) -> None:
+    from qurantext.gui.i18n import t
+    from qurantext.jobs.episode_assets import project_episode
+    from qurantext.jobs.project import load_project
+
+    gone = tmp_path / "app-data" / "episode" / "gone.mp4"
+    jobs_module, spec = _lecture_setup(tmp_path, monkeypatch)
+    spec = replace(spec, episode_defaults=(str(gone), None))
+    events: list[ProgressEvent] = []
+    project = jobs_module.run_matching(spec, progress=events.append)
+
+    assert project.path is not None and project.path.exists(), "the job is still created"
+    assert load_project(project.path).episode == {}
+    assert project_episode(project).is_empty
+    notice = t("episode.seed.missing", name="gone.mp4")
+    assert "gone.mp4" in notice
+    assert any(e.stage == "detect" and e.message == notice and e.translated for e in events)
+
+
+def test_a_default_clip_that_cannot_be_copied_is_skipped_with_a_notice(
+    tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui.i18n import t
+    from qurantext.jobs.project import load_project
+
+    intro, outro = _default_clips(tmp_path)
+    wrong = intro.with_name("intro.txt")
+    wrong.write_bytes(b"not a clip")
+    jobs_module, spec = _lecture_setup(tmp_path, monkeypatch)
+    spec = replace(spec, episode_defaults=(str(wrong), str(outro)))
+    events: list[ProgressEvent] = []
+    project = jobs_module.run_matching(spec, progress=events.append)
+
+    episode = load_project(project.path).episode
+    assert "intro" not in episode and episode["outro"], "the clip that copied is kept"
+    notice = t("episode.seed.failed", name="intro.txt")
+    assert any(e.message == notice and e.translated for e in events)
+
+
+def test_recitation_jobs_are_not_seeded(tmp_path, monkeypatch) -> None:
+    from qurantext.jobs.episode_assets import episode_dir_for
+    from qurantext.jobs.project import load_project
+
+    intro, outro = _default_clips(tmp_path)
+    jobs_module, spec = _rematch_setup(tmp_path, monkeypatch)
+    project = jobs_module.run_matching(replace(spec, episode_defaults=(str(intro), str(outro))))
+
+    assert load_project(project.path).episode == {}
+    assert not episode_dir_for(project.path).exists()
+
+
+def _choose_an_episode(project_path: Path, tmp_path: Path) -> dict:
+    """Give the saved lecture at *project_path* an intro and a recitation; return its episode."""
+    from qurantext.jobs.episode_assets import (
+        EpisodeChoice,
+        import_episode_clip,
+        set_project_episode,
+    )
+    from qurantext.jobs.project import load_project, save_project
+
+    clip = tmp_path / "chosen.mp4"
+    clip.write_bytes(b"chosen intro")
+    project = load_project(project_path)
+    set_project_episode(
+        project,
+        EpisodeChoice(
+            intro=import_episode_clip(project_path, clip),
+            recitation=tmp_path / "rec_recitation.qalun.json",
+        ),
+    )
+    save_project(project, project_path)
+    return load_project(project_path).episode
+
+
+def test_a_rematch_keeps_the_earlier_episode(tmp_path, monkeypatch) -> None:
+    from qurantext.jobs.episode_assets import project_episode
+    from qurantext.jobs.project import load_project, save_project
+
+    intro, outro = _default_clips(tmp_path)
+    jobs_module, spec = _lecture_setup(tmp_path, monkeypatch)
+    first = jobs_module.run_matching(spec)
+    chosen = _choose_an_episode(first.path, tmp_path)
+
+    # Unchanged content: no backup, the file is left as it was, episode and all,
+    # and the defaults are not seeded over the person's choice.
+    before = first.path.read_bytes()
+    again = jobs_module.run_matching(replace(spec, episode_defaults=(str(intro), str(outro))))
+    assert not list(tmp_path.glob("*.qalun-backup.json")), "the episode is not content"
+    assert first.path.read_bytes() == before
+    assert again.episode == chosen
+
+    # Changed content: a backup is kept, and the new project carries the episode.
+    corrected = load_project(first.path)
+    corrected.cards[0]["start_time"] = 0.25
+    save_project(corrected, first.path)
+    project = jobs_module.run_matching(replace(spec, episode_defaults=(str(intro), str(outro))))
+
+    assert list(tmp_path.glob("dars_lecture.*.qalun-backup.json")), "content changed"
+    assert project.cards[0]["start_time"] != 0.25
+    assert project.episode == chosen
+    kept = project_episode(load_project(first.path))
+    assert kept.intro is not None and kept.intro.read_bytes() == b"chosen intro"
+    assert kept.recitation == (tmp_path / "rec_recitation.qalun.json").resolve()
+    assert kept.outro is None, "no default outro was added"

@@ -766,6 +766,15 @@ class NewJobPanel(QWidget):
             output_dir=self._output_dir,
             style=self._prefs.default_look_style(),
             studied_surah=None if recitation else self.studied_surah_box.currentData(),
+            episode_defaults=(None, None) if recitation else self._episode_defaults(),
+        )
+
+    def _episode_defaults(self) -> tuple[str | None, str | None]:
+        """The default intro and outro a new lecture starts with, as absolute strings."""
+        intro, outro = self._prefs.default_episode
+        return (
+            str(intro) if intro is not None else None,
+            str(outro) if outro is not None else None,
         )
 
     def problem(self) -> str | None:

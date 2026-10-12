@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from qurantext.jobs.look_assets import copy_by_content
 from qurantext.jobs.project import Project, _resolve_path, _store_path
@@ -24,6 +25,7 @@ __all__ = [
     "episode_dir_for",
     "import_episode_clip",
     "project_episode",
+    "seed_project_episode",
     "set_project_episode",
 ]
 
@@ -122,3 +124,40 @@ def set_project_episode(
         if value is not None:
             episode[key] = _store_path(Path(value), folder)
     project.episode = episode
+
+
+def seed_project_episode(
+    project: Project, project_path: Path, intro: Path | None, outro: Path | None
+) -> list[tuple[str, dict[str, Any]]]:
+    """Give a new lecture about to be saved at *project_path* the default *intro* and *outro*.
+
+    Each clip is copied beside the project, as choosing it in the Episode
+    dialog would; the recitation is left unchosen, since a default one would
+    be the wrong recitation for every lecture but one. A default clip that has
+    gone missing, or that cannot be copied, is not a reason to lose a new job:
+    it is left out, and a notice says so.
+
+    Returns the notices as ``(i18n key, values)`` pairs for the caller to say
+    in the person's language (``episode.seed.missing``,
+    ``episode.seed.failed``); the job layer does not translate, as
+    :class:`~qurantext.jobs.episode.EpisodeError` does not. Never raises for a
+    clip that is missing or refused.
+    """
+    notices: list[tuple[str, dict[str, Any]]] = []
+
+    def copied(clip: Path | None) -> Path | None:
+        if clip is None:
+            return None
+        clip = Path(clip)
+        try:
+            return import_episode_clip(project_path, clip)
+        except FileNotFoundError:
+            notices.append(("episode.seed.missing", {"name": clip.name}))
+        except (ValueError, OSError):
+            notices.append(("episode.seed.failed", {"name": clip.name}))
+        return None
+
+    choice = EpisodeChoice(intro=copied(intro), outro=copied(outro))
+    if not choice.is_empty:
+        set_project_episode(project, choice, project_dir=Path(project_path).parent)
+    return notices
