@@ -167,6 +167,10 @@ def export_project_subtitles(
 ) -> list[Path]:
     """Write subtitle files for *project* without rendering anything.
 
+    Each file is *stem* with the format's suffix in place of its own, so pass
+    a video's path (``talk 25.7.mp4`` gives ``talk 25.7.srt``) rather than a
+    stem whose name has a dot in it, which would be cut at that dot.
+
     *offset* seconds are added to every cue after the timeline's own shift:
     the episode's files hold the lecture's cues where the lecture starts inside
     the joined video, after its intro and recitation.

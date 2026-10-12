@@ -41,7 +41,7 @@ from qurantext.jobs.project_render import (
     render_project,
 )
 from qurantext.pipelines.detection import run_detection, run_recitation_range
-from qurantext.utils.progress import CancelToken, ProgressCallback, report
+from qurantext.utils.progress import CancelToken, JobCancelled, ProgressCallback, report
 
 __all__ = [
     "JobSpec",
@@ -248,11 +248,15 @@ def run_matching(
     *,
     progress: ProgressCallback | None = None,
     cancel: CancelToken | None = None,
+    notices: list[str] | None = None,
 ) -> Project:
     """Find or align the ayat, then write the project the review opens.
 
     An earlier project for the same match file is kept as a backup when its
-    content differs, and the backup is reported as progress.
+    content differs, and the backup is reported as progress. What a new
+    lecture's default episode could not do (a default clip gone) is reported
+    as progress too, and appended to *notices*, already in the window's
+    language, for a window that keeps it on screen after the job.
     """
     audio = Path(spec.audio)
     match_path = match_path_for(spec)
@@ -308,7 +312,10 @@ def run_matching(
             intro, outro = (Path(clip) if clip else None for clip in spec.episode_defaults)
             # A default clip that is gone is left out, and said as the backup is.
             for key, fmt in seed_project_episode(project, destination, intro, outro):
-                report(progress, "detect", t(key, **fmt), translated=True)
+                said = t(key, part=t(f"episode.part.{fmt['part']}"))
+                report(progress, "detect", said, translated=True)
+                if notices is not None:
+                    notices.append(said)
     save_project(project, destination)
     return project
 
@@ -380,10 +387,10 @@ def _make_episode(
 
     Returns the episode written (None when the episode has no part besides
     the lecture, or it could not be made) and what went wrong, in the window's
-    language (None when nothing did). The lecture's video and its record stay
-    as they are whatever happens here. A cancel passes through as
-    ``JobCancelled``: the lecture is complete, and the join leaves no partial
-    file.
+    language (None when nothing did). The lecture is complete and recorded by
+    now, so nothing here may make the job read as stopped or failed: a cancel
+    during the episode, and any error, end in the second value, and the job
+    finishes with the lecture's outcome. The join leaves no partial file.
     """
     try:
         return _join_episode(
@@ -391,6 +398,31 @@ def _make_episode(
         )
     except EpisodeError as error:
         return None, t(error.key, **error.fmt)
+    except JobCancelled:
+        return None, t("episode.error.cancelled")
+    except Exception as error:  # noqa: BLE001 — the lecture's render must stand
+        return None, t("episode.error.ffmpeg", reason=str(error) or type(error).__name__)
+
+
+#: The parts a person adds as clips, by the name the window gives them.
+_CLIP_PARTS = ("intro", "outro")
+
+
+def _part_error(error: EpisodeError, clips: dict[str, Path]) -> EpisodeError:
+    """*error*, said as "the intro clip …" when it names a clip by its copy's file name.
+
+    The copies beside the project are named by their content (``3f2a9c1b2d4e.mp4``),
+    which tells the person nothing about which part is meant.
+    """
+    kind = {"episode.error.missing": "missing", "episode.error.not_video": "not_video"}.get(
+        error.key
+    )
+    if kind is None:
+        return error
+    for part, clip in clips.items():
+        if error.fmt.get("name") == clip.name:
+            return EpisodeError(f"episode.error.part_{kind}", part=t(f"episode.part.{part}"))
+    return error
 
 
 def _join_episode(
@@ -404,14 +436,20 @@ def _join_episode(
 ) -> tuple[Path | None, str | None]:
     """:func:`_make_episode`'s work; raises :class:`EpisodeError` for what stops it.
 
-    When the job writes subtitle files, the episode gets its own, holding the
-    lecture's cues moved to where the lecture starts in it. The episode is
-    recorded in the project's render, and saved, before they are written: a
-    subtitle file that cannot be written leaves the episode made, and says so.
+    The intro and outro are looked for first, so a missing outro is said
+    before minutes are spent rendering the recitation. When the job writes
+    subtitle files, the episode gets its own, holding the lecture's cues moved
+    to where the lecture starts in it. The episode is recorded in the
+    project's render before they are written: a subtitle file that cannot be
+    written leaves the episode made, and says so.
     """
     choice = project_episode(project)
     if choice.is_empty:
         return None, None
+    clips = {part: getattr(choice, part) for part in _CLIP_PARTS if getattr(choice, part)}
+    for part, clip in clips.items():
+        if not clip.is_file():
+            raise EpisodeError("episode.error.part_missing", part=t(f"episode.part.{part}"))
     recitation: Path | None = None
     if choice.recitation is not None:
         report(
@@ -432,16 +470,19 @@ def _join_episode(
         return None, None
     width, height, fps = _lecture_geometry(project)
     report(progress, "episode_join", t("job.stage.episode_join"), translated=True)
-    joined = assemble_episode(
-        parts,
-        episode_path_for(lecture),
-        lecture_index=lecture_index,
-        width=width,
-        height=height,
-        fps=fps,
-        progress=progress,
-        cancel=cancel,
-    )
+    try:
+        joined = assemble_episode(
+            parts,
+            episode_path_for(lecture),
+            lecture_index=lecture_index,
+            width=width,
+            height=height,
+            fps=fps,
+            progress=progress,
+            cancel=cancel,
+        )
+    except EpisodeError as error:
+        raise _part_error(error, clips) from error
     # Recorded before the subtitle files, which are extra: the video is made.
     assert project.render is not None  # render_project has just recorded it
     project.render["episode"] = {
@@ -450,21 +491,30 @@ def _join_episode(
         "durations": [round(d, 3) for d in joined.durations],
     }
     if project.path is not None:
-        save_project(project, project.path)
-    if subtitles in ("sidecar", "both") and formats:
-        stem = joined.output.with_name(f"{lecture.stem} – episode")
         try:
+            save_project(project, project.path)
+        except OSError:
+            # The episode is on disk either way; the record only names it. The
+            # review copies this render back and its next save writes it.
+            pass
+    if subtitles in ("sidecar", "both") and formats:
+        try:
+            # Named from the episode's own path: ``with_suffix`` on a bare stem
+            # would cut a name with a dot in it ("Tafsir 25.7-11 – episode")
+            # back to "Tafsir 25", the lecture's own subtitle file.
             export_project_subtitles(
                 project,
-                stem,
+                joined.output,
                 tuple(formats),
                 timeline="video",
                 offset=joined.lecture_offset,
             )
         except ValueError:
             pass  # no cue to write: the lecture's render wrote no subtitle file either
-        except OSError as error:
-            return joined.output, t("episode.error.subtitles", reason=str(error))
+        except Exception as error:  # noqa: BLE001 — OSError, or ffprobe unable to read
+            return joined.output, t(
+                "episode.error.subtitles", reason=str(error) or type(error).__name__
+            )
     return joined.output, None
 
 

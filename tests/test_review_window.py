@@ -16,6 +16,7 @@ from PySide6.QtTest import QTest  # noqa: E402
 from qurantext.gui.i18n import t  # noqa: E402
 from qurantext.gui.review.player import FakePlayer  # noqa: E402
 from qurantext.jobs.project import (  # noqa: E402
+    CaptionCue,
     Project,
     load_project,
     project_path_for,
@@ -502,6 +503,32 @@ def test_export_writes_the_chosen_formats_and_saves_first(qt_app, tmp_path, stor
     assert not session.dirty, "unsaved edits are saved before exporting"
     names = ", ".join(p.name for p in written)
     assert dialog._result_label.text() == f"Wrote 2 files: {names}"
+
+
+@pytest.mark.parametrize(
+    ("typed", "written"),
+    [
+        ("Tafsir 25.7-11", ["Tafsir 25.7-11.srt", "Tafsir 25.7-11.vtt"]),
+        ("Dars 12.10.2024", ["Dars 12.10.2024.srt", "Dars 12.10.2024.vtt"]),
+        ("talk.srt", ["talk.srt", "talk.vtt"]),
+    ],
+)
+def test_export_keeps_every_dot_in_the_name(qt_app, tmp_path, monkeypatch, typed, written) -> None:
+    """The name is a stem: "Tafsir 25.7-11" must not be written as "Tafsir 25.srt"."""
+    from qurantext.gui.review import export_dialog as module
+    from qurantext.gui.review.session import ReviewSession
+    from qurantext.jobs import project_render
+
+    monkeypatch.setattr(project_render, "get_audio_duration", lambda path: 10.0)
+    project = Project(
+        audio=tmp_path / "talk.mp3", mode="lecture", captions=[CaptionCue(1.0, 2.0, "line")]
+    )
+    save_project(project, tmp_path / "job.qalun.json")
+    dialog = module.ExportDialog(ReviewSession(project))
+    dialog.set_formats(("srt", "vtt"))
+    dialog.set_destination(tmp_path / "out", typed)
+    assert sorted(p.name for p in dialog.export()) == written
+    assert sorted(p.name for p in (tmp_path / "out").iterdir()) == written
 
 
 def test_export_on_the_video_timeline_is_offered_only_after_a_render(qt_app, tmp_path) -> None:
@@ -1920,3 +1947,69 @@ def test_the_card_placed_or_changed_is_selected_in_the_list(
     menu = table.context_menu_at(table.visualItemRect(table.item(2, 0)).center())
     menu.actions()[0].trigger()
     assert sorted({index.row() for index in table.selectedIndexes()}) == [2]
+
+
+@pytest.mark.parametrize("stop", ["cancelled", "failed"])
+def test_a_render_stopped_after_its_record_was_saved_keeps_that_record(
+    qt_app, tmp_path, monkeypatch, stop
+) -> None:
+    """A lecture rendered and recorded, then stopped in a later step (its episode, say).
+
+    The project file holds the new record; the live project must take it
+    too, or the session's next save writes the old record back over it.
+    """
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.jobs.project import load_project, save_project
+    from qurantext.utils.progress import JobCancelled
+
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    assert window.session.project.render is None
+    saved_paths: list = []
+    window.saved.connect(saved_paths.append)
+
+    def recorded_then_stopped(project, **kwargs):
+        # What render_project does: record the lecture's render and save the file ...
+        project.record_render(
+            tmp_path / "v.mp4", preset="social", basmala_offset_s=0.0, width=8, height=8, fps=1
+        )
+        save_project(project, project.path)
+        # ... and then a later step stops.
+        if stop == "cancelled":
+            raise JobCancelled("episode")
+        raise RuntimeError("disk on fire")
+
+    monkeypatch.setattr(jobs_module, "run_render", recorded_then_stopped)
+    said: dict = {}
+    monkeypatch.setattr(window, "_say_render", lambda kind, text: said.setdefault(kind, text))
+
+    window.render_requested.emit()
+    assert _wait_for(lambda: not window._rendering, 5000)
+
+    assert stop in said
+    assert window.session.project.render is not None
+    assert window.session.project.render["video"] == (tmp_path / "v.mp4").resolve()
+    assert saved_paths == [window.session.project.path]
+    # The person's next edit and save keeps the record the render wrote.
+    window.session.project.cards[0]["end_time"] += 0.25
+    save_project(window.session.project, window.session.project.path)
+    assert load_project(window.session.project.path).render is not None
+
+
+def test_a_render_stopped_before_any_record_changes_nothing(qt_app, tmp_path, monkeypatch) -> None:
+    from qurantext.gui import jobs as jobs_module
+
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    saved_paths: list = []
+    window.saved.connect(saved_paths.append)
+
+    def failed(project, **kwargs):
+        raise RuntimeError("no FFmpeg")
+
+    monkeypatch.setattr(jobs_module, "run_render", failed)
+    monkeypatch.setattr(window, "_say_render", lambda kind, text: None)
+    window.render_requested.emit()
+    assert _wait_for(lambda: not window._rendering, 5000)
+
+    assert window.session.project.render is None and saved_paths == []

@@ -32,6 +32,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,6 +50,7 @@ from qurantext.config.paths import (
 )
 from qurantext.config.settings import describe_secret, env_dir, get_settings
 from qurantext.core.video_common import ffmpeg_filters, require_binary
+from qurantext.utils.progress import CancelToken, JobCancelled
 
 if TYPE_CHECKING:
     from qurantext.services.model_store import ModelManifest
@@ -123,19 +125,24 @@ def _ffmpeg_binary(name: str) -> CheckResult:
 _EPISODE = "Episode joining"
 
 
-#: How long one step of the release gate's trial join may take.
+#: How long making one of the release gate's trial clips may take.
 _TRIAL_TIMEOUT_S = 30
+#: How long the release gate's trial join may take; it needs well under a second.
+_TRIAL_JOIN_TIMEOUT_S = 30
 
 
-def _trial_join() -> str | None:
-    """Join two tiny made-up clips the way an episode is joined; None when it worked.
+def _trial_join(*, tone_map: bool = False) -> str | None:
+    """Join tiny made-up clips the way an episode is joined; None when it worked.
 
     A filter can be present while an option the join passes to it has been
     renamed (``sidedata``'s ``type``, say): the filter list cannot tell, a real
-    join can. The clips are a fifth of a second each, one landscape with sound
+    join can. The clips are a fifth of a second each: one landscape with sound
     and one portrait without, so the run covers the letterbox and the silence
-    a part without sound gets, and takes well under a second. Returns what went
-    wrong, in FFmpeg's own words.
+    a part without sound gets, and, with *tone_map*, one tagged as HDR (PQ,
+    BT.2020), so the ``zscale``/``tonemap`` chain an HDR phone intro gets is
+    run too. It takes well under a second, and gives up after
+    ``_TRIAL_JOIN_TIMEOUT_S`` rather than hang the build gate. Returns what
+    went wrong, in FFmpeg's own words where it said any.
     """
     from qurantext.jobs.episode import EpisodeError, assemble_episode
 
@@ -150,7 +157,18 @@ def _trial_join() -> str | None:
         ],
         "b.mp4": ["-f", "lavfi", "-i", "color=c=gray:size=36x64:rate=10:duration=0.2"],
     }  # fmt: skip
-    with tempfile.TemporaryDirectory(prefix="qalun-doctor-episode-") as folder:
+    if tone_map:
+        clips["hdr.mp4"] = [
+            "-f", "lavfi", "-i", "testsrc2=size=64x36:rate=10:duration=0.2",
+            "-color_trc", "smpte2084", "-color_primaries", "bt2020", "-colorspace", "bt2020nc",
+        ]  # fmt: skip
+    try:
+        temporary = tempfile.TemporaryDirectory(
+            prefix="qalun-doctor-episode-", ignore_cleanup_errors=True
+        )
+    except OSError as error:
+        return f"could not make a folder for the trial join: {error}"
+    with temporary as folder:
         parts = []
         for name, inputs in clips.items():
             part = Path(folder) / name
@@ -167,12 +185,29 @@ def _trial_join() -> str | None:
             if made.returncode != 0:
                 return f"could not make a test clip: {made.stderr.strip() or made.returncode}"
             parts.append(part)
+        # The join has no time limit of its own; a cancel after the limit
+        # stops FFmpeg at once, as Cancel in the window does.
+        token = CancelToken()
+        timer = threading.Timer(_TRIAL_JOIN_TIMEOUT_S, token.cancel)
+        timer.start()
         try:
             assemble_episode(
-                parts, Path(folder) / "joined.mp4", lecture_index=0, width=64, height=36, fps=10
+                parts,
+                Path(folder) / "joined.mp4",
+                lecture_index=0,
+                width=64,
+                height=36,
+                fps=10,
+                cancel=token,
             )
         except EpisodeError as error:
             return str(error.fmt.get("reason") or error)
+        except JobCancelled:
+            return f"the trial join took longer than {_TRIAL_JOIN_TIMEOUT_S} s"
+        except OSError as error:
+            return str(error)
+        finally:
+            timer.cancel()
     return None
 
 
@@ -212,18 +247,21 @@ def _episode_join(release: bool) -> CheckResult:
             f"this FFmpeg has no {_joined(missing)} filter, so no episode can be joined",
             "Use a full FFmpeg build (the BtbN or Homebrew builds have every filter needed).",
         )
+    no_tone_map = [name for name in TONE_MAP_FILTERS if name not in have]
     if release:
-        failed = _trial_join()
+        failed = _trial_join(tone_map=not no_tone_map)
         if failed is not None:
-            first = failed.strip().splitlines()[0] if failed.strip() else "no reason given"
+            # FFmpeg's last lines say why; the very last is usually the verdict.
+            lines = [line.strip() for line in failed.splitlines() if line.strip()]
+            said = lines[-1] if lines else "no reason given"
             return CheckResult(
                 _EPISODE,
                 Status.FAIL,
-                f"a trial join of two tiny clips failed, so no episode can be joined: {first}",
+                f"a trial join of tiny clips failed, so no episode can be joined. "
+                f"FFmpeg said: {said}",
                 "Use a full FFmpeg build (the BtbN or Homebrew builds), or check that the "
                 "episode's filter graph (jobs/episode.py) still matches this FFmpeg's options.",
             )
-    no_tone_map = [name for name in TONE_MAP_FILTERS if name not in have]
     if no_tone_map:
         return CheckResult(
             _EPISODE,

@@ -348,11 +348,18 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "episode.error.subtitles": (
             "The episode was made, but its subtitle files could not be written: {reason}"
         ),
+        "episode.error.part_missing": "The {part} clip is missing, so the episode was not made.",
+        "episode.error.part_not_video": (
+            "The {part} clip is not a video Qalun can read, so the episode was not made."
+        ),
+        "episode.error.cancelled": "The episode was cancelled; the lecture video is kept.",
+        "episode.part.intro": "intro",
+        "episode.part.outro": "outro",
         "episode.seed.missing": (
-            "The default clip \u2068{name}\u2069 is missing, so this lecture starts without it."
+            "The default {part} clip is missing, so this lecture starts without it."
         ),
         "episode.seed.failed": (
-            "The default clip \u2068{name}\u2069 could not be copied beside this lecture, "
+            "The default {part} clip could not be copied beside this lecture, "
             "so it starts without it."
         ),
     },
@@ -676,8 +683,19 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "episode.error.recitation": "تعذّر استخدام مهمة التلاوة: {reason}",
         "episode.error.ffmpeg": "فشل تجميع الحلقة: {reason}",
         "episode.error.subtitles": "صُنعت الحلقة، لكن تعذّرت كتابة ملفات ترجمتها النصية: {reason}",
-        "episode.seed.missing": "المقطع الافتراضي {name} مفقود، فتبدأ هذه المحاضرة بدونه.",
-        "episode.seed.failed": "تعذّر نسخ المقطع الافتراضي {name} بجانب هذه المحاضرة، فتبدأ بدونه.",
+        "episode.error.part_missing": "مقطع \u2068{part}\u2069 مفقود، فلم تُصنع الحلقة.",
+        "episode.error.part_not_video": (
+            "مقطع \u2068{part}\u2069 ليس فيديو يستطيع قالون قراءته، فلم تُصنع الحلقة."
+        ),
+        "episode.error.cancelled": "أُلغيت الحلقة، وبقي فيديو المحاضرة كما هو.",
+        "episode.part.intro": "المقدمة",
+        "episode.part.outro": "الخاتمة",
+        "episode.seed.missing": (
+            "مقطع \u2068{part}\u2069 الافتراضي مفقود، فتبدأ هذه المحاضرة بدونه."
+        ),
+        "episode.seed.failed": (
+            "تعذّر نسخ مقطع \u2068{part}\u2069 الافتراضي بجانب هذه المحاضرة، فتبدأ بدونه."
+        ),
     },
 }
 LANGUAGES = tuple(STRINGS)

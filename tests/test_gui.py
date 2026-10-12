@@ -934,7 +934,7 @@ def _fake_matching(monkeypatch, calls: list | None = None, *, before=None):
     from qurantext.gui import main_window as module
     from qurantext.jobs.project import load_project
 
-    def fake(spec, *, progress=None, cancel=None):
+    def fake(spec, *, progress=None, cancel=None, notices=None):
         if calls is not None:
             calls.append(spec)
         if before is not None:
@@ -1025,7 +1025,7 @@ def test_a_finished_job_whose_review_cannot_open_says_why(
     from qurantext.gui import main_window as module
     from qurantext.jobs.project import Project
 
-    def gone(spec, *, progress=None, cancel=None):
+    def gone(spec, *, progress=None, cancel=None, notices=None):
         project = Project(audio=Path(spec.audio), cards=[_card()])
         project.path = tmp_path / "gone.qalun.json"
         return project
@@ -1427,7 +1427,7 @@ def _blocked_until(release, seen: list | None = None, *, finish=None):
     like a model call that never looks at it.
     """
 
-    def blocked(spec, *, progress=None, cancel=None):
+    def blocked(spec, *, progress=None, cancel=None, notices=None):
         assert release.wait(timeout=10), "the test forgot to release the job"
         if seen is not None:
             seen.append(cancel.cancelled)
@@ -2411,8 +2411,8 @@ def test_run_render_writes_the_episode_and_shifted_subtitles(tmp_path, monkeypat
     (exported,) = seen["exported"]
     assert exported["offset"] == 5.0 and exported["timeline"] == "video"
     assert exported["formats"] == ("srt",)
-    assert exported["stem"] == lecture.with_name("lec – episode")
-    assert exported["stem"].name.endswith(" – episode")
+    # The episode's own path, whose ".mp4" each format replaces (a dotted name stays whole).
+    assert exported["stem"] == episode
     assert project.render["episode"] == {
         "video": str(episode),
         "lecture_offset": 5.0,
@@ -2436,7 +2436,7 @@ def test_a_failed_episode_keeps_the_lecture(tmp_path, monkeypatch) -> None:
     project, jobs_module, seen = _episode_job(tmp_path, monkeypatch)
 
     def missing(parts, output, **kwargs):
-        raise EpisodeError("episode.error.missing", name="intro.mp4")
+        raise EpisodeError("episode.error.missing", name="rec.mp4")
 
     monkeypatch.setattr(jobs_module, "assemble_episode", missing)
     outcome = jobs_module.run_render(project)
@@ -2444,7 +2444,7 @@ def test_a_failed_episode_keeps_the_lecture(tmp_path, monkeypatch) -> None:
     lecture = (tmp_path / "videos").resolve() / "lec.mp4"
     assert outcome.video == lecture
     assert outcome.episode_video is None
-    assert outcome.episode_error == t("episode.error.missing", name="intro.mp4")
+    assert outcome.episode_error == t("episode.error.missing", name="rec.mp4")
     assert seen["exported"] == [], "no subtitle files for an episode that was not made"
     saved = load_project(project.path)
     assert saved.render["video"] == lecture and "episode" not in saved.render
@@ -2467,19 +2467,25 @@ def test_a_recitation_that_cannot_be_used_keeps_the_lecture(tmp_path, monkeypatc
     assert seen["assembled"] == []
 
 
-def test_a_cancel_during_the_episode_passes_through(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("step", ["recitation_video", "assemble_episode"])
+def test_a_cancel_during_the_episode_keeps_the_lecture(tmp_path, monkeypatch, step) -> None:
+    """The lecture is complete and recorded: the job finishes with it, and says so."""
+    from qurantext.gui.i18n import t
     from qurantext.jobs.project import load_project
 
     project, jobs_module, _seen = _episode_job(tmp_path, monkeypatch)
 
-    def cancelled(parts, output, **kwargs):
+    def cancelled(*args, **kwargs):
         raise JobCancelled("episode")
 
-    monkeypatch.setattr(jobs_module, "assemble_episode", cancelled)
-    with pytest.raises(JobCancelled):
-        jobs_module.run_render(project)
-    saved = load_project(project.path)
-    assert saved.render["video"] == (tmp_path / "videos").resolve() / "lec.mp4"
+    monkeypatch.setattr(jobs_module, step, cancelled)
+    outcome = jobs_module.run_render(project)
+
+    lecture = (tmp_path / "videos").resolve() / "lec.mp4"
+    assert outcome.video == lecture and outcome.episode_video is None
+    assert outcome.episode_error == t("episode.error.cancelled")
+    assert t("episode.error.cancelled") == "The episode was cancelled; the lecture video is kept."
+    assert load_project(project.path).render["video"] == lecture
 
 
 @pytest.mark.parametrize("episode", [{}, {"future": 1}])
@@ -2589,8 +2595,8 @@ def test_a_missing_default_clip_is_skipped_with_a_notice(tmp_path, monkeypatch) 
     assert project.path is not None and project.path.exists(), "the job is still created"
     assert load_project(project.path).episode == {}
     assert project_episode(project).is_empty
-    notice = t("episode.seed.missing", name="gone.mp4")
-    assert "gone.mp4" in notice
+    notice = t("episode.seed.missing", part=t("episode.part.intro"))
+    assert notice == "The default intro clip is missing, so this lecture starts without it."
     assert any(e.stage == "detect" and e.message == notice and e.translated for e in events)
 
 
@@ -2610,7 +2616,7 @@ def test_a_default_clip_that_cannot_be_copied_is_skipped_with_a_notice(
 
     episode = load_project(project.path).episode
     assert "intro" not in episode and episode["outro"], "the clip that copied is kept"
-    notice = t("episode.seed.failed", name="intro.txt")
+    notice = t("episode.seed.failed", part=t("episode.part.intro"))
     assert any(e.message == notice and e.translated for e in events)
 
 
@@ -2679,3 +2685,179 @@ def test_a_rematch_keeps_the_earlier_episode(tmp_path, monkeypatch) -> None:
     assert kept.intro is not None and kept.intro.read_bytes() == b"chosen intro"
     assert kept.recitation == (tmp_path / "rec_recitation.qalun.json").resolve()
     assert kept.outro is None, "no default outro was added"
+
+
+def _real_lecture_render(tmp_path, monkeypatch, name: str, *, offset: float = 30.0):
+    """A lecture named *name* with an intro, rendered by the real ``render_project``.
+
+    Only the picture is faked (``render_video`` writes a stand-in file) and so
+    is the join (``assemble_episode`` reports *offset* seconds before the
+    lecture); the subtitle files, their names and the records are the real ones.
+    """
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.jobs import export as export_module
+    from qurantext.jobs import project_render
+    from qurantext.jobs.episode import EpisodeResult
+    from qurantext.jobs.episode_assets import EpisodeChoice, set_project_episode
+    from qurantext.jobs.project import (
+        CaptionCue,
+        JobSettings,
+        Project,
+        save_project,
+        set_job_settings,
+    )
+    from qurantext.jobs.render import RenderResult
+
+    def fake_render_video(request, progress=None, cancel=None):
+        request.output.parent.mkdir(parents=True, exist_ok=True)
+        request.output.write_bytes(b"lecture")
+        return RenderResult(
+            output=request.output, width=1280, height=720, fps=30, duration_seconds=10.0
+        )
+
+    def fake_assemble(parts, output, **kwargs):
+        output.write_bytes(b"episode")
+        return EpisodeResult(output=output, durations=(offset, 10.0), lecture_offset=offset)
+
+    monkeypatch.setattr(export_module, "render_video", fake_render_video)
+    monkeypatch.setattr(project_render, "get_audio_duration", lambda path: 10.0)
+    monkeypatch.setattr(jobs_module, "assemble_episode", fake_assemble)
+
+    matches = tmp_path / f"{name}_lecture.json"
+    matches.write_text(json.dumps({"matches": [], "meta": {"mode": "lecture"}}), encoding="utf-8")
+    intro = tmp_path / "intro.mp4"
+    intro.write_bytes(b"intro")
+    project = Project(
+        audio=tmp_path / f"{name}.m4a",
+        mode="lecture",
+        matches=matches,
+        captions=[CaptionCue(1.0, 2.0, "first line")],
+    )
+    set_job_settings(project, JobSettings("social", "both", ("srt",), tmp_path / "videos"))
+    set_project_episode(project, EpisodeChoice(intro=intro), project_dir=tmp_path)
+    save_project(project, tmp_path / f"{name}_lecture.qalun.json")
+    return project, jobs_module.run_render(project)
+
+
+def _first_cue_start(path: Path) -> str:
+    return path.read_text(encoding="utf-8-sig").splitlines()[1].split(" --> ")[0]
+
+
+@pytest.mark.parametrize("name", ["Tafsir 25.7-11", "Dars 12.10.2024"])
+def test_a_dotted_name_keeps_the_lecture_and_episode_subtitles_apart(
+    tmp_path, monkeypatch, name
+) -> None:
+    """The episode's shifted cues must never land in the lecture's own subtitle file."""
+    _project, outcome = _real_lecture_render(tmp_path, monkeypatch, name)
+
+    videos = (tmp_path / "videos").resolve()
+    assert outcome.episode_error is None
+    assert outcome.episode_video == videos / f"{name} – episode.mp4"
+    assert sorted(p.name for p in videos.iterdir()) == sorted(
+        [f"{name}.mp4", f"{name}.srt", f"{name} – episode.mp4", f"{name} – episode.srt"]
+    )
+    assert _first_cue_start(videos / f"{name}.srt") == "00:00:01,000"
+    assert _first_cue_start(videos / f"{name} – episode.srt") == "00:00:31,000"
+
+
+def test_the_job_list_calls_a_lecture_rendered_after_its_episode(tmp_path, monkeypatch) -> None:
+    from qurantext.jobs.catalog import RENDERED, job_status
+    from qurantext.jobs.project import load_project
+
+    project, outcome = _real_lecture_render(tmp_path, monkeypatch, "talk")
+
+    assert outcome.episode_video is not None
+    saved = load_project(project.path)
+    assert saved.render["episode"]["lecture_offset"] == 30.0
+    assert job_status(saved) == RENDERED and job_status(project) == RENDERED
+
+
+def test_an_unexpected_error_in_the_episode_keeps_the_lecture(tmp_path, monkeypatch) -> None:
+    from qurantext.gui.i18n import t
+
+    project, jobs_module, _seen = _episode_job(tmp_path, monkeypatch)
+
+    def boom(parts, output, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(jobs_module, "assemble_episode", boom)
+    outcome = jobs_module.run_render(project)
+
+    assert outcome.video == (tmp_path / "videos").resolve() / "lec.mp4"
+    assert outcome.episode_video is None
+    assert outcome.episode_error == t("episode.error.ffmpeg", reason="boom")
+
+
+def test_an_episode_record_that_cannot_be_saved_keeps_the_episode(tmp_path, monkeypatch) -> None:
+    project, jobs_module, _seen = _episode_job(tmp_path, monkeypatch)
+    real_save = jobs_module.save_project
+
+    def full_disk(project, path):
+        if project.render and "episode" in project.render:
+            raise OSError("No space left on device")
+        return real_save(project, path)
+
+    monkeypatch.setattr(jobs_module, "save_project", full_disk)
+    outcome = jobs_module.run_render(project)
+
+    assert outcome.episode_video is not None and outcome.episode_error is None
+    assert project.render["episode"]["lecture_offset"] == 5.0, "the review copies it back"
+
+
+def test_episode_subtitles_that_ffprobe_cannot_time_keep_the_episode(tmp_path, monkeypatch) -> None:
+    from qurantext.gui.i18n import t
+
+    project, jobs_module, _seen = _episode_job(tmp_path, monkeypatch)
+
+    def unreadable(project, stem, formats, **kwargs):
+        raise RuntimeError("ffprobe could not read the recording")
+
+    monkeypatch.setattr(jobs_module, "export_project_subtitles", unreadable)
+    outcome = jobs_module.run_render(project)
+
+    assert outcome.episode_video is not None
+    assert outcome.episode_error == t(
+        "episode.error.subtitles", reason="ffprobe could not read the recording"
+    )
+
+
+def test_a_missing_intro_is_named_before_the_recitation_is_rendered(tmp_path, monkeypatch) -> None:
+    from qurantext.gui.i18n import t
+
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch)
+    seen["intro"].unlink()
+    outcome = jobs_module.run_render(project)
+
+    assert seen["recitations"] == [] and seen["assembled"] == []
+    assert outcome.episode_error == t("episode.error.part_missing", part=t("episode.part.intro"))
+    assert outcome.episode_error == "The intro clip is missing, so the episode was not made."
+
+
+def test_an_intro_that_is_not_a_video_is_named_as_the_intro(tmp_path, monkeypatch) -> None:
+    """The copy beside the project is named by its content, which tells the person nothing."""
+    from qurantext.gui.i18n import t
+    from qurantext.jobs.episode import EpisodeError
+
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch)
+
+    def unreadable(parts, output, **kwargs):
+        raise EpisodeError("episode.error.not_video", name=seen["intro"].name)
+
+    monkeypatch.setattr(jobs_module, "assemble_episode", unreadable)
+    outcome = jobs_module.run_render(project)
+
+    assert outcome.episode_error == t("episode.error.part_not_video", part=t("episode.part.intro"))
+
+
+def test_start_hands_the_seed_notices_on_with_the_job(tmp_path, monkeypatch) -> None:
+    """The status line says them in passing; the finished job keeps them for the window."""
+    from qurantext.gui.i18n import t
+    from qurantext.gui.main_window import _match_then_render
+
+    jobs_module, spec = _lecture_setup(tmp_path, monkeypatch)
+    gone = tmp_path / "app-data" / "episode" / "gone.mp4"
+    finished = _match_then_render(
+        replace(spec, episode_defaults=(None, str(gone))), progress=None, cancel=CancelToken()
+    )
+
+    assert finished.notices == (t("episode.seed.missing", part=t("episode.part.outro")),)

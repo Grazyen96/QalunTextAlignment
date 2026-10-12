@@ -105,6 +105,9 @@ class _Finished:
 
     project: Project
     outcome: JobOutcome | None = None
+    #: What matching could not do for a new job (a default intro gone), in the
+    #: window's language; said as progress while the job runs.
+    notices: tuple[str, ...] = ()
 
 
 def _match_then_render(
@@ -118,12 +121,14 @@ def _match_then_render(
     Runs on the worker thread, so it touches no widget. A Cancel that lands
     between the two stages stops before the render starts.
     """
-    project = run_matching(spec, progress=progress, cancel=cancel)
+    notices: list[str] = []
+    project = run_matching(spec, progress=progress, cancel=cancel, notices=notices)
     if not spec.render_right_away:
-        return _Finished(project)
+        return _Finished(project, notices=tuple(notices))
     if cancel is not None:
         cancel.raise_if_cancelled("render")
-    return _Finished(project, run_render(project, progress=progress, cancel=cancel))
+    outcome = run_render(project, progress=progress, cancel=cancel)
+    return _Finished(project, outcome, notices=tuple(notices))
 
 
 class MainWindow(QMainWindow):

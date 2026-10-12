@@ -140,24 +140,25 @@ def seed_project_episode(
     Returns the notices as ``(i18n key, values)`` pairs for the caller to say
     in the person's language (``episode.seed.missing``,
     ``episode.seed.failed``); the job layer does not translate, as
-    :class:`~qurantext.jobs.episode.EpisodeError` does not. Never raises for a
-    clip that is missing or refused.
+    :class:`~qurantext.jobs.episode.EpisodeError` does not. The one value,
+    ``part``, is ``"intro"`` or ``"outro"``: the default's own file name is a
+    content hash in the app's folder, which would tell the person nothing.
+    Never raises for a clip that is missing or refused.
     """
     notices: list[tuple[str, dict[str, Any]]] = []
 
-    def copied(clip: Path | None) -> Path | None:
+    def copied(part: str, clip: Path | None) -> Path | None:
         if clip is None:
             return None
-        clip = Path(clip)
         try:
-            return import_episode_clip(project_path, clip)
+            return import_episode_clip(project_path, Path(clip))
         except FileNotFoundError:
-            notices.append(("episode.seed.missing", {"name": clip.name}))
+            notices.append(("episode.seed.missing", {"part": part}))
         except (ValueError, OSError):
-            notices.append(("episode.seed.failed", {"name": clip.name}))
+            notices.append(("episode.seed.failed", {"part": part}))
         return None
 
-    choice = EpisodeChoice(intro=copied(intro), outro=copied(outro))
+    choice = EpisodeChoice(intro=copied("intro", intro), outro=copied("outro", outro))
     if not choice.is_empty:
         set_project_episode(project, choice, project_dir=Path(project_path).parent)
     return notices

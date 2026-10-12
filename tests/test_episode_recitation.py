@@ -81,14 +81,18 @@ def test_a_stale_render_is_rendered_again(tmp_path, monkeypatch, recitation_proj
 
     def fake(project, output, **kw):
         seen.update(kw, output=output)
+        output.write_bytes(b"new render")
         return SimpleNamespace(video=output)
 
     monkeypatch.setattr("qurantext.jobs.episode.render_project", fake)
     video = recitation_video(recitation_project.path)
     # The job's own choices, so the job list calls the new render current; no files.
-    assert seen["subtitles"] == "both" and seen["formats"] == () and video == seen["output"]
+    assert seen["subtitles"] == "both" and seen["formats"] == ()
     assert seen["preset"] == "fast" and seen["save"] is False
-    assert seen["output"] == default_video_path(recitation_project) == tmp_path / "videos" / "a.mp4"
+    # Written beside the target under a name of its own, then moved into place.
+    assert video == default_video_path(recitation_project) == tmp_path / "videos" / "a.mp4"
+    assert seen["output"].parent == video.parent and seen["output"] != video
+    assert video.read_bytes() == b"new render" and not seen["output"].exists()
 
 
 def test_a_render_whose_file_is_gone_is_rendered_again(tmp_path, monkeypatch, recitation_project):
@@ -97,10 +101,12 @@ def test_a_render_whose_file_is_gone_is_rendered_again(tmp_path, monkeypatch, re
 
     def fake(project, output, **kw):
         calls.append(output)
+        output.write_bytes(b"new render")
         return SimpleNamespace(video=output)
 
     monkeypatch.setattr("qurantext.jobs.episode.render_project", fake)
-    assert recitation_video(recitation_project.path) == calls[0]
+    assert recitation_video(recitation_project.path) == default_video_path(recitation_project)
+    assert len(calls) == 1
 
 
 def test_a_missing_or_wrong_project_raises(tmp_path, lecture_project):
@@ -241,3 +247,39 @@ def _settings(project: Project) -> dict:
     from dataclasses import asdict
 
     return asdict(job_settings(project))
+
+
+@pytest.mark.parametrize("stop", [JobCancelled("cancelled"), RuntimeError("FFmpeg failed")])
+def test_a_stopped_render_keeps_the_earlier_video(monkeypatch, recitation_project, stop):
+    """The renderer deletes what it was writing; that must not be the earlier video."""
+    earlier = Path(recitation_project.render["video"])
+    earlier.write_bytes(b"earlier render")
+    _make_stale(recitation_project)
+    written = []
+
+    def stopped(project, output, **kw):
+        written.append(output)
+        output.write_bytes(b"half")
+        raise stop
+
+    monkeypatch.setattr("qurantext.jobs.episode.render_project", stopped)
+    with pytest.raises((JobCancelled, EpisodeError)):
+        recitation_video(recitation_project.path)
+    assert earlier.read_bytes() == b"earlier render"
+    assert written and written[0] != earlier and not written[0].exists()
+
+
+def test_two_renders_of_one_recitation_write_separate_files(monkeypatch, recitation_project):
+    """Another render of the same recitation (from its own review) may be under way."""
+    _make_stale(recitation_project)
+    outputs = []
+
+    def fake(project, output, **kw):
+        outputs.append(output)
+        output.write_bytes(b"render")
+        return SimpleNamespace(video=output)
+
+    monkeypatch.setattr("qurantext.jobs.episode.render_project", fake)
+    recitation_video(recitation_project.path)
+    recitation_video(recitation_project.path)
+    assert len(set(outputs)) == 2 and default_video_path(recitation_project) not in outputs

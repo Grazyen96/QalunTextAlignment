@@ -328,3 +328,23 @@ def test_a_default_episode_that_cannot_be_copied_stores_nothing(settings, tmp_pa
         prefs.save_default_episode(tmp_path / "notes.txt", None)
     assert prefs.default_episode == before and before[1] is not None
     assert before[1].read_bytes() == b"outro"
+
+
+def test_a_replaced_default_clip_is_removed_from_app_data(settings, tmp_path, monkeypatch):
+    """Intros can be large; trying a few must not leave every one behind."""
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    prefs = Prefs(settings)
+    first, second, outro = (tmp_path / n for n in ("one.mp4", "two.mp4", "end.mov"))
+    first.write_bytes(b"first intro")
+    second.write_bytes(b"second intro")
+    outro.write_bytes(b"outro")
+    folder = tmp_path / "data" / "episode"
+
+    prefs.save_default_episode(first, outro)
+    prefs.save_default_episode(second, prefs.default_episode[1])
+    intro, kept_outro = prefs.default_episode
+    assert sorted(p.read_bytes() for p in folder.iterdir()) == [b"outro", b"second intro"]
+    assert intro.read_bytes() == b"second intro" and kept_outro.read_bytes() == b"outro"
+
+    prefs.save_default_episode(None, None)
+    assert list(folder.iterdir()) == []

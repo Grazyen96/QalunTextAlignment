@@ -165,7 +165,12 @@ succeeds:
 **Failure handling:** if the lecture render fails, nothing changes. If the episode step fails or a
 part is missing, the lecture video and its subtitles are kept and `JobOutcome.episode_error`
 carries the translated message. The review window shows it in the warnings strip, and the main
-window's status line shows it for "render right away". Cancel stops whichever step is running.
+window's status line shows it for "render right away". Cancel stops whichever step is running; a
+cancel during the episode step (after the lecture is written and recorded) ends as
+`episode_error` ("The episode was cancelled; the lecture video is kept.") and the job finishes with
+the lecture. A missing intro or outro is named as "the intro" / "the outro", and is looked for
+before the recitation is rendered. The subtitle files are named from the episode's full path, so a
+recording name with a dot ("Tafsir 25.7-11") keeps the lecture's and the episode's files apart.
 
 ### 3.5 GUI
 

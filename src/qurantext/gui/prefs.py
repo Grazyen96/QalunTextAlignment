@@ -305,6 +305,7 @@ class Prefs:
         value = {"intro": stored(intro), "outro": stored(outro)}
         self._settings.setValue("default_episode", json.dumps(value))
         self._settings.sync()
+        _remove_clips_but(folder, {v for v in value.values() if v is not None})
 
     # -- more_options_open --------------------------------------------------
 
@@ -419,3 +420,21 @@ class Prefs:
                 ordered.append(resolved)
         self._settings.setValue("job_dirs", [str(path) for path in ordered])
         self._settings.sync()
+
+
+def _remove_clips_but(folder: Path, kept: set[str]) -> None:
+    """Delete the clips in *folder* other than *kept*: earlier defaults no one names now.
+
+    The folder is the app's own, written only by ``save_default_episode``, and
+    an intro can be hundreds of megabytes; trying a few must not leave them
+    all behind. A clip that will not go is left for the next save.
+    """
+    if not folder.is_dir():
+        return
+    keep = {Path(path).resolve() for path in kept}
+    for clip in folder.iterdir():
+        if clip.suffix.lower() in EPISODE_SUFFIXES and clip.resolve() not in keep:
+            try:
+                clip.unlink()
+            except OSError:
+                continue
