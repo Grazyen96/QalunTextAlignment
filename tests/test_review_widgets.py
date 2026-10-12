@@ -429,6 +429,12 @@ def test_the_edge_under_the_pointer_is_highlighted_until_the_pointer_leaves(qt_a
     strip.show()
     first = session.words()[0]
     x_end = strip._viewport.x_for(first.end, strip.width())
+    # The first QTest.mouseMove of a process is swallowed by the offscreen
+    # platform (it only establishes the pointer's position), so a move away
+    # from the edge comes first; otherwise this passes only after another
+    # test has already moved the pointer.
+    QTest.mouseMove(strip, QPoint(int(x_end) - 40, strip.height() // 2))
+    assert strip.hovered_edge is None
     QTest.mouseMove(strip, QPoint(int(x_end), strip.height() // 2))
     assert strip.hovered_edge == ("end", first.ref)
     QTest.mouseMove(strip, QPoint(int(x_end) - 40, strip.height() // 2))
@@ -446,6 +452,12 @@ def test_the_edge_handle_shows_on_the_selected_word(qt_app) -> None:
     first = session.words()[0]
     strip.select(first.ref)
     x_end = strip._viewport.x_for(first.end, strip.width())
+    # The first QTest.mouseMove of a process is swallowed by the offscreen
+    # platform (it only establishes the pointer's position), so a move away
+    # from the edge comes first; otherwise this passes only after another
+    # test has already moved the pointer.
+    QTest.mouseMove(strip, QPoint(int(x_end) - 40, strip.height() // 2))
+    assert strip.hovered_edge is None
     QTest.mouseMove(strip, QPoint(int(x_end), strip.height() // 2))
     assert strip.hovered_edge == ("end", first.ref)
     image = strip.grab().toImage()
