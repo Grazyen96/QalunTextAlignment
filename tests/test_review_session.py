@@ -997,3 +997,59 @@ def test_the_guessed_studied_surah_is_the_one_the_frame_keeps_to(lecture_session
     project.cards.insert(0, dict(project.cards[0], surah_num=2, start_time=1.0, end_time=2.0))
     assert lecture_session.guessed_studied_surah == 25
     assert ReviewSession(_recitation()).guessed_studied_surah is None
+
+
+# -- the episode ---------------------------------------------------------------
+
+
+def test_set_episode_is_one_undo_step(lecture_session, tmp_path):
+    from qurantext.jobs.episode_assets import EpisodeChoice
+
+    choice = EpisodeChoice(None, tmp_path / "r.qalun.json", None)
+    lecture_session.set_episode(choice)
+    assert lecture_session.episode == EpisodeChoice(
+        None, (tmp_path / "r.qalun.json").resolve(), None
+    )
+    assert lecture_session.dirty and lecture_session.undo()
+    assert lecture_session.episode == EpisodeChoice(None, None, None) and not lecture_session.dirty
+
+
+def test_unchanged_episode_is_no_edit(lecture_session):
+    from qurantext.jobs.episode_assets import EpisodeChoice
+
+    lecture_session.set_episode(EpisodeChoice(None, None, None))
+    assert not lecture_session.can_undo
+
+
+def test_recitation_sessions_refuse_an_episode(session, tmp_path):
+    from qurantext.jobs.episode_assets import EpisodeChoice
+
+    with pytest.raises(ValueError):
+        session.set_episode(EpisodeChoice(None, tmp_path / "r.qalun.json", None))
+
+
+def test_the_episode_is_saved_redone_and_reverted(lecture_session, tmp_path):
+    from qurantext.jobs.episode_assets import EpisodeChoice
+
+    intro = tmp_path / "dars.qalun.episode" / "abc.mp4"
+    choice = EpisodeChoice(intro, None, None)
+    lecture_session.set_episode(choice)
+    lecture_session.undo()
+    assert lecture_session.redo() and lecture_session.episode == EpisodeChoice(
+        intro.resolve(), None, None
+    )
+    lecture_session.save()
+    saved = load_project(lecture_session.project.path)
+    assert saved.episode == {"intro": "dars.qalun.episode/abc.mp4"}, "stored beside the project"
+    lecture_session.set_episode(EpisodeChoice(None, None, None))
+    lecture_session.revert()
+    assert lecture_session.episode.intro == intro.resolve() and not lecture_session.dirty
+
+
+def test_undoing_a_retime_keeps_an_episode_chosen_before_it(lecture_session, tmp_path):
+    from qurantext.jobs.episode_assets import EpisodeChoice
+
+    lecture_session.set_episode(EpisodeChoice(None, tmp_path / "r.qalun.json", None))
+    lecture_session.set_studied_surah(25)
+    lecture_session.undo()
+    assert lecture_session.episode.recitation == (tmp_path / "r.qalun.json").resolve()

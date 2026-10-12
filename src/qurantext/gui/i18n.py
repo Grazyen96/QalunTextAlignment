@@ -285,6 +285,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
             "This card's times follow its words; retime the words instead."
         ),
         "session.manual_lecture_only": "Ayah cards can only be placed by hand in a lecture.",
+        "session.episode_lecture_only": "Only a lecture can have an intro, a recitation and an outro.",
         "session.manual_bad_reference": "Surah {surah} has no ayat {first}–{last}.",
         "session.manual_store_unavailable": (
             "Could not read the Quran store, so no ayah card was made: {details}"
@@ -361,6 +362,26 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "episode.seed.failed": (
             "The default {part} clip could not be copied beside this lecture, "
             "so it starts without it."
+        ),
+        "episode.title": "Episode",
+        "episode.intro": "Intro",
+        "episode.recitation": "Recitation",
+        "episode.outro": "Outro",
+        "episode.none": "None",
+        "episode.choose": "Choose…",
+        "episode.remove": "Remove",
+        "episode.rendered": "rendered",
+        "episode.render_first": "will be rendered first",
+        "episode.damaged": "damaged",
+        "episode.total": "Total length: {length}",
+        "episode.unknown": "?",
+        "episode.clip": "\u2068{name}\u2069 · {length}",
+        "episode.recitation_entry": "{name} · {range} · {status}",
+        "episode.recitation_entry_no_range": "{name} · {status}",
+        "episode.clip_filter": "Video clips",
+        "episode.copy_failed": "The clip could not be copied beside the job: {reason}",
+        "episode.default_failed": (
+            "The episode is set, but it could not be kept for new lectures: {reason}"
         ),
     },
     # Drafted for the first release; a native speaker must review every line
@@ -624,6 +645,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
             "توقيت هذه البطاقة يتبع كلماتها؛ عدِّل توقيت الكلمات بدلًا منها."
         ),
         "session.manual_lecture_only": "لا تُضاف بطاقات الآيات يدويًا إلا في الدروس.",
+        "session.episode_lecture_only": "لا تكون المقدمة والتلاوة والخاتمة إلا للدروس.",
         "session.manual_bad_reference": "لا تضمّ السورة {surah} الآيات {first}–{last}.",
         "session.manual_store_unavailable": (
             "تعذّرت قراءة قاعدة بيانات القرآن، فلم تُنشأ بطاقة الآية: {details}"
@@ -696,6 +718,24 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "episode.seed.failed": (
             "تعذّر نسخ مقطع \u2068{part}\u2069 الافتراضي بجانب هذه المحاضرة، فتبدأ بدونه."
         ),
+        "episode.title": "الحلقة",
+        "episode.intro": "المقدمة",
+        "episode.recitation": "التلاوة",
+        "episode.outro": "الخاتمة",
+        "episode.none": "بدون",
+        "episode.choose": "اختر…",
+        "episode.remove": "أزل",
+        "episode.rendered": "مُصدَّرة",
+        "episode.render_first": "ستُصدَّر أولًا",
+        "episode.damaged": "تالفة",
+        "episode.total": "المدة الكاملة: {length}",
+        "episode.unknown": "؟",
+        "episode.clip": "\u200f\u2068{name}\u2069 · {length}",
+        "episode.recitation_entry": "\u200f{name} · {range} · {status}",
+        "episode.recitation_entry_no_range": "\u200f{name} · {status}",
+        "episode.clip_filter": "مقاطع الفيديو",
+        "episode.copy_failed": "تعذّر نسخ المقطع بجانب المهمة: {reason}",
+        "episode.default_failed": "ضُبطت الحلقة، لكن تعذّر حفظها للدروس الجديدة: {reason}",
     },
 }
 LANGUAGES = tuple(STRINGS)
