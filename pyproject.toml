@@ -39,6 +39,10 @@ dependencies = [
   # packaging/licenses/segno-LICENSE.txt is this release's licence, and
   # tests/test_packaging_spec.py fails until the pin, the install and it agree.
   "segno==1.6.6",
+  # The outro link's international host names, IDNA 2008 with UTS #46 as browsers
+  # use (BSD 3-Clause, pure Python); Python's own codec is IDNA 2003. Pinned
+  # exactly, like segno; the notice credits it in its own right.
+  "idna==3.13",
 ]
 
 [project.optional-dependencies]

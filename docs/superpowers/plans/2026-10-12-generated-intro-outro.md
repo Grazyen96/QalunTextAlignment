@@ -73,7 +73,7 @@
 | `src/qurantext/gui/jobs.py` | the episode step makes generated parts |
 | `src/qurantext/gui/prefs.py` | default kinds and generated settings |
 | `src/qurantext/gui/review/episode_dialog.py` | kinds, generated fields, previews, tracked link, Copy |
-| `pyproject.toml`, `THIRD_PARTY_NOTICES.md`, `packaging/licenses/`, packaging tests | segno + Amiri |
+| `pyproject.toml`, `THIRD_PARTY_NOTICES.md`, `packaging/licenses/`, packaging tests | segno, idna (IDNA 2008 hosts, fix round 2) + Amiri |
 
 ---
 

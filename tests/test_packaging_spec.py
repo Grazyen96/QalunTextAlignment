@@ -366,3 +366,26 @@ def test_segno_is_pinned_credited_and_its_licence_shipped() -> None:
     assert "_internal/segno-LICENSE.txt" in section
     readme = (SPEC.parent / "licenses" / "README.md").read_text(encoding="utf-8")
     assert "segno-LICENSE.txt" in readme and f"segno {pin}" in readme
+
+
+def test_idna_is_pinned_credited_and_its_licence_shipped() -> None:
+    """idna (BSD 3-Clause) turns the outro link's international host into the QR
+    code's ASCII form with the rules browsers use. Qalun now uses it directly, so it
+    is a pinned dependency of its own, credited by name, its licence copied with its
+    metadata, rather than riding on replicate's."""
+    from importlib.metadata import distribution
+
+    tomllib = pytest.importorskip("tomllib")
+    with (ROOT / "pyproject.toml").open("rb") as handle:
+        core = tomllib.load(handle)["project"]["dependencies"]
+    pins = [dep for dep in core if dep.startswith("idna")]
+    assert len(pins) == 1 and pins[0].startswith("idna=="), pins
+    pin = pins[0].removeprefix("idna==")
+    assert f"idna=={pin}" in (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    assert distribution("idna").version == pin
+    assert 'copy_metadata("idna")' in SPEC.read_text(encoding="utf-8")
+    notice = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    section = notice.split("## idna", 1)[1].split("\n## ", 1)[0]
+    assert f"version {pin}" in section and "BSD 3-Clause" in section
+    assert f"_internal/idna-{pin}.dist-info/licenses/LICENSE.md" in section
+    assert any(f.name == "LICENSE.md" for f in distribution("idna").files or ())

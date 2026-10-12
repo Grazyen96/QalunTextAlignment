@@ -197,3 +197,19 @@ def test_readable_link_decodes_for_people():
 def test_readable_link_never_shows_credentials():
     with pytest.raises(LinkError):
         readable_link("https://user:pass@ex.org/d")
+
+
+@pytest.mark.parametrize(
+    "host, ascii_host",
+    [
+        ("straße.de", "xn--strae-oqa.de"),
+        ("βόλος.gr", "xn--nxasmm1c.gr"),
+        ("مثال.com", "xn--mgbh0fb.com"),
+    ],
+)
+def test_international_hosts_are_encoded_as_browsers_do(host, ascii_host):
+    """IDNA 2008 with UTS #46 non-transitional mapping, as browsers do. Python's own
+    codec (IDNA 2003) maps ß to ss and final ς to σ: a different domain."""
+    url = tracked_link(f"https://{host}/x", platform="youtube", campaign="c")
+    assert urlsplit(url).hostname == ascii_host
+    assert readable_link(url).split("/")[0] == host.lower()

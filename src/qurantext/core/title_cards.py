@@ -69,6 +69,7 @@ __all__ = [
     "IntroSpec",
     "OutroSpec",
     "TitleClipError",
+    "TitleTextError",
     "missing_glyphs",
     "qr_box",
     "qr_colours",
@@ -105,6 +106,11 @@ _QR_MIN_MODULE = 5  # px; 4 px codes stop decoding after a 480p transcode
 _QR_ROOM_PORTRAIT = 0.6  # of the panel's height
 _QR_ROOM_LANDSCAPE = 0.5  # of the panel's width
 _ELLIPSIS = "…"
+# Characters the title font has but cannot draw, and what is drawn instead. Amiri's
+# ﷽ (U+FDFD, the basmala ligature) fails to rasterise at every size ("raster
+# overflow"), and it is a character this audience types; the words it stands for
+# are drawn instead.
+_SPELLED_OUT = {"\ufdfd": "بسم الله الرحمن الرحيم"}
 _INSTALL_HINT = "Install FFmpeg and try again."
 _ERROR_LINES = 8
 
@@ -114,6 +120,21 @@ Box = tuple[int, int, int, int]
 
 class TitleClipError(RuntimeError):
     """FFmpeg could not write the clip; the message ends with what it said."""
+
+
+class TitleTextError(ValueError):
+    """The title font could not measure or draw *text*; the message says which."""
+
+    def __init__(self, text: str, error: OSError) -> None:
+        super().__init__(f"the title font cannot draw {text!r}: {error}")
+        self.text = text
+
+
+def _drawable(text: str) -> str:
+    """*text* with every character the font cannot draw spelled out (see _SPELLED_OUT)."""
+    for char, words in _SPELLED_OUT.items():
+        text = text.replace(char, f" {words} ")
+    return text
 
 
 def _check(style: str, seconds: float) -> float:
@@ -243,7 +264,16 @@ class _Block:
     height: int
 
 
-def _fit(
+def _fit(text: str, font_file: Path, *args: Any, **kwargs: Any) -> _Block | None:
+    """:func:`_fit_text` on the drawable form of *text*; a font failure is a
+    :class:`TitleTextError` naming the text, never a bare ``OSError``."""
+    try:
+        return _fit_text(_drawable(text), font_file, *args, **kwargs)
+    except OSError as error:
+        raise TitleTextError(text, error) from error
+
+
+def _fit_text(
     text: str,
     font_file: Path,
     max_width: int,
@@ -297,13 +327,16 @@ def _draw_block(draw: ImageDraw.ImageDraw, block: _Block, centre_x: float, top: 
     y = top
     for line in block.lines:
         x0, y0, x1, y1 = _bbox(line, block.font, block.direction)
-        draw.text(
-            (centre_x - (x0 + x1) / 2, y - y0),
-            line,
-            font=block.font,
-            fill=255,
-            direction=block.direction,
-        )
+        try:
+            draw.text(
+                (centre_x - (x0 + x1) / 2, y - y0),
+                line,
+                font=block.font,
+                fill=255,
+                direction=block.direction,
+            )
+        except OSError as error:
+            raise TitleTextError(line, error) from error
         y += (y1 - y0) + _spacing(block.font)
 
 
@@ -379,7 +412,10 @@ def _layout(spec: Spec, width: int, height: int) -> _Layout:
             room = min(max_h - 2 * pad, int((max_w - 3 * pad) * _QR_ROOM_LANDSCAPE))
         if qr_side > room:
             # Only a preview is drawn this small; a clip refuses (qr_fits).
-            qr_side, qr_scannable = max(1, room // span) * span, False
+            qr_scannable = False
+            # Whole modules when even 1 px ones fit; below that the code is scaled
+            # down into the room, so a thumbnail never draws it past the frame.
+            qr_side = (room // span) * span if room >= span else max(1, room)
         if portrait:
             panel_w = max(panel_w, qr_side + 2 * pad)
             panel_h = max(panel_h, math.ceil(qr_side / _QR_ROOM_PORTRAIT) + 2 * pad)
@@ -504,7 +540,11 @@ def _tofu(font_file: Path) -> tuple[tuple[int, int], bytes]:
 
 @lru_cache(maxsize=2048)
 def _has_glyph(font_file: Path, char: str) -> bool:
-    mask = load_font(font_file, 32).getmask(char)
+    """Whether the font draws *char*: not its missing-glyph box, and not an error."""
+    try:
+        mask = load_font(font_file, 32).getmask(char)
+    except OSError:  # a glyph FreeType cannot rasterise draws nothing either
+        return False
     return (mask.size, bytes(mask)) != _tofu(font_file)
 
 
@@ -513,10 +553,12 @@ def missing_glyphs(text: str) -> str:
 
     Amiri draws Arabic and Latin (with its diacritics), not Cyrillic, Bengali
     or emoji, which would come out as empty boxes; the dialog can warn first.
-    Spaces and invisible formatting characters are never reported.
+    Spaces and invisible formatting characters are never reported, nor is a
+    character the renderer spells out instead of drawing (﷽ becomes the words
+    of the basmala).
     """
     missing = []
-    for char in dict.fromkeys(text):
+    for char in dict.fromkeys(_drawable(text)):
         if char.isspace() or unicodedata.category(char) in ("Cc", "Cf"):
             continue
         if not all(_has_glyph(path, char) for path in (TEXT_FONT_PATH, TEXT_FONT_BOLD_PATH)):
@@ -573,13 +615,16 @@ def _scene(spec: Spec, look: Look, width: int, height: int) -> _Scene:
         assert isinstance(spec, OutroSpec) and spec.qr_url
         dark, light = qr_colours(look)
         side = layout.qr_box[2] - layout.qr_box[0]
+        span = qr_modules(spec.qr_url) + 2 * _QR_QUIET
         qr = qr_image(
             spec.qr_url,
-            side,
+            max(side, span),
             dark,
             light,
             min_module_px=_QR_MIN_MODULE if layout.qr_scannable else 1,
         )
+        if qr.width != side:  # a thumbnail smaller than one pixel a module
+            qr = qr.resize((side, side), Image.Resampling.BOX)
     return _Scene(layout, text, qr)
 
 

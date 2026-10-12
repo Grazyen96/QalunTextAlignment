@@ -24,6 +24,8 @@ import re
 import unicodedata
 from urllib.parse import quote, unquote, unquote_plus, urlsplit, urlunsplit
 
+import idna
+
 __all__ = [
     "LINK_ERRORS",
     "PLATFORMS",
@@ -62,7 +64,12 @@ def _invisible_or_space(char: str) -> bool:
 
 
 def _ascii_host(host: str, text: str) -> str:
-    """The host as ASCII (punycode for an IDN), or :class:`LinkError` ``host``."""
+    """The host as ASCII (punycode for an IDN), or :class:`LinkError` ``host``.
+
+    IDNA 2008 with UTS #46 non-transitional mapping, as browsers do: «straße.de»
+    is ``xn--strae-oqa.de``. Python's own ``idna`` codec is IDNA 2003, which maps
+    ß to ss and ς to σ, and so would send the viewer to a different domain.
+    """
     host = host.rstrip(".")
     if not host:
         raise LinkError("host", text)
@@ -75,11 +82,11 @@ def _ascii_host(host: str, text: str) -> str:
     except ValueError:
         pass
     try:
-        ascii_host = host.encode("idna").decode("ascii").lower()
+        ascii_host = idna.encode(host, uts46=True, transitional=False).decode("ascii").lower()
         labels = ascii_host.split(".")
         for label in labels:
             if label.startswith("xn--"):
-                label.encode("ascii").decode("idna")  # valid punycode, or UnicodeError
+                idna.decode(label)  # valid punycode, or IDNAError (a UnicodeError)
     except UnicodeError as error:
         raise LinkError("host", text) from error
     if not all(_LABEL.match(label) for label in labels):
@@ -200,7 +207,7 @@ def readable_link(url: str) -> str:
     host = parts.hostname or ""
     if not host.startswith("[") and ":" not in host:
         try:
-            host = host.encode("ascii").decode("idna")
+            host = idna.decode(host)
         except UnicodeError:
             pass
     else:

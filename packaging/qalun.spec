@@ -94,6 +94,10 @@ datas += collect_data_files("certifi")
 # certifi is MPL-2.0, and its licence travels in its metadata. replicate's
 # recursive copy below brings it too, but naming it here keeps it if replicate goes.
 datas += copy_metadata("certifi")
+# idna (BSD 3-Clause) encodes the outro link's international host names. Its
+# licence travels in its metadata, which replicate's recursive copy also brings;
+# named here so it stays if replicate goes.
+datas += copy_metadata("idna")
 
 # replicate/__about__.py runs `version("replicate")` at import time, so the
 # package's metadata has to travel with it or the import raises. recursive=True

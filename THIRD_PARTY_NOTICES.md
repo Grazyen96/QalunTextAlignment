@@ -188,6 +188,13 @@ https://github.com/heuer/segno, version 1.6.6 as published on PyPI, © Lars
 Heuer, BSD 3-Clause License. Qalun uses it to encode the generated outro's QR
 code. The licence text is in the app's folder, at `_internal/segno-LICENSE.txt`.
 
+## idna
+
+https://github.com/kjd/idna, version 3.13 as published on PyPI, © Kim Davies and contributors,
+BSD 3-Clause License. Qalun uses it to turn an international host name in the
+outro's link into the form the QR code carries, as browsers do. The licence
+text is in the app's folder, at `_internal/idna-3.13.dist-info/licenses/LICENSE.md`.
+
 ## The rest of the app
 
 The app is built with PyInstaller from the following, each bundled in the app's

@@ -104,7 +104,8 @@ host in its own script, a percent-encoded path as its words («example.org/در�
 the person how many came by typing rather than scanning.
 
 The person can see the tracked link (§2.1) and copy it for the video description. The QR code
-encodes exactly that tracked link, in ASCII: an IDN host in punycode, a non-ASCII path or fragment
+encodes exactly that tracked link, in ASCII: an IDN host in punycode (IDNA 2008 with UTS #46 non-transitional mapping, as browsers do:
+«straße.de» is `xn--strae-oqa.de`, not `strasse.de`), a non-ASCII path or fragment
 percent-encoded. Existing query pieces are kept exactly as written (their encoding, a bare
 `flag`, a `;`); an empty `utm_campaign` counts as none.
 
@@ -122,7 +123,9 @@ time *t*:
 - **Background:** `backgrounds.base_layer(look, w, h, card_box, radius)`, the look's background
   plus card. The card box is a centred title panel, about 70 % × 40 % of the frame.
 - **Text:**
-  - with the **text font** (§4.3);
+  - with the **text font** (§4.3); the basmala ligature ﷽ (U+FDFD), which Amiri cannot
+    rasterise, is drawn spelled out as «بسم الله الرحمن الرحيم»; a font failure is a
+    `TitleTextError` (a `ValueError`) naming the text, never a crash;
   - right to left with raqm, the Arabic text shaped;
   - Latin text such as an English name laid out left to right, each text's direction taken from
     its first strong letter; the link text always left to right, whatever its script;
@@ -207,10 +210,10 @@ lecture is kept. This is the same rule as for clips.
 | Situation | Behaviour |
 |---|---|
 | Link not http/https, or unparsable | The dialog refuses it with a message; OK is disabled while it is invalid |
-| Link too long for a QR code at level M, or for the lecture's frame at 5 px modules | The dialog says so, using `qr_fits` with the lecture's size (a fixed character count is wrong: about 900 characters already fail at 960×540) |
+| Link too long for a QR code at level M, or for the lecture's frame at 5 px modules | The dialog says so, using `qr_fits` with the lecture's size (a fixed character count is wrong. Measured with 5 px modules, the longest tracked link that fits is 412 characters at 960×540, 779 at 1280×720, 1,911 at 1920×1080 and 2,213 at 1080×1920) |
 | A character the title font cannot draw (Cyrillic, emoji) | The dialog warns, using `missing_glyphs` |
 | No ayat known for the title | The title shows the surah name, or is left out |
-| Text too long for the panel | Font size shrinks (the renderer's `fit_font_size`); wraps to at most 3 lines |
+| Text too long for the panel | Font size shrinks (the renderer's `fit_font_size`); wraps to at most 2 lines, the last cut with «…» if it still does not fit |
 | Generation fails or is cancelled | `episode_error`; the lecture is kept |
 | A light look where QR contrast is low | Black on white is used instead |
 
