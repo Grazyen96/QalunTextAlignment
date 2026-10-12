@@ -37,8 +37,8 @@ python3 -m pip install -r requirements.txt
 ```
 
 The runtime dependencies are NumPy, Pillow (built with libraqm, for Arabic
-shaping), certifi, the Replicate client (only used by the optional WhisperX
-engine) and **sherpa-onnx** (Apache 2.0, though its PyPI build also contains
+shaping), certifi, segno (the generated outro's QR code), the Replicate client
+(only used by the optional WhisperX engine) and **sherpa-onnx** (Apache 2.0, though its PyPI build also contains
 GPL-3.0 code; see [Licence](#licence)), which runs the local speech model.
 That model, NVIDIA's FastConformer Hybrid Large (Arabic),
 `stt_ar_fastconformer_hybrid_large_pcd_v1.0`, is not installed by pip: Qalun
@@ -751,4 +751,7 @@ licences are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 The licence does not cover the bundled Quran font (`qaloon.10.ttf`,
 `qaloon.10.woff2`) or the Quran text (`UthmanicQaloon1-v10.txt`). They are
 third-party works, their provenance and terms to be confirmed by the owner;
-see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Nor does it cover the
+bundled Amiri font (`Amiri-Regular.ttf`, `Amiri-Bold.ttf`), which the generated
+intro and outro write their titles in: it is under the SIL Open Font License
+1.1, whose text ships beside it.

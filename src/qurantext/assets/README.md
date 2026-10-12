@@ -10,6 +10,9 @@ resolves its default font into the Python installation directory.
 
 - `fonts/qaloon.10.ttf` — the Qalun face the frame renderer draws with.
 - `fonts/qaloon.10.woff2` — the same face for web use.
+- `fonts/Amiri-Regular.ttf`, `fonts/Amiri-Bold.ttf` — the text font for the
+  generated intro's and outro's titles, which need Latin letters as well as
+  Arabic ones; the Quran font has no Latin. `fonts/Amiri-OFL.txt` is its licence.
 - `quran/UthmanicQaloon1-v10.txt` — the certified Qalun text everything is
   built from: the store, the citation index, the ayah text on screen.
 
@@ -46,3 +49,22 @@ the app and its source zip. Their provenance and terms are to be confirmed by
 the owner; until then `THIRD_PARTY_NOTICES.md` says so, and the release
 checklist holds the first release until they are confirmed and written down
 there. The text's source is recorded above; its terms are not.
+
+## Amiri: the text font
+
+`fonts/Amiri-Regular.ttf` and `fonts/Amiri-Bold.ttf` are Amiri release 1.003,
+https://github.com/aliftype/amiri/releases/tag/1.003, taken unmodified from
+the release archive `Amiri-1.003.zip` (sha256
+`81af0aff7d2086d8af24cea7202f7546130997982534691373485cd96744d05e`, the digest
+GitHub publishes for it), fetched 12 Oct 2026:
+
+- `Amiri-Regular.ttf`, sha256
+  `cd2550c0f4c05eb341bf97958211aaa39382bca96577ba3a67d4a3b4912c43c0`
+- `Amiri-Bold.ttf`, sha256
+  `8cfed49b66de57e360ac61631d882dddfa23095d3ddb39fc2133eaf93892e79a`
+
+Copyright 2010-2022 The Amiri Project Authors, under the SIL Open Font License,
+Version 1.1. The licence, the release's `OFL.txt`, is `fonts/Amiri-OFL.txt`
+beside the fonts, so it travels wherever they do (the wheel, the app, the
+source zip); `packaging/licenses/Amiri-OFL.txt` keeps the same text.
+`tests/test_packaging_spec.py` checks both hashes.

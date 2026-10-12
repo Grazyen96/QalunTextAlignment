@@ -40,7 +40,8 @@ as it does today.
 
 - **Name**: free text, e.g. «دروس الشيخ …» or "Dars of Sheikh …". It is remembered.
 - **Title line**: read-only. It is filled from the lecture: the surah name and ayat range of its
-  on-screen cards (studied surah, hand-made cards included), e.g. «سورة الفرقان · الآيات ٤٤–٤٩».
+  on-screen cards (studied surah, hand-made cards included), e.g. «سورة الفرقان، الآيات ٤٤–٤٩». The separator is the Arabic comma «،»: Amiri draws a
+  middle dot «·» between Arabic words like an Arabic zero «٠».
   When nothing is known, it is the surah name alone, or the line is left out.
 - **Style**: Fade, Rise or Reveal.
 - **Length**: 3–10 s, default 5.
@@ -56,7 +57,11 @@ as it does today.
 
   The phrase is remembered.
 - **Link**: a URL field, remembered. Only `http` and `https` are accepted; a missing scheme becomes
-  `https://`. Leaving it empty means no QR code and no address.
+  `https://`. Leaving it empty means no QR code and no address. The link must have a real host
+  name (or a valid IDN, or an IP address) with an optional valid port, and no user name or
+  password, spaces or invisible characters; mistyped schemes (`https:/x`, `https//x`, `https:x`)
+  are refused. `normalise_link` raises `LinkError` with a `code` the dialog words (empty, spaces,
+  scheme, slashes, userinfo, host, port).
 - **Publishing on**: YouTube, Instagram, Facebook, TikTok, Telegram or WhatsApp. It is remembered
   as the last one used and asked again on each OK, because it can change per export.
 - **Tracked link**: read-only, showing the full URL inside the QR code, with a **Copy** button so
@@ -93,12 +98,16 @@ fps, tracked URL and the generator's version. When nothing changed, the clip is 
 - The automatic campaign is `qalun-<surah:03d>-<from:03d>-<to:03d>`, e.g. `qalun-025-044-049`.
   With no ayat it is `qalun-<surah:03d>`; with no surah it is `qalun-lecture`.
 
-The **readable text** under the QR code is `host + path`, without scheme, query, fragment or a
-trailing `/`, e.g. `example.org/dars`. Visits typed from it show as direct traffic, which tells
+The **readable text** under the QR code is `host + path`, without scheme, query, fragment, user
+name or a trailing `/`, e.g. `example.org/dars`. It is decoded for people (display only): an IDN
+host in its own script, a percent-encoded path as its words («example.org/دروس»). Visits typed from it show as direct traffic, which tells
 the person how many came by typing rather than scanning.
 
 The person can see the tracked link (§2.1) and copy it for the video description. The QR code
-encodes exactly that tracked link.
+encodes exactly that tracked link, in ASCII: an IDN host in punycode (IDNA 2008 with UTS #46 non-transitional mapping, as browsers do:
+«straße.de» is `xn--strae-oqa.de`, not `strasse.de`), a non-ASCII path or fragment
+percent-encoded. Existing query pieces are kept exactly as written (their encoding, a bare
+`flag`, a `;`); an empty `utm_campaign` counts as none.
 
 ## 4. Architecture
 
@@ -114,26 +123,38 @@ time *t*:
 - **Background:** `backgrounds.base_layer(look, w, h, card_box, radius)`, the look's background
   plus card. The card box is a centred title panel, about 70 % × 40 % of the frame.
 - **Text:**
-  - with the **text font** (§4.3);
+  - with the **text font** (§4.3); the basmala ligature ﷽ (U+FDFD), which Amiri cannot
+    rasterise, is drawn spelled out as «بسم الله الرحمن الرحيم»; a font failure is a
+    `TitleTextError` (a `ValueError`) naming the text, never a crash;
   - right to left with raqm, the Arabic text shaped;
-  - Latin text such as an English name or the link text laid out left to right;
+  - Latin text such as an English name laid out left to right, each text's direction taken from
+    its first strong letter; the link text always left to right, whatever its script;
   - mixed text isolated.
 - **Colours:** the name uses `look.header_text`, the title line `look.body_text`, the phrase
   `look.body_text` and the link text `look.placeholder_text`.
+- **Sizes:** the name starts at 9 % of the frame height and the title line at 0.7 × the name's
+  fitted size, so the title reads as the smaller line.
 - **QR code** (outro only):
   - drawn from segno's module matrix with Pillow;
   - error correction "M", quiet zone of 4 modules;
-  - dark modules in `look.body_text` on a light square of `look.card` at full opacity;
+  - dark modules on a light square: of `look.body_text` and `look.card` (at full opacity), the
+    darker draws the modules and the lighter the square. On a dark look that is card-coloured
+    modules on a body-text square: an inverted code (light on dark) is one many phone scanners,
+    and OpenCV, cannot read;
   - if contrast is below 4.5:1, the code uses black on white instead;
-  - its size is at least 25 % of the frame's shorter side, and each module at least 4 px;
+  - each module is a whole number of pixels, `max(5, ceil(0.25 · short side / (modules + 8)))`,
+    so the code with its quiet zone is at least 25 % of the frame's shorter side. At 4 px a code
+    stops decoding once a platform scales the video to 480p or 360p. A clip refuses a size where
+    such a code cannot fit in the panel (`qr_fits`); a small preview may draw smaller modules;
   - it sits beside or above the phrase, depending on whether the frame is landscape or portrait.
 - **Animation:** `progress = t / seconds`.
   - **Fade:** everything fades in over the first 0.6 s and out over the last 0.6 s, alpha-blended
     over the background.
   - **Rise:** the text slides up 6 % of the height while fading in, and the end fades.
   - **Reveal:** the background pattern draws in left to right over the first 40 %, or right to
-    left when the UI is in Arabic, then the text fades in. The QR code never animates: it is fully
-    visible for at least 70 % of the outro, so a viewer can scan it.
+    left when the UI is in Arabic (the spec's `rtl` field, so it is in the cache key and a preview
+    matches its clip), then the text fades in. The QR code never animates: it is fully drawn from
+    14 % to 86 % of the outro, which is at least 70 % of its frames, so a viewer can scan it.
 
 `render_title_clip(spec, look, output, *, width, height, fps, progress, cancel) -> Path` streams
 frames to FFmpeg:
@@ -189,9 +210,10 @@ lecture is kept. This is the same rule as for clips.
 | Situation | Behaviour |
 |---|---|
 | Link not http/https, or unparsable | The dialog refuses it with a message; OK is disabled while it is invalid |
-| Link too long for a QR code at level M (over about 2,300 characters) | The dialog says so |
+| Link too long for a QR code at level M, or for the lecture's frame at 5 px modules | The dialog says so, using `qr_fits` with the lecture's size (a fixed character count is wrong. Measured with 5 px modules, the longest tracked link that fits is 412 characters at 960×540, 779 at 1280×720, 1,911 at 1920×1080 and 2,213 at 1080×1920) |
+| A character the title font cannot draw (Cyrillic, emoji) | The dialog warns, using `missing_glyphs` |
 | No ayat known for the title | The title shows the surah name, or is left out |
-| Text too long for the panel | Font size shrinks (the renderer's `fit_font_size`); wraps to at most 3 lines |
+| Text too long for the panel | Font size shrinks (the renderer's `fit_font_size`); wraps to at most 2 lines, the last cut with «…» if it still does not fit |
 | Generation fails or is cancelled | `episode_error`; the lecture is kept |
 | A light look where QR contrast is low | Black on white is used instead |
 

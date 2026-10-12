@@ -45,6 +45,8 @@ from qurantext.config.paths import (
     DEFAULT_QURAN_PATH,
     OUTPUT_DIR,
     QURAN_DB_PATH,
+    TEXT_FONT_BOLD_PATH,
+    TEXT_FONT_PATH,
     checkout_root,
     user_data_dir,
     user_log_file,
@@ -334,6 +336,35 @@ def _bundled_font() -> CheckResult:
         f"missing at {DEFAULT_FONT_PATH}",
         "The font ships inside the package. A build missing it was packaged "
         "without its data files; check that assets/ is included.",
+    )
+
+
+def _title_parts() -> CheckResult:
+    """What the generated intro and outro need: the Amiri title font and segno.
+
+    Both ship with the app; a frozen build that dropped the font files or the
+    pure-Python QR encoder renders the lecture fine and fails only when an
+    episode with a generated part is made, so the doctor names it up front.
+    """
+    name = "Generated intro and outro"
+    missing = [p.name for p in (TEXT_FONT_PATH, TEXT_FONT_BOLD_PATH) if not p.is_file()]
+    try:
+        import segno
+    except ImportError:
+        missing.append("segno (the QR code library)")
+        version = None
+    else:
+        version = getattr(segno, "__version__", "?")
+    if missing:
+        return CheckResult(
+            name,
+            Status.FAIL,
+            f"missing: {', '.join(missing)}",
+            "They ship with the app. A build missing them was packaged without its "
+            "data files or without segno; reinstall, or report it if this is a release.",
+        )
+    return CheckResult(
+        name, Status.OK, f"{TEXT_FONT_PATH.name}, {TEXT_FONT_BOLD_PATH.name}, segno {version}"
     )
 
 
@@ -1111,6 +1142,7 @@ def run_checks(*, release: bool = False) -> list[CheckResult]:
         _episode_join(release),
         *_transcription(release),
         _bundled_font(),
+        _title_parts(),
         _bundled_quran(),
         _quran_store(),
         _writable_output(),

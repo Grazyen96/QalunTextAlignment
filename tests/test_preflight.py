@@ -899,3 +899,17 @@ def test_the_report_names_the_error_log(tmp_path, monkeypatch) -> None:
     expected = tmp_path / "data" / "logs" / "qalun.log"
     assert f"  error log in {expected}" in report.splitlines()
     assert not expected.parent.exists(), "naming the log does not make its folder"
+
+
+def test_the_doctor_checks_what_generated_parts_need(monkeypatch, tmp_path) -> None:
+    """The Amiri title font and segno: a build without them renders the lecture and
+    fails only when an episode with a generated intro or outro is made."""
+    results = {r.name: r for r in run_checks()}
+    ok = results["Generated intro and outro"]
+    assert ok.status == Status.OK and "Amiri-Regular.ttf" in ok.detail and "segno" in ok.detail
+
+    monkeypatch.setattr(preflight, "TEXT_FONT_BOLD_PATH", tmp_path / "Amiri-Bold.ttf")
+    monkeypatch.setitem(sys.modules, "segno", None)  # import segno now raises ImportError
+    broken = preflight._title_parts()
+    assert broken.status == Status.FAIL and broken.remedy
+    assert "Amiri-Bold.ttf" in broken.detail and "segno" in broken.detail

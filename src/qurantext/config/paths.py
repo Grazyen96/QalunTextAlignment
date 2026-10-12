@@ -48,6 +48,8 @@ __all__ = [
     "RECITATION_MATCHING_OUTPUT_DIR",
     "REQUIRED_DIRECTORIES",
     "RETIRED_QURAN_NAMES",
+    "TEXT_FONT_BOLD_PATH",
+    "TEXT_FONT_PATH",
     "VIDEOS_OUTPUT_DIR",
     "WHISPERX_TRANSCRIPTS_OUTPUT_DIR",
     "bundled_asset",
@@ -195,6 +197,11 @@ RANGE_MATCHING_OUTPUT_DIR = OUTPUT_DIR / "range_matching"
 
 #: The Qalun font that ships with the package.
 DEFAULT_FONT_PATH = bundled_asset("fonts/qaloon.10.ttf")
+#: The text font for everything that is not Quran text: the generated intro's and
+#: outro's titles. Amiri (SIL OFL 1.1) draws Latin and Arabic letters alike, which
+#: the Quran font does not. See assets/README.md for the release and its hashes.
+TEXT_FONT_PATH = bundled_asset("fonts/Amiri-Regular.ttf")
+TEXT_FONT_BOLD_PATH = bundled_asset("fonts/Amiri-Bold.ttf")
 #: The certified Qalun text that ships with the package. Everything is built
 #: from this — the store, the citation index, the ayah text on screen — so the
 #: app carries it rather than asking each user to find a copy and hoping the

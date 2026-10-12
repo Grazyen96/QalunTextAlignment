@@ -15,7 +15,9 @@ readme = "README.md"
 # Not covered: the package data's Quran font (assets/fonts/qaloon.10.ttf and
 # qaloon.10.woff2) and Quran text (assets/quran/UthmanicQaloon1-v10.txt) are
 # third-party works, their provenance and terms to be confirmed by the owner; see
-# src/qurantext/assets/README.md and THIRD_PARTY_NOTICES.md.
+# src/qurantext/assets/README.md and THIRD_PARTY_NOTICES.md. Nor is the title font,
+# Amiri (assets/fonts/Amiri-Regular.ttf and Amiri-Bold.ttf), which stays under the SIL
+# Open Font License 1.1, its text beside it (Amiri-OFL.txt).
 license = "GPL-3.0-only"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
@@ -33,6 +35,14 @@ dependencies = [
   # packaging/third-party-sources.txt describe this very build, so moving the pin
   # means updating them; tests/test_packaging_spec.py fails until they agree.
   "sherpa-onnx==1.13.8",
+  # The generated outro's QR code (BSD 3-Clause, pure Python). Pinned exactly:
+  # packaging/licenses/segno-LICENSE.txt is this release's licence, and
+  # tests/test_packaging_spec.py fails until the pin, the install and it agree.
+  "segno==1.6.6",
+  # The outro link's international host names, IDNA 2008 with UTS #46 as browsers
+  # use (BSD 3-Clause, pure Python); Python's own codec is IDNA 2003. Pinned
+  # exactly, like segno; the notice credits it in its own right.
+  "idna==3.13",
 ]
 
 [project.optional-dependencies]

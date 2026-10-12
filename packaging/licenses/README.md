@@ -26,6 +26,22 @@ the wheels the binaries come from do not carry them.
   `VERS_1.28.2` (`nm -D --defined-only ... | grep VERS`). Fetch it again from
   the matching tag whenever the sherpa-onnx pin moves.
 
+- `segno-LICENSE.txt`: segno, BSD 3-Clause License, © Lars Heuer, the QR
+  encoder for the generated outro. Its wheel does carry this file, in its
+  `.dist-info`, but segno is pure Python, so PyInstaller puts its code inside
+  the app's archive and leaves the metadata out; the spec ships this copy
+  beside `THIRD_PARTY_NOTICES.md` instead. Copied verbatim from the installed
+  segno 1.6.6 (`segno-1.6.6.dist-info/licenses/LICENSE`, fetched 12 Oct 2026);
+  `tests/test_packaging_spec.py` fails if it stops matching the installed one.
+
+- `Amiri-OFL.txt`: the SIL Open Font License 1.1 for the Amiri font, the
+  release's own `OFL.txt` from
+  https://github.com/aliftype/amiri/releases/tag/1.003 (`Amiri-1.003.zip`,
+  fetched 12 Oct 2026). The same file sits beside the fonts in
+  `src/qurantext/assets/fonts/`, so the wheel carries it too, and the spec's
+  copy of `assets/` puts it beside them in the app; it is kept here with the
+  other licence texts, and a test holds the two copies equal.
+
 sherpa-onnx's own licence (Apache 2.0) is not here: its wheel carries it, and the
 spec takes it from the installed distribution so it always matches the version built.
 
