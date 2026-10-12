@@ -172,7 +172,7 @@ this is the only place anyone hears each platform's build recognise speech.
   - the Cancel and Close forms
   - `review.save` used as a dialog title
   - `home.reading`
-  - the eleven `job.stage.*` lines, among them `download`, `unpack`, `transcribe`,
+  - the fourteen `job.stage.*` lines, among them `download`, `unpack`, `transcribe`,
     `transcribe_online` and the episode's two, `episode_recitation` («تجهيز التلاوة للحلقة…»)
     and `episode_join` («تجميع الحلقة…»): the other stage lines open with «جارٍ»; should
     these two as well?
@@ -243,6 +243,18 @@ this is the only place anyone hears each platform's build recognise speech.
       the home window `home.progress.episode_lecture` («إخراج الدرس»),
       `home.progress.episode_recitation` («إخراج التلاوة») and
       `home.progress.episode_join` («تجميع الحلقة»), each with its `_eta` form.
+    - the generated intro and outro, made during the render: the steps
+      `job.stage.episode_intro` («جارٍ إعداد المقدمة…») and `job.stage.episode_outro`
+      («جارٍ إعداد الخاتمة…»), their progress `home.progress.episode_intro` and
+      `home.progress.episode_outro` («إعداد المقدمة»، «إعداد الخاتمة», each with its `_eta`
+      form) and, in the review's bar, `render.running_intro` («المقدمة») and
+      `render.running_outro` («الخاتمة»); the errors `episode.error.generate` («تعذّر إعداد
+      المقدمة، فلم تُصنع الحلقة») and `episode.error.qr_too_big` («رابط الخاتمة أطول من أن
+      تقرأ الهواتف رمز الاستجابة السريعة الخاص به في فيديو بحجم 1280×720…»): is «رمز
+      الاستجابة السريعة» what a person calls a QR code, or «رمز QR»? And the intro's title
+      line, drawn into the video itself from the lecture's cards: «سورة الفرقان، الآيات
+      ٤٤–٤٩» and, for one ayah, «سورة الفرقان، الآية ٧» (Arabic-Indic digits, the Arabic
+      comma and an en dash), with the outro's default phrase «جزاكم الله خيرًا».
 
     Is «الحلقة» the right word for the episode, and «الدرس» or «المحاضرة» for the lecture
     (both are used now)?

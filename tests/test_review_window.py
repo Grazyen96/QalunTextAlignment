@@ -2264,6 +2264,10 @@ def test_the_render_progress_names_each_step_of_an_episode(qt_app, tmp_path, mon
         assert bar.toolTip() == t("job.stage.episode_recitation")
         window._on_render_progress(ProgressEvent("episode_recitation", "x", fraction=0.3))
         assert bar.format() == t("render.running_recitation", percent=30)
+        window._on_render_progress(ProgressEvent("episode_intro", "x", fraction=0.4))
+        assert bar.format() == t("render.running_intro", percent=40)
+        window._on_render_progress(ProgressEvent("episode_outro", "x", fraction=0.6))
+        assert bar.format() == t("render.running_outro", percent=60)
         window._on_render_progress(ProgressEvent("episode_join", "x", fraction=0.9))
         assert bar.format() == t("render.running_join", percent=90)
     finally:

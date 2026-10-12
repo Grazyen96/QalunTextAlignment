@@ -379,6 +379,25 @@ def list_surahs(conn: sqlite3.Connection) -> list[dict]:
     ]
 
 
+def stored_surah_names(db_path: str | Path) -> dict[int, str]:
+    """Surah names from the built store at *db_path*, or none when it is not there.
+
+    Read-only, and never raises for a store that is missing or unreadable: a
+    picker without names still works (each surah is listed by its number), and
+    a generated intro's title falls back to the cards' own surah names.
+    """
+    try:
+        conn = connect(db_path)
+    except (OSError, sqlite3.Error):
+        return {}
+    try:
+        return {int(row["surah_num"]): str(row["name"]) for row in list_surahs(conn)}
+    except sqlite3.Error:
+        return {}
+    finally:
+        conn.close()
+
+
 def surah_ayah_count(conn: sqlite3.Connection, surah_num: int) -> int:
     """How many ayat a surah has, in the shipped text's own Madani counting."""
     row = conn.execute("SELECT ayah_count FROM surahs WHERE surah_num = ?", (surah_num,)).fetchone()

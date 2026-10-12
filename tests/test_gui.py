@@ -2821,6 +2821,167 @@ def test_a_failed_episode_keeps_the_lecture(tmp_path, monkeypatch) -> None:
     assert saved.render["video"] == lecture and "episode" not in saved.render
 
 
+_GENERATED_EPISODE = {
+    "intro_generated": {"name": "دروس الشيخ أحمد", "style": "rise", "seconds": 4},
+    "outro_generated": {"link": "example.org/dars", "platform": "telegram"},
+}
+
+
+def _fake_generation(jobs_module, monkeypatch, tmp_path) -> list[dict]:
+    """``ensure_generated_part`` faked: each part is a path named for it; returns the calls."""
+    from qurantext.utils.progress import report
+
+    made: list[dict] = []
+
+    def ensure(project, kind, spec, look, **kwargs):
+        made.append(dict(kwargs, kind=kind, spec=spec, look=look))
+        report(kwargs["progress"], "title_clip", "Drawing the title clip", fraction=0.5)
+        return tmp_path / f"made-{kind}.mp4"
+
+    monkeypatch.setattr(jobs_module, "ensure_generated_part", ensure)
+    monkeypatch.setattr(jobs_module, "stored_surah_names", lambda db_path: {25: "الفرقان"})
+    return made
+
+
+def test_run_render_makes_generated_parts(tmp_path, monkeypatch) -> None:
+    from qurantext.core.looks import NIGHT_GOLD
+    from qurantext.core.title_cards import IntroSpec, OutroSpec
+    from qurantext.gui.i18n import t
+
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch, episode=_GENERATED_EPISODE)
+    made = _fake_generation(jobs_module, monkeypatch, tmp_path)
+    events: list[ProgressEvent] = []
+    outcome = jobs_module.run_render(project, progress=events.append)
+
+    lecture = (tmp_path / "videos").resolve() / "lec.mp4"
+    assert outcome.episode_error is None
+    assert outcome.episode_video == lecture.with_name("lec – episode.mp4")
+    (joined,) = seen["assembled"]
+    assert joined["parts"] == [tmp_path / "made-intro.mp4", lecture, tmp_path / "made-outro.mp4"]
+    assert joined["lecture_index"] == 1
+    # Each part is made at the lecture's own size and rate, in its look.
+    assert [call["kind"] for call in made] == ["intro", "outro"]
+    for call in made:
+        assert (call["width"], call["height"], call["fps"]) == (1280, 720, 30)
+        assert call["look"] == NIGHT_GOLD
+    intro, outro = made[0]["spec"], made[1]["spec"]
+    assert isinstance(intro, IntroSpec) and isinstance(outro, OutroSpec)
+    assert (intro.name, intro.style, intro.seconds) == ("دروس الشيخ أحمد", "rise", 4.0)
+    assert "utm_source=telegram" in outro.qr_url and outro.link_text == "example.org/dars"
+    said = [(e.stage, e.message) for e in events if e.translated]
+    assert said == [
+        ("episode_intro", t("job.stage.episode_intro")),
+        ("episode_outro", t("job.stage.episode_outro")),
+        ("episode_join", t("job.stage.episode_join")),
+    ]
+    assert t("job.stage.episode_intro") == "Making the intro…"
+    # The clip's own progress is reported under the part's stage.
+    drawn = [e.stage for e in events if e.message == "Drawing the title clip"]
+    assert drawn == ["episode_intro", "episode_outro"]
+
+
+def test_a_generated_part_beside_a_clip_and_a_recitation(tmp_path, monkeypatch) -> None:
+    """A generated outro after a chosen intro clip and a recitation: four parts in order."""
+    from qurantext.jobs.episode_assets import (
+        EpisodeChoice,
+        GeneratedOutro,
+        project_episode,
+        set_project_episode,
+    )
+
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch)
+    choice = project_episode(project)
+    set_project_episode(
+        project, EpisodeChoice(choice.intro, choice.recitation, outro_generated=GeneratedOutro())
+    )
+    made = _fake_generation(jobs_module, monkeypatch, tmp_path)
+    outcome = jobs_module.run_render(project)
+
+    lecture = (tmp_path / "videos").resolve() / "lec.mp4"
+    assert outcome.episode_error is None
+    (joined,) = seen["assembled"]
+    assert joined["parts"] == [
+        seen["intro"],
+        seen["rec_video"],
+        lecture,
+        tmp_path / "made-outro.mp4",
+    ]
+    assert [call["kind"] for call in made] == ["outro"]
+    assert made[0]["spec"].qr_url is None, "no link, no QR code"
+
+
+def test_a_generation_failure_keeps_the_lecture(tmp_path, monkeypatch) -> None:
+    from qurantext.gui.i18n import t
+    from qurantext.jobs.episode import EpisodeError
+    from qurantext.jobs.project import load_project
+
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch, episode=_GENERATED_EPISODE)
+    _fake_generation(jobs_module, monkeypatch, tmp_path)
+
+    def broken(project, kind, spec, look, **kwargs):
+        raise EpisodeError("episode.error.generate", part=f"episode.part.{kind}")
+
+    monkeypatch.setattr(jobs_module, "ensure_generated_part", broken)
+    outcome = jobs_module.run_render(project)
+
+    lecture = (tmp_path / "videos").resolve() / "lec.mp4"
+    assert outcome.video == lecture
+    assert outcome.episode_video is None
+    expected = t("episode.error.generate", part=t("episode.part.intro"))
+    assert outcome.episode_error == expected
+    assert expected == "The intro could not be made, so the episode was not made."
+    assert seen["assembled"] == [] and seen["exported"] == []
+    saved = load_project(project.path)
+    assert saved.render["video"] == lecture and "episode" not in saved.render
+
+
+def test_a_link_too_long_for_the_lecture_s_size_keeps_the_lecture(tmp_path, monkeypatch) -> None:
+    """The real check, at the lecture's size: the person is told to shorten the link."""
+    from qurantext.gui.i18n import t
+
+    long_link = {"link": "example.org/" + "d" * 900}  # 779 characters fit at 1280×720
+    episode = {"outro_generated": long_link}
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch, episode=episode)
+    monkeypatch.setattr(jobs_module, "stored_surah_names", lambda db_path: {})
+    monkeypatch.setattr(
+        "qurantext.jobs.generated_parts.render_title_clip",
+        lambda *a, **k: pytest.fail("no clip is drawn"),
+    )
+    outcome = jobs_module.run_render(project)
+
+    assert outcome.video is not None and outcome.episode_video is None
+    assert outcome.episode_error == t("episode.error.qr_too_big", size="1280×720")
+    assert seen["assembled"] == []
+
+
+def test_a_hand_edited_bad_link_keeps_the_lecture(tmp_path, monkeypatch) -> None:
+    from qurantext.gui.i18n import t
+
+    episode = {"outro_generated": {"link": "ftp://example.org"}}
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch, episode=episode)
+    made = _fake_generation(jobs_module, monkeypatch, tmp_path)
+    outcome = jobs_module.run_render(project)
+
+    assert outcome.episode_video is None
+    assert outcome.episode_error == t("episode.error.generate", part=t("episode.part.outro"))
+    assert made == [] and seen["assembled"] == []
+
+
+def test_a_cancel_while_making_a_part_keeps_the_lecture(tmp_path, monkeypatch) -> None:
+    from qurantext.gui.i18n import t
+
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch, episode=_GENERATED_EPISODE)
+    _fake_generation(jobs_module, monkeypatch, tmp_path)
+
+    def cancelled(*args, **kwargs):
+        raise JobCancelled("title_clip")
+
+    monkeypatch.setattr(jobs_module, "ensure_generated_part", cancelled)
+    outcome = jobs_module.run_render(project)
+    assert outcome.video is not None and outcome.episode_video is None
+    assert outcome.episode_error == t("episode.error.cancelled")
+
+
 def test_a_recitation_that_cannot_be_used_keeps_the_lecture(tmp_path, monkeypatch) -> None:
     from qurantext.gui.i18n import t
     from qurantext.jobs.episode import EpisodeError
@@ -3450,6 +3611,8 @@ def test_seed_notices_after_a_render_right_away_wait_to_be_dismissed(
         ("episode_recitation", "home.progress.episode_recitation"),
         ("episode_join", "home.progress.episode_join"),
         ("episode_lecture", "home.progress.episode_lecture"),
+        ("episode_intro", "home.progress.episode_intro"),
+        ("episode_outro", "home.progress.episode_outro"),
         ("render", "home.progress.rendering"),
     ],
 )
