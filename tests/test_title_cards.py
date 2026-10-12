@@ -17,7 +17,7 @@ from qurantext.core.title_cards import (
 
 URL = "https://example.org/dars?utm_campaign=qalun-025&utm_source=youtube&utm_medium=video&utm_content=outro-qr"
 OUTRO = OutroSpec("جزاكم الله خيرًا", "example.org/dars", URL)
-INTRO = IntroSpec("دروس الشيخ", "سورة الفرقان · الآيات ٤٤–٤٩")
+INTRO = IntroSpec("دروس الشيخ", "سورة الفرقان، الآيات ٤٤–٤٩")
 
 
 @pytest.mark.parametrize("style", STYLES)
@@ -57,7 +57,7 @@ def test_layout_fits_portrait_and_landscape():
 
 
 def test_long_text_stays_inside_the_panel():
-    long = IntroSpec("دروس " * 30, "سورة الفرقان · الآيات ٤٤–٤٩")
+    long = IntroSpec("دروس " * 30, "سورة الفرقان، الآيات ٤٤–٤٩")
     img = np.array(render_title_frame(long, NIGHT_GOLD, 960, 540, long.seconds / 2))
     # Nothing is drawn in the outer 3 % margin, which lies outside the panel.
     edge = img[:, : int(960 * 0.03)]
@@ -180,3 +180,183 @@ def test_cancel_while_writing_kills_ffmpeg_and_leaves_nothing(tmp_path):
         )
     assert len(seen) < 10
     assert not list(tmp_path.iterdir())
+
+
+# --- The fix wave (phase-1 review I2-I4, m1, m2, m6, m11; the title-size ruling) -----
+
+from dataclasses import replace  # noqa: E402
+
+from qurantext.core.title_cards import _layout, _state, missing_glyphs  # noqa: E402
+from qurantext.core.tracked_link import readable_link, tracked_link  # noqa: E402
+
+#: A typical tracked link: 143 characters, 49 modules a side.
+TYPICAL = tracked_link(
+    "https://example.org/dars/tafsir-al-furqan?ref=channel12",
+    platform="youtube",
+    campaign="qalun-025-044-049",
+)
+LONG_NAME = "دروس الشيخ " * 12
+LONG_PHRASE = "سبحانك اللهم وبحمدك، أشهد أن لا إله إلا أنت، أستغفرك وأتوب إليك " * 3
+
+
+def _overlap(a, b):
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def _inside(inner, outer):
+    return (
+        outer[0] <= inner[0]
+        and outer[1] <= inner[1]
+        and inner[2] <= outer[2]
+        and (inner[3] <= outer[3])
+    )
+
+
+@pytest.mark.parametrize(
+    "size", [(1080, 1920), (1920, 1080), (1080, 1080), (1080, 1350), (960, 540), (1280, 720)]
+)
+@pytest.mark.parametrize(
+    "spec",
+    [
+        IntroSpec(LONG_NAME, LONG_NAME),
+        OutroSpec(LONG_PHRASE, "example.org/" + "dars/" * 30, URL),
+        OutroSpec(LONG_PHRASE, readable_link(TYPICAL), TYPICAL),
+        OutroSpec("جزاكم الله خيرًا", "example.org/d", URL + "&x=" + "a" * 600),
+    ],
+    ids=["long-intro", "long-link-text", "typical", "600-char-link"],
+)
+def test_text_and_qr_stay_inside_the_panel_and_apart(spec, size):
+    layout = _layout(spec, *size)
+    boxes = [p.box for p in layout.texts]
+    assert boxes, "something is drawn"
+    for box in boxes + ([layout.qr_box] if layout.qr_box else []):
+        assert _inside(box, layout.panel), (box, layout.panel)
+    for i, box in enumerate(boxes):
+        if layout.qr_box:
+            assert not _overlap(box, layout.qr_box), (box, layout.qr_box)
+        for other in boxes[i + 1 :]:
+            assert not _overlap(box, other)
+
+
+@pytest.mark.parametrize("size", [(960, 540), (1080, 1920), (1920, 1080)])
+def test_long_text_is_fitted_not_cut_at_the_panel_edge(size):
+    """Text is drawn on a panel-sized layer, so text that was never fitted would be cut
+    at the panel's edge rather than reach the frame's margin. Every pixel the text
+    changes must lie inside the panel's padding."""
+    long = IntroSpec("دروس " * 30, "Dars of Sheikh " * 20)
+    w, h = size
+    mid = np.array(render_title_frame(long, NIGHT_GOLD, w, h, long.seconds / 2)).astype(int)
+    bare = np.array(render_title_frame(long, NIGHT_GOLD, w, h, 0.0)).astype(int)
+    ys, xs = np.nonzero(np.abs(mid - bare).sum(axis=2) > 0)
+    x0, y0, x1, y1 = _layout(long, w, h).panel
+    inset = round(0.02 * min(w, h))
+    assert xs.min() >= x0 + inset and xs.max() < x1 - inset
+    assert ys.min() >= y0 + inset and ys.max() < y1 - inset
+
+
+def _ink_components(spec) -> int:
+    cv2 = pytest.importorskip("cv2")
+    mid = np.array(render_title_frame(spec, NIGHT_GOLD, 960, 540, spec.seconds / 2).convert("L"))
+    bare = np.array(render_title_frame(spec, NIGHT_GOLD, 960, 540, 0.0).convert("L"))
+    ink = (np.abs(mid.astype(int) - bare.astype(int)) > 60).astype(np.uint8)
+    count, _ = cv2.connectedComponents(ink)
+    return count - 1
+
+
+def test_arabic_is_shaped_into_joined_forms():
+    """«محمد» shaped is one joined stroke; its letters held apart (ZWNJ) are four."""
+    assert _ink_components(IntroSpec("محمد", "")) <= 2
+    assert _ink_components(IntroSpec("‌".join("محمد"), "")) >= 4
+
+
+@pytest.mark.parametrize("style", STYLES)
+@pytest.mark.parametrize("spec", [INTRO, OUTRO])
+def test_every_style_ends_on_the_bare_look(style, spec):
+    styled = replace(spec, style=style)
+    end = np.array(render_title_frame(styled, NIGHT_GOLD, 960, 540, styled.seconds))
+    bare = np.array(render_title_frame(replace(spec, style="fade"), NIGHT_GOLD, 960, 540, 0.0))
+    assert (end == bare).all()
+
+
+@pytest.mark.parametrize("fps", [17, 24, 25, 30, 50, 60])
+def test_qr_is_fully_drawn_in_at_least_70_percent_of_frames(fps):
+    for tenths in range(30, 101, 5):
+        spec = replace(OUTRO, seconds=tenths / 10)
+        frames = round(spec.seconds * fps)
+        full = sum(_state(spec, 540, i / fps)[2] >= 1 for i in range(frames))
+        assert full >= 0.70 * frames, (spec.seconds, fps, full, frames)
+
+
+def test_qr_modules_are_whole_pixels_of_at_least_five():
+    for w, h in ((960, 540), (1280, 720), (1920, 1080), (1080, 1920)):
+        for url in (URL, TYPICAL):
+            spec = replace(OUTRO, qr_url=url)
+            x0, _, x1, _ = qr_box(spec, w, h)
+            from qurantext.core.qr import qr_modules
+
+            span = qr_modules(url) + 8
+            assert (x1 - x0) % span == 0 and (x1 - x0) // span >= 5
+            assert x1 - x0 >= 0.25 * min(w, h)
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs FFmpeg")
+@pytest.mark.parametrize(
+    "size, look",
+    [((1920, 1080), PRESETS["sand"]), ((1080, 1920), NIGHT_GOLD)],
+    ids=["16x9", "9x16"],
+)
+def test_qr_survives_a_480p_and_360p_transcode(tmp_path, size, look):
+    """WhatsApp, Telegram and a phone's YouTube player show the video at 480p or less.
+    The code is read back from the real clip after such a transcode, scaled up again
+    as a full-screen player does."""
+    cv2 = pytest.importorskip("cv2")
+    w, h = size
+    spec = OutroSpec("جزاكم الله خيرًا", readable_link(TYPICAL), TYPICAL, seconds=3)
+    clip = render_title_clip(spec, look, tmp_path / "o.mp4", width=w, height=h, fps=10)
+    for short in (480, 360):
+        small = tmp_path / f"o{short}.mp4"
+        scale = f"scale=-2:{short}" if w > h else f"scale={short}:-2"
+        subprocess.run(
+            ["ffmpeg", "-v", "error", "-y", "-i", str(clip), "-vf", scale,
+             "-c:v", "libx264", "-preset", "veryfast", "-crf", "28", str(small)],
+            check=True,
+        )  # fmt: skip
+        capture = cv2.VideoCapture(str(small))
+        capture.set(cv2.CAP_PROP_POS_FRAMES, 15)
+        ok, frame = capture.read()
+        capture.release()
+        assert ok
+        frame = cv2.resize(frame, (w, h), interpolation=cv2.INTER_LINEAR)
+        data, *_ = cv2.QRCodeDetector().detectAndDecode(frame)
+        assert data == TYPICAL, short
+
+
+def test_the_link_text_is_left_to_right_and_the_outro_uses_the_spec_colours():
+    spec = OutroSpec("جزاكم الله خيرًا", "مثال.com/دروس", URL)
+    texts = {p.colour: p.block for p in _layout(spec, 1920, 1080).texts}
+    assert set(texts) == {"body_text", "placeholder_text"}
+    assert texts["placeholder_text"].direction == "ltr"
+    assert texts["body_text"].direction == "rtl"
+
+
+@pytest.mark.parametrize("size", [(1080, 1920), (1920, 1080), (960, 540)])
+def test_the_title_is_smaller_than_the_name(size):
+    name, title = _layout(INTRO, *size).texts
+    assert title.block.font.size <= round(0.7 * name.block.font.size)
+
+
+def test_reveal_direction_is_part_of_the_spec():
+    sand = PRESETS["sand"]
+    rtl = replace(OUTRO, style="reveal")
+    ltr = replace(rtl, rtl=False)
+    assert rtl.cache_key() != ltr.cache_key()
+    # A third of the way in, the left of the panel is uncovered only when reading starts left.
+    a = np.array(render_title_frame(ltr, sand, 960, 540, 0.3))
+    b = np.array(render_title_frame(rtl, sand, 960, 540, 0.3))
+    assert tuple(b[270, 200]) == sand.frame_bg[:3] != tuple(a[270, 200])
+    assert (np.array(render_title_frame(rtl, sand, 960, 540, 0.3, rtl=False)) == a).all()
+
+
+def test_missing_glyphs_names_what_amiri_cannot_draw():
+    assert missing_glyphs("Dars دروس، ٤٤–٤٩ … café \u200f") == ""
+    assert missing_glyphs("Дars ব😀 Д") == "Дব😀"

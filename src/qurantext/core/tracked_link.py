@@ -4,32 +4,140 @@ An organisation rule says every link put in front of viewers must be
 measurable. So the QR code opens the person's link with UTM parameters naming
 the platform the video is published on, the medium (a video), the lecture
 (campaign) and the spot (the outro's QR code). A campaign the person set in the
-link themselves is theirs and stays; every other parameter they had stays too.
+link themselves is theirs and stays; every other parameter they had stays too,
+exactly as they wrote it.
 
-The words under the code are the bare address, without the tracking: typed
-visits then show as direct traffic, which tells the person how many viewers
-typed it rather than scanned it.
+A dead link measures nothing, so a link is checked strictly before any of this
+(:func:`normalise_link`): a web address with a real host, nothing else. What
+the QR code encodes is plain ASCII (an IDN host in punycode, an Arabic path
+percent-encoded), which every scanner reads the same way.
+
+The words under the code are the bare address, without the tracking, decoded
+for people (:func:`readable_link`): typed visits then show as direct traffic,
+which tells the person how many viewers typed it rather than scanned it.
 """
 
 from __future__ import annotations
 
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+import ipaddress
+import re
+import unicodedata
+from urllib.parse import quote, unquote, unquote_plus, urlsplit, urlunsplit
 
-__all__ = ["PLATFORMS", "campaign_for", "normalise_link", "readable_link", "tracked_link"]
+__all__ = [
+    "LINK_ERRORS",
+    "PLATFORMS",
+    "LinkError",
+    "campaign_for",
+    "normalise_link",
+    "readable_link",
+    "tracked_link",
+]
 
 PLATFORMS = ("youtube", "instagram", "facebook", "tiktok", "telegram", "whatsapp")
 
+#: Why a link was refused, as :attr:`LinkError.code`; the dialog words each one.
+LINK_ERRORS = ("empty", "spaces", "scheme", "slashes", "userinfo", "host", "port")
+
+_TRACKING = ("utm_source", "utm_medium", "utm_content")
+_SCHEME = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*):(.*)$", re.DOTALL)
+_HOST_PORT = re.compile(r"^\d+(?:[/?#]|$)")
+_LABEL = re.compile(r"^(?!-)[a-z0-9-]{1,63}(?<!-)$")
+# Characters kept as they are when the path, query or fragment is made ASCII:
+# RFC 3986's reserved and unreserved characters, and "%" so escapes stay escapes.
+_SAFE_PATH = "/%:@!$&'()*+,;=-._~"
+_SAFE_QUERY = _SAFE_PATH + "?"
+
+
+class LinkError(ValueError):
+    """A link that cannot go in front of viewers; *code* is one of :data:`LINK_ERRORS`."""
+
+    def __init__(self, code: str, text: str) -> None:
+        super().__init__(f"{code}: {text!r} is not a web link Qalun can use")
+        self.code = code
+
+
+def _invisible_or_space(char: str) -> bool:
+    return char.isspace() or unicodedata.category(char) in ("Cc", "Cf", "Zl", "Zp")
+
+
+def _ascii_host(host: str, text: str) -> str:
+    """The host as ASCII (punycode for an IDN), or :class:`LinkError` ``host``."""
+    host = host.rstrip(".")
+    if not host:
+        raise LinkError("host", text)
+    try:
+        return f"[{ipaddress.IPv6Address(host)}]"
+    except ValueError:
+        pass
+    try:
+        return str(ipaddress.IPv4Address(host))
+    except ValueError:
+        pass
+    try:
+        ascii_host = host.encode("idna").decode("ascii").lower()
+        labels = ascii_host.split(".")
+        for label in labels:
+            if label.startswith("xn--"):
+                label.encode("ascii").decode("idna")  # valid punycode, or UnicodeError
+    except UnicodeError as error:
+        raise LinkError("host", text) from error
+    if not all(_LABEL.match(label) for label in labels):
+        raise LinkError("host", text)
+    if len(ascii_host) > 253 or all(label.isdigit() for label in labels):
+        raise LinkError("host", text)  # too long, or a broken IPv4 address
+    if len(labels) < 2 and ascii_host != "localhost":
+        raise LinkError("host", text)
+    return ascii_host
+
 
 def normalise_link(text: str) -> str:
+    """*text* as a checked web link, in the ASCII form the QR code encodes.
+
+    Adds ``https://`` when there is no scheme (``example.org/dars``,
+    ``localhost:8000``). Raises :class:`LinkError` (a ``ValueError``) for an
+    empty link; spaces or invisible characters; a scheme other than http or
+    https; a mistyped one (``https:/x``, ``https//x``, ``https:x``); a user
+    name or password; a host that is not a real host name; or a bad port.
+    """
     text = (text or "").strip()
     if not text:
-        raise ValueError("empty link")
-    if "://" not in text and not text.lower().startswith(("javascript:", "data:", "mailto:")):
-        text = "https://" + text
+        raise LinkError("empty", text)
+    if any(_invisible_or_space(char) for char in text):
+        raise LinkError("spaces", text)
+    low = text.lower()
+    for name in ("https", "http"):
+        if low.startswith(name):
+            rest = low[len(name) :]
+            if not rest.startswith("://") and rest[:1] in (":", "/"):
+                raise LinkError("slashes", text)
+            break
+    scheme = _SCHEME.match(text)
+    if scheme is None or _HOST_PORT.match(scheme.group(2)):
+        text = "https://" + text  # no scheme: a bare host, perhaps with a port
     parts = urlsplit(text)
-    if parts.scheme.lower() not in ("http", "https") or not parts.netloc:
-        raise ValueError(f"not a web link: {text}")
-    return text
+    if parts.scheme.lower() not in ("http", "https"):
+        raise LinkError("scheme", text)
+    if "@" in parts.netloc:
+        raise LinkError("userinfo", text)
+    try:
+        port = parts.port
+    except ValueError as error:
+        raise LinkError("port", text) from error
+    if port == 0:
+        raise LinkError("port", text)
+    netloc = _ascii_host(parts.hostname or "", text)
+    if port is not None:
+        netloc += f":{port}"
+    return urlunsplit(
+        (
+            parts.scheme.lower(),
+            netloc,
+            quote(parts.path, safe=_SAFE_PATH),
+            quote(parts.query, safe=_SAFE_QUERY),
+            quote(parts.fragment, safe=_SAFE_QUERY),
+        )
+    )
 
 
 def campaign_for(surah: int | None, from_ayah: int | None, to_ayah: int | None) -> str:
@@ -41,17 +149,62 @@ def campaign_for(surah: int | None, from_ayah: int | None, to_ayah: int | None) 
 
 
 def tracked_link(url: str, *, platform: str, campaign: str) -> str:
+    """*url* with the four UTM parameters; everything else in it kept byte for byte.
+
+    The query is split on ``&`` and each piece kept as written (its encoding,
+    a bare ``flag``, a ``;``); only its key is decoded, to find the tracking
+    parameters. Source, medium and content are replaced; a campaign the person
+    set stays, unless it is empty.
+    """
     if platform not in PLATFORMS:
         raise ValueError(f"unknown platform {platform!r}")
     parts = urlsplit(normalise_link(url))
-    query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)]
-    keep = [(k, v) for k, v in query if k not in ("utm_source", "utm_medium", "utm_content")]
-    if not any(k == "utm_campaign" for k, _ in keep):
-        keep.append(("utm_campaign", campaign))
-    keep += [("utm_source", platform), ("utm_medium", "video"), ("utm_content", "outro-qr")]
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(keep), parts.fragment))
+    keep: list[str] = []
+    has_campaign = False
+    for piece in parts.query.split("&"):
+        if not piece:
+            continue
+        key, _, value = piece.partition("=")
+        key = unquote_plus(key)
+        if key in _TRACKING:
+            continue
+        if key == "utm_campaign":
+            if not unquote_plus(value).strip():
+                continue  # an empty campaign measures nothing: the automatic one replaces it
+            has_campaign = True
+        keep.append(piece)
+    if not has_campaign:
+        keep.append("utm_campaign=" + quote(campaign, safe=""))
+    keep += [f"utm_source={platform}", "utm_medium=video", "utm_content=outro-qr"]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, "&".join(keep), parts.fragment))
+
+
+def _for_people(text: str) -> str:
+    """*text* with %-escapes decoded, except where that would hide or break something."""
+    try:
+        decoded = unquote(text, errors="strict")
+    except UnicodeDecodeError:
+        return text  # not UTF-8: the escapes are the only honest way to show it
+    return "".join(quote(char, safe="") if _invisible_or_space(char) else char for char in decoded)
 
 
 def readable_link(url: str) -> str:
+    """The address to write under the QR code: host and path, decoded for people.
+
+    No scheme, query, fragment, user name or trailing ``/``. An IDN host shows
+    in its own script and a percent-encoded path as the words it encodes, so
+    «example.org/دروس» rather than ``example.org/%D8%AF…``. Display only: the
+    QR code keeps the encoded link.
+    """
     parts = urlsplit(normalise_link(url))
-    return (parts.netloc + parts.path).rstrip("/")
+    host = parts.hostname or ""
+    if not host.startswith("[") and ":" not in host:
+        try:
+            host = host.encode("ascii").decode("idna")
+        except UnicodeError:
+            pass
+    else:
+        host = f"[{host.strip('[]')}]"
+    if parts.port is not None:
+        host += f":{parts.port}"
+    return (host + _for_people(parts.path)).rstrip("/")

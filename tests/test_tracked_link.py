@@ -91,3 +91,109 @@ def test_normalise_refuses(bad):
 )
 def test_readable_link(url, text):
     assert readable_link(url) == text
+
+
+# --- The fix wave (phase-1 review I1, I2, m3, m4, m5) --------------------------------
+
+from qurantext.core.tracked_link import LINK_ERRORS, LinkError  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    "bad, code",
+    [
+        ("", "empty"),
+        ("   ", "empty"),
+        ("https:/example.org", "slashes"),
+        ("https//example.org", "slashes"),
+        ("http//example.org", "slashes"),
+        ("https:example.org", "slashes"),
+        ("HTTPS:/Example.org", "slashes"),
+        ("tel:+491234", "scheme"),
+        ("file:/etc/passwd", "scheme"),
+        ("vbscript:msgbox(1)", "scheme"),
+        ("javascript:alert(1)", "scheme"),
+        ("mailto:a@b.org", "scheme"),
+        ("ftp://x.org", "scheme"),
+        ("https://exa mple.org/x", "spaces"),
+        ("https://ex.org/a b", "spaces"),
+        ("java\nscript:alert(1)", "spaces"),
+        ("https://ex.org/\u200fx", "spaces"),
+        ("https://ex.org:abc/x", "port"),
+        ("https://ex.org:99999/x", "port"),
+        ("https://ex.org:0/x", "port"),
+        ("https://:80", "host"),
+        ("https://", "host"),
+        ("https://ex_ample.org", "host"),
+        ("https://-ex.org", "host"),
+        ("https://exampleorg/x", "host"),
+        ("https://999.1.1.1/x", "host"),
+        ("https://xn--zz.org", "host"),
+        ("https://user:pass@ex.org/d", "userinfo"),
+        ("https://youtube.com@evil.org/x", "userinfo"),
+        ("user@ex.org", "userinfo"),
+    ],
+)
+def test_malformed_links_are_refused_with_a_reason(bad, code):
+    with pytest.raises(LinkError) as caught:
+        normalise_link(bad)
+    assert caught.value.code == code and code in LINK_ERRORS
+    assert isinstance(caught.value, ValueError)
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Example.ORG/Dars", "https://example.org/Dars"),
+        ("localhost:8000/x", "https://localhost:8000/x"),
+        ("example.org:8080", "https://example.org:8080"),
+        ("https://ex.org:/x", "https://ex.org/x"),
+        ("http://192.168.1.10:8000/d", "http://192.168.1.10:8000/d"),
+        ("https://[::1]:8000/d", "https://[::1]:8000/d"),
+        ("httpbin.org/get", "https://httpbin.org/get"),
+        ("https://example.org./x", "https://example.org/x"),
+        ("https://example.org/#/route?x=1", "https://example.org/#/route?x=1"),
+    ],
+)
+def test_good_links_are_kept(text, expected):
+    assert normalise_link(text) == expected
+
+
+def test_the_qr_content_is_ascii():
+    url = tracked_link("مثال.com/دروس/تفسير#قسم", platform="youtube", campaign="c")
+    assert url.isascii()
+    parts = urlsplit(url)
+    assert parts.hostname == "xn--mgbh0fb.com"
+    assert parts.path == "/%D8%AF%D8%B1%D9%88%D8%B3/%D8%AA%D9%81%D8%B3%D9%8A%D8%B1"
+
+
+def test_existing_parameters_are_kept_exactly_as_written():
+    url = tracked_link(
+        "https://ex.org/d?q=%E9&s=a%20b&flag&a=1;b=2&utm_source=x&utm_source=y",
+        platform="whatsapp",
+        campaign="c",
+    )
+    query = urlsplit(url).query
+    assert query.startswith("q=%E9&s=a%20b&flag&a=1;b=2&")
+    assert query.count("utm_source") == 1 and "utm_source=whatsapp" in query
+
+
+@pytest.mark.parametrize("empty", ["utm_campaign=", "utm_campaign=%20", "utm_campaign"])
+def test_an_empty_campaign_gets_the_automatic_one(empty):
+    url = tracked_link(f"https://ex.org/d?{empty}", platform="youtube", campaign="qalun-025")
+    assert _q(url)["utm_campaign"] == "qalun-025"
+    assert urlsplit(url).query.count("utm_campaign") == 1
+
+
+def test_readable_link_decodes_for_people():
+    copied = "https://example.org/%D8%AF%D8%B1%D9%88%D8%B3/%D8%AA%D9%81%D8%B3%D9%8A%D8%B1/"
+    assert readable_link(copied) == "example.org/دروس/تفسير"
+    assert readable_link("https://xn--mgbh0fb.com/dars") == "مثال.com/dars"
+    assert readable_link("https://ex.org:8080/a") == "ex.org:8080/a"
+    # Not UTF-8 stays escaped; an encoded newline is not drawn as one.
+    assert readable_link("https://ex.org/%E9t%C3%A9") == "ex.org/%E9t%C3%A9"
+    assert readable_link("https://ex.org/a%0Ab") == "ex.org/a%0Ab"
+
+
+def test_readable_link_never_shows_credentials():
+    with pytest.raises(LinkError):
+        readable_link("https://user:pass@ex.org/d")

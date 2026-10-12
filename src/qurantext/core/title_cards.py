@@ -11,13 +11,22 @@ A clip is silent, as long as its spec says, and written by FFmpeg from raw
 frames streamed to it: ``<output>.part.mp4`` first, renamed into place when it
 is complete. A cancel kills FFmpeg and removes the partial file.
 
-The QR code is never animated, offset or masked. It is fully drawn from 15 % to
-85 % of the clip, with a short fade either side, so a phone has most of the
-outro to read it. Its modules are the darker of the look's body text and card
+The QR code is never animated, offset or masked. It is fully drawn from 14 % to
+86 % of the clip, with a short fade either side, so a phone has at least 70 %
+of the outro's frames to read it. Its modules are whole pixels, at least 5 and
+enough for the code with its quiet zone to fill a quarter of the frame's short
+side: at 4 px a code that decodes from the clip itself no longer does once a
+platform has scaled the video down to 480p or 360p, as WhatsApp, Telegram and a
+phone's YouTube player do. Its modules are the darker of the look's body text and card
 colours on the lighter one: phone scanners expect dark modules on a light
 ground, and an inverted code (light on dark) is one many of them, and OpenCV's
 detector, cannot read. When the two colours are too close (under 4.5:1) the
 code is black on white.
+
+The link text under the code is always laid out left to right, whatever script
+its host or path is in; every other text takes its direction from its first
+strong letter. "Reveal" uncovers the frame from the edge the reader starts at,
+which is part of the spec (``rtl``), so a clip and its preview agree.
 """
 
 from __future__ import annotations
@@ -28,6 +37,7 @@ import math
 import subprocess
 import tempfile
 import unicodedata
+import uuid
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -43,6 +53,7 @@ from qurantext.core.frame_renderer import (
     _measure_probe,
     _require_raqm_support,
     fit_font_size,
+    load_font,
 )
 from qurantext.core.looks import MIN_CONTRAST, Look, contrast_ratio
 from qurantext.core.qr import qr_image, qr_modules
@@ -58,8 +69,10 @@ __all__ = [
     "IntroSpec",
     "OutroSpec",
     "TitleClipError",
+    "missing_glyphs",
     "qr_box",
     "qr_colours",
+    "qr_fits",
     "render_title_clip",
     "render_title_frame",
 ]
@@ -75,16 +88,22 @@ STAGE = "title_clip"
 
 _TEXT_FADE = 0.6  # seconds the text takes to fade in, and out
 _QR_FADE = 0.2  # seconds the QR code takes to fade in, and out
-_QR_FROM, _QR_TO = 0.15, 0.85  # the share of the clip the QR code is fully drawn
+# The share of the clip the QR code is fully drawn: 72 %, so that counted in whole
+# frames it is still at least 70 % at any length and frame rate from 17 fps up.
+_QR_FROM, _QR_TO = 0.14, 0.86
 _REVEAL_SHARE = 0.4  # the share of the clip "reveal" spends uncovering the frame
 _RISE = 0.06  # how far below its place "rise" starts the text, as a share of H
 _FONT_START = 0.09  # the first size tried for titles, as a share of H
 _FONT_MIN = 0.02  # the smallest size, as a share of the frame's short side
 _LINK_START = 0.045  # the first size tried for the link text, of the short side
+_TITLE_UNDER_NAME = 0.7  # the intro's title starts at this share of the name's size
 _MAX_LINES = 2
-_QR_MIN_SHARE = 0.25  # the QR code's side, at least, as a share of the short side
+_QR_MIN_SHARE = 0.25  # the code with its quiet zone, at least, of the short side
 _QR_QUIET = 4
-_QR_MIN_MODULE = 4
+_QR_MIN_MODULE = 5  # px; 4 px codes stop decoding after a 480p transcode
+# The most of the panel's text room the code may take, so the words keep theirs.
+_QR_ROOM_PORTRAIT = 0.6  # of the panel's height
+_QR_ROOM_LANDSCAPE = 0.5  # of the panel's width
 _ELLIPSIS = "…"
 _INSTALL_HINT = "Install FFmpeg and try again."
 _ERROR_LINES = 8
@@ -98,6 +117,7 @@ class TitleClipError(RuntimeError):
 
 
 def _check(style: str, seconds: float) -> float:
+    """*seconds* as a float, or ``ValueError`` for an unknown style or a length out of range."""
     if style not in STYLES:
         raise ValueError(f"unknown style {style!r}; expected one of {STYLES}")
     seconds = float(seconds)
@@ -120,9 +140,12 @@ class IntroSpec:
     title: str
     style: str = "fade"
     seconds: float = 5.0
+    #: The reader starts on the right: "reveal" uncovers from that edge.
+    rtl: bool = True
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "seconds", _check(self.style, self.seconds))
+        object.__setattr__(self, "rtl", bool(self.rtl))
 
     def cache_key(self) -> str:
         """A sha256 of every field and :data:`GENERATOR_VERSION`, stable across runs."""
@@ -142,9 +165,12 @@ class OutroSpec:
     qr_url: str | None
     style: str = "fade"
     seconds: float = 6.0
+    #: The reader starts on the right: "reveal" uncovers from that edge.
+    rtl: bool = True
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "seconds", _check(self.style, self.seconds))
+        object.__setattr__(self, "rtl", bool(self.rtl))
 
     def cache_key(self) -> str:
         """A sha256 of every field and :data:`GENERATOR_VERSION`, stable across runs."""
@@ -184,11 +210,26 @@ def _block_size(lines: tuple[str, ...], font: Any, direction: str) -> tuple[int,
 
 
 def _ellipsize(line: str, font: Any, max_width: int, direction: str) -> str:
-    """*line*, cut short with an ellipsis at its logical end until it fits *max_width*."""
-    for cut in range(len(line), 0, -1):
-        candidate = line[:cut].rstrip() + _ELLIPSIS
+    """*line*, cut short with an ellipsis at its logical end until it fits *max_width*.
+
+    Cut between words when a whole word fits; inside a word (one long word, a
+    link) only when none does.
+    """
+
+    def fits(candidate: str) -> bool:
         box = _bbox(candidate, font, direction)
-        if box[2] - box[0] <= max_width:
+        return box[2] - box[0] <= max_width
+
+    if fits(line + _ELLIPSIS):
+        return line + _ELLIPSIS
+    spaces = [i for i, char in enumerate(line) if char == " "]
+    for cut in reversed(spaces):
+        candidate = line[:cut].rstrip() + _ELLIPSIS
+        if line[:cut].strip() and fits(candidate):
+            return candidate
+    for cut in range(len(line) - 1, 0, -1):
+        candidate = line[:cut].rstrip() + _ELLIPSIS
+        if fits(candidate):
             return candidate
     return _ELLIPSIS
 
@@ -210,18 +251,20 @@ def _fit(
     start: int,
     minimum: int,
     max_lines: int,
+    direction: str | None = None,
 ) -> _Block | None:
     """The largest size from *start* down at which *text* fits in at most *max_lines*.
 
     Sizes are tried with :func:`fit_font_size` (one size at a time, so its cache
     serves every later frame). Text that does not fit even at *minimum* keeps
     its first *max_lines* lines, the last one cut short with an ellipsis, so it
-    never leaves the box sideways.
+    never leaves the box sideways. *direction* overrides the one guessed from
+    the first strong letter (the link text is always ``ltr``).
     """
     text = " ".join(text.split())
     if not text:
         return None
-    direction = _direction(text)
+    direction = direction or _direction(text)
     probe = _measure_probe()
     max_width, max_height = max(1, max_width), max(1, max_height)
     minimum = max(8, minimum)
@@ -272,8 +315,14 @@ class _Placed:
     block: _Block
     centre_x: float
     top: float
-    #: Which look colour draws it: ``header_text`` or ``body_text``.
+    #: The look colour that draws it: ``header_text``, ``body_text`` or ``placeholder_text``.
     colour: str
+
+    @property
+    def box(self) -> tuple[float, float, float, float]:
+        """Where its ink lies in the frame."""
+        half = self.block.width / 2
+        return (self.centre_x - half, self.top, self.centre_x + half, self.top + self.block.height)
 
 
 @dataclass(frozen=True)
@@ -282,7 +331,7 @@ class _Layout:
     radius: int
     texts: tuple[_Placed, ...]
     qr_box: Box | None
-    #: False when the frame is too small for modules of 4 px (a preview thumbnail).
+    #: False when the frame is too small for modules of 5 px (a preview thumbnail).
     qr_scannable: bool
 
 
@@ -320,15 +369,23 @@ def _layout(spec: Spec, width: int, height: int) -> _Layout:
     qr_side = 0
     qr_scannable = True
     if isinstance(spec, OutroSpec) and spec.qr_url:
-        modules = qr_modules(spec.qr_url)
-        qr_side = max(math.ceil(_QR_MIN_SHARE * short), _QR_MIN_MODULE * (modules + 2 * _QR_QUIET))
+        span = qr_modules(spec.qr_url) + 2 * _QR_QUIET
+        module = max(_QR_MIN_MODULE, math.ceil(_QR_MIN_SHARE * short / span))
+        qr_side = module * span
+        # The most the code may take and still leave the words their room.
+        if portrait:
+            room = min(max_w - 2 * pad, int((max_h - 2 * pad) * _QR_ROOM_PORTRAIT))
+        else:
+            room = min(max_h - 2 * pad, int((max_w - 3 * pad) * _QR_ROOM_LANDSCAPE))
+        if qr_side > room:
+            # Only a preview is drawn this small; a clip refuses (qr_fits).
+            qr_side, qr_scannable = max(1, room // span) * span, False
         if portrait:
             panel_w = max(panel_w, qr_side + 2 * pad)
+            panel_h = max(panel_h, math.ceil(qr_side / _QR_ROOM_PORTRAIT) + 2 * pad)
         else:
             panel_h = max(panel_h, qr_side + 2 * pad)
-        room = (max_w if portrait else max_h) - 2 * pad
-        if qr_side > room:
-            qr_side, qr_scannable = max(modules + 2 * _QR_QUIET, room), False
+            panel_w = max(panel_w, math.ceil(qr_side / _QR_ROOM_LANDSCAPE) + 3 * pad)
     panel_w, panel_h = min(panel_w, max_w), min(panel_h, max_h)
     x0, y0 = (width - panel_w) // 2, (height - panel_h) // 2
     panel = (x0, y0, x0 + panel_w, y0 + panel_h)
@@ -344,7 +401,17 @@ def _layout(spec: Spec, width: int, height: int) -> _Layout:
             spec.name, TEXT_FONT_BOLD_PATH, inner_w, round(share * 0.55), start, minimum, _MAX_LINES
         )
         title_room = inner_h - (name.height + gap if name else 0)
-        title = _fit(spec.title, TEXT_FONT_PATH, inner_w, title_room, start, minimum, _MAX_LINES)
+        # Below the name, smaller than it: the title starts at 0.7 of the name's size.
+        title_start = round(name.font.size * _TITLE_UNDER_NAME) if name else start
+        title = _fit(
+            spec.title,
+            TEXT_FONT_PATH,
+            inner_w,
+            title_room,
+            title_start,
+            min(minimum, title_start),
+            _MAX_LINES,
+        )
         items = []
         if name:
             items.append(("header_text", name, name.height))
@@ -368,7 +435,9 @@ def _layout(spec: Spec, width: int, height: int) -> _Layout:
         col_w = column[2] - column[0]
         link = None
         if spec.link_text:
-            link = _fit(spec.link_text, TEXT_FONT_PATH, col_w, inner_h, link_start, link_min, 1)
+            link = _fit(
+                spec.link_text, TEXT_FONT_PATH, col_w, inner_h, link_start, link_min, 1, "ltr"
+            )
         link_gap = max(4, round(pad * 0.4))
         used = (link.height + link_gap if link else 0) + (
             qr_side + gap if qr_side and portrait else 0
@@ -386,16 +455,16 @@ def _layout(spec: Spec, width: int, height: int) -> _Layout:
         if qr_side and portrait:
             items.append(("qr", None, qr_side))
             if link:
-                items += [("gap", None, link_gap), ("body_text", link, link.height)]
+                items += [("gap", None, link_gap), ("placeholder_text", link, link.height)]
             if phrase:
-                items += [("gap", None, gap), ("header_text", phrase, phrase.height)]
+                items += [("gap", None, gap), ("body_text", phrase, phrase.height)]
         else:
             if phrase:
-                items.append(("header_text", phrase, phrase.height))
+                items.append(("body_text", phrase, phrase.height))
             if phrase and link:
                 items.append(("gap", None, gap))
             if link:
-                items.append(("body_text", link, link.height))
+                items.append(("placeholder_text", link, link.height))
         total = sum(size for _, _, size in items)
         centre = (column[0] + column[2]) / 2
         for kind, block, top in _stack(items, column[1] + (inner_h - total) / 2):
@@ -414,6 +483,45 @@ def _layout(spec: Spec, width: int, height: int) -> _Layout:
 def qr_box(spec: Spec, width: int, height: int) -> Box | None:
     """Where the QR code is drawn in a *width* × *height* frame, or None without one."""
     return _layout(spec, width, height).qr_box
+
+
+def qr_fits(spec: Spec, width: int, height: int) -> bool:
+    """Whether a clip of *spec* at this size can carry its QR code at 5 px modules.
+
+    True without a code. A long link needs more modules, so whether it fits
+    depends on the lecture's size, not on a fixed number of characters; this
+    is what :func:`render_title_clip` checks before it starts.
+    """
+    return _layout(spec, width, height).qr_scannable
+
+
+@lru_cache(maxsize=4)
+def _tofu(font_file: Path) -> tuple[tuple[int, int], bytes]:
+    """The mask the font draws for a character it has no glyph for."""
+    mask = load_font(font_file, 32).getmask("\ue000")
+    return mask.size, bytes(mask)
+
+
+@lru_cache(maxsize=2048)
+def _has_glyph(font_file: Path, char: str) -> bool:
+    mask = load_font(font_file, 32).getmask(char)
+    return (mask.size, bytes(mask)) != _tofu(font_file)
+
+
+def missing_glyphs(text: str) -> str:
+    """The characters of *text* the title font cannot draw, each once, in order.
+
+    Amiri draws Arabic and Latin (with its diacritics), not Cyrillic, Bengali
+    or emoji, which would come out as empty boxes; the dialog can warn first.
+    Spaces and invisible formatting characters are never reported.
+    """
+    missing = []
+    for char in dict.fromkeys(text):
+        if char.isspace() or unicodedata.category(char) in ("Cc", "Cf"):
+            continue
+        if not all(_has_glyph(path, char) for path in (TEXT_FONT_PATH, TEXT_FONT_BOLD_PATH)):
+            missing.append(char)
+    return "".join(missing)
 
 
 def qr_colours(look: Look) -> tuple[RGB, RGB]:
@@ -446,7 +554,7 @@ def _scene(spec: Spec, look: Look, width: int, height: int) -> _Scene:
     text = None
     if layout.texts:
         text = Image.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
-        for colour in ("header_text", "body_text"):
+        for colour in dict.fromkeys(p.colour for p in layout.texts):
             placed = [p for p in layout.texts if p.colour == colour]
             if not placed:
                 continue
@@ -541,15 +649,17 @@ def _compose(
 
 
 def render_title_frame(
-    spec: Spec, look: Look, width: int, height: int, t: float, *, rtl: bool = True
+    spec: Spec, look: Look, width: int, height: int, t: float, *, rtl: bool | None = None
 ) -> Image.Image:
     """The clip's frame at *t* seconds, as an RGB image of *width* × *height*.
 
-    *rtl* sets the edge "reveal" uncovers from (the right one when True); each
-    text's own direction comes from its first strong letter.
+    The edge "reveal" uncovers from is the spec's (``spec.rtl``), so a preview
+    matches its clip; *rtl* overrides it. Each text's own direction comes from
+    its first strong letter, and the link text is always left to right.
     """
     scene = _scene(spec, look, width, height)
-    return _compose(scene, look, width, height, _state(spec, height, t), rtl)
+    edge = spec.rtl if rtl is None else rtl
+    return _compose(scene, look, width, height, _state(spec, height, t), edge)
 
 
 # --- Clips --------------------------------------------------------------------
@@ -587,10 +697,13 @@ def render_title_clip(
 ) -> Path:
     """Write *spec* as a silent H.264 clip of *width* × *height* at *fps* to *output*.
 
-    ``round(seconds × fps)`` frames, through ``<output>.part.mp4``. Raises
-    ``JobCancelled`` when *cancel* is set, :class:`TitleClipError` when FFmpeg
-    fails, ``ValueError`` when the frame is too small for a QR code phones can
-    read, and ``RuntimeError`` without FFmpeg; no partial file is left.
+    ``round(seconds × fps)`` frames, through a hidden partial file beside
+    *output* (``.<stem>.<random>.part.mp4``, so two makers never share one).
+    Progress is reported about once per second of video. Raises ``JobCancelled``
+    when *cancel* is set, :class:`TitleClipError` when FFmpeg fails,
+    ``ValueError`` when the frame is too small for a QR code phones can read
+    (:func:`qr_fits`), and ``RuntimeError`` without FFmpeg; no partial file is
+    left.
     """
     if cancel is not None:
         cancel.raise_if_cancelled(STAGE)
@@ -599,11 +712,11 @@ def render_title_clip(
     if fps <= 0:
         raise ValueError(f"fps must be positive, not {fps}")
     scene = _scene(spec, look, width, height)
-    if scene.qr is not None and not scene.layout.qr_scannable:
+    if not scene.layout.qr_scannable:
         raise ValueError(f"{width}x{height} is too small for a QR code phones can read")
     ffmpeg = require_binary("ffmpeg", _INSTALL_HINT)
     output = Path(output)
-    partial = output.with_name(f"{output.name}.part.mp4")
+    partial = output.with_name(f".{output.stem}.{uuid.uuid4().hex[:8]}.part.mp4")
     frames = max(1, round(spec.seconds * fps))
     command = [
         ffmpeg, "-y", "-nostdin", "-v", "error",
@@ -628,16 +741,19 @@ def render_title_clip(
                     cancel.raise_if_cancelled(STAGE)
                 state = _state(spec, height, index / fps)
                 if state != last_state:  # most of a clip is one still frame
-                    data = _compose(scene, look, width, height, state, True).tobytes()
+                    data = _compose(scene, look, width, height, state, spec.rtl).tobytes()
                     last_state = state
                 try:
                     process.stdin.write(data)
-                except BrokenPipeError:
-                    break  # FFmpeg ended early; its own words say why, below
-                report(progress, STAGE, "Drawing the title clip", fraction=(index + 1) / frames)
+                except OSError:
+                    # FFmpeg ended early: BrokenPipeError, or EINVAL on Windows.
+                    # Its own words say why, below.
+                    break
+                if (index + 1) % fps == 0 or index + 1 == frames:
+                    report(progress, STAGE, "Drawing the title clip", fraction=(index + 1) / frames)
             try:
                 process.stdin.close()
-            except BrokenPipeError:
+            except OSError:  # the flush hit the same closed pipe
                 pass
             process.wait()
             if cancel is not None:

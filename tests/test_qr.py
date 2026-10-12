@@ -40,8 +40,18 @@ def test_module_count_grows_with_length():
 
 
 def test_text_fonts_are_bundled_and_cover_latin_and_arabic():
+    """A missing glyph draws the font's .notdef box, which has a width too, so the
+    check compares each character's mask with the mask of one Amiri lacks."""
     from PIL import ImageFont
 
     for path in (TEXT_FONT_PATH, TEXT_FONT_BOLD_PATH):
         font = ImageFont.truetype(str(path), 40)
-        assert font.getbbox("Dars")[2] > 0 and font.getbbox("دروس")[2] > 0
+        tofu = font.getmask("\ue000")
+
+        def drawn(char, font=font, tofu=tofu):
+            mask = font.getmask(char)
+            return (mask.size, bytes(mask)) != (tofu.size, bytes(tofu))
+
+        assert not drawn("Д")  # the check does see a missing glyph
+        for char in "DarsAhmdé…،–٤٩دروسمحمدجزاكمخيرًا":
+            assert drawn(char), (path.name, char)

@@ -28,9 +28,10 @@
 - **Accepted links:** `http`/`https` only. A link without a scheme gets `https://`.
 - **QR codes:**
   - segno, error correction `M`, quiet zone of 4 modules;
-  - the side is at least 25 % of the frame's short side, and each module at least 4 px;
-  - colours are `look.body_text` on an opaque `look.card`, falling back to black on white when contrast is below 4.5:1;
-  - the code is fully visible for at least 70 % of the outro and never animates.
+  - each module is `max(5, ceil(0.25·short side / (modules + 8)))` px, so the code with its quiet zone is at least 25 % of the frame's short side (phase-1 fix wave: 4 px codes fail after a 480p transcode);
+  - colours are dark modules on a light square: the darker of `look.body_text` and an opaque `look.card` on the lighter, falling back to black on white when contrast is below 4.5:1;
+  - the code is fully drawn from 14 % to 86 % of the outro (at least 70 % of its frames) and never animates.
+- **Links** (phase-1 fix wave): `normalise_link` raises `LinkError(code)` (a `ValueError`; codes in `LINK_ERRORS`) for malformed links; the QR code encodes the ASCII form; `readable_link` is decoded for display. `qr_fits(spec, w, h)` and `missing_glyphs(text)` are there for the dialog.
 - **Fonts:** the text font is **Amiri** (Regular and Bold) in `assets/fonts/`, SIL OFL 1.1, pinned by sha256, with its licence in `THIRD_PARTY_NOTICES.md` and `packaging/licenses/`. The Quran font is not used for these clips.
 - **Styles:** `fade`, `rise` and `reveal`.
 - **Lengths:** 3–10 s. The intro defaults to 5 s and the outro to 6 s.
@@ -640,7 +641,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Consumes: `IntroSpec`, `OutroSpec`, `render_title_clip` (Task 3); `tracked_link`, `readable_link`, `campaign_for` (Task 1); `GeneratedIntro` and `GeneratedOutro` (Task 4); `cards_on_screen` and `project_look`; the project's studied surah (`JobSettings.studied_surah` / `job_settings`); `episode_dir_for`.
 - Produces:
   - `title_for(project, surah_names: dict[int, str]) -> tuple[str, int | None, int | None, int | None]` returns `(title text, surah, from, to)`. The range is the min and max ayat of the on-screen cards of the studied surah, or of the surah most cards name.
-    - The text is «سورة <name> · الآيات <a>–<b>» with Arabic-Indic digits, or «… · الآية <a>» when `a == b`.
+    - The text is «سورة <name>، الآيات <a>–<b>» with Arabic-Indic digits, or «…، الآية <a>» when `a == b`.
     - Without ayat it is the surah name alone, and with no surah it is "".
     - Surah names come from the store (`gui/surahs.stored_surah_names` is Qt-free in its body; move a Qt-free helper to `data/quran_db.py` if needed).
   - `intro_spec_for(project, settings: GeneratedIntro, surah_names) -> IntroSpec`.
@@ -666,7 +667,7 @@ i18n keys (en / ar):
 # with cards 25:44 and 25:49 and studied surah 25)
 def test_title_reads_the_lectures_surah_and_range(lecture_project):
     text, surah, a, b = title_for(lecture_project, {25: "الفرقان"})
-    assert (surah, a, b) == (25, 44, 49) and text == "سورة الفرقان · الآيات ٤٤–٤٩"
+    assert (surah, a, b) == (25, 44, 49) and text == "سورة الفرقان، الآيات ٤٤–٤٩"
 
 
 def test_outro_spec_carries_the_tracked_link(lecture_project):
