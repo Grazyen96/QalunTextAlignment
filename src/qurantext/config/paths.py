@@ -56,6 +56,8 @@ __all__ = [
     "redirect_retired_quran",
     "user_cache_dir",
     "user_data_dir",
+    "user_log_dir",
+    "user_log_file",
 ]
 
 
@@ -88,6 +90,21 @@ def user_data_dir() -> Path:
     base = os.getenv("XDG_DATA_HOME")
     root = Path(base).expanduser() if base else Path.home() / ".local" / "share"
     return root / _APP_DIR_POSIX
+
+
+def user_log_dir() -> Path:
+    """Where the app's error log lives: beside the person's data, under ``logs``.
+
+    Under the data directory rather than the cache, because the cache is the
+    folder people are told is safe to delete, and the log is what someone is
+    asked to send after something went wrong.
+    """
+    return user_data_dir() / "logs"
+
+
+def user_log_file() -> Path:
+    """The current error log; ``qalun.log.1`` to ``.3`` are the older ones."""
+    return user_log_dir() / "qalun.log"
 
 
 def user_cache_dir() -> Path:

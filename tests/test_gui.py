@@ -8,6 +8,7 @@ progress, results, failures and Cancel.
 
 from __future__ import annotations
 
+import errno
 import json
 import shutil
 import subprocess
@@ -154,6 +155,201 @@ def test_worker_always_signals_done(qt_app) -> None:
         worker.failed.connect(lambda _m: None)
         worker.run()
         assert events == ["done"]
+
+
+def _raised_in(module: str, error: Exception):
+    """A job whose exception is raised by a function of *module*, as that module would."""
+    namespace: dict = {"__name__": module, "error": error}
+    exec("def raiser():\n    raise error\n", namespace)  # noqa: S102 - a test's stand-in module
+
+    def job(*, progress, cancel):
+        namespace["raiser"]()
+
+    return job
+
+
+#: The review's probe: classic bugs, written as if they lived in the renderer.
+#: Several are raised by a builtin or a C extension inside Qalun's own code.
+_BUGS_IN_QALUNS_CODE = """
+def unpack(progress, cancel):
+    start, end = [1.0, 2.0, 3.0]
+def empty_max(progress, cancel):
+    return max([])
+def bad_int(progress, cancel):
+    return int("7a")
+def dict_changed(progress, cancel):
+    d = {1: 1}
+    for k in d:
+        d[k + 1] = 0
+def deleted_qt(progress, cancel):
+    import shiboken6
+    from PySide6.QtCore import QObject
+    o = QObject()
+    shiboken6.delete(o)
+    o.objectName()
+def broken_pipe(progress, cancel):
+    raise BrokenPipeError(32, "Broken pipe")
+def no_message(progress, cancel):
+    raise ValueError("")
+def ffmpeg_failed(progress, cancel):
+    raise RuntimeError("FFmpeg failed while rendering the video: no codec")
+def wrong_path(progress, cancel):
+    open("/nonexistent-dir-built-wrong/frame_0001.png")
+"""
+
+
+def _probe_job(name: str):
+    namespace: dict = {"__name__": "qurantext.core.fake"}
+    exec(compile(_BUGS_IN_QALUNS_CODE, "qurantext/core/fake.py", "exec"), namespace)  # noqa: S102
+    return lambda *, progress, cancel: namespace[name](progress, cancel)
+
+
+def _run_failing(job, caplog) -> tuple[list[str], list]:
+    import logging
+
+    messages: list[str] = []
+    worker = JobWorker(job, CancelToken())
+    worker.failed.connect(messages.append)
+    with caplog.at_level(logging.DEBUG, logger="qurantext.gui.worker"):
+        worker.run()
+    return messages, [r for r in caplog.records if r.name == "qurantext.gui.worker"]
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "unpack",
+        "empty_max",
+        "bad_int",
+        "dict_changed",
+        "deleted_qt",
+        "broken_pipe",
+        "no_message",
+        "ffmpeg_failed",
+    ],
+)
+def test_a_bug_in_a_job_is_an_error_with_its_traceback(qt_app, name, caplog) -> None:
+    """Raised inside Qalun's code or not, anything but the app's own error types is a bug."""
+    import logging
+
+    messages, records = _run_failing(_probe_job(name), caplog)
+
+    assert len(messages) == 1, "the window is told, as before"
+    (record,) = records
+    assert record.levelno == logging.ERROR
+    assert record.exc_info is not None and record.exc_info[2] is not None
+    assert record.getMessage() == "The job failed unexpectedly"
+
+
+@pytest.mark.parametrize(
+    "job",
+    [
+        pytest.param(_raised_in("json.decoder", ValueError("Expecting value")), id="library-value"),
+        pytest.param(_raised_in("qurantext.gui.jobs", ValueError("Choose the range")), id="value"),
+        pytest.param(_raised_in("qurantext.x", NotImplementedError("later")), id="unfinished"),
+        pytest.param(_raised_in("qurantext.x", ConnectionResetError(104, "reset")), id="network"),
+    ],
+)
+def test_other_failures_are_errors_too(qt_app, job, caplog) -> None:
+    import logging
+
+    _messages, records = _run_failing(job, caplog)
+
+    (record,) = records
+    assert record.levelno == logging.ERROR and record.exc_info is not None
+
+
+@pytest.mark.parametrize(
+    "job",
+    [
+        pytest.param(_raised_in("tests.x", FileNotFoundError("/some/where.mp3")), id="not-found"),
+        pytest.param(_raised_in("shutil", PermissionError("output folder")), id="permission"),
+        pytest.param(_raised_in("shutil", IsADirectoryError("out.mp4")), id="is-a-directory"),
+        pytest.param(_raised_in("shutil", NotADirectoryError("videos")), id="not-a-directory"),
+        pytest.param(
+            _raised_in("shutil", OSError(errno.ENOSPC, "No space left on device")), id="disk-full"
+        ),
+        pytest.param(_probe_job("wrong_path"), id="probe-wrong-path"),
+    ],
+)
+def test_what_the_machine_refused_is_a_warning_with_its_traceback(qt_app, job, caplog) -> None:
+    """A file gone, a folder not writable, a full disk: no code change fixes those.
+
+    The traceback stays all the same. A path built wrong is a FileNotFoundError
+    too (the probe's ``wrong_path``), and the level alone cannot tell; the
+    traceback can.
+    """
+    import logging
+
+    messages, records = _run_failing(job, caplog)
+
+    (record,) = records
+    assert record.levelno == logging.WARNING
+    assert record.exc_info is not None and record.exc_info[2] is not None
+    assert record.getMessage() == f"The job stopped: {messages[0]}"
+
+
+def test_the_apps_own_error_types_are_warnings_with_their_traceback(qt_app, caplog) -> None:
+    """The episode's, the store's and transcription's errors are all raised on purpose."""
+    import logging
+
+    from qurantext.data.quran_db import QuranDataError
+    from qurantext.jobs.episode import EpisodeError
+    from qurantext.services.errors import (
+        LocalEngineError,
+        ModelDownloadError,
+        ModelLoadError,
+        WhisperXServiceError,
+    )
+
+    for error in (
+        EpisodeError("episode.error.missing", name="rec.mp4"),
+        QuranDataError("the store is damaged"),
+        ModelDownloadError("the model did not download"),
+        WhisperXServiceError("Replicate refused the token"),
+        LocalEngineError("the engine stopped"),
+        ModelLoadError("the model did not load"),
+    ):
+        caplog.clear()
+        _messages, records = _run_failing(_raised_in("anywhere", error), caplog)
+        assert [(r.levelno, r.exc_info is not None) for r in records] == [
+            (logging.WARNING, True)
+        ], type(error).__name__
+
+
+def test_a_cancelled_job_is_not_logged(qt_app, caplog) -> None:
+    def job(*, progress, cancel):
+        raise JobCancelled("render")
+
+    _messages, records = _run_failing(job, caplog)
+    assert records == []
+
+
+def test_a_failed_job_reaches_the_log_file(qt_app, tmp_path, monkeypatch) -> None:
+    """End to end: the job's bug, with its traceback, in the file someone is asked to send."""
+    import sys
+    import threading
+
+    from qurantext.config import app_log
+
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(sys, "excepthook", sys.excepthook)
+    monkeypatch.setattr(threading, "excepthook", threading.excepthook)
+    path = app_log.configure()
+    try:
+
+        def job(*, progress, cancel):
+            return [][0]
+
+        worker = JobWorker(job, CancelToken())
+        worker.failed.connect(lambda _m: None)
+        worker.run()
+    finally:
+        app_log._uninstall()
+
+    text = path.read_text(encoding="utf-8")
+    assert "ERROR qurantext.gui.worker: The job failed unexpectedly" in text
+    assert "IndexError: list index out of range" in text and "Traceback" in text
 
 
 def test_run_in_thread_runs_off_the_calling_thread(qt_app) -> None:
@@ -1803,6 +1999,178 @@ def test_the_app_names_itself_before_any_settings_are_read(qt_app) -> None:
     finally:
         QCoreApplication.setOrganizationName(before[0])
         QCoreApplication.setApplicationName(before[1])
+
+
+def test_starting_the_log_never_stops_the_window(monkeypatch) -> None:
+    from qurantext.config import app_log
+    from qurantext.gui import app as app_module
+
+    calls: list = []
+
+    def broken() -> None:
+        calls.append(True)
+        raise RuntimeError("no log today")
+
+    monkeypatch.setattr(app_log, "configure", broken)
+    app_module._start_the_log()  # does not raise
+    assert calls == [True]
+
+
+def test_only_qts_criticals_and_fatals_reach_the_log(qt_app, caplog, capsys) -> None:
+    """Qt's warnings are platform chatter more often than not: printed, not kept."""
+    import logging
+
+    from PySide6.QtCore import (
+        QtMsgType,
+        qCritical,
+        qDebug,
+        qInfo,
+        qInstallMessageHandler,
+        qWarning,
+    )
+
+    from qurantext.gui import app as app_module
+
+    app_module._route_qt_messages()
+    try:
+        with caplog.at_level(logging.DEBUG, logger="qurantext.qt"):
+            qWarning("qt.qpa.wayland: a notice on each activation")
+            qCritical("a critical one")
+            qInfo("some information")
+            qDebug("just chatter")
+            # qFatal aborts the process after the handler returns, so the
+            # handler is called as Qt would call it.
+            app_module._qt_message(
+                QtMsgType.QtFatalMsg, None, "QThread: Destroyed while thread is still running"
+            )
+    finally:
+        qInstallMessageHandler(app_module._previous_qt_handler)
+        app_module._previous_qt_handler = None
+
+    records = [(r.levelno, r.getMessage()) for r in caplog.records if r.name == "qurantext.qt"]
+    assert records == [
+        (logging.ERROR, "a critical one"),
+        (logging.CRITICAL, "QThread: Destroyed while thread is still running"),
+    ]
+    printed = capsys.readouterr().err
+    for line in ("qt.qpa.wayland: a notice", "some information", "just chatter"):
+        assert line in printed, "printed as Qt's default did"
+
+
+def test_a_qt_message_handler_that_fails_stays_quiet(monkeypatch) -> None:
+    from qurantext.gui import app as app_module
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("logging is broken")
+
+    monkeypatch.setattr(app_module._qt_log, "log", broken)
+    from PySide6.QtCore import QtMsgType
+
+    app_module._qt_message(QtMsgType.QtCriticalMsg, None, "x")  # does not raise
+
+
+def test_leaving_at_once_works_without_stdout_or_stderr(monkeypatch) -> None:
+    """The windowed build has neither; a flush on None skipped the os._exit it guards."""
+    import os
+    import sys
+
+    from qurantext.gui import app as app_module
+
+    class Left(Exception):
+        pass
+
+    def exit_now(code):
+        raise Left(code)
+
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    monkeypatch.setattr(os, "_exit", exit_now)
+
+    with pytest.raises(Left) as left:
+        app_module._leave_now(3)
+    assert left.value.args == (3,)
+
+
+# --- the error log ---------------------------------------------------------------
+
+
+class _FakeDesktop:
+    """Stands in for ``QDesktopServices``: records each URL instead of opening it."""
+
+    opened: list = []
+    answer = True
+
+    @classmethod
+    def openUrl(cls, url):  # noqa: N802 - Qt's name
+        cls.opened.append(url)
+        return cls.answer
+
+
+@pytest.fixture()
+def desktop(monkeypatch):
+    from qurantext.gui import files
+
+    class Fake(_FakeDesktop):
+        opened: list = []
+
+    monkeypatch.setattr(files, "QDesktopServices", Fake)
+    return Fake
+
+
+def test_open_log_folder_opens_the_logs_folder(
+    qt_app, home, desktop, tmp_path, monkeypatch
+) -> None:
+    from PySide6.QtCore import Qt
+
+    from qurantext.gui.i18n import t
+
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    assert home.log_link.text() == f'<a href="logs">{t("home.open_log_folder")}</a>'
+    flags = home.log_link.textInteractionFlags()
+    assert flags & Qt.TextInteractionFlag.LinksAccessibleByKeyboard, "reachable without a mouse"
+
+    home.log_link.linkActivated.emit("logs")
+
+    folder = tmp_path / "data" / "logs"
+    assert [url.toLocalFile() for url in desktop.opened] == [str(folder)]
+    assert folder.is_dir(), "made first, so the file manager has something to open"
+    assert home._status is None, "nothing to say when it opened"
+
+
+def test_open_log_folder_says_when_it_could_not(
+    qt_app, home, desktop, tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    desktop.answer = False
+
+    home.log_link.linkActivated.emit("logs")
+
+    assert home._status is not None and home._status.key == "home.open_log_failed"
+    from qurantext.gui.i18n import path_text
+
+    assert path_text(tmp_path / "data" / "logs") in home._status.text()
+
+
+def test_open_log_folder_is_rebuilt_in_the_new_language(qt_app, home) -> None:
+    from qurantext.gui import i18n
+
+    assert home.set_language("ar")
+    assert i18n.STRINGS["ar"]["home.open_log_folder"] in home.log_link.text()
+
+
+def test_open_log_folder_leaves_the_arabic_footer_its_height(qt_app, home) -> None:
+    """No taller than the language's own label and combo: a button's frame around
+    Arabic letters made the footer, and so the window's minimum, 8 px taller."""
+    from PySide6.QtWidgets import QLabel
+
+    from qurantext.gui import i18n
+
+    assert home.set_language("ar")
+    (label,) = [
+        w for w in home.findChildren(QLabel) if w.text() == i18n.STRINGS["ar"]["home.language"]
+    ]
+    language = max(label.sizeHint().height(), home.language_combo.sizeHint().height())
+    assert home.log_link.sizeHint().height() <= language
 
 
 # --- the window's language -----------------------------------------------------

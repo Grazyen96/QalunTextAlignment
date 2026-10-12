@@ -13,7 +13,7 @@ from pathlib import Path
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
 
-__all__ = ["show_in_folder"]
+__all__ = ["open_folder", "show_in_folder"]
 
 
 def show_in_folder(path: Path) -> None:
@@ -28,3 +28,16 @@ def show_in_folder(path: Path) -> None:
     except OSError:
         pass
     QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
+
+
+def open_folder(folder: Path) -> bool:
+    """Open *folder* itself in the file manager, making it first; False when that failed.
+
+    Made first because the log folder appears only once the window has started
+    with a writable data folder; an empty one is still the right place to look.
+    """
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return False
+    return bool(QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder))))

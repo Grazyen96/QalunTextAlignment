@@ -47,6 +47,7 @@ from qurantext.config.paths import (
     QURAN_DB_PATH,
     checkout_root,
     user_data_dir,
+    user_log_file,
 )
 from qurantext.config.settings import describe_secret, env_dir, get_settings
 from qurantext.core.video_common import ffmpeg_filters, require_binary
@@ -1139,6 +1140,8 @@ def format_report(results: list[CheckResult], *, release: bool = False) -> str:
         f"Qalun {__version__} on {sys.platform}",
         f"  running from {'a checkout' if checkout_root() else 'an installed copy'}",
         f"  app data in {user_data_dir()}",
+        # The window's error log: what to send along with this report after a crash.
+        f"  error log in {user_log_file()}",
         f"  licensed {LICENCE}; see LICENSE and THIRD_PARTY_NOTICES.md",
         "",
     ]

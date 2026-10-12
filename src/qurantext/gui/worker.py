@@ -8,18 +8,45 @@ thread and turn its callbacks into Qt signals.
 
 Qt objects belong to the thread that created them, so the job never touches a
 widget. It emits; the window's slots run on the UI thread and do the drawing.
+
+A job that fails is shown to the person as a sentence, and its traceback goes
+to the log (``config.app_log``), which is what someone is asked to send. Every
+failure keeps its traceback: whether one is a bug cannot be told from its type
+alone (``int("7a")`` and a deliberate "bad range" are both ``ValueError``), and
+a traceback lost is the one thing the log cannot get back. Only the level says
+which is which: WARNING for the app's own error types and for what the machine
+refused (a file gone, a folder not writable, a full disk), ERROR for the rest.
 """
 
 from __future__ import annotations
 
+import errno
+import logging
 from collections.abc import Callable
 from typing import Any
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal
 
+from qurantext.data.quran_db import QuranDataError
+from qurantext.jobs.episode import EpisodeError
+from qurantext.services.errors import TranscriptionError
 from qurantext.utils.progress import CancelToken, JobCancelled, ProgressEvent
 
 __all__ = ["JobWorker", "run_in_thread"]
+
+_log = logging.getLogger(__name__)
+
+#: The app's own error types, raised on purpose with a sentence for the person
+#: (``TranscriptionError`` covers WhisperX, the model download and the local engine).
+_APP_ERRORS: tuple[type[Exception], ...] = (EpisodeError, QuranDataError, TranscriptionError)
+#: What the machine refused rather than what the code got wrong. Not every
+#: ``OSError``: a broken pipe is FFmpeg dying under the renderer, a bug to read.
+_REFUSED_BY_THE_MACHINE: tuple[type[OSError], ...] = (
+    FileNotFoundError,
+    PermissionError,
+    IsADirectoryError,
+    NotADirectoryError,
+)
 
 
 class JobWorker(QObject):
@@ -48,6 +75,10 @@ class JobWorker(QObject):
         except JobCancelled:
             self.cancelled.emit()
         except Exception as error:  # noqa: BLE001 — a window must never die on a job
+            if _foreseen(error):
+                _log.warning("The job stopped: %s", _readable(error), exc_info=True)
+            else:
+                _log.error("The job failed unexpectedly", exc_info=True)
             self.failed.emit(_readable(error))
         else:
             self.finished.emit(result)
@@ -56,6 +87,18 @@ class JobWorker(QObject):
 
     def _emit(self, event: ProgressEvent) -> None:
         self.progressed.emit(event)
+
+
+def _foreseen(error: Exception) -> bool:
+    """Is *error* one of the app's own, or something the machine refused?
+
+    Decided by class alone, never by where it was raised: a builtin or a C
+    extension adds no frame of its own, so ``max([])`` inside Qalun's code would
+    look exactly like a deliberate ``raise``.
+    """
+    if isinstance(error, _APP_ERRORS + _REFUSED_BY_THE_MACHINE):
+        return True
+    return isinstance(error, OSError) and error.errno == errno.ENOSPC
 
 
 def _readable(error: Exception) -> str:
