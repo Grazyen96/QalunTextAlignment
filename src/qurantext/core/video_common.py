@@ -46,49 +46,98 @@ def ayah_label(match: dict[str, Any]) -> str:
     return surah_name
 
 
-def lecture_intro_lines(matches: list[dict[str, Any]]) -> tuple[str, str] | None:
-    """Return ``(surah_name, tadabbur_line)`` for a lecture's opening card.
+def _start_of(card: dict[str, Any]) -> float:
+    try:
+        start = float(card.get("_start_time", card.get("start_time", math.inf)))
+    except (TypeError, ValueError):
+        return math.inf
+    return start if not math.isnan(start) else math.inf
 
-    The intro announces which ayat the lecture ponders: the surah of the first
-    detected ayah, plus the span from the lowest to the highest ayah number
-    found within that surah (e.g. ``"تدبر الآيات من الآية 7 إلى الآية 11"``).
-    Returns ``None`` when no ayah numbering is available to announce.
 
-    A card placed by hand (:func:`is_manual_card`) is shown whatever its surah,
-    so the first card may be a cross-reference the teacher explains with; the
-    detected cards are the studied surah's (``cards_on_screen`` keeps them to
-    it), so the surah is taken from them. Hand-made cards name it only in a
-    lecture where no detected card names one, and a hand-made card of the
-    announced surah still widens the span.
+def _is_ayah_number(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+def lecture_span(
+    cards: list[dict[str, Any]], studied_surah: int | None = None
+) -> tuple[int | str | None, int | None, int | None]:
+    """The surah a lecture's cards announce, with its lowest and highest ayah on them.
+
+    *cards* are the cards the video shows (:func:`cards_on_screen`). Returns
+    ``(surah, from, to)``: the surah is a number, or a name for cards that
+    carry no number, and None when no card names one; ``from`` and ``to`` are
+    None when no card of that surah carries ayah numbers.
+
+    The one rule the lecture's opening card (:func:`lecture_intro_lines`) and a
+    generated intro's title and link campaign (``jobs.generated_parts``) share,
+    so they cannot name different surahs:
+
+    - the surah is *studied_surah* when the person chose one;
+    - else the automatic guess the card filter uses
+      (:func:`guessed_studied_surah`: detected cards by heard time; a card
+      placed by hand does not vote);
+    - else, when no detected card can vote (every card made by hand, say), the
+      surah of the first detected card with ayah numbers, then of the first
+      hand-made one, by time.
+
+    The range covers every card of that surah, hand-made ones included.
     """
-    ordered = sorted(matches, key=lambda m: float(m.get("_start_time", math.inf)))
-
-    def named(match: dict[str, Any]) -> str:
-        name = str(match.get("surah_name") or "").strip()
-        return name if name and isinstance(match.get("from_ayah"), int) else ""
-
-    detected = [named(m) for m in ordered if not is_manual_card(m)]
-    by_hand = [named(m) for m in ordered if is_manual_card(m)]
-    surah_name = next((name for name in detected + by_hand if name), "")
-    if not surah_name:
-        return None
-
+    surah: int | str | None = studied_surah
+    if surah is None:
+        surah = guessed_studied_surah(cards)
+    if surah is None:
+        ordered = sorted(cards, key=_start_of)
+        numbered = [
+            card
+            for card in ordered
+            if _card_surah(card) is not None and _is_ayah_number(card.get("from_ayah"))
+        ]
+        detected = [card for card in numbered if not is_manual_card(card)]
+        by_hand = [card for card in numbered if is_manual_card(card)]
+        first = (detected + by_hand)[:1]
+        surah = _card_surah(first[0]) if first else None
+    if surah is None:
+        return None, None, None
     lows: list[int] = []
     highs: list[int] = []
-    for match in ordered:
-        if str(match.get("surah_name") or "").strip() != surah_name:
+    for card in cards:
+        first_ayah, last_ayah = card.get("from_ayah"), card.get("to_ayah")
+        if _card_surah(card) != surah or not _is_ayah_number(first_ayah):
             continue
-        from_ayah = match.get("from_ayah")
-        to_ayah = match.get("to_ayah")
-        if isinstance(from_ayah, int):
-            lows.append(from_ayah)
-            highs.append(to_ayah if isinstance(to_ayah, int) else from_ayah)
-
+        lows.append(first_ayah)
+        highs.append(
+            last_ayah if _is_ayah_number(last_ayah) and last_ayah >= first_ayah else first_ayah
+        )
     if not lows:
-        return None
-    from_ayah = min(lows)
-    to_ayah = max(highs)
+        return surah, None, None
+    return surah, min(lows), max(highs)
 
+
+def lecture_intro_lines(
+    matches: list[dict[str, Any]], studied_surah: int | None = None
+) -> tuple[str, str] | None:
+    """Return ``(surah_name, tadabbur_line)`` for a lecture's opening card.
+
+    The intro announces which ayat the lecture ponders: the surah and the span
+    from its lowest to its highest ayah on the cards (e.g. ``"تدبر الآيات من
+    الآية 7 إلى الآية 11"``), as :func:`lecture_span` picks them from the
+    cards on screen (*matches*) and the person's *studied_surah*. Returns
+    ``None`` when there is no ayah numbering to announce, or no card says the
+    surah's name.
+    """
+    surah, from_ayah, to_ayah = lecture_span(matches, studied_surah)
+    if surah is None or from_ayah is None or to_ayah is None:
+        return None
+    surah_name = next(
+        (
+            str(match.get("surah_name")).strip()
+            for match in sorted(matches, key=_start_of)
+            if _card_surah(match) == surah and str(match.get("surah_name") or "").strip()
+        ),
+        "",
+    )
+    if not surah_name:
+        return None
     if from_ayah == to_ayah:
         line = f"تدبر الآية {from_ayah}"
     else:
@@ -208,6 +257,15 @@ def guessed_studied_surah(cards: list[dict[str, Any]]) -> int | str | None:
     if not heard:
         return None
     return max(heard, key=lambda surah: (heard[surah], -first[surah]))
+
+
+def is_drawable_card(card: dict[str, Any]) -> bool:
+    """Whether the video can draw *card*: it has a time on screen and a text.
+
+    A card ``validated_matches`` would drop counts for nothing: not in the
+    guess, not in a range a title announces.
+    """
+    return _card_span(card) is not None
 
 
 def has_surah_cards(cards: list[dict[str, Any]], surah: int) -> bool:

@@ -138,6 +138,8 @@ _LOOK_PANEL_WIDTH = 260
 #: What the render's progress bar says during each of the episode's steps.
 _EPISODE_PROGRESS_KEYS = {
     "episode_lecture": "render.running_lecture",
+    "episode_intro": "render.running_intro",
+    "episode_outro": "render.running_outro",
     "episode_recitation": "render.running_recitation",
     "episode_join": "render.running_join",
 }

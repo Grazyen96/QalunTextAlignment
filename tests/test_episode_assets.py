@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -158,3 +159,96 @@ def test_seeding_keeps_the_default_s_name(tmp_path, lecture_project):
     assert notices == []
     assert project_episode(project).intro_name == "Channel intro.mp4"
     assert project.episode["intro_name"] == "Channel intro.mp4"
+
+
+# --- generated intro and outro settings -----------------------------------------
+
+
+def test_generated_settings_round_trip_through_the_project(lecture_project):
+    from qurantext.jobs.episode_assets import GeneratedIntro, GeneratedOutro
+
+    outro = GeneratedOutro(link="example.org", platform="telegram")
+    intro = GeneratedIntro(name="دروس الشيخ أحمد", style="reveal", seconds=7.5)
+    set_project_episode(
+        lecture_project, EpisodeChoice(intro_generated=intro, outro_generated=outro)
+    )
+    save_project(lecture_project, lecture_project.path)
+
+    again = project_episode(load_project(lecture_project.path))
+    assert again.outro_generated == outro and again.intro_generated == intro
+    assert again.outro_generated.phrase == "جزاكم الله خيرًا", "the default phrase"
+    assert again.intro is None and again.outro is None
+    assert again.parts_set == ("intro", "outro") and not again.is_empty
+    assert again.is_generated("outro") and not again.is_generated("recitation")
+
+
+def test_junk_generated_settings_fall_back(lecture_project):
+    from qurantext.jobs.episode_assets import GeneratedOutro
+
+    lecture_project.episode = {
+        "outro_generated": {"seconds": "lots", "style": "spin", "platform": 5, "link": "ex.org"}
+    }
+    outro = project_episode(lecture_project).outro_generated
+    assert outro == GeneratedOutro(link="ex.org")
+    assert (outro.seconds, outro.style, outro.platform) == (6.0, "fade", "youtube")
+
+    lecture_project.episode = {"outro_generated": {"seconds": 99, "phrase": 3, "name": None}}
+    outro = project_episode(lecture_project).outro_generated
+    assert outro.seconds == 10.0 and outro.phrase == "جزاكم الله خيرًا", "clamped; a default"
+    lecture_project.episode = {"intro_generated": {"seconds": 1, "name": ["x"]}}
+    intro = project_episode(lecture_project).intro_generated
+    assert (intro.seconds, intro.name) == (3.0, "")
+    lecture_project.episode = {"intro_generated": {"seconds": float("nan"), "style": "rise"}}
+    assert project_episode(lecture_project).intro_generated.seconds == 5.0
+    assert project_episode(lecture_project).intro_generated.style == "rise"
+
+    for junk in ("fade", 3, ["seconds"], None, True):
+        lecture_project.episode = {"intro_generated": junk, "outro_generated": junk}
+        choice = project_episode(lecture_project)
+        assert choice.intro_generated is None and choice.outro_generated is None, junk
+        assert choice.is_empty, junk
+
+
+def test_a_part_is_either_a_clip_or_generated(tmp_path, lecture_project):
+    from qurantext.jobs.episode_assets import GeneratedIntro
+
+    clip = import_episode_clip(lecture_project.path, _clip(tmp_path / "i.mp4"))
+    set_project_episode(lecture_project, EpisodeChoice(intro=clip, intro_name="Channel.mp4"))
+    assert {"intro", "intro_name"} <= set(lecture_project.episode)
+
+    # A generated intro after a clip removes the clip's keys.
+    current = project_episode(lecture_project)
+    set_project_episode(
+        lecture_project, replace(current, intro_generated=GeneratedIntro(name="دروس"))
+    )
+    assert set(lecture_project.episode) == {"intro_generated"}
+    assert project_episode(lecture_project).intro is None
+
+    # And the reverse: a clip after a generated intro removes its settings.
+    set_project_episode(lecture_project, EpisodeChoice(intro=clip))
+    assert set(lecture_project.episode) == {"intro"}
+    assert project_episode(lecture_project).intro_generated is None
+
+    # Given both, the generated settings win; a hand-edited file holding both reads so too.
+    both = EpisodeChoice(intro=clip, intro_name="x.mp4", intro_generated=GeneratedIntro())
+    assert both.intro is None and both.intro_name is None
+    lecture_project.episode = {"intro": "lec.qalun.episode/" + clip.name, "intro_generated": {}}
+    read = project_episode(lecture_project)
+    assert read.intro is None and read.intro_generated == GeneratedIntro()
+
+
+def test_seeding_stores_generated_defaults_without_copying(tmp_path):
+    from qurantext.jobs.episode_assets import GeneratedOutro, seed_project_episode
+
+    project = Project(audio=tmp_path / "new.mp3", mode="lecture")
+    clip = _clip(tmp_path / "3f2a9c1b2d4e.mp4")
+    outro = GeneratedOutro(link="example.org/dars", platform="tiktok")
+    notices = seed_project_episode(
+        project, tmp_path / "new.qalun.json", clip, clip, generated=(None, outro)
+    )
+    assert notices == []
+    choice = project_episode(project)
+    assert choice.outro_generated == outro and choice.outro is None
+    assert choice.intro is not None, "the intro clip is still copied"
+    copies = list(episode_dir_for(tmp_path / "new.qalun.json").iterdir())
+    assert [copy.name for copy in copies] == [choice.intro.name], "one copy: the intro's"

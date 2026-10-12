@@ -16,8 +16,10 @@ from pathlib import Path
 
 from qurantext.config.paths import (
     LECTURE_MATCHING_OUTPUT_DIR,
+    QURAN_DB_PATH,
     RECITATION_MATCHING_OUTPUT_DIR,
 )
+from qurantext.data.quran_db import stored_surah_names
 from qurantext.gui.i18n import t
 from qurantext.jobs.episode import (
     EpisodeError,
@@ -25,8 +27,20 @@ from qurantext.jobs.episode import (
     episode_path_for,
     recitation_video,
 )
-from qurantext.jobs.episode_assets import project_episode, seed_project_episode
-from qurantext.jobs.look_assets import seed_project_look
+from qurantext.jobs.episode_assets import (
+    EpisodeChoice,
+    GeneratedIntro,
+    GeneratedOutro,
+    project_episode,
+    seed_project_episode,
+)
+from qurantext.jobs.generated_parts import (
+    ensure_generated_part,
+    intro_spec_for,
+    outro_spec_for,
+    remove_generated_parts,
+)
+from qurantext.jobs.look_assets import project_look, seed_project_look
 from qurantext.jobs.project import (
     JobSettings,
     Project,
@@ -97,6 +111,10 @@ class JobSpec:
     #: Their original file names, shown in the Episode dialog (the copies are
     #: named by their content); None when unknown.
     episode_default_names: tuple[str | None, str | None] = (None, None)
+    #: The default generated intro and outro settings, for a part whose
+    #: default is generated rather than a clip (it then has no clip); nothing
+    #: is copied for them. Like the clips, only a brand-new lecture uses them.
+    episode_generated: tuple[GeneratedIntro | None, GeneratedOutro | None] = (None, None)
 
     @property
     def settings(self) -> JobSettings:
@@ -320,11 +338,16 @@ def run_matching(
         # and a brand-new lecture with the default intro and outro.
         if spec.style:
             seed_project_look(project, destination, spec.style)
-        if spec.mode == "lecture" and any(spec.episode_defaults):
+        if spec.mode == "lecture" and (any(spec.episode_defaults) or any(spec.episode_generated)):
             intro, outro = (Path(clip) if clip else None for clip in spec.episode_defaults)
             # A default clip that is gone is left out, and said as the backup is.
             seeded = seed_project_episode(
-                project, destination, intro, outro, names=spec.episode_default_names
+                project,
+                destination,
+                intro,
+                outro,
+                names=spec.episode_default_names,
+                generated=spec.episode_generated,
             )
             for key, fmt in seeded:
                 said = t(key, part=t(f"episode.part.{fmt['part']}"))
@@ -430,17 +453,24 @@ def _make_episode(
 _CLIP_PARTS = ("intro", "outro")
 
 
-def _part_error(error: EpisodeError, clips: dict[str, Path]) -> EpisodeError:
+def _part_error(
+    error: EpisodeError, clips: dict[str, Path], made: dict[str, Path] | None = None
+) -> EpisodeError:
     """*error*, said as "the intro clip …" when it names a clip by its copy's file name.
 
     The copies beside the project are named by their content (``3f2a9c1b2d4e.mp4``),
-    which tells the person nothing about which part is meant.
+    which tells the person nothing about which part is meant. A generated part
+    (*made*) is not a clip the person chose: one the join cannot use is said as
+    a part that could not be made.
     """
     kind = {"episode.error.missing": "missing", "episode.error.not_video": "not_video"}.get(
         error.key
     )
     if kind is None:
         return error
+    for part, clip in (made or {}).items():
+        if error.fmt.get("name") == clip.name:
+            return EpisodeError("episode.error.generate", part=t(f"episode.part.{part}"))
     for part, clip in clips.items():
         if error.fmt.get("name") == clip.name:
             return EpisodeError(f"episode.error.part_{kind}", part=t(f"episode.part.{part}"))
@@ -459,19 +489,33 @@ def _join_episode(
     """:func:`_make_episode`'s work; raises :class:`EpisodeError` for what stops it.
 
     The intro and outro are looked for first, so a missing outro is said
-    before minutes are spent rendering the recitation. When the job writes
+    before minutes are spent rendering the recitation; a generated intro or
+    outro is made then too, at the size and rate the lecture was just
+    rendered at, for the same reason (a link too long for a QR code at this
+    size stops the episode at once). When the job writes
     subtitle files, the episode gets its own, holding the lecture's cues moved
     to where the lecture starts in it. The episode is recorded in the
     project's render before they are written: a subtitle file that cannot be
     written leaves the episode made, and says so.
     """
     choice = project_episode(project)
+    if project.path is not None:
+        # A part no longer generated leaves no clip of it behind.
+        for part in _CLIP_PARTS:
+            if not choice.is_generated(part):
+                remove_generated_parts(project.path, part)
     if choice.is_empty:
         return None, None
     clips = {part: getattr(choice, part) for part in _CLIP_PARTS if getattr(choice, part)}
     for part, clip in clips.items():
         if not clip.is_file():
             raise EpisodeError("episode.error.part_missing", part=t(f"episode.part.{part}"))
+    made: dict[str, Path] = {}
+    if any(choice.is_generated(part) for part in _CLIP_PARTS):
+        made = _generated_parts(
+            project, choice, *_lecture_geometry(project), progress=progress, cancel=cancel
+        )
+    intro, outro = made.get("intro", choice.intro), made.get("outro", choice.outro)
     recitation: Path | None = None
     if choice.recitation is not None:
         report(
@@ -486,11 +530,11 @@ def _join_episode(
             progress=_as_stage(progress, "episode_recitation"),
             cancel=cancel,
         )
-    parts = [p for p in (choice.intro, recitation) if p is not None]
+    parts = [p for p in (intro, recitation) if p is not None]
     lecture_index = len(parts)
     parts.append(lecture)
-    if choice.outro is not None:
-        parts.append(choice.outro)
+    if outro is not None:
+        parts.append(outro)
     if len(parts) == 1:
         return None, None
     width, height, fps = _lecture_geometry(project)
@@ -507,7 +551,7 @@ def _join_episode(
             cancel=cancel,
         )
     except EpisodeError as error:
-        raise _part_error(error, clips) from error
+        raise _part_error(error, clips, made) from error
     # Recorded before the subtitle files, which are extra: the video is made.
     assert project.render is not None  # render_project has just recorded it
     project.render["episode"] = {
@@ -543,6 +587,64 @@ def _join_episode(
                 "episode.error.subtitles", reason=str(error) or type(error).__name__
             )
     return joined.output, None
+
+
+def _generated_parts(
+    project: Project,
+    choice: EpisodeChoice,
+    width: int,
+    height: int,
+    fps: int,
+    *,
+    progress: ProgressCallback | None,
+    cancel: CancelToken | None,
+) -> dict[str, Path]:
+    """Make (or reuse) the episode's generated parts, in the lecture's look; by part.
+
+    Each is reported as its own stage (``episode_intro``, ``episode_outro``).
+    Raises :class:`EpisodeError` with the part said in the window's language.
+    """
+    look = None
+    names: dict[int, str] = {}
+    made: dict[str, Path] = {}
+    for part in _CLIP_PARTS:
+        settings = getattr(choice, f"{part}_generated")
+        if settings is None:
+            continue
+        stage = f"episode_{part}"
+        report(progress, stage, t(f"job.stage.{stage}"), translated=True)
+        try:
+            if look is None:
+                look = project_look(project)
+                names = stored_surah_names(QURAN_DB_PATH)
+            spec_for = intro_spec_for if part == "intro" else outro_spec_for
+            spec = spec_for(project, settings, names)
+            made[part] = ensure_generated_part(
+                project,
+                part,
+                spec,
+                look,
+                width=width,
+                height=height,
+                fps=fps,
+                progress=_as_stage(progress, stage),
+                cancel=cancel,
+            )
+        except EpisodeError as error:
+            fmt = dict(error.fmt)
+            # The job layer names the part by its key; the window says it.
+            if str(fmt.get("part", "")).startswith("episode.part."):
+                fmt["part"] = t(str(fmt["part"]))
+            raise EpisodeError(error.key, **fmt) from error
+        except JobCancelled:
+            raise
+        except Exception as error:  # noqa: BLE001 — not the join's failure: this part's
+            # A link or a text the dialog refuses (only a hand-edited project has
+            # one), or odd data in the project: the person reads which part, the
+            # log has the cause.
+            _log.warning("The generated %s could not be set up", part, exc_info=True)
+            raise EpisodeError("episode.error.generate", part=t(f"episode.part.{part}")) from error
+    return made
 
 
 def _as_stage(progress: ProgressCallback | None, stage: str) -> ProgressCallback | None:

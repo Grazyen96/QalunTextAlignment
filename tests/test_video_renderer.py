@@ -1493,3 +1493,49 @@ def test_a_failed_filter_query_is_asked_again(monkeypatch, tmp_path) -> None:
     assert video_common.ffmpeg_filters(path) == frozenset()
     assert video_common.ffmpeg_filters(path) == frozenset({"apad"})
     assert video_common.ffmpeg_filters(path) == frozenset({"apad"}) and len(calls) == 2
+
+
+def test_the_opening_card_is_not_chosen_by_hand_made_cross_references() -> None:
+    """Hand-made cards of another surah outnumber the detected ones and come first: the
+    lecture still opens on the surah it studies (``lecture_span``, the intro's rule too)."""
+    from qurantext.core.frame_renderer import placeholder_lines
+    from qurantext.core.video_common import cards_on_screen, lecture_span, validated_matches
+
+    cards = [
+        {**_card(2, 255, 0.0, 3.0, "سورة البقرة"), "manual": True},
+        {**_card(2, 256, 3.0, 6.0, "سورة البقرة"), "manual": True},
+        {**_card(2, 257, 6.0, 9.0, "سورة البقرة"), "manual": True},
+        _card(25, 44, 10.0, 14.0, "سورة الفرقان"),
+        _card(25, 49, 20.0, 24.0, "سورة الفرقان"),
+    ]
+    shown = cards_on_screen(validated_matches(cards, bridge_gaps=False), "lecture")
+    assert lecture_span(shown) == (25, 44, 49)
+    assert placeholder_lines(shown, reserve_caption_band=True) == (
+        "سورة الفرقان",
+        "تدبر الآيات من الآية 44 إلى الآية 49",
+    )
+
+
+def test_the_opening_card_names_the_chosen_surah() -> None:
+    """With a studied surah chosen, it is the one announced, as the cards keep to it."""
+    from qurantext.core.frame_renderer import placeholder_lines
+    from qurantext.core.video_common import cards_on_screen, lecture_span, validated_matches
+
+    cards = [
+        _card(2, 255, 0.0, 30.0, "سورة البقرة"),
+        _card(25, 63, 40.0, 44.0, "سورة الفرقان"),
+        {**_card(2, 286, 50.0, 53.0, "سورة البقرة"), "manual": True},
+    ]
+    shown = cards_on_screen(validated_matches(cards, bridge_gaps=False), "lecture", 25)
+    assert lecture_span(shown, 25) == (25, 63, 63)
+    assert placeholder_lines(shown, reserve_caption_band=True, studied_surah=25) == (
+        "سورة الفرقان",
+        "تدبر الآية 63",
+    )
+    # A chosen surah with no card of its own has nothing to announce: the plain title.
+    only_quote = cards_on_screen(validated_matches(cards[:1], bridge_gaps=False), "lecture", 25)
+    assert lecture_span(only_quote, 25) == (25, None, None)
+    assert placeholder_lines(only_quote, reserve_caption_band=True, studied_surah=25) == (
+        "القرآن الكريم",
+        "",
+    )

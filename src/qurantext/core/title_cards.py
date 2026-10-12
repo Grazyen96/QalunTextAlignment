@@ -80,7 +80,7 @@ __all__ = [
 
 #: Part of every clip's cache key: bump it whenever a clip's pixels change for
 #: the same spec, so clips made by an earlier version are made again.
-GENERATOR_VERSION = 1
+GENERATOR_VERSION = 2
 STYLES = ("fade", "rise", "reveal")
 MIN_SECONDS = 3.0
 MAX_SECONDS = 10.0
@@ -99,6 +99,9 @@ _FONT_MIN = 0.02  # the smallest size, as a share of the frame's short side
 _LINK_START = 0.045  # the first size tried for the link text, of the short side
 _TITLE_UNDER_NAME = 0.7  # the intro's title starts at this share of the name's size
 _MAX_LINES = 2
+# Before wrapping, a text may shrink to this share of its first size to stay on one
+# line: «دروس الشيخ أحمد» as one line, not «دروس الشيخ» over a lone «أحمد».
+_ONE_LINE_SHARE = 0.7
 _QR_MIN_SHARE = 0.25  # the code with its quiet zone, at least, of the short side
 _QR_QUIET = 4
 _QR_MIN_MODULE = 5  # px; 4 px codes stop decoding after a 480p transcode
@@ -282,14 +285,20 @@ def _fit_text(
     minimum: int,
     max_lines: int,
     direction: str | None = None,
+    *,
+    exact: bool = False,
 ) -> _Block | None:
     """The largest size from *start* down at which *text* fits in at most *max_lines*.
 
-    Sizes are tried with :func:`fit_font_size` (one size at a time, so its cache
-    serves every later frame). Text that does not fit even at *minimum* keeps
-    its first *max_lines* lines, the last one cut short with an ellipsis, so it
-    never leaves the box sideways. *direction* overrides the one guessed from
-    the first strong letter (the link text is always ``ltr``).
+    One line is preferred to two: sizes down to 70 % of *start* are tried for
+    one line first, so a short name does not wrap a word onto a line of its
+    own; only text that needs more shrinking than that wraps (at the largest
+    size that fits). Sizes are tried with :func:`fit_font_size` (one size at a
+    time, so its cache serves every later frame). Text that does not fit even
+    at *minimum* keeps its first *max_lines* lines, the last one cut short with
+    an ellipsis, so it never leaves the box sideways. *direction* overrides the one guessed from
+    the first strong letter (the link text is always ``ltr``). With *exact*,
+    text that does not fit by *minimum* gives None instead of being cut short.
     """
     text = " ".join(text.split())
     if not text:
@@ -299,6 +308,20 @@ def _fit_text(
     max_width, max_height = max(1, max_width), max(1, max_height)
     minimum = max(8, minimum)
     size = max(start, minimum)
+    if max_lines > 1:
+        one_line = _fit_text(
+            text,
+            font_file,
+            max_width,
+            max_height,
+            size,
+            max(minimum, round(size * _ONE_LINE_SHARE)),
+            1,
+            direction,
+            exact=True,
+        )
+        if one_line is not None:
+            return one_line
     while True:
         font, lines = fit_font_size(probe, text, font_file, max_width, max_height, size, size)
         lines = tuple(lines)
@@ -308,6 +331,8 @@ def _fit_text(
         if size <= minimum:
             break
         size = max(minimum, size - max(2, size // 12))
+    if exact:
+        return None
     kept = list(lines[:max_lines])
     # Lines that do not fit by height go too: one line at the smallest size always stays.
     while len(kept) > 1 and _block_size(tuple(kept), font, direction)[1] > max_height:

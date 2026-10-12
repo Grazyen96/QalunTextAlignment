@@ -431,3 +431,31 @@ def test_a_tiny_preview_keeps_a_huge_code_inside_the_frame():
         assert 0 <= x0 < x1 <= w and 0 <= y0 < y1 <= h
         assert _inside((x0, y0, x1, y1), _layout(spec, w, h).panel)
         assert render_title_frame(spec, NIGHT_GOLD, w, h, 3.0).size == (w, h)
+
+
+@pytest.mark.parametrize("size", [(1080, 1920), (1920, 1080), (960, 540)])
+def test_a_short_name_shrinks_rather_than_leave_a_word_alone(size):
+    """«دروس الشيخ أحمد» stays on one line, smaller, rather than «أحمد» under the rest;
+    so does the title under it."""
+    spec = IntroSpec("دروس الشيخ أحمد", "سورة الفرقان، الآيات ٤٤–٤٩")
+    name, title = _layout(spec, *size).texts
+    assert name.block.lines == ("دروس الشيخ أحمد",)
+    assert title.block.lines == ("سورة الفرقان، الآيات ٤٤–٤٩",)
+    start = round(0.09 * size[1])
+    assert name.block.font.size >= round(0.7 * start) - 1, "no smaller than 70 % of its start"
+
+
+def test_text_that_needs_more_than_that_still_wraps_at_the_larger_size():
+    """Below 70 % of the start size one line is not worth it: two lines, larger."""
+    from qurantext.config.paths import TEXT_FONT_BOLD_PATH
+    from qurantext.core.title_cards import _fit_text
+
+    text = "دروس الشيخ أحمد في تفسير سورة الفرقان"
+    width, start = 600, 120
+    one = _fit_text(text, TEXT_FONT_BOLD_PATH, width, 400, start, 12, 1)
+    assert len(one.lines) == 1 and one.font.size < round(0.7 * start), "one line needs less"
+    block = _fit_text(text, TEXT_FONT_BOLD_PATH, width, 400, start, 12, 2)
+    assert len(block.lines) == 2 and block.font.size > one.font.size
+    # The same fit with a start it can keep to within 70 % stays on one line.
+    near = _fit_text(text, TEXT_FONT_BOLD_PATH, width, 400, round(one.font.size / 0.75), 12, 2)
+    assert near.lines == (text,)

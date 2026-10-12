@@ -8,13 +8,12 @@ read the same and hold the same data: None for "detect", else the surah number.
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 from PySide6.QtWidgets import QComboBox
 
 from qurantext.config.paths import QURAN_DB_PATH
-from qurantext.data.quran_db import connect, list_surahs
+from qurantext.data import quran_db
 from qurantext.gui.i18n import t
 from qurantext.jobs.project import SURAH_COUNT
 
@@ -26,17 +25,10 @@ def stored_surah_names(db_path: Path = QURAN_DB_PATH) -> dict[int, str]:
 
     Read-only: the review window has no business building the store, and a
     picker without names still works (each surah is listed by its number).
+    The work is :func:`qurantext.data.quran_db.stored_surah_names`, which the
+    job layer calls without Qt.
     """
-    try:
-        conn = connect(db_path)
-    except (OSError, sqlite3.Error):
-        return {}
-    try:
-        return {int(row["surah_num"]): str(row["name"]) for row in list_surahs(conn)}
-    except sqlite3.Error:
-        return {}
-    finally:
-        conn.close()
+    return quran_db.stored_surah_names(db_path)
 
 
 def surah_label(num: int, names: dict[int, str]) -> str:

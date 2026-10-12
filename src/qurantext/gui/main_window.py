@@ -72,6 +72,8 @@ _KNOWN_STAGES = frozenset(
         "render",
         "export",
         "episode_lecture",
+        "episode_intro",
+        "episode_outro",
         "episode_recitation",
         "episode_join",
     }
@@ -84,6 +86,8 @@ _PERCENT_KEYS = {
     # The episode's steps, after the lecture's own render (``gui.jobs`` reports
     # the recitation's render and the join under these names).
     "episode_lecture": "home.progress.episode_lecture",
+    "episode_intro": "home.progress.episode_intro",
+    "episode_outro": "home.progress.episode_outro",
     "episode_recitation": "home.progress.episode_recitation",
     "episode_join": "home.progress.episode_join",
 }

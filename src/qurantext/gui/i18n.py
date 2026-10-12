@@ -155,6 +155,8 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "job.stage.export": "Writing subtitle files…",
         "job.stage.working": "Working…",
         "job.stage.episode_lecture": "Rendering the lecture…",
+        "job.stage.episode_intro": "Making the intro…",
+        "job.stage.episode_outro": "Making the outro…",
         "job.stage.episode_recitation": "Preparing the recitation for the episode…",
         "job.stage.episode_join": "Joining the episode…",
         "app.title": "Qalun",
@@ -170,6 +172,10 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "home.progress.rendering_eta": "Rendering — {percent}%, about {eta} left",
         "home.progress.episode_lecture": "Rendering the lecture — {percent}%",
         "home.progress.episode_lecture_eta": "Rendering the lecture — {percent}%, about {eta} left",
+        "home.progress.episode_intro": "Making the intro — {percent}%",
+        "home.progress.episode_intro_eta": "Making the intro — {percent}%, about {eta} left",
+        "home.progress.episode_outro": "Making the outro — {percent}%",
+        "home.progress.episode_outro_eta": "Making the outro — {percent}%, about {eta} left",
         "home.progress.episode_recitation": "Rendering the recitation — {percent}%",
         "home.progress.episode_recitation_eta": (
             "Rendering the recitation — {percent}%, about {eta} left"
@@ -293,6 +299,8 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "export.close": "Close",
         "render.running": "Rendering — {percent}%",
         "render.running_lecture": "Lecture — {percent}%",
+        "render.running_intro": "Intro — {percent}%",
+        "render.running_outro": "Outro — {percent}%",
         "render.running_recitation": "Recitation — {percent}%",
         "render.running_join": "Joining — {percent}%",
         "render.done": "The video is ready: {path}",
@@ -373,6 +381,15 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
             "The {part} clip is not a video Qalun can read, so the episode was not made."
         ),
         "episode.error.cancelled": "The episode was cancelled; the lecture video is kept.",
+        "episode.error.generate": "The {part} could not be made, so the episode was not made.",
+        "episode.error.generate_empty": (
+            "The generated {part} has no words and no link to show, so the episode was not "
+            "made. Give it a name or a phrase in the Episode dialog."
+        ),
+        "episode.error.qr_too_big": (
+            "The outro's link is too long for a QR code phones can read in a {size} video, "
+            "so the episode was not made. Shorten the link."
+        ),
         "episode.error.recitation_changed": (
             "The recitation's video \u2068{name}\u2069 was rendered again while the episode "
             "was being made, so the episode was not made. Render again to use the new one."
@@ -527,6 +544,8 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "job.stage.export": "جارٍ كتابة ملفات الترجمة النصية…",
         "job.stage.working": "جارٍ العمل…",
         "job.stage.episode_lecture": "إخراج الدرس…",
+        "job.stage.episode_intro": "جارٍ إعداد المقدمة…",
+        "job.stage.episode_outro": "جارٍ إعداد الخاتمة…",
         "job.stage.episode_recitation": "تجهيز التلاوة للحلقة…",
         "job.stage.episode_join": "تجميع الحلقة…",
         "app.title": "Qalun",
@@ -542,6 +561,10 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "home.progress.rendering_eta": "إخراج الفيديو — \u2066{percent}%\u2069، يتبقى نحو {eta}",
         "home.progress.episode_lecture": "إخراج الدرس — \u2066{percent}%\u2069",
         "home.progress.episode_lecture_eta": "إخراج الدرس — \u2066{percent}%\u2069، يتبقى نحو {eta}",
+        "home.progress.episode_intro": "إعداد المقدمة — \u2066{percent}%\u2069",
+        "home.progress.episode_intro_eta": "إعداد المقدمة — \u2066{percent}%\u2069، يتبقى نحو {eta}",
+        "home.progress.episode_outro": "إعداد الخاتمة — \u2066{percent}%\u2069",
+        "home.progress.episode_outro_eta": "إعداد الخاتمة — \u2066{percent}%\u2069، يتبقى نحو {eta}",
         "home.progress.episode_recitation": "إخراج التلاوة — \u2066{percent}%\u2069",
         "home.progress.episode_recitation_eta": (
             "إخراج التلاوة — \u2066{percent}%\u2069، يتبقى نحو {eta}"
@@ -681,6 +704,8 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "export.close": "إغلاق",
         "render.running": "إخراج الفيديو — \u2066{percent}%\u2069",
         "render.running_lecture": "الدرس — \u2066{percent}%\u2069",
+        "render.running_intro": "المقدمة — \u2066{percent}%\u2069",
+        "render.running_outro": "الخاتمة — \u2066{percent}%\u2069",
         "render.running_recitation": "التلاوة — \u2066{percent}%\u2069",
         "render.running_join": "التجميع — \u2066{percent}%\u2069",
         "render.done": "الفيديو جاهز: {path}",
@@ -759,6 +784,15 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
             "مقطع \u2068{part}\u2069 ليس فيديو يستطيع قالون قراءته، فلم تُصنع الحلقة."
         ),
         "episode.error.cancelled": "أُلغيت الحلقة، وبقي فيديو المحاضرة كما هو.",
+        "episode.error.generate": "تعذّر إعداد {part}، فلم تُصنع الحلقة.",
+        "episode.error.generate_empty": (
+            "ليس في {part} المُعدّة كلمات ولا رابط تعرضه، فلم تُصنع الحلقة. "
+            "أعطها اسمًا أو عبارة في نافذة الحلقة."
+        ),
+        "episode.error.qr_too_big": (
+            "رابط الخاتمة أطول من أن تقرأ الهواتف رمز الاستجابة السريعة الخاص به "
+            "في فيديو بحجم \u2066{size}\u2069، فلم تُصنع الحلقة. اختصر الرابط."
+        ),
         "episode.error.recitation_changed": (
             "أُعيد إخراج فيديو التلاوة \u2068{name}\u2069 أثناء صنع الحلقة، فلم تُصنع الحلقة. "
             "أعد الإخراج لاستخدام الجديد."

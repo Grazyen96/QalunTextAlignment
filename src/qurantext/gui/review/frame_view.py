@@ -139,6 +139,8 @@ class FrameView(QLabel):
         if self._placeholder_revision != self._session.revision:
             self._placeholder_revision = self._session.revision
             self._placeholder = placeholder_lines(
-                self._session.validated_cards(), reserve_caption_band=reserve_caption_band
+                self._session.validated_cards(),
+                reserve_caption_band=reserve_caption_band,
+                studied_surah=self._session.studied_surah,
             )
         return self._placeholder

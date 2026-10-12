@@ -466,3 +466,11 @@ def test_a_job_or_file_name_in_an_episode_line_is_isolated_in_every_language(key
     """An Arabic job name («الفرقان44-49») must not pull the ayat after it out of order."""
     for language in i18n.LANGUAGES:
         assert "\u2068{name}\u2069" in i18n.STRINGS[language][key], language
+
+
+def test_the_video_size_in_the_qr_error_keeps_its_order_in_arabic() -> None:
+    """ "1280×720" inside an Arabic sentence must not read "720×1280"."""
+    assert "\u2066{size}\u2069" in i18n.STRINGS["ar"]["episode.error.qr_too_big"]
+    for language in ("en", "ar"):
+        for key in ("episode.error.generate", "episode.error.generate_empty"):
+            assert "{part}" in i18n.STRINGS[language][key], (language, key)

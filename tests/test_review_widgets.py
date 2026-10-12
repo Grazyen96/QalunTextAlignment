@@ -2298,3 +2298,34 @@ def test_an_arabic_job_name_keeps_its_ayat_in_order(
     dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
     text = dialog.recitation_box.itemText(1)
     assert "\u2068دروس الفرقان\u2069" in text and "\u206625:7-11\u2069" in text
+
+
+def test_ok_in_the_episode_dialog_keeps_a_generated_part_it_does_not_show(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    """Until the dialog offers Generated, OK keeps a generated part the person left alone,
+    and a clip chosen for that part replaces it."""
+    from qurantext.gui.prefs import KEEP_DEFAULT
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+    from qurantext.jobs.episode_assets import EpisodeChoice, GeneratedIntro, GeneratedOutro
+
+    _recitation_jobs(monkeypatch, tmp_path, episode_lecture.project.path)
+    _fake_probe(monkeypatch, {"intro.mp4": 4.0})
+    (tmp_path / "intro.mp4").write_bytes(b"intro")
+    intro, outro = GeneratedIntro(name="دروس"), GeneratedOutro(link="example.org")
+    episode_lecture.set_episode(EpisodeChoice(intro_generated=intro, outro_generated=outro))
+    prefs.save_default_episode(
+        KEEP_DEFAULT, KEEP_DEFAULT, intro_generated=intro, outro_generated=outro
+    )
+
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    _choose_file(monkeypatch, tmp_path / "intro.mp4")
+    dialog.intro_choose.click()
+    dialog.ok_button.click()
+
+    episode = episode_lecture.episode
+    assert episode.intro is not None and episode.intro_generated is None
+    assert episode.outro_generated == outro, "the outro was not touched"
+    # The defaults the same: the intro's is now the clip, the outro's still generated.
+    assert prefs.default_episode_kinds == ("clip", "generated")
+    assert prefs.default_outro_generated == outro and prefs.default_intro_generated is None

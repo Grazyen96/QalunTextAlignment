@@ -28,7 +28,7 @@ from qurantext.config.settings import ENGINES, VIDEO_PRESETS
 from qurantext.core.looks import NIGHT_GOLD, Look, look_from_style
 from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.gui.i18n import LANGUAGES
-from qurantext.jobs.episode_assets import EPISODE_SUFFIXES
+from qurantext.jobs.episode_assets import EPISODE_SUFFIXES, GeneratedIntro, GeneratedOutro
 from qurantext.jobs.look_assets import copy_by_content
 from qurantext.jobs.project import SUBTITLE_CHOICES
 
@@ -278,12 +278,13 @@ class Prefs:
         return {} if look == NIGHT_GOLD else look.to_dict()
 
     # -- default_episode --------------------------------------------------------
-    # The intro and outro new lectures start with. Stored as absolute paths into
-    # the app's own folder, so deleting or moving the original clip does not
-    # lose it. The recitation is never a default: it differs per lecture.
+    # The intro and outro new lectures start with: each a clip or generated
+    # settings, never both. A clip is stored as an absolute path into the app's
+    # own folder, so deleting or moving the original clip does not lose it.
+    # The recitation is never a default: it differs per lecture.
 
-    def _default_episode_parts(self) -> dict[str, tuple[Path, str | None]]:
-        """The stored default clips, each as (path, original name), by part; tolerant."""
+    def _default_episode_data(self) -> dict:
+        """The stored default episode as a dict; empty when unset or unreadable."""
         raw = self._settings.value("default_episode", "")
         if not isinstance(raw, str) or not raw:
             return {}
@@ -291,10 +292,18 @@ class Prefs:
             data = json.loads(raw)
         except ValueError:  # json.JSONDecodeError is a ValueError
             return {}
-        if not isinstance(data, dict):
-            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _default_episode_parts(self) -> dict[str, tuple[Path, str | None]]:
+        """The stored default clips, each as (path, original name), by part; tolerant.
+
+        A part with generated settings has no clip, whatever else is stored for it.
+        """
+        data = self._default_episode_data()
         parts: dict[str, tuple[Path, str | None]] = {}
         for key in ("intro", "outro"):
+            if isinstance(data.get(f"{key}_generated"), dict):
+                continue
             value = data.get(key)
             if not isinstance(value, str) or not value:
                 continue
@@ -307,7 +316,7 @@ class Prefs:
 
     @property
     def default_episode(self) -> tuple[Path | None, Path | None]:
-        """The default intro and outro; ``(None, None)`` when unset or unreadable."""
+        """The default intro and outro clips; ``(None, None)`` when unset or unreadable."""
         parts = self._default_episode_parts()
         intro, outro = parts.get("intro"), parts.get("outro")
         return (intro[0] if intro else None, outro[0] if outro else None)
@@ -319,12 +328,34 @@ class Prefs:
         intro, outro = parts.get("intro"), parts.get("outro")
         return (intro[1] if intro else None, outro[1] if outro else None)
 
+    @property
+    def default_intro_generated(self) -> GeneratedIntro | None:
+        """The default generated intro's settings; None when the default is a clip or none."""
+        return GeneratedIntro.from_dict(self._default_episode_data().get("intro_generated"))
+
+    @property
+    def default_outro_generated(self) -> GeneratedOutro | None:
+        """The default generated outro's settings; None when the default is a clip or none."""
+        return GeneratedOutro.from_dict(self._default_episode_data().get("outro_generated"))
+
+    @property
+    def default_episode_kinds(self) -> tuple[str, str]:
+        """Each default part's kind: ``"none"``, ``"clip"`` or ``"generated"``."""
+        clips = self.default_episode
+        generated = (self.default_intro_generated, self.default_outro_generated)
+        return tuple(  # type: ignore[return-value]
+            "generated" if made is not None else "clip" if clip is not None else "none"
+            for clip, made in zip(clips, generated, strict=True)
+        )
+
     def save_default_episode(
         self,
         intro: Path | None | object,
         outro: Path | None | object,
         *,
         names: tuple[str | None, str | None] = (None, None),
+        intro_generated: GeneratedIntro | None | object = KEEP_DEFAULT,
+        outro_generated: GeneratedOutro | None | object = KEEP_DEFAULT,
     ) -> None:
         """Remember *intro* and *outro* for new lectures; None clears that part.
 
@@ -336,11 +367,41 @@ class Prefs:
         :func:`~qurantext.jobs.look_assets.copy_by_content` raises
         (``ValueError``, ``OSError``) when a clip cannot be copied; nothing is
         stored then.
+
+        A part is a clip or generated, so for each part:
+
+        - generated settings (*intro_generated*) are stored, and its clip goes;
+        - else a clip or None (not :data:`KEEP_DEFAULT`) decides the part, and
+          its generated settings go;
+        - else None for its generated settings removes them, keeping its clip;
+        - else (both kept) the part stays as it is.
+
+        Raises ``TypeError`` for settings of the other part's type.
         """
         folder = user_data_dir() / "episode"
         current = self._default_episode_parts()
-        value: dict[str, str | None] = {}
-        for key, clip, name in (("intro", intro, names[0]), ("outro", outro, names[1])):
+        data = self._default_episode_data()
+        value: dict[str, object] = {}
+        for key, clip, name, generated, kind in (
+            ("intro", intro, names[0], intro_generated, GeneratedIntro),
+            ("outro", outro, names[1], outro_generated, GeneratedOutro),
+        ):
+            if generated is not KEEP_DEFAULT and generated is not None:
+                if not isinstance(generated, kind):
+                    # An outro's settings given as the intro's would read back empty.
+                    raise TypeError(
+                        f"{key}_generated must be a {kind.__name__}, not {type(generated).__name__}"
+                    )
+            if isinstance(generated, kind):
+                clip = None
+                value[f"{key}_generated"] = generated.to_dict()
+            elif clip is KEEP_DEFAULT and generated is KEEP_DEFAULT:
+                kept_settings = data.get(f"{key}_generated")
+                value[f"{key}_generated"] = (
+                    kept_settings if isinstance(kept_settings, dict) else None
+                )
+            else:
+                value[f"{key}_generated"] = None
             if clip is KEEP_DEFAULT:
                 kept = current.get(key)
                 value[key] = str(kept[0]) if kept else None

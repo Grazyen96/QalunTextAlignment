@@ -2821,6 +2821,238 @@ def test_a_failed_episode_keeps_the_lecture(tmp_path, monkeypatch) -> None:
     assert saved.render["video"] == lecture and "episode" not in saved.render
 
 
+_GENERATED_EPISODE = {
+    "intro_generated": {"name": "دروس الشيخ أحمد", "style": "rise", "seconds": 4},
+    "outro_generated": {"link": "example.org/dars", "platform": "telegram"},
+}
+
+
+def _fake_generation(jobs_module, monkeypatch, tmp_path) -> list[dict]:
+    """``ensure_generated_part`` faked: each part is a path named for it; returns the calls."""
+    from qurantext.utils.progress import report
+
+    made: list[dict] = []
+
+    def ensure(project, kind, spec, look, **kwargs):
+        made.append(dict(kwargs, kind=kind, spec=spec, look=look))
+        report(kwargs["progress"], "title_clip", "Drawing the title clip", fraction=0.5)
+        return tmp_path / f"made-{kind}.mp4"
+
+    monkeypatch.setattr(jobs_module, "ensure_generated_part", ensure)
+    monkeypatch.setattr(jobs_module, "stored_surah_names", lambda db_path: {25: "الفرقان"})
+    return made
+
+
+def test_run_render_makes_generated_parts(tmp_path, monkeypatch) -> None:
+    from qurantext.core.looks import NIGHT_GOLD
+    from qurantext.core.title_cards import IntroSpec, OutroSpec
+    from qurantext.gui.i18n import t
+
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch, episode=_GENERATED_EPISODE)
+    made = _fake_generation(jobs_module, monkeypatch, tmp_path)
+    events: list[ProgressEvent] = []
+    outcome = jobs_module.run_render(project, progress=events.append)
+
+    lecture = (tmp_path / "videos").resolve() / "lec.mp4"
+    assert outcome.episode_error is None
+    assert outcome.episode_video == lecture.with_name("lec – episode.mp4")
+    (joined,) = seen["assembled"]
+    assert joined["parts"] == [tmp_path / "made-intro.mp4", lecture, tmp_path / "made-outro.mp4"]
+    assert joined["lecture_index"] == 1
+    # Each part is made at the lecture's own size and rate, in its look.
+    assert [call["kind"] for call in made] == ["intro", "outro"]
+    for call in made:
+        assert (call["width"], call["height"], call["fps"]) == (1280, 720, 30)
+        assert call["look"] == NIGHT_GOLD
+    intro, outro = made[0]["spec"], made[1]["spec"]
+    assert isinstance(intro, IntroSpec) and isinstance(outro, OutroSpec)
+    assert (intro.name, intro.style, intro.seconds) == ("دروس الشيخ أحمد", "rise", 4.0)
+    assert "utm_source=telegram" in outro.qr_url and outro.link_text == "example.org/dars"
+    said = [(e.stage, e.message) for e in events if e.translated]
+    assert said == [
+        ("episode_intro", t("job.stage.episode_intro")),
+        ("episode_outro", t("job.stage.episode_outro")),
+        ("episode_join", t("job.stage.episode_join")),
+    ]
+    assert t("job.stage.episode_intro") == "Making the intro…"
+    # The clip's own progress is reported under the part's stage.
+    drawn = [e.stage for e in events if e.message == "Drawing the title clip"]
+    assert drawn == ["episode_intro", "episode_outro"]
+
+
+def test_a_generated_part_beside_a_clip_and_a_recitation(tmp_path, monkeypatch) -> None:
+    """A generated outro after a chosen intro clip and a recitation: four parts in order."""
+    from qurantext.jobs.episode_assets import (
+        EpisodeChoice,
+        GeneratedOutro,
+        project_episode,
+        set_project_episode,
+    )
+
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch)
+    choice = project_episode(project)
+    set_project_episode(
+        project, EpisodeChoice(choice.intro, choice.recitation, outro_generated=GeneratedOutro())
+    )
+    made = _fake_generation(jobs_module, monkeypatch, tmp_path)
+    outcome = jobs_module.run_render(project)
+
+    lecture = (tmp_path / "videos").resolve() / "lec.mp4"
+    assert outcome.episode_error is None
+    (joined,) = seen["assembled"]
+    assert joined["parts"] == [
+        seen["intro"],
+        seen["rec_video"],
+        lecture,
+        tmp_path / "made-outro.mp4",
+    ]
+    assert [call["kind"] for call in made] == ["outro"]
+    assert made[0]["spec"].qr_url is None, "no link, no QR code"
+
+
+def test_a_generation_failure_keeps_the_lecture(tmp_path, monkeypatch) -> None:
+    from qurantext.gui.i18n import t
+    from qurantext.jobs.episode import EpisodeError
+    from qurantext.jobs.project import load_project
+
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch, episode=_GENERATED_EPISODE)
+    _fake_generation(jobs_module, monkeypatch, tmp_path)
+
+    def broken(project, kind, spec, look, **kwargs):
+        raise EpisodeError("episode.error.generate", part=f"episode.part.{kind}")
+
+    monkeypatch.setattr(jobs_module, "ensure_generated_part", broken)
+    outcome = jobs_module.run_render(project)
+
+    lecture = (tmp_path / "videos").resolve() / "lec.mp4"
+    assert outcome.video == lecture
+    assert outcome.episode_video is None
+    expected = t("episode.error.generate", part=t("episode.part.intro"))
+    assert outcome.episode_error == expected
+    assert expected == "The intro could not be made, so the episode was not made."
+    assert seen["assembled"] == [] and seen["exported"] == []
+    saved = load_project(project.path)
+    assert saved.render["video"] == lecture and "episode" not in saved.render
+
+
+def test_a_link_too_long_for_the_lecture_s_size_keeps_the_lecture(tmp_path, monkeypatch) -> None:
+    """The real check, at the lecture's size: the person is told to shorten the link."""
+    from qurantext.gui.i18n import t
+
+    long_link = {"link": "example.org/" + "d" * 900}  # 779 characters fit at 1280×720
+    episode = {"outro_generated": long_link}
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch, episode=episode)
+    monkeypatch.setattr(jobs_module, "stored_surah_names", lambda db_path: {})
+    monkeypatch.setattr(
+        "qurantext.jobs.generated_parts.render_title_clip",
+        lambda *a, **k: pytest.fail("no clip is drawn"),
+    )
+    outcome = jobs_module.run_render(project)
+
+    assert outcome.video is not None and outcome.episode_video is None
+    assert outcome.episode_error == t("episode.error.qr_too_big", size="1280×720")
+    assert seen["assembled"] == []
+
+
+def test_a_hand_edited_bad_link_keeps_the_lecture(tmp_path, monkeypatch) -> None:
+    from qurantext.gui.i18n import t
+
+    episode = {"outro_generated": {"link": "ftp://example.org"}}
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch, episode=episode)
+    made = _fake_generation(jobs_module, monkeypatch, tmp_path)
+    outcome = jobs_module.run_render(project)
+
+    assert outcome.episode_video is None
+    assert outcome.episode_error == t("episode.error.generate", part=t("episode.part.outro"))
+    assert made == [] and seen["assembled"] == []
+
+
+def test_a_cancel_while_making_a_part_keeps_the_lecture(tmp_path, monkeypatch) -> None:
+    from qurantext.gui.i18n import t
+
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch, episode=_GENERATED_EPISODE)
+    _fake_generation(jobs_module, monkeypatch, tmp_path)
+
+    def cancelled(*args, **kwargs):
+        raise JobCancelled("title_clip")
+
+    monkeypatch.setattr(jobs_module, "ensure_generated_part", cancelled)
+    outcome = jobs_module.run_render(project)
+    assert outcome.video is not None and outcome.episode_video is None
+    assert outcome.episode_error == t("episode.error.cancelled")
+
+
+def test_a_part_no_longer_generated_leaves_no_clip_behind(tmp_path, monkeypatch) -> None:
+    """The intro became a clip: its generated clips go; the outro's still-generated ones stay."""
+    from qurantext.jobs.episode_assets import episode_dir_for
+
+    episode = {"outro_generated": {"phrase": "بارك الله فيكم"}}
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch, episode=episode)
+    _fake_generation(jobs_module, monkeypatch, tmp_path)
+    folder = episode_dir_for(project.path)
+    folder.mkdir()
+    for name in ("generated-intro-aaa.mp4", "generated-outro-bbb.mp4", "3f2a9c1b2d4e.mp4"):
+        (folder / name).write_bytes(b"x")
+
+    jobs_module.run_render(project)
+    assert sorted(p.name for p in folder.iterdir()) == [
+        "3f2a9c1b2d4e.mp4",
+        "generated-outro-bbb.mp4",  # the fake made no new one, so nothing replaced it
+    ]
+
+    # With no generated part at all (the episode emptied), none is left either.
+    project.episode = {}
+    jobs_module.run_render(project)
+    assert sorted(p.name for p in folder.iterdir()) == ["3f2a9c1b2d4e.mp4"]
+
+
+def test_an_unforeseen_error_while_setting_up_a_part_names_the_part(
+    tmp_path, monkeypatch, caplog
+) -> None:
+    """Odd data in a hand-edited project is the part's failure, not "joining failed"."""
+    from qurantext.gui.i18n import t
+
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch, episode=_GENERATED_EPISODE)
+    made = _fake_generation(jobs_module, monkeypatch, tmp_path)
+
+    def odd(project):
+        raise TypeError("'int' object is not subscriptable")
+
+    monkeypatch.setattr(jobs_module, "project_look", odd)
+    with caplog.at_level("WARNING"):
+        outcome = jobs_module.run_render(project)
+    assert outcome.episode_error == t("episode.error.generate", part=t("episode.part.intro"))
+    assert made == [] and seen["assembled"] == []
+    assert "not subscriptable" in caplog.text, "the cause is in the log"
+
+
+def test_a_generated_part_the_join_cannot_read_is_said_as_not_made(tmp_path, monkeypatch) -> None:
+    from qurantext.gui.i18n import t
+    from qurantext.jobs.episode import EpisodeError
+
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch, episode=_GENERATED_EPISODE)
+    _fake_generation(jobs_module, monkeypatch, tmp_path)
+
+    def missing(parts, output, **kwargs):
+        raise EpisodeError("episode.error.missing", name="made-outro.mp4")
+
+    monkeypatch.setattr(jobs_module, "assemble_episode", missing)
+    outcome = jobs_module.run_render(project)
+    assert outcome.episode_error == t("episode.error.generate", part=t("episode.part.outro"))
+
+
+def test_an_empty_generated_part_is_said(tmp_path, monkeypatch) -> None:
+    """No name and no surah: the real check refuses an empty panel, in the person's words."""
+    from qurantext.gui.i18n import t
+
+    episode = {"intro_generated": {"name": ""}}
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch, episode=episode)
+    monkeypatch.setattr(jobs_module, "stored_surah_names", lambda db_path: {})
+    outcome = jobs_module.run_render(project)
+    assert outcome.episode_error == t("episode.error.generate_empty", part=t("episode.part.intro"))
+    assert seen["assembled"] == []
+
+
 def test_a_recitation_that_cannot_be_used_keeps_the_lecture(tmp_path, monkeypatch) -> None:
     from qurantext.gui.i18n import t
     from qurantext.jobs.episode import EpisodeError
@@ -2952,6 +3184,46 @@ def test_a_new_lecture_job_is_seeded_with_the_default_episode(tmp_path, monkeypa
     assert not [e for e in events if e.translated and e.stage == "detect" and "clip" in e.message]
 
 
+def test_new_lecture_is_seeded_with_generated_defaults(tmp_path, monkeypatch) -> None:
+    from qurantext.jobs.episode_assets import (
+        GeneratedIntro,
+        GeneratedOutro,
+        episode_dir_for,
+        project_episode,
+    )
+    from qurantext.jobs.project import load_project
+
+    intro, _outro = _default_clips(tmp_path)
+    jobs_module, spec = _lecture_setup(tmp_path, monkeypatch)
+    generated_intro = GeneratedIntro(name="دروس الشيخ أحمد", style="reveal")
+    generated_outro = GeneratedOutro(link="example.org/dars", platform="telegram", seconds=8)
+    # The intro's default clip is ignored for a part whose default is generated.
+    spec = replace(
+        spec,
+        episode_defaults=(str(intro), None),
+        episode_generated=(generated_intro, generated_outro),
+    )
+    events: list[ProgressEvent] = []
+    project = jobs_module.run_matching(spec, progress=events.append)
+
+    saved = load_project(project.path)
+    choice = project_episode(saved)
+    assert choice.intro_generated == generated_intro
+    assert choice.outro_generated == generated_outro
+    assert choice.intro is None and choice.outro is None
+    assert set(saved.episode) == {"intro_generated", "outro_generated"}
+    assert not episode_dir_for(project.path).exists(), "nothing is copied"
+    assert not [e for e in events if e.translated and e.stage == "detect" and "clip" in e.message]
+
+    # A recitation is never seeded, generated or not.
+    (tmp_path / "rec").mkdir()
+    rec_module, rec_spec = _rematch_setup(tmp_path / "rec", monkeypatch)
+    rec = rec_module.run_matching(
+        replace(rec_spec, episode_generated=(generated_intro, generated_outro))
+    )
+    assert load_project(rec.path).episode == {}
+
+
 def test_a_missing_default_clip_is_skipped_with_a_notice(tmp_path, monkeypatch) -> None:
     from qurantext.gui.i18n import t
     from qurantext.jobs.episode_assets import project_episode
@@ -3024,6 +3296,53 @@ def _choose_an_episode(project_path: Path, tmp_path: Path) -> dict:
     )
     save_project(project, project_path)
     return load_project(project_path).episode
+
+
+def test_a_rematch_keeps_generated_parts_and_seeds_nothing(tmp_path, monkeypatch) -> None:
+    """A re-matched lecture keeps its generated intro; the defaults never seed over it."""
+    from qurantext.jobs.episode_assets import (
+        EpisodeChoice,
+        GeneratedIntro,
+        GeneratedOutro,
+        project_episode,
+        set_project_episode,
+    )
+    from qurantext.jobs.project import load_project, save_project
+
+    jobs_module, spec = _lecture_setup(tmp_path, monkeypatch)
+    first = jobs_module.run_matching(spec)
+    chosen = GeneratedIntro(name="دروس الشيخ أحمد")
+    project = load_project(first.path)
+    set_project_episode(project, EpisodeChoice(intro_generated=chosen))
+    save_project(project, first.path)
+    defaults = replace(spec, episode_generated=(GeneratedIntro(name="other"), GeneratedOutro()))
+
+    # Unchanged content: the file is left alone.
+    again = jobs_module.run_matching(defaults)
+    assert project_episode(again).intro_generated == chosen
+    assert project_episode(again).outro_generated is None
+
+    # Changed content: the new project carries the earlier episode, not the defaults.
+    corrected = load_project(first.path)
+    corrected.cards[0]["start_time"] = 0.25
+    save_project(corrected, first.path)
+    rematched = jobs_module.run_matching(defaults)
+    assert list(tmp_path.glob("dars_lecture.*.qalun-backup.json")), "content changed"
+    kept = project_episode(load_project(rematched.path))
+    assert kept.intro_generated == chosen and kept.outro_generated is None
+
+
+def test_a_rematched_lecture_without_an_episode_is_not_seeded(tmp_path, monkeypatch) -> None:
+    from qurantext.jobs.episode_assets import GeneratedOutro
+    from qurantext.jobs.project import load_project, save_project
+
+    jobs_module, spec = _lecture_setup(tmp_path, monkeypatch)
+    first = jobs_module.run_matching(spec)
+    corrected = load_project(first.path)
+    corrected.cards[0]["start_time"] = 0.25
+    save_project(corrected, first.path)
+    project = jobs_module.run_matching(replace(spec, episode_generated=(None, GeneratedOutro())))
+    assert load_project(project.path).episode == {}
 
 
 def test_a_rematch_keeps_the_earlier_episode(tmp_path, monkeypatch) -> None:
@@ -3410,6 +3729,8 @@ def test_seed_notices_after_a_render_right_away_wait_to_be_dismissed(
         ("episode_recitation", "home.progress.episode_recitation"),
         ("episode_join", "home.progress.episode_join"),
         ("episode_lecture", "home.progress.episode_lecture"),
+        ("episode_intro", "home.progress.episode_intro"),
+        ("episode_outro", "home.progress.episode_outro"),
         ("render", "home.progress.rendering"),
     ],
 )
