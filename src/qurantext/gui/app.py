@@ -9,9 +9,11 @@ from typing import Any, NoReturn
 
 __all__ = ["main"]
 
-#: Qt's own warnings, criticals and fatals (``QThread: Destroyed while thread is
-#: still running``) come through its message handler, not Python's, so a
-#: windowed build would otherwise record nothing of them.
+#: Qt's own criticals and fatals (``QThread: Destroyed while thread is still
+#: running``) come through its message handler, not Python's, so a windowed
+#: build would otherwise record nothing of them. Its warnings stay out of the
+#: log: platform chatter (``qt.qpa.*`` on each activation) would share the 4 MB
+#: with real errors, and one repeated per frame would rotate them away.
 _qt_log = logging.getLogger("qurantext.qt")
 #: The handler Qt had before ours: None means Qt's default, which prints.
 _previous_qt_handler: Any = None
@@ -55,7 +57,7 @@ def _start_the_log() -> None:
 
 
 def _route_qt_messages() -> None:
-    """Send Qt's warnings and worse to the log; its debug and info lines print as before."""
+    """Send Qt's criticals and fatals to the log; everything else prints as before."""
     global _previous_qt_handler
     from PySide6.QtCore import qInstallMessageHandler
 
@@ -68,13 +70,12 @@ def _qt_message(mode: Any, context: Any, message: str) -> None:
         from PySide6.QtCore import QtMsgType
 
         levels = {
-            QtMsgType.QtWarningMsg: logging.WARNING,
             QtMsgType.QtCriticalMsg: logging.ERROR,
             QtMsgType.QtFatalMsg: logging.CRITICAL,
         }
         level = levels.get(mode)
         if level is None:
-            # Debug and info: not errors, so not the log's; printed as Qt would.
+            # Debug, info and warnings: not the log's; printed as Qt would.
             if _previous_qt_handler is not None:
                 _previous_qt_handler(mode, context, message)
             elif sys.stderr is not None:

@@ -43,6 +43,7 @@ import logging
 import os
 import sys
 import threading
+import uuid
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from types import TracebackType
@@ -116,9 +117,11 @@ class SharedRotatingFileHandler(RotatingFileHandler):
             self.stream.close()
             self.stream = None  # type: ignore[assignment]
         base = self.baseFilename
-        # Fixed rather than unique, so a crash between the steps below leaves at
-        # most one such file, which the next rotation then replaces.
-        moving = f"{base}.rotating"
+        # Unique to this process and this rotation: under a fixed name, a crash
+        # between the steps below, or two windows rotating in the same instant,
+        # let the next rotation overwrite a copy not yet moved to ``.1``. A crash
+        # leaves this file behind under its own name, on disk for whoever looks.
+        moving = f"{base}.{os.getpid()}-{uuid.uuid4().hex[:8]}.rotating"
         try:
             os.replace(base, moving)
         except OSError:
@@ -136,7 +139,7 @@ class SharedRotatingFileHandler(RotatingFileHandler):
         try:
             os.replace(moving, f"{base}.1")
         except OSError:
-            pass  # left as qalun.log.rotating, still on disk for whoever looks
+            pass  # left under its .rotating name, still on disk for whoever looks
         self.stream = self._open()
 
 

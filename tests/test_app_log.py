@@ -241,7 +241,34 @@ def test_rotation_keeps_three_older_copies() -> None:
     assert path.stat().st_size < 1000
     assert path.with_name("qalun.log.1").stat().st_size > app_log.LOG_MAX_BYTES
     assert _backups(path)[1:] == ["backup 1\n", "backup 2\n"]
-    assert not path.with_name("qalun.log.rotating").exists()
+    assert list(path.parent.glob("*.rotating")) == []
+
+
+def test_each_rotation_moves_through_a_name_of_its_own(monkeypatch) -> None:
+    """A copy a crash left half way, or another window's, is never overwritten."""
+    path = app_log.setup_logging()
+    # What a window that crashed between the two renames left behind.
+    stale = path.with_name("qalun.log.4242-0badf00d.rotating")
+    stale.write_text("crashed mid-rotation\n")
+    real_replace = os.replace
+    moved_through: list[str] = []
+
+    def recording(src, dst):
+        if os.fspath(src) == str(path):
+            moved_through.append(os.path.basename(os.fspath(dst)))
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", recording)
+    for _ in range(2):
+        _fill(path, app_log.LOG_MAX_BYTES)
+        logging.getLogger("qurantext.x").error("rolls over")
+    _flush()
+
+    assert len(moved_through) == 2 and len(set(moved_through)) == 2
+    assert all(name.startswith(f"qalun.log.{os.getpid()}-") for name in moved_through)
+    assert all(name.endswith(".rotating") for name in moved_through)
+    assert stale.read_text() == "crashed mid-rotation\n", "the stale copy is untouched"
+    assert list(path.parent.glob("*.rotating")) == [stale]
 
 
 def test_a_refused_rotation_keeps_every_record_and_every_copy(monkeypatch) -> None:

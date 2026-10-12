@@ -8,6 +8,7 @@ progress, results, failures and Cancel.
 
 from __future__ import annotations
 
+import errno
 import json
 import shutil
 import subprocess
@@ -167,6 +168,42 @@ def _raised_in(module: str, error: Exception):
     return job
 
 
+#: The review's probe: classic bugs, written as if they lived in the renderer.
+#: Several are raised by a builtin or a C extension inside Qalun's own code.
+_BUGS_IN_QALUNS_CODE = """
+def unpack(progress, cancel):
+    start, end = [1.0, 2.0, 3.0]
+def empty_max(progress, cancel):
+    return max([])
+def bad_int(progress, cancel):
+    return int("7a")
+def dict_changed(progress, cancel):
+    d = {1: 1}
+    for k in d:
+        d[k + 1] = 0
+def deleted_qt(progress, cancel):
+    import shiboken6
+    from PySide6.QtCore import QObject
+    o = QObject()
+    shiboken6.delete(o)
+    o.objectName()
+def broken_pipe(progress, cancel):
+    raise BrokenPipeError(32, "Broken pipe")
+def no_message(progress, cancel):
+    raise ValueError("")
+def ffmpeg_failed(progress, cancel):
+    raise RuntimeError("FFmpeg failed while rendering the video: no codec")
+def wrong_path(progress, cancel):
+    open("/nonexistent-dir-built-wrong/frame_0001.png")
+"""
+
+
+def _probe_job(name: str):
+    namespace: dict = {"__name__": "qurantext.core.fake"}
+    exec(compile(_BUGS_IN_QALUNS_CODE, "qurantext/core/fake.py", "exec"), namespace)  # noqa: S102
+    return lambda *, progress, cancel: namespace[name](progress, cancel)
+
+
 def _run_failing(job, caplog) -> tuple[list[str], list]:
     import logging
 
@@ -179,32 +216,47 @@ def _run_failing(job, caplog) -> tuple[list[str], list]:
 
 
 @pytest.mark.parametrize(
-    "job",
+    "name",
     [
-        pytest.param(
-            _raised_in("qurantext.gui.fake", IndexError("list index out of range")), id="index"
-        ),
-        pytest.param(_raised_in("json.decoder", ValueError("Expecting value")), id="library-value"),
-        pytest.param(_raised_in("numpy.core", RuntimeError("bad shape")), id="library-runtime"),
-        pytest.param(_raised_in("qurantext.gui.fake", ValueError("")), id="no-message"),
-        pytest.param(
-            _raised_in("qurantext.gui.fake", NotImplementedError("later")), id="unfinished"
-        ),
-        pytest.param(
-            _raised_in("qurantext.x", UnicodeEncodeError("utf-8", "", 0, 1, "x")), id="encoding"
-        ),
+        "unpack",
+        "empty_max",
+        "bad_int",
+        "dict_changed",
+        "deleted_qt",
+        "broken_pipe",
+        "no_message",
+        "ffmpeg_failed",
     ],
 )
-def test_an_unexpected_job_failure_is_logged_with_its_traceback(qt_app, job, caplog) -> None:
-    """A bug in a job: the person still reads a sentence, and the log gets the traceback."""
+def test_a_bug_in_a_job_is_an_error_with_its_traceback(qt_app, name, caplog) -> None:
+    """Raised inside Qalun's code or not, anything but the app's own error types is a bug."""
     import logging
 
-    messages, records = _run_failing(job, caplog)
+    messages, records = _run_failing(_probe_job(name), caplog)
 
     assert len(messages) == 1, "the window is told, as before"
     (record,) = records
-    assert record.levelno == logging.ERROR and record.exc_info is not None
+    assert record.levelno == logging.ERROR
+    assert record.exc_info is not None and record.exc_info[2] is not None
     assert record.getMessage() == "The job failed unexpectedly"
+
+
+@pytest.mark.parametrize(
+    "job",
+    [
+        pytest.param(_raised_in("json.decoder", ValueError("Expecting value")), id="library-value"),
+        pytest.param(_raised_in("qurantext.gui.jobs", ValueError("Choose the range")), id="value"),
+        pytest.param(_raised_in("qurantext.x", NotImplementedError("later")), id="unfinished"),
+        pytest.param(_raised_in("qurantext.x", ConnectionResetError(104, "reset")), id="network"),
+    ],
+)
+def test_other_failures_are_errors_too(qt_app, job, caplog) -> None:
+    import logging
+
+    _messages, records = _run_failing(job, caplog)
+
+    (record,) = records
+    assert record.levelno == logging.ERROR and record.exc_info is not None
 
 
 @pytest.mark.parametrize(
@@ -212,38 +264,57 @@ def test_an_unexpected_job_failure_is_logged_with_its_traceback(qt_app, job, cap
     [
         pytest.param(_raised_in("tests.x", FileNotFoundError("/some/where.mp3")), id="not-found"),
         pytest.param(_raised_in("shutil", PermissionError("output folder")), id="permission"),
+        pytest.param(_raised_in("shutil", IsADirectoryError("out.mp4")), id="is-a-directory"),
+        pytest.param(_raised_in("shutil", NotADirectoryError("videos")), id="not-a-directory"),
         pytest.param(
-            _raised_in("qurantext.core.ass_renderer", RuntimeError("FFmpeg failed: no codec")),
-            id="ffmpeg",
+            _raised_in("shutil", OSError(errno.ENOSPC, "No space left on device")), id="disk-full"
         ),
-        pytest.param(_raised_in("qurantext.gui.jobs", ValueError("Choose the range")), id="value"),
+        pytest.param(_probe_job("wrong_path"), id="probe-wrong-path"),
     ],
 )
-def test_a_foreseen_job_failure_is_one_line_without_a_traceback(qt_app, job, caplog) -> None:
-    """What the code meant to say is not a bug: a line for the timeline, nothing more."""
+def test_what_the_machine_refused_is_a_warning_with_its_traceback(qt_app, job, caplog) -> None:
+    """A file gone, a folder not writable, a full disk: no code change fixes those.
+
+    The traceback stays all the same. A path built wrong is a FileNotFoundError
+    too (the probe's ``wrong_path``), and the level alone cannot tell; the
+    traceback can.
+    """
     import logging
 
     messages, records = _run_failing(job, caplog)
 
     (record,) = records
-    assert record.levelno == logging.WARNING and record.exc_info is None
+    assert record.levelno == logging.WARNING
+    assert record.exc_info is not None and record.exc_info[2] is not None
     assert record.getMessage() == f"The job stopped: {messages[0]}"
 
 
-def test_the_apps_own_error_types_are_foreseen(qt_app, caplog) -> None:
+def test_the_apps_own_error_types_are_warnings_with_their_traceback(qt_app, caplog) -> None:
     """The episode's, the store's and transcription's errors are all raised on purpose."""
+    import logging
+
     from qurantext.data.quran_db import QuranDataError
     from qurantext.jobs.episode import EpisodeError
-    from qurantext.services.errors import ModelDownloadError
+    from qurantext.services.errors import (
+        LocalEngineError,
+        ModelDownloadError,
+        ModelLoadError,
+        WhisperXServiceError,
+    )
 
     for error in (
         EpisodeError("episode.error.missing", name="rec.mp4"),
         QuranDataError("the store is damaged"),
         ModelDownloadError("the model did not download"),
+        WhisperXServiceError("Replicate refused the token"),
+        LocalEngineError("the engine stopped"),
+        ModelLoadError("the model did not load"),
     ):
         caplog.clear()
-        _messages, records = _run_failing(_raised_in("qurantext.somewhere", error), caplog)
-        assert [r.exc_info for r in records] == [None], type(error).__name__
+        _messages, records = _run_failing(_raised_in("anywhere", error), caplog)
+        assert [(r.levelno, r.exc_info is not None) for r in records] == [
+            (logging.WARNING, True)
+        ], type(error).__name__
 
 
 def test_a_cancelled_job_is_not_logged(qt_app, caplog) -> None:
@@ -1945,29 +2016,45 @@ def test_starting_the_log_never_stops_the_window(monkeypatch) -> None:
     assert calls == [True]
 
 
-def test_qts_warnings_reach_the_log_and_its_debug_lines_do_not(qt_app, caplog, capsys) -> None:
+def test_only_qts_criticals_and_fatals_reach_the_log(qt_app, caplog, capsys) -> None:
+    """Qt's warnings are platform chatter more often than not: printed, not kept."""
     import logging
 
-    from PySide6.QtCore import qCritical, qDebug, qInstallMessageHandler, qWarning
+    from PySide6.QtCore import (
+        QtMsgType,
+        qCritical,
+        qDebug,
+        qInfo,
+        qInstallMessageHandler,
+        qWarning,
+    )
 
     from qurantext.gui import app as app_module
 
     app_module._route_qt_messages()
     try:
         with caplog.at_level(logging.DEBUG, logger="qurantext.qt"):
-            qWarning("QThread: Destroyed while thread is still running")
+            qWarning("qt.qpa.wayland: a notice on each activation")
             qCritical("a critical one")
+            qInfo("some information")
             qDebug("just chatter")
+            # qFatal aborts the process after the handler returns, so the
+            # handler is called as Qt would call it.
+            app_module._qt_message(
+                QtMsgType.QtFatalMsg, None, "QThread: Destroyed while thread is still running"
+            )
     finally:
         qInstallMessageHandler(app_module._previous_qt_handler)
         app_module._previous_qt_handler = None
 
     records = [(r.levelno, r.getMessage()) for r in caplog.records if r.name == "qurantext.qt"]
     assert records == [
-        (logging.WARNING, "QThread: Destroyed while thread is still running"),
         (logging.ERROR, "a critical one"),
+        (logging.CRITICAL, "QThread: Destroyed while thread is still running"),
     ]
-    assert "just chatter" in capsys.readouterr().err, "debug lines print as Qt's default did"
+    printed = capsys.readouterr().err
+    for line in ("qt.qpa.wayland: a notice", "some information", "just chatter"):
+        assert line in printed, "printed as Qt's default did"
 
 
 def test_a_qt_message_handler_that_fails_stays_quiet(monkeypatch) -> None:
@@ -1979,7 +2066,7 @@ def test_a_qt_message_handler_that_fails_stays_quiet(monkeypatch) -> None:
     monkeypatch.setattr(app_module._qt_log, "log", broken)
     from PySide6.QtCore import QtMsgType
 
-    app_module._qt_message(QtMsgType.QtWarningMsg, None, "x")  # does not raise
+    app_module._qt_message(QtMsgType.QtCriticalMsg, None, "x")  # does not raise
 
 
 def test_leaving_at_once_works_without_stdout_or_stderr(monkeypatch) -> None:

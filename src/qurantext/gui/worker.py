@@ -9,29 +9,44 @@ thread and turn its callbacks into Qt signals.
 Qt objects belong to the thread that created them, so the job never touches a
 widget. It emits; the window's slots run on the UI thread and do the drawing.
 
-A job that fails is shown to the person as a sentence, and that is all most
-failures need: FFmpeg refusing a file, a missing model, a folder that cannot be
-written. A failure nobody wrote a sentence for is a bug, and its traceback goes
-to the log (``config.app_log``), which is what someone is asked to send.
+A job that fails is shown to the person as a sentence, and its traceback goes
+to the log (``config.app_log``), which is what someone is asked to send. Every
+failure keeps its traceback: whether one is a bug cannot be told from its type
+alone (``int("7a")`` and a deliberate "bad range" are both ``ValueError``), and
+a traceback lost is the one thing the log cannot get back. Only the level says
+which is which: WARNING for the app's own error types and for what the machine
+refused (a file gone, a folder not writable, a full disk), ERROR for the rest.
 """
 
 from __future__ import annotations
 
+import errno
 import logging
 from collections.abc import Callable
 from typing import Any
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal
 
+from qurantext.data.quran_db import QuranDataError
+from qurantext.jobs.episode import EpisodeError
+from qurantext.services.errors import TranscriptionError
 from qurantext.utils.progress import CancelToken, JobCancelled, ProgressEvent
 
 __all__ = ["JobWorker", "run_in_thread"]
 
 _log = logging.getLogger(__name__)
 
-#: Subclasses of the foreseen types below that are bugs wherever they come from:
-#: code nobody finished, a recursion with no end, a text that could not be encoded.
-_NEVER_FORESEEN = (NotImplementedError, RecursionError, UnicodeError)
+#: The app's own error types, raised on purpose with a sentence for the person
+#: (``TranscriptionError`` covers WhisperX, the model download and the local engine).
+_APP_ERRORS: tuple[type[Exception], ...] = (EpisodeError, QuranDataError, TranscriptionError)
+#: What the machine refused rather than what the code got wrong. Not every
+#: ``OSError``: a broken pipe is FFmpeg dying under the renderer, a bug to read.
+_REFUSED_BY_THE_MACHINE: tuple[type[OSError], ...] = (
+    FileNotFoundError,
+    PermissionError,
+    IsADirectoryError,
+    NotADirectoryError,
+)
 
 
 class JobWorker(QObject):
@@ -61,9 +76,7 @@ class JobWorker(QObject):
             self.cancelled.emit()
         except Exception as error:  # noqa: BLE001 — a window must never die on a job
             if _foreseen(error):
-                # Said to the person in full; the log keeps a line of it, for the
-                # timeline, but no traceback: nothing here needs fixing in the code.
-                _log.warning("The job stopped: %s", _readable(error))
+                _log.warning("The job stopped: %s", _readable(error), exc_info=True)
             else:
                 _log.error("The job failed unexpectedly", exc_info=True)
             self.failed.emit(_readable(error))
@@ -77,29 +90,15 @@ class JobWorker(QObject):
 
 
 def _foreseen(error: Exception) -> bool:
-    """Is *error* one the code meant to raise, with a sentence for the person?
+    """Is *error* one of the app's own, or something the machine refused?
 
-    Two kinds are. Anything the operating system refused (``OSError``: a file
-    not found, a folder not writable, a full disk), which no code change fixes.
-    And a ``ValueError`` or ``RuntimeError`` with a message, raised by Qalun's
-    own code: that is how every module says "this cannot be done" (FFmpeg
-    failed, a bad range, the store unreadable, and the episode's, transcription's
-    and store's own error types, which are all ``RuntimeError``). The same types
-    raised from inside a library (numpy, json) are a call that went wrong, a bug.
+    Decided by class alone, never by where it was raised: a builtin or a C
+    extension adds no frame of its own, so ``max([])`` inside Qalun's code would
+    look exactly like a deliberate ``raise``.
     """
-    if isinstance(error, _NEVER_FORESEEN):
-        return False
-    if isinstance(error, OSError):
+    if isinstance(error, _APP_ERRORS + _REFUSED_BY_THE_MACHINE):
         return True
-    if not isinstance(error, ValueError | RuntimeError) or not str(error).strip():
-        return False
-    tb = error.__traceback__
-    if tb is None:
-        return False
-    while tb.tb_next is not None:
-        tb = tb.tb_next
-    module = tb.tb_frame.f_globals.get("__name__", "")
-    return module == "qurantext" or module.startswith("qurantext.")
+    return isinstance(error, OSError) and error.errno == errno.ENOSPC
 
 
 def _readable(error: Exception) -> str:
