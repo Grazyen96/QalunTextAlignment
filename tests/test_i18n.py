@@ -208,9 +208,12 @@ def test_the_counted_strings_read_naturally_in_english() -> None:
     assert tn("home.finished.matched", 1) == "Matched 1 card. The review is open."
     assert tn("home.finished.matched", 3) == "Matched 3 cards. The review is open."
     assert tn("home.surah_item", 7, num=1, name="Al-Fatiha") == "1. Al-Fatiha  (7 ayat)"
+    # No "file(s)": a count picks its form. "Length (s)" is the unit, seconds.
+    units = {"episode.gen.seconds"}
     assert not any(
         "(s)" in variant or "(es)" in variant
-        for value in i18n.STRINGS["en"].values()
+        for key, value in i18n.STRINGS["en"].items()
+        if key not in units
         for variant in (value.values() if isinstance(value, dict) else [value])
     )
 

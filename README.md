@@ -151,6 +151,44 @@ intro. The review shows "Episode: on" when any part is set. Clips copied beside
 a project stay there after an Undo or a Remove (Redo needs them back); delete
 the `.qalun.episode` folder's unused files by hand if it grows.
 
+### Generated intro and outro
+
+In the Episode dialog the intro and the outro are each **None**, **My clip** or
+**Generated**. A generated part is drawn by Qalun in the lecture's own look, at
+its size, while the episode is made, and kept beside the project
+(`generated-intro-<hash>.mp4`) until something it is made from changes.
+
+- **The intro** shows a name you type (your channel or the speaker) above the
+  lecture's surah and ayat, read from its cards: «سورة الفرقان، الآيات ٤٤–٤٩».
+- **The outro** shows a closing phrase (one of three, or your own) and, when
+  you give a link, a QR code with the address written under it.
+- Each has a style (Fade, Rise or Reveal), a length of 3 to 10 seconds and a
+  still preview, its middle frame.
+
+**The tracked link.** Every link put in front of viewers has to be measurable,
+so the QR code does not open your link as you typed it: it opens it with UTM
+parameters added — `utm_source` the platform you publish on ("Publishing on":
+YouTube, Instagram, Facebook, TikTok, Telegram or WhatsApp), `utm_medium=video`,
+`utm_content=outro-qr`, and `utm_campaign` naming the lecture
+(`qalun-025-044-049`: surah and ayat) unless your link already has a campaign of
+its own. Your link's other parameters and its `#fragment` are kept. The dialog
+shows this tracked link as it changes, with **Copy** to put it in the video's
+description too. Change the platform for the next upload and render again: the
+outro is made again with the new source.
+
+**Why the written address has no tracking.** Under the code Qalun writes the
+plain address, `example.org/dars`, without the scheme or any parameter: short
+enough for a viewer to read and type. Visits typed from it arrive without UTM
+parameters and show as direct traffic in your analytics, so comparing them with
+the QR code's visits tells you how many viewers typed the address rather than
+scanned it.
+
+The dialog refuses what is not a web link (only `http` and `https`, a real host
+name, no user name or password) and says why; leave the link empty for an outro
+without a QR code. It warns, too, when a link is too long for a QR code phones
+can read at the lecture's size, and when the name or phrase has letters the
+title font (Amiri) cannot draw.
+
 **More options**, folded away since most jobs don't need them: a Quran text
 other than the certified one that ships with the app, subtitles burned into
 the picture, written as files beside it, or both (and in which formats), an
