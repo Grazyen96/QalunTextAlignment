@@ -51,7 +51,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtGui import QGuiApplication, QImage, QPixmap
+from PySide6.QtGui import QGuiApplication, QImage, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -380,6 +380,12 @@ class EpisodeDialog(QDialog):
         self.message_label.setWordWrap(True)
         self.message_label.setVisible(False)
         layout.addWidget(self.message_label)
+
+        #: OK keeps what changed as the default for new lectures; say so, quietly.
+        self.defaults_hint = QLabel(t("episode.defaults_hint"))
+        self.defaults_hint.setWordWrap(True)
+        self.defaults_hint.setForegroundRole(QPalette.ColorRole.PlaceholderText)
+        layout.addWidget(self.defaults_hint)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self

@@ -2895,6 +2895,23 @@ def test_the_dialog_fits_a_laptop_screen_with_warnings(qt_app, tmp_path, prefs, 
     dialog.reject()
 
 
+def test_the_dialog_says_its_changes_become_the_default(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui.i18n import set_language, t
+
+    texts = {}
+    for language in ("en", "ar"):
+        set_language(language)
+        dialog = _generated_dialog(episode_lecture, prefs, tmp_path, monkeypatch)
+        assert _shown(dialog.defaults_hint) and dialog.defaults_hint.wordWrap()
+        texts[language] = dialog.defaults_hint.text()
+        assert texts[language] == t("episode.defaults_hint")
+        dialog.reject()
+    assert texts["en"] == "Changes you make here also become the default for new lectures."
+    assert texts["ar"] == "ما تغيّره هنا يصبح أيضًا الافتراضي للدروس الجديدة."
+
+
 def test_a_dialog_opened_after_a_card_change_shows_the_new_campaign(
     qt_app, tmp_path, prefs, monkeypatch
 ) -> None:

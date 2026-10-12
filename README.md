@@ -156,7 +156,8 @@ the `.qalun.episode` folder's unused files by hand if it grows.
 In the Episode dialog the intro and the outro are each **None**, **My clip** or
 **Generated**. A generated part is drawn by Qalun in the lecture's own look, at
 its size, while the episode is made, and kept beside the project
-(`generated-intro-<hash>.mp4`) until something it is made from changes.
+(`generated-intro-<hash>.mp4`) until something it is made from changes. A line above OK and Cancel reminds you
+that what you change in the dialog also becomes the default for new lectures.
 
 - **The intro** shows a name you type (your channel or the speaker) above the
   lecture's surah and ayat, read from its cards: «سورة الفرقان، الآيات ٤٤–٤٩».
