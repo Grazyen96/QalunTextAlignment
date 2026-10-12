@@ -242,6 +242,30 @@ def test_a_look_change_makes_a_render_stale(tmp_path) -> None:
     assert project.render_is_stale is False
 
 
+def test_an_empty_episode_keeps_the_hash(tmp_path) -> None:
+    project = _project(tmp_path)
+    assert project.episode == {}
+    payload = json.dumps(
+        {"cards": project.cards, "captions": [cue.to_dict() for cue in project.captions]},
+        sort_keys=True,
+        ensure_ascii=False,
+        default=str,
+    )
+    assert project.content_hash() == hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def test_an_episode_change_makes_a_render_stale(tmp_path) -> None:
+    project = _project(tmp_path)
+    project.record_render(tmp_path / "v.mp4", preset="social", basmala_offset_s=0.0)
+    assert project.render_is_stale is False
+
+    project.episode = {"intro": "job.qalun.episode/abc.mp4"}
+    assert project.render_is_stale is True
+
+    project.episode = {}
+    assert project.render_is_stale is False
+
+
 def test_mark_reviewed_records_state_and_time(tmp_path) -> None:
     from datetime import datetime
 

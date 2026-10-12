@@ -71,6 +71,7 @@ _KNOWN_KEYS = frozenset(
         "export",
         "review",
         "render",
+        "episode",
     }
 )
 
@@ -155,6 +156,9 @@ class Project:
     review: dict[str, Any] = field(default_factory=_default_review)
     #: The last successful render, or None. See :meth:`record_render`.
     render: dict[str, Any] | None = None
+    #: A lecture's episode: the intro, recitation and outro joined around it.
+    #: Read and written through ``jobs.episode_assets``; unknown keys are kept.
+    episode: dict[str, Any] = field(default_factory=dict)
     #: Top-level keys this build does not know, written back untouched.
     extra: dict[str, Any] = field(default_factory=dict)
     #: Where this project was loaded from, when it was.
@@ -228,6 +232,7 @@ class Project:
                 "export": export,
                 "review": self.review,
                 "render": render,
+                "episode": self.episode,
             }
         )
         return data
@@ -251,6 +256,7 @@ class Project:
         if isinstance(export.get("output_dir"), str) and export["output_dir"]:
             export["output_dir"] = _resolve_path(export["output_dir"], base_dir).as_posix()
         review = data.get("review")
+        episode = data.get("episode")
         cards = _list_of_dicts(data, "cards")
         captions = _list_of_dicts(data, "captions")
         return cls(
@@ -263,17 +269,19 @@ class Project:
             matches=_resolve_path(str(data["matches"]), base_dir) if data.get("matches") else None,
             review=dict(review) if isinstance(review, dict) else _default_review(),
             render=render,
+            episode=dict(episode) if isinstance(episode, dict) else {},
             extra={k: v for k, v in data.items() if k not in _KNOWN_KEYS},
         )
 
     def content_hash(self) -> str:
         """A digest of what a render depends on: the cards, the captions, a chosen
-        look and a chosen studied surah.
+        look, a chosen studied surah and a chosen episode.
 
-        The look and the surah join the digest only once one is chosen, so a
-        project from before either existed keeps its hash and its render stays
-        current; choosing or changing the surah changes which cards the video
-        draws, so it leaves the render stale.
+        The look, the surah and the episode join the digest only once one is
+        chosen, so a project from before any of them existed keeps its hash and
+        its render stays current; choosing or changing the surah changes which
+        cards the video draws, and changing the episode changes the joined
+        video, so either leaves the render stale.
         """
         content: dict[str, Any] = {
             "cards": self.cards,
@@ -281,6 +289,8 @@ class Project:
         }
         if self.style:
             content["style"] = self.style
+        if self.episode:
+            content["episode"] = self.episode
         studied = studied_surah_choice(self.export.get("studied_surah"))
         if studied is not None:
             content["studied_surah"] = studied
