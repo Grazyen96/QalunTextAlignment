@@ -1466,3 +1466,30 @@ def test_the_export_the_preview_and_the_review_show_the_same_lecture_card(
         assert exported == previewed == reviewed, at
     expected = "3:1" if chosen is None else "2:2"
     assert reviewed == expected
+
+
+def test_a_failed_filter_query_is_asked_again(monkeypatch, tmp_path) -> None:
+    """One FFmpeg that would not answer must not turn tone mapping off for the whole session."""
+    import subprocess as sp
+
+    from qurantext.core import video_common
+
+    answers = [
+        sp.TimeoutExpired("ffmpeg", 30),
+        sp.CompletedProcess([], 0, stdout=" ... apad   A->A  Pad audio.\n", stderr=""),
+    ]
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append(args)
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    path = str(tmp_path / "ffmpeg")
+    monkeypatch.setattr(video_common.subprocess, "run", fake_run)
+    monkeypatch.setattr(video_common, "_FILTERS", {})
+    assert video_common.ffmpeg_filters(path) == frozenset()
+    assert video_common.ffmpeg_filters(path) == frozenset({"apad"})
+    assert video_common.ffmpeg_filters(path) == frozenset({"apad"}) and len(calls) == 2

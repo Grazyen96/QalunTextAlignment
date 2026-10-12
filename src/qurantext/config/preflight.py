@@ -48,7 +48,7 @@ from qurantext.config.paths import (
     user_data_dir,
 )
 from qurantext.config.settings import describe_secret, env_dir, get_settings
-from qurantext.core.video_common import require_binary
+from qurantext.core.video_common import ffmpeg_filters, require_binary
 
 if TYPE_CHECKING:
     from qurantext.services.model_store import ModelManifest
@@ -118,6 +118,53 @@ def _ffmpeg_binary(name: str) -> CheckResult:
             "Reinstall FFmpeg, or point PATH at a working build.",
         )
     return CheckResult(name, Status.OK, version.strip())
+
+
+_EPISODE = "Episode joining"
+
+
+def _episode_join(release: bool) -> CheckResult:
+    """Can this FFmpeg join a lecture's episode?
+
+    The join leans on filters a renamed option or a slimmed-down build could
+    lose; without them every episode fails while the lecture still renders, so
+    it is a note in a checkout and a failure in a release (the build gate).
+    """
+    from qurantext.jobs.episode import REQUIRED_FILTERS, TONE_MAP_FILTERS
+
+    try:
+        have = ffmpeg_filters(require_binary("ffmpeg"))
+    except RuntimeError:
+        return CheckResult(
+            _EPISODE,
+            _strict(release),
+            "FFmpeg was not found, so no episode can be joined",
+            "Install FFmpeg; see the FFmpeg line above.",
+        )
+    if not have:
+        return CheckResult(
+            _EPISODE,
+            _strict(release),
+            "could not list this FFmpeg's filters, so the episode check could not run",
+            "Run `ffmpeg -filters` to see why FFmpeg will not answer, then check again.",
+        )
+    missing = [name for name in REQUIRED_FILTERS if name not in have]
+    if missing:
+        return CheckResult(
+            _EPISODE,
+            _strict(release),
+            f"this FFmpeg has no {_joined(missing)} filter, so no episode can be joined",
+            "Use a full FFmpeg build (the BtbN or Homebrew builds have every filter needed).",
+        )
+    no_tone_map = [name for name in TONE_MAP_FILTERS if name not in have]
+    if no_tone_map:
+        return CheckResult(
+            _EPISODE,
+            Status.WARN,
+            f"joins, but without {_joined(no_tone_map)} an HDR phone clip is not tone-mapped",
+            "Use an FFmpeg built with zimg (zscale) so HDR intros keep their colours.",
+        )
+    return CheckResult(_EPISODE, Status.OK, "FFmpeg has every filter the episode uses")
 
 
 def _arabic_shaping() -> CheckResult:
@@ -912,6 +959,7 @@ _NOT_RENDERING = frozenset(
         _TRANSCRIPTION,
         _LOCAL_OPTIONAL,
         _WHISPERX_OPTIONAL,
+        _EPISODE,
         "Window",
         "Playback",
         "Window translation",
@@ -953,6 +1001,7 @@ def run_checks(*, release: bool = False) -> list[CheckResult]:
         _arabic_shaping(),
         _ffmpeg_binary("ffmpeg"),
         _ffmpeg_binary("ffprobe"),
+        _episode_join(release),
         *_transcription(release),
         _bundled_font(),
         _bundled_quran(),

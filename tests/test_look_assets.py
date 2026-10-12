@@ -283,3 +283,15 @@ def test_seeding_night_gold_leaves_the_style_alone(tmp_path: Path) -> None:
     project.style = {"future_option": 3}
     look_assets.seed_project_look(project, tmp_path / "job.qalun.json", {})
     assert project.style == {"future_option": 3}
+
+
+def test_copy_by_content_accepts_given_suffixes(tmp_path: Path) -> None:
+    clip = tmp_path / "intro.mp4"
+    clip.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    copied = look_assets.copy_by_content(clip, tmp_path / "clips", suffixes=(".mp4",))
+    assert copied.parent == (tmp_path / "clips").resolve()
+    assert copied.name == hashlib.sha256(clip.read_bytes()).hexdigest()[:12] + ".mp4"
+    with pytest.raises(ValueError, match=r"\.mp4"):
+        look_assets.copy_by_content(
+            _png(tmp_path / "a.png"), tmp_path / "clips", suffixes=(".mp4",)
+        )

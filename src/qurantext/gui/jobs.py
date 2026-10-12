@@ -16,7 +16,6 @@ from pathlib import Path
 from qurantext.config.paths import (
     LECTURE_MATCHING_OUTPUT_DIR,
     RECITATION_MATCHING_OUTPUT_DIR,
-    VIDEOS_OUTPUT_DIR,
 )
 from qurantext.gui.i18n import t
 from qurantext.jobs.look_assets import seed_project_look
@@ -29,7 +28,7 @@ from qurantext.jobs.project import (
     save_project,
     set_job_settings,
 )
-from qurantext.jobs.project_render import render_project
+from qurantext.jobs.project_render import default_video_path, render_project
 from qurantext.pipelines.detection import run_detection, run_recitation_range
 from qurantext.utils.progress import CancelToken, ProgressCallback, report
 
@@ -301,10 +300,9 @@ def run_render(
     job's choice; None means "use the job's".
     """
     settings = job_settings(project)
-    video_dir = Path(output_dir or settings.output_dir or VIDEOS_OUTPUT_DIR)
     result = render_project(
         project,
-        video_dir / f"{Path(project.audio).stem}.mp4",
+        default_video_path(project, output_dir=output_dir),
         preset=preset if preset is not None else settings.preset,
         subtitles=subtitles if subtitles is not None else settings.subtitles,
         formats=tuple(formats) if formats is not None else settings.formats,

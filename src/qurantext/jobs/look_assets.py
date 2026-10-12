@@ -106,7 +106,9 @@ def import_look_image(project_path: Path, source: Path) -> Path:
     return copy_by_content(source, look_dir_for(project_path))
 
 
-def copy_by_content(source: Path, folder: Path) -> Path:
+def copy_by_content(
+    source: Path, folder: Path, *, suffixes: tuple[str, ...] = IMAGE_SUFFIXES
+) -> Path:
     """Copy *source* into *folder* as ``<sha12><suffix>``; return the copy.
 
     The source is read once, in chunks, hashing what is written: the copy's
@@ -115,15 +117,18 @@ def copy_by_content(source: Path, folder: Path) -> Path:
     under its final name only when complete, and a failed copy leaves nothing.
     The same bytes copied twice keep one file.
 
-    Raises ``ValueError`` for a type that is not an image the look can show,
+    *suffixes* are the types accepted, lower case with their dot: by default
+    the images a look can show; the episode passes its video types.
+
+    Raises ``ValueError`` for a type not in *suffixes*,
     ``FileNotFoundError`` for a missing source, and another ``OSError`` for
     anything the file system refuses (an unreadable source, a read-only
     folder, a folder path that is a file, a full disk).
     """
     source = Path(source).expanduser()
     suffix = source.suffix.lower()
-    if suffix not in IMAGE_SUFFIXES:
-        raise ValueError(f"{source.name}: choose a PNG, JPEG or WebP image.")
+    if suffix not in suffixes:
+        raise ValueError(f"{source.name}: choose one of {', '.join(suffixes)}.")
     if not source.is_file():
         raise FileNotFoundError(source)
     folder = Path(folder)
@@ -140,7 +145,7 @@ def copy_by_content(source: Path, folder: Path) -> Path:
         if destination.is_file():
             temporary.unlink()
         else:
-            # A temporary file is private to its owner (0600); the image should
+            # A temporary file is private to its owner (0600); the copy should
             # be as readable as the project beside it.
             os.chmod(temporary, 0o644)
             temporary.replace(destination)

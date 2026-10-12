@@ -17,7 +17,7 @@ import copy
 from dataclasses import replace
 from pathlib import Path
 
-from qurantext.config.paths import QURAN_DB_PATH
+from qurantext.config.paths import QURAN_DB_PATH, VIDEOS_OUTPUT_DIR
 from qurantext.config.settings import VIDEO_PRESETS
 from qurantext.core.looks import Look
 from qurantext.core.subtitles import Cue, write_subtitles
@@ -27,12 +27,28 @@ from qurantext.jobs.look_assets import project_look, set_project_look
 from qurantext.jobs.project import Project, job_settings, save_project, set_job_settings
 from qurantext.utils.progress import CancelToken, ProgressCallback
 
-__all__ = ["SUBTITLE_TIMELINES", "export_project_subtitles", "render_project"]
+__all__ = [
+    "SUBTITLE_TIMELINES",
+    "default_video_path",
+    "export_project_subtitles",
+    "render_project",
+]
 
 #: Which clock exported subtitles follow.
 SUBTITLE_TIMELINES = ("video", "audio")
 
 _DEFAULT_SIZE = (1080, 1920)
+
+
+def default_video_path(project: Project, *, output_dir: Path | None = None) -> Path:
+    """Where a render of *project* is written: ``<folder>/<audio stem>.mp4``.
+
+    The folder is *output_dir* when given, else the job's own choice, else the
+    default videos folder. A render from the window and the recitation an
+    episode renders first both use it, so they write the same file.
+    """
+    folder = Path(output_dir or job_settings(project).output_dir or VIDEOS_OUTPUT_DIR)
+    return folder / f"{Path(project.audio).stem}.mp4"
 
 
 def render_project(
@@ -52,8 +68,14 @@ def render_project(
     studied_surah: int | None = None,
     progress: ProgressCallback | None = None,
     cancel: CancelToken | None = None,
+    save: bool = True,
 ) -> ExportResult:
     """Render *project*, remember the render, and save the project if it has a file.
+
+    *save* False records the render on *project* but leaves its file alone: a
+    caller that loaded the project for this render alone (the episode's
+    recitation) writes the record onto a fresh load instead, so a correction
+    saved meanwhile by an open review is not overwritten by this copy.
 
     The cards, captions, style and output choices are copied before anything runs, and the
     render is made and hashed from that copy. A render can take minutes in a
@@ -129,7 +151,7 @@ def render_project(
         fps=rendered.fps if rendered is not None else None,
         subtitles=subtitles,
     )
-    if project.path is not None:
+    if save and project.path is not None:
         save_project(project, project.path)
     return result
 
