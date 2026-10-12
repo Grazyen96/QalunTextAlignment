@@ -53,7 +53,9 @@ __all__ = [
     "intro_spec_for",
     "outro_spec_for",
     "remove_generated_parts",
+    "spec_is_empty",
     "title_for",
+    "tracked_link_for",
 ]
 
 _log = logging.getLogger(__name__)
@@ -162,6 +164,34 @@ def intro_spec_for(
     )
 
 
+def tracked_link_for(
+    project: Project,
+    settings: GeneratedOutro,
+    surah_names: Mapping[int, str],
+    *,
+    content: str = "outro-qr",
+) -> str | None:
+    """The outro's link, tracked for *project*; None without a link.
+
+    *content* is where it is shown: ``outro-qr``, the link the QR code opens,
+    or ``description``, the same link for the video's description, so the two
+    are counted apart. The campaign names the lecture's surah and ayat
+    (:func:`title_for`), as they are now: a card changed later changes it.
+    Raises :class:`~qurantext.core.tracked_link.LinkError` for a link that is
+    not one.
+    """
+    link = settings.link.strip()
+    if not link:
+        return None
+    _, surah, first, last = title_for(project, surah_names)
+    return tracked_link(
+        link,
+        platform=settings.platform,
+        campaign=campaign_for(surah, first, last),
+        content=content,
+    )
+
+
 def outro_spec_for(
     project: Project,
     settings: GeneratedOutro,
@@ -182,10 +212,7 @@ def outro_spec_for(
     link = settings.link.strip()
     qr_url = link_text = None
     if link:
-        _, surah, first, last = title_for(project, surah_names)
-        qr_url = tracked_link(
-            link, platform=settings.platform, campaign=campaign_for(surah, first, last)
-        )
+        qr_url = tracked_link_for(project, settings, surah_names)
         link_text = readable_link(link)
     return OutroSpec(
         phrase=phrase,
@@ -299,8 +326,11 @@ def remove_generated_parts(project_path: Path, kind: str, *, keep: Path | None =
                 continue
 
 
-def _is_empty(spec: IntroSpec | OutroSpec) -> bool:
-    """Whether *spec* would draw an empty panel: no words and no QR code."""
+def spec_is_empty(spec: IntroSpec | OutroSpec) -> bool:
+    """Whether *spec* would draw an empty panel: no words and no QR code.
+
+    Such a part is refused when the clip is made; the dialog refuses it first.
+    """
     if isinstance(spec, IntroSpec):
         return not (spec.name.strip() or spec.title.strip())
     return not (spec.phrase.strip() or spec.qr_url or spec.link_text)
@@ -335,7 +365,7 @@ def ensure_generated_part(
     part = f"episode.part.{kind}"
     if project.path is None:
         raise EpisodeError("episode.error.generate", part=part)
-    if _is_empty(spec):
+    if spec_is_empty(spec):
         raise EpisodeError("episode.error.generate_empty", part=part)
     output = generated_part_path(
         project.path, kind, spec, look, width=width, height=height, fps=fps

@@ -10,6 +10,8 @@ whole number of pixels, at least 4: a phone filming a screen needs all three.
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 import segno
 from PIL import Image, ImageDraw
 
@@ -21,7 +23,11 @@ _MIN_MODULE_PX = 4
 RGB = tuple[int, int, int]
 
 
+@lru_cache(maxsize=16)
 def _encode(data: str) -> segno.QRCode:
+    """The code for *data*; kept for the next call, since a preview, its fit
+    check and the clip's frames all ask for the same link (a long one takes
+    about 80 ms to encode)."""
     try:
         # boost_error=False keeps the level at M: a higher level would grow the
         # code for the same link, and the size check below assumes M.

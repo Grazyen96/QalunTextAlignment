@@ -63,15 +63,27 @@ as it does today.
   are refused. `normalise_link` raises `LinkError` with a `code` the dialog words (empty, spaces,
   scheme, slashes, userinfo, host, port).
 - **Publishing on**: YouTube, Instagram, Facebook, TikTok, Telegram or WhatsApp. It is remembered
-  as the last one used and asked again on each OK, because it can change per export.
-- **Tracked link**: read-only, showing the full URL inside the QR code, with a **Copy** button so
-  it can also go into the video description.
+  as the last one used and shown, editable, each time the dialog opens, because it can change per
+  export (no separate confirmation on OK).
+- **Tracked link**: read-only, showing the full URL inside the QR code, with a **Copy** button for
+  the video description. Copy gives the same link with `utm_content=description` instead of
+  `outro-qr`, so description clicks and QR scans are counted apart (§3).
 - **Style** (default Fade), **Length** (3–10 s, default 6), and a still preview.
 
-**Defaults:** generated settings follow the same "only what you changed" rule as clips. The name,
-phrase, link, platform and styles are saved as defaults only when changed in the dialog. New
-lectures start with the default intro and outro *kind*, so a person who chose Generated keeps
-getting it.
+**Defaults:** generated settings follow the same "only what you changed" rule as clips, **field
+by field**: the name, phrase, link, platform, style and length are each saved as the default only
+when that field was changed in the dialog; a field left alone keeps the default's value, not the
+open lecture's. The kind is saved only when it was changed. New lectures start with the default
+intro and outro *kind*, so a person who chose Generated keeps getting it. The generated settings
+are remembered apart from the kind: choosing None or My clip keeps them for when the part is
+Generated again.
+
+**Refused and warned:** OK is disabled for a refused link and for a generated part with nothing to
+show (no name and no surah for the intro; no phrase and no link for the outro). Warnings, which
+leave OK enabled: a link too long for a QR code at the size the next render makes (the job's
+preset), characters the title font cannot draw (name, phrase and written address), and an
+address that could pass for another (`lookalike_host`: alphabets mixed in one name, or a name
+wholly in Latin-looking Cyrillic or Greek letters).
 
 ### 2.2 Output
 
@@ -84,13 +96,15 @@ fps, tracked URL and the generator's version. When nothing changed, the clip is 
 
 ## 3. The tracked link (organisation rule)
 
-`tracked_link(url, *, platform, campaign) -> str`:
+`tracked_link(url, *, platform, campaign, content="outro-qr") -> str`:
 
 - It parses the URL and **keeps every existing query parameter and the fragment**.
 - It sets:
   - `utm_source=<platform>` (`youtube`, `instagram`, `facebook`, `tiktok`, `telegram`, `whatsapp`);
   - `utm_medium=video`;
-  - `utm_content=outro-qr`.
+  - `utm_content=<content>`: `outro-qr` for the link the QR code opens, `description` for the
+    same link copied into the video's description, so scans and description clicks are measured
+    apart.
 
   These three always overwrite.
 - It sets `utm_campaign=<campaign>` **only when the link has none**, so a campaign the person set
@@ -100,10 +114,12 @@ fps, tracked URL and the generator's version. When nothing changed, the clip is 
 
 The **readable text** under the QR code is `host + path`, without scheme, query, fragment, user
 name or a trailing `/`, e.g. `example.org/dars`. It is decoded for people (display only): an IDN
-host in its own script, a percent-encoded path as its words («example.org/دروس»). Visits typed from it show as direct traffic, which tells
-the person how many came by typing rather than scanning.
+host in its own script, a percent-encoded path as its words («example.org/دروس»). Visits typed from it show as direct traffic, apart
+from the QR code's (`outro-qr`) and the description's (`description`) visits.
 
-The person can see the tracked link (§2.1) and copy it for the video description. The QR code
+The person can see the tracked link (§2.1) and copy its description form. The campaign is read
+from the lecture's cards when the dialog opens and again when the clip is made, so the link is
+best copied once the cards are final. The QR code
 encodes exactly that tracked link, in ASCII: an IDN host in punycode (IDNA 2008 with UTS #46 non-transitional mapping, as browsers do:
 «straße.de» is `xn--strae-oqa.de`, not `strasse.de`), a non-ASCII path or fragment
 percent-encoded. Existing query pieces are kept exactly as written (their encoding, a bare

@@ -11,12 +11,15 @@ parts joined in order around it. This dialog is where the person chooses them:
     generated outro a closing phrase and, with a link, its QR code. The link
     is tracked (an organisation rule: every link put before viewers must be
     measurable): the field under it shows the exact link the QR code opens,
-    live, with Copy for the video's description, and the address written
-    under the code, which has no tracking, so typed visits show as direct
-    traffic. A link that is not one disables OK and says why; a link too long
-    for a QR code at the lecture's size, and letters the title font cannot
-    draw, are warned about. Each has a still preview, its middle frame in the
-    lecture's look, drawn once typing rests (300 ms; about 20 ms a frame);
+    live; Copy gives the same link marked as the description's
+    (``utm_content=description``), so description clicks are counted apart
+    from scans; the address written under the code has no tracking, so typed
+    visits show as direct traffic. A link that is not one, and a generated
+    part with nothing to show, disable OK and say why; a link too long for a
+    QR code at the size the next render makes, an address that could pass for
+    another, and letters the title font cannot draw are warned about. Each
+    has a still preview, its middle frame in the lecture's look, drawn once
+    typing rests (300 ms; about 20 ms a frame);
 - the recitation is one of the recitation jobs in the job list. Each says
   whether its current video can be used as it is, or will be rendered first;
   a damaged job cannot be chosen;
@@ -26,10 +29,11 @@ parts joined in order around it. This dialog is where the person chooses them:
 Nothing is changed until OK. Then the newly chosen clips are copied beside the
 project (``import_episode_clip``), with their original names kept beside the
 copies (which are named by their content), and the choice becomes one undoable
-edit of the session. An intro or outro the person changed here (its kind, its
-clip or its generated fields) also becomes the default new lectures start
-with; a part left alone leaves its default alone, so setting only a lecture's
-recitation never clears the channel's intro. A clip that cannot be copied is
+edit of the session. What the person changed here of an intro or outro (its
+kind, its clip, each generated field on its own) also becomes the default new
+lectures start with; the rest of the default stays as it was, so setting only
+a lecture's recitation never clears the channel's intro, and re-exporting an
+old lecture for another platform does not bring back its old link. A clip that cannot be copied is
 said in the dialog, which stays open; a default that cannot be kept is not a
 reason to lose the episode, and is said by the window after it closes
 (:attr:`EpisodeDialog.default_error`).
@@ -74,7 +78,7 @@ from qurantext.core.title_cards import (
     qr_fits,
     render_title_frame,
 )
-from qurantext.core.tracked_link import PLATFORMS, LinkError
+from qurantext.core.tracked_link import PLATFORMS, LinkError, lookalike_host
 from qurantext.core.video_common import get_audio_duration
 from qurantext.gui.colors import warning_color
 from qurantext.gui.i18n import ltr, plain_title, t
@@ -100,7 +104,13 @@ from qurantext.jobs.episode_assets import (
     episode_dir_for,
     import_episode_clip,
 )
-from qurantext.jobs.generated_parts import intro_spec_for, outro_spec_for, title_for
+from qurantext.jobs.generated_parts import (
+    intro_spec_for,
+    outro_spec_for,
+    spec_is_empty,
+    title_for,
+    tracked_link_for,
+)
 from qurantext.jobs.project import Project, job_settings, load_project
 from qurantext.jobs.project_render import default_video_path
 
@@ -122,13 +132,21 @@ PHRASES = (
 #: The previews are drawn this wide, in the lecture's shape…
 PREVIEW_WIDTH = 320
 #: …and shown within this box, so an upright lecture's stays short.
-PREVIEW_BOX = (320, 240)
+PREVIEW_BOX = (320, 180)
 #: How long typing rests before the previews are drawn again.
 PREVIEW_DELAY_MS = 300
 #: How far a generated part's fields are set in from its row (mirrored in Arabic).
 _FIELDS_INDENT = 16
+#: The longest written address the dialog shows whole, in characters.
+_SHOWN_ADDRESS = 40
 #: Room for a tracked link to be read without scrolling through it.
 _TRACKED_MIN_WIDTH = 280
+
+#: Each part's generated fields: a default keeps only those changed in the dialog.
+_FIELDS = {
+    "intro": ("name", "style", "seconds"),
+    "outro": ("phrase", "link", "platform", "style", "seconds"),
+}
 
 #: The sentence for each reason a link is refused (``LinkError.code``).
 _LINK_MESSAGES = {
@@ -305,6 +323,12 @@ class EpisodeDialog(QDialog):
         self._surah_names = stored_surah_names()
         #: Why the outro's link is refused (a ``LinkError`` code), or None.
         self._link_error: str | None = None
+        #: Whether the outro's address could pass for another (``lookalike_host``).
+        self._host_warning: str | None = None
+        #: The outro as the render would make it now (None while its link is refused).
+        self._outro_spec: OutroSpec | None = None
+        #: The link Copy gives: the QR code's, counted as the description's.
+        self._description_link = ""
         self._qr_warning = ""
         self._preview_timer = QTimer(self)
         self._preview_timer.setSingleShot(True)
@@ -327,7 +351,7 @@ class EpisodeDialog(QDialog):
         form.addRow(t("episode.intro"), self._kind_row(self.intro_kind, self._intro))
         self._intro_original = current.intro_generated
         self.intro_fields = self._intro_fields(
-            current.intro_generated or prefs.default_intro_generated or GeneratedIntro()
+            current.intro_generated or prefs.remembered_intro_generated or GeneratedIntro()
         )
         form.addRow(self.intro_fields)
 
@@ -346,7 +370,7 @@ class EpisodeDialog(QDialog):
         form.addRow(t("episode.outro"), self._kind_row(self.outro_kind, self._outro))
         self._outro_original = current.outro_generated
         self.outro_fields = self._outro_fields(
-            current.outro_generated or prefs.default_outro_generated or GeneratedOutro()
+            current.outro_generated or prefs.remembered_outro_generated or GeneratedOutro()
         )
         form.addRow(self.outro_fields)
         layout.addLayout(form)
@@ -470,6 +494,7 @@ class EpisodeDialog(QDialog):
         self.intro_name_edit.textChanged.connect(self._on_fields)
         form.addRow(t("episode.gen.name"), self.intro_name_edit)
         title = title_for(self._session.project, self._surah_names)[0]
+        self._title_text = title
         self.intro_title = QLabel(title or "—")
         self.intro_title.setWordWrap(True)
         form.addRow(t("episode.gen.title"), self.intro_title)
@@ -524,6 +549,7 @@ class EpisodeDialog(QDialog):
         self.outro_tracked.setMinimumWidth(_TRACKED_MIN_WIDTH)
         self.outro_tracked.setToolTip(t("episode.gen.tracked.tip"))
         self.outro_copy = QPushButton(t("episode.gen.copy"))
+        self.outro_copy.setToolTip(t("episode.gen.copy.tip"))
         self.outro_copy.clicked.connect(self._copy_link)
         tracked = QHBoxLayout()
         tracked.setContentsMargins(0, 0, 0, 0)
@@ -590,67 +616,128 @@ class EpisodeDialog(QDialog):
             return original
         return settings
 
-    def _changed(self, part: str) -> bool:
-        """Whether the person changed *part* here: only then does OK make it the default."""
-        kind, settings = self._initial[part]
+    def _changed_fields(self, part: str) -> dict[str, object]:
+        """The generated fields of *part* the person changed here, by name, with their values.
+
+        Only while the part is Generated: a field edited and then left for
+        another kind was not chosen.
+        """
+        if self._kind(part) != "generated":
+            return {}
+        now = self._intro_settings() if part == "intro" else self._outro_settings()
+        before = self._initial[part][1]
+        return {
+            name: getattr(now, name)
+            for name in _FIELDS[part]
+            if getattr(now, name) != getattr(before, name)
+        }
+
+    def _default_for(self, part: str, source: Path | None) -> tuple[object, object, object] | None:
+        """What OK keeps as *part*'s default: (clip, generated, remembered), or None for nothing.
+
+        Field by field: only a kind or a field the person changed here. The
+        fields left alone stay as the default has them, not as this lecture
+        has them, so re-exporting an old lecture for another platform does not
+        bring back its old link for every new lecture.
+        """
+        kind, _ = self._initial[part]
         now = self._kind(part)
+        fields = self._changed_fields(part)
+        remembered = (
+            self._prefs.remembered_intro_generated
+            if part == "intro"
+            else self._prefs.remembered_outro_generated
+        )
+        base = remembered or (GeneratedIntro() if part == "intro" else GeneratedOutro())
+        merged = replace(base, **fields)  # type: ignore[arg-type]
         if now != kind:
-            return True
-        if now == "clip":
-            return (self._intro if part == "intro" else self._outro).touched
-        if now == "generated":
-            current = self._intro_settings() if part == "intro" else self._outro_settings()
-            return current != settings
-        return False
+            if now == "generated":
+                return KEEP_DEFAULT, merged, KEEP_DEFAULT
+            return (source if now == "clip" else None), KEEP_DEFAULT, KEEP_DEFAULT
+        if now == "clip" and (self._intro if part == "intro" else self._outro).touched:
+            return source, KEEP_DEFAULT, KEEP_DEFAULT
+        if fields:
+            return KEEP_DEFAULT, KEEP_DEFAULT, merged
+        return None
 
     # -- the link ------------------------------------------------------------------------
 
     def _update_link(self) -> None:
-        """The tracked link and the address under the code, live; OK only for a usable link."""
+        """The tracked link and the address under the code, live; OK only when both parts can be made."""
         link = self.outro_link.text().strip()
-        tracked = readable = ""
-        self._link_error = None
-        if link:
-            try:
-                spec = outro_spec_for(
-                    self._session.project, self._outro_settings(), self._surah_names
+        tracked = readable = description = ""
+        self._link_error = self._host_warning = None
+        settings = self._outro_settings()
+        project = self._session.project
+        try:
+            self._outro_spec = outro_spec_for(project, settings, self._surah_names)
+            if link:
+                description = (
+                    tracked_link_for(project, settings, self._surah_names, content="description")
+                    or ""
                 )
-            except LinkError as error:
-                self._link_error = error.code
-            else:
-                tracked, readable = spec.qr_url or "", spec.link_text or ""
+                self._host_warning = lookalike_host(link)
+        except LinkError as error:
+            self._link_error, self._outro_spec = error.code, None
+        else:
+            tracked = self._outro_spec.qr_url or ""
+            readable = self._outro_spec.link_text or ""
+        self._description_link = description
         self.outro_tracked.setText(tracked)
         self.outro_tracked.setCursorPosition(0)
-        self.outro_copy.setEnabled(bool(tracked))
+        self.outro_copy.setEnabled(bool(description))
         self.outro_readable.setText(
-            t("episode.gen.readable", link=ltr(readable)) if readable else ""
+            t("episode.gen.readable", link=ltr(_shortened(readable))) if readable else ""
         )
         self.outro_readable.setVisible(bool(readable))
-        self.ok_button.setEnabled(not (self._link_error and self._kind("outro") == "generated"))
+        self.ok_button.setEnabled(not self._refused())
         self._show_warnings()
 
+    def _empty(self, part: str) -> bool:
+        """Whether *part* is Generated with nothing to show: the render would refuse it."""
+        if self._kind(part) != "generated":
+            return False
+        if part == "outro":
+            return self._outro_spec is not None and spec_is_empty(self._outro_spec)
+        return not (self.intro_name_edit.text().strip() or self._title_text)
+
+    def _refused(self) -> bool:
+        """Whether OK is refused: a Generated outro's link is not one, or a part has nothing."""
+        link_refused = bool(self._link_error) and self._kind("outro") == "generated"
+        return link_refused or self._empty("intro") or self._empty("outro")
+
     def _copy_link(self) -> None:
-        tracked = self.outro_tracked.text()
-        if tracked:
-            QGuiApplication.clipboard().setText(tracked)
+        """The link for the video's description: the QR code's, counted apart from scans."""
+        if self._description_link:
+            QGuiApplication.clipboard().setText(self._description_link)
 
     def _show_warnings(self) -> None:
-        """Under each part: a refused link, a QR code too big, letters the font cannot draw."""
-        intro = _glyph_warning(self.intro_name_edit.text())
+        """Under each part: why it is refused, and what would not come out as meant.
+
+        A refused link or an empty part (OK is disabled); a QR code too big for
+        the lecture's size, an address that could pass for another, and
+        letters the title font cannot draw, the written address's included.
+        """
+        intro_lines = []
+        if self._empty("intro"):
+            intro_lines.append(t("episode.gen.empty_intro"))
+        if glyphs := _glyph_warning(self.intro_name_edit.text()):
+            intro_lines.append(glyphs)
         outro_lines = []
         if self._link_error:
             outro_lines.append(t(_LINK_MESSAGES.get(self._link_error, "episode.link_invalid")))
+        elif self._empty("outro"):
+            outro_lines.append(t("episode.gen.empty_outro"))
         elif self._qr_warning and self.outro_link.text().strip():
             outro_lines.append(self._qr_warning)
-        phrase = self._outro_settings().phrase
-        if glyphs := _glyph_warning(phrase):
+        if self._host_warning:
+            outro_lines.append(t(f"episode.link_warning.{self._host_warning}"))
+        written = (self._outro_spec.link_text or "") if self._outro_spec is not None else ""
+        if glyphs := _glyph_warning(self._outro_settings().phrase + written):
             outro_lines.append(glyphs)
-        for label, text in (
-            (self.intro_warning, intro),
-            (self.outro_warning, " ".join(outro_lines)),
-        ):
-            label.setText(text)
-            label.setVisible(bool(text))
+        for label, lines in ((self.intro_warning, intro_lines), (self.outro_warning, outro_lines)):
+            label.setText(" ".join(lines))
+            label.setVisible(bool(lines))
 
     # -- the previews --------------------------------------------------------------------
 
@@ -668,10 +755,12 @@ class EpisodeDialog(QDialog):
                 if part == "intro":
                     spec = intro_spec_for(project, self._intro_settings(), self._surah_names)
                 else:
-                    settings = self._outro_settings()
-                    if self._link_error:
-                        settings = replace(settings, link="")  # the phrase alone, meanwhile
-                    spec = outro_spec_for(project, settings, self._surah_names)
+                    spec = self._outro_spec or outro_spec_for(
+                        # While the link is refused, the phrase alone.
+                        project,
+                        replace(self._outro_settings(), link=""),
+                        self._surah_names,
+                    )
                 image = render_title_frame(spec, look, width, height, spec.seconds / 2)
             except (ValueError, OSError):
                 # A text the font cannot lay out: said under the fields, not drawn.
@@ -828,7 +917,7 @@ class EpisodeDialog(QDialog):
         if project_path is None:
             self._show_message(t("session.no_file"))
             return
-        if self._link_error and self._kind("outro") == "generated":
+        if self._refused():
             return  # OK is disabled; a key press must not slip past it
         current = self._session.episode
         pending = self.choice()
@@ -838,31 +927,30 @@ class EpisodeDialog(QDialog):
         except (ValueError, OSError) as error:
             self._show_message(t("episode.copy_failed", reason=str(error)))
             return
-        changed = {part: self._changed(part) for part in ("intro", "outro")}
+        defaults = {
+            "intro": self._default_for("intro", pending.intro),
+            "outro": self._default_for("outro", pending.outro),
+        }
         self._session.set_episode(replace(pending, intro=intro, outro=outro))
-        defaults: dict[str, tuple[object, object]] = {}
-        for part, source in (("intro", pending.intro), ("outro", pending.outro)):
-            kind = self._kind(part)
-            if not changed[part]:
-                # Only a part the person changed here: opening an old lecture
-                # to set its recitation must not clear the channel's intro.
-                defaults[part] = (KEEP_DEFAULT, KEEP_DEFAULT)
-            elif kind == "generated":
-                defaults[part] = (KEEP_DEFAULT, getattr(pending, f"{part}_generated"))
-            else:  # a clip, or None: either way its generated settings go
-                defaults[part] = (source, KEEP_DEFAULT)
         # The rows now name what was stored, so choice() says what OK did.
         for row, stored in ((self._intro, intro), (self._outro, outro)):
             if self._kind(row.part) == "clip":
                 row.path = stored
-        if any(changed.values()):
+        if any(defaults.values()):
+            # Only what the person changed here: opening an old lecture to set
+            # its recitation must not clear the channel's intro.
+            unchanged = (KEEP_DEFAULT, KEEP_DEFAULT, KEEP_DEFAULT)
+            intro_default = defaults["intro"] or unchanged
+            outro_default = defaults["outro"] or unchanged
             try:
                 self._prefs.save_default_episode(
-                    defaults["intro"][0],
-                    defaults["outro"][0],
+                    intro_default[0],
+                    outro_default[0],
                     names=(self._intro.name, self._outro.name),
-                    intro_generated=defaults["intro"][1],
-                    outro_generated=defaults["outro"][1],
+                    intro_generated=intro_default[1],
+                    outro_generated=outro_default[1],
+                    intro_remembered=intro_default[2],
+                    outro_remembered=outro_default[2],
                 )
             except (ValueError, OSError) as error:
                 self.default_error = t("episode.default_failed", reason=str(error))
@@ -877,14 +965,13 @@ def _kind_of(choice: EpisodeChoice, part: str) -> str:
 
 
 def _render_size(project: Project) -> tuple[int, int]:
-    """The size the lecture was rendered at, else the size its job's preset renders at."""
-    render = project.render or {}
-    try:
-        width, height = int(render["width"]), int(render["height"])
-    except (KeyError, TypeError, ValueError):
-        width = height = 0
-    if width > 0 and height > 0:
-        return width, height
+    """The size the next render makes: the job's preset's.
+
+    Not the last render's recorded size: a job run again with another preset
+    renders at the new one (``job_settings`` falls back to the last render's
+    preset only when the job names none), and the episode's parts are made at
+    the size just rendered.
+    """
     width, height = VIDEO_PRESETS[job_settings(project).preset][:2]
     return int(width), int(height)
 
@@ -926,6 +1013,15 @@ def _left_to_right(edit: QLineEdit) -> None:
     """A web address reads left to right in every language, an Arabic window's too."""
     edit.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
     edit.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignAbsolute)
+
+
+def _shortened(text: str) -> str:
+    """*text* cut to :data:`_SHOWN_ADDRESS` characters with an ellipsis.
+
+    The address is one word a label cannot wrap: a long one would widen the
+    dialog past the screen. The frame cuts it to its own width the same way.
+    """
+    return text if len(text) <= _SHOWN_ADDRESS else text[: _SHOWN_ADDRESS - 1] + "…"
 
 
 def _glyph_warning(text: str) -> str:

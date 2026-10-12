@@ -543,3 +543,39 @@ def test_settings_of_the_other_part_are_refused(settings, tmp_path, monkeypatch)
     with pytest.raises(TypeError):
         prefs.save_default_episode(KEEP_DEFAULT, KEEP_DEFAULT, outro_generated=GeneratedIntro())
     assert prefs.default_episode_kinds == ("none", "none"), "nothing was stored"
+
+
+def test_generated_settings_are_remembered_apart_from_the_kind(settings, tmp_path, monkeypatch):
+    """A part set to None or a clip keeps its name, phrase and link for Generated again."""
+    from qurantext.gui.prefs import KEEP_DEFAULT
+    from qurantext.jobs.episode_assets import GeneratedIntro, GeneratedOutro
+
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    prefs = Prefs(settings)
+    assert prefs.remembered_outro_generated is None
+    outro = GeneratedOutro(link="example.org/dars", platform="telegram")
+    prefs.save_default_episode(KEEP_DEFAULT, KEEP_DEFAULT, outro_generated=outro)
+    clip = tmp_path / "outro.mp4"
+    clip.write_bytes(b"outro")
+    prefs.save_default_episode(KEEP_DEFAULT, clip)
+    assert prefs.default_episode_kinds == ("none", "clip")
+    assert prefs.default_outro_generated is None and prefs.remembered_outro_generated == outro
+    prefs.save_default_episode(KEEP_DEFAULT, None)
+    assert prefs.default_episode_kinds == ("none", "none")
+    assert prefs.remembered_outro_generated == outro
+
+    # Remembered settings change without changing the kind…
+    newer = GeneratedOutro(link="example.org/new", platform="telegram")
+    prefs.save_default_episode(KEEP_DEFAULT, KEEP_DEFAULT, outro_remembered=newer)
+    assert prefs.default_episode_kinds == ("none", "none")
+    assert prefs.remembered_outro_generated == newer
+    # …and a generated default follows them.
+    intro = GeneratedIntro(name="دروس")
+    prefs.save_default_episode(KEEP_DEFAULT, KEEP_DEFAULT, intro_generated=intro)
+    prefs.save_default_episode(
+        KEEP_DEFAULT, KEEP_DEFAULT, intro_remembered=GeneratedIntro(name="دروس", style="rise")
+    )
+    assert prefs.default_intro_generated == GeneratedIntro(name="دروس", style="rise")
+    assert prefs.default_episode_kinds == ("generated", "none")
+    with pytest.raises(TypeError):
+        prefs.save_default_episode(KEEP_DEFAULT, KEEP_DEFAULT, intro_remembered=newer)

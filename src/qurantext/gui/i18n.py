@@ -445,13 +445,32 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "episode.gen.tracked": "Link in the QR code",
         "episode.gen.tracked.tip": (
             "The link the QR code opens, with tracking that says the visit came from this "
-            "video's QR code on this platform. Copy it into the video's description too."
+            "video's QR code on this platform."
         ),
         "episode.gen.copy": "Copy",
+        "episode.gen.copy.tip": (
+            "Copy the link for the video's description: the same link, marked as the "
+            "description's, so its clicks are counted apart from the QR code's scans. "
+            "Copy it once the lecture's cards are final: they name its campaign."
+        ),
         "episode.gen.readable": "Written under the code: {link}",
         "episode.gen.readable.tip": (
             "The address viewers can type. It has no tracking, so typed visits show as "
-            "direct traffic: the difference from the QR code's visits is how many typed it."
+            "direct traffic, apart from the QR code's and the description's visits."
+        ),
+        "episode.gen.empty_intro": (
+            "The intro has nothing to show: give it a name (this lecture's cards name no surah)."
+        ),
+        "episode.gen.empty_outro": (
+            "The outro has nothing to show: choose a closing phrase or give a link."
+        ),
+        "episode.link_warning.mixed": (
+            "This address mixes alphabets in one name, like a Cyrillic letter among Latin "
+            "ones: it could pass for another site. Check it."
+        ),
+        "episode.link_warning.confusable": (
+            "This address is written in letters that look Latin but are not: it could pass "
+            "for another site. Check it."
         ),
         "episode.gen.qr_too_big": (
             "This link is too long for a QR code phones can read in a {size} video. "
@@ -895,21 +914,34 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "episode.gen.tracked": "الرابط داخل رمز QR",
         "episode.gen.tracked.tip": (
             "الرابط الذي يفتحه رمز QR، ومعه تتبّع يبيّن أن الزيارة جاءت من رمز هذا الفيديو "
-            "على هذه المنصة. انسخه إلى وصف الفيديو أيضًا."
+            "على هذه المنصة."
         ),
         "episode.gen.copy": "انسخ",
+        "episode.gen.copy.tip": (
+            "انسخ الرابط لوصف الفيديو: هو الرابط نفسه، معلَّمًا بأنه من الوصف، فتُحسب نقراته "
+            "منفصلةً عن مسح رمز QR. انسخه بعد أن تستقر بطاقات الدرس، فهي تسمّي حملته."
+        ),
         "episode.gen.readable": "يُكتب تحت الرمز: {link}",
         "episode.gen.readable.tip": (
-            "العنوان الذي يستطيع المشاهد كتابته. ليس فيه تتبّع، فتظهر زياراته زياراتٍ مباشرة: "
-            "والفرق بينها وبين زيارات الرمز هو عدد من كتبه."
+            "العنوان الذي يستطيع المشاهد كتابته. ليس فيه تتبّع، فتظهر زياراته زياراتٍ مباشرة، "
+            "منفصلةً عن زيارات الرمز وزيارات الوصف."
+        ),
+        "episode.gen.empty_intro": (
+            "ليس في المقدمة ما تعرضه: أعطها اسمًا (فبطاقات هذا الدرس لا تذكر سورة)."
+        ),
+        "episode.gen.empty_outro": "ليس في الخاتمة ما تعرضه: اختر عبارة ختام أو أعطها رابطًا.",
+        "episode.link_warning.mixed": (
+            "يخلط هذا العنوان أبجديات في اسم واحد، كحرف كيريلي بين حروف لاتينية: "
+            "قد يُظنّ موقعًا آخر. تحقّق منه."
+        ),
+        "episode.link_warning.confusable": (
+            "هذا العنوان مكتوب بحروف تشبه اللاتينية وليست منها: قد يُظنّ موقعًا آخر. تحقّق منه."
         ),
         "episode.gen.qr_too_big": (
             "هذا الرابط أطول من أن تقرأ الهواتف رمز QR الخاص به في فيديو بحجم {size}. "
             "اختصره، وإلا فلن تُصنع الحلقة."
         ),
-        "episode.gen.missing_glyphs": (
-            "لا يستطيع خط العنوان رسم \u2068{chars}\u2069: ستظهر مربعاتٍ فارغة."
-        ),
+        "episode.gen.missing_glyphs": ("لا يستطيع خط العنوان رسم {chars}: ستظهر مربعاتٍ فارغة."),
         "episode.link_invalid": "أدخل عنوان ويب يبدأ بـ \u2066http://\u2069 أو \u2066https://\u2069.",
         "episode.link_invalid.spaces": "لا يصح أن يحوي الرابط مسافات أو محارف غير مرئية.",
         "episode.link_invalid.slashes": (

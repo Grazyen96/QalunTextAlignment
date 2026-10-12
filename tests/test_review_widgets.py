@@ -2483,17 +2483,32 @@ def test_an_invalid_link_says_why_and_disables_ok(
     assert dialog.outro_tracked.text() == "" and not dialog.outro_copy.isEnabled()
 
 
-def test_copy_puts_the_tracked_link_on_the_clipboard(
+def test_copy_gives_the_qr_link_counted_as_the_descriptions(
     qt_app, episode_lecture, prefs, tmp_path, monkeypatch
 ) -> None:
+    """Description clicks and QR scans are measured apart: only utm_content differs."""
+    from urllib.parse import parse_qsl, urlsplit
+
     from PySide6.QtGui import QGuiApplication
 
     dialog = _generated_dialog(episode_lecture, prefs, tmp_path, monkeypatch)
     QGuiApplication.clipboard().setText("")
     dialog.outro_copy.click()
     text = QGuiApplication.clipboard().text()
-    assert text == dialog.outro_tracked.text() and "utm_source=youtube" in text
+    qr = dialog.outro_tracked.text()
+    copied, shown = urlsplit(text), urlsplit(qr)
+    copied_query, qr_query = dict(parse_qsl(copied.query)), dict(parse_qsl(shown.query))
+    assert qr_query["utm_content"] == "outro-qr", "the field shows what the QR code opens"
+    assert copied_query.pop("utm_content") == "description"
+    qr_query.pop("utm_content")
+    assert copied_query == qr_query and copied_query["utm_source"] == "youtube"
+    assert copied._replace(query="") == shown._replace(query="")
     assert "\u2066" not in text and "\u2069" not in text
+    # The same link the render would put in a description, from the same builder.
+    from qurantext.jobs.generated_parts import tracked_link_for
+
+    settings = episode_lecture.episode.outro_generated
+    assert text == tracked_link_for(episode_lecture.project, settings, {}, content="description")
 
 
 def test_previews_render_and_wait_for_typing_to_rest(
@@ -2540,12 +2555,20 @@ def test_a_link_too_long_for_a_qr_code_and_letters_the_font_lacks_are_warned(
     dialog.flush_previews()
     assert dialog.ok_button.isEnabled(), "a warning: the lecture's size may change first"
     assert dialog.outro_warning.text() == t("episode.gen.qr_too_big", size="960×540")
-    # Rendered: the size it was rendered at, whatever the preset says now.
+    # Rendered at 1920×1080 before: the next render is the preset's size still,
+    # and the episode's parts are made at the size just rendered (probe S4).
     episode_lecture.project.record_render(
-        tmp_path / "dars.mp4", preset="fast", basmala_offset_s=0.0, width=1920, height=1080
+        tmp_path / "dars.mp4", preset="high", basmala_offset_s=0.0, width=1920, height=1080
     )
     from qurantext.gui.review.episode_dialog import EpisodeDialog
 
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    assert dialog._size == (960, 540)
+    dialog.outro_link.setText("example.org/" + "a" * 400)
+    dialog.flush_previews()
+    assert dialog.outro_warning.text() == t("episode.gen.qr_too_big", size="960×540")
+    # Re-run with "high": 1920×1080, where the link fits.
+    set_job_settings(episode_lecture.project, JobSettings(preset="high"))
     dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
     dialog.outro_link.setText("example.org/" + "a" * 400)
     dialog.flush_previews()
@@ -2596,9 +2619,10 @@ def test_ok_keeps_the_generated_settings_as_one_undo_step(
     assert episode_lecture.episode.is_empty and not episode_lecture.can_undo
 
 
-def test_changing_only_the_outros_platform_keeps_only_its_default(
+def test_changing_only_the_outros_platform_keeps_only_that_field_as_default(
     qt_app, episode_lecture, prefs, tmp_path, monkeypatch
 ) -> None:
+    """Field by field: this lecture's link does not replace the default's (review I1)."""
     from qurantext.gui.prefs import KEEP_DEFAULT
     from qurantext.jobs.episode_assets import GeneratedIntro, GeneratedOutro
 
@@ -2618,13 +2642,126 @@ def test_changing_only_the_outros_platform_keeps_only_its_default(
     )
     dialog.outro_platform.setCurrentIndex(dialog.outro_platform.findData("whatsapp"))
     dialog.ok_button.click()
-    assert episode_lecture.episode.outro_generated.platform == "whatsapp"
+    assert episode_lecture.episode.outro_generated == GeneratedOutro(
+        link="example.org/dars", platform="whatsapp"
+    ), "the lecture keeps its own link"
     assert episode_lecture.episode.intro_generated == GeneratedIntro(name="درس")
     assert prefs.default_episode_kinds == ("clip", "generated")
     assert (prefs.default_episode[0], prefs.default_episode_names[0]) == before_intro
     assert prefs.default_outro_generated == GeneratedOutro(
-        link="example.org/dars", platform="whatsapp"
+        link="example.org", platform="whatsapp"
+    ), "the default keeps its link and takes only the platform"
+
+
+def test_an_old_lecture_re_exported_keeps_the_channels_new_defaults(
+    qt_app, tmp_path, monkeypatch
+) -> None:
+    """Probe S1: the site moved; re-exporting an old lecture for Instagram keeps the new one."""
+    from PySide6.QtCore import QSettings
+
+    from qurantext.gui.prefs import KEEP_DEFAULT, Prefs
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+    from qurantext.jobs.episode_assets import EpisodeChoice, GeneratedIntro, GeneratedOutro
+
+    session, folder = _probe_lecture(tmp_path, monkeypatch)
+    prefs = Prefs(QSettings(str(folder / "prefs.ini"), QSettings.Format.IniFormat))
+    prefs.save_default_episode(
+        KEEP_DEFAULT,
+        KEEP_DEFAULT,
+        outro_generated=GeneratedOutro(phrase="بارك الله فيكم", link="example.org/new-site"),
+        intro_generated=GeneratedIntro(name="القناة الجديدة"),
     )
+    session.set_episode(
+        EpisodeChoice(
+            intro_generated=GeneratedIntro(name="الاسم القديم"),
+            outro_generated=GeneratedOutro(link="example.org/old-site"),
+        )
+    )
+    dialog = EpisodeDialog(session, prefs=prefs, job_dirs=[folder])
+    dialog.outro_platform.setCurrentIndex(dialog.outro_platform.findData("instagram"))
+    dialog.intro_style.setCurrentIndex(dialog.intro_style.findData("rise"))
+    dialog.ok_button.click()
+    assert prefs.default_outro_generated == GeneratedOutro(
+        phrase="بارك الله فيكم", link="example.org/new-site", platform="instagram"
+    )
+    assert prefs.default_intro_generated == GeneratedIntro(name="القناة الجديدة", style="rise")
+    assert session.episode.outro_generated.link == "example.org/old-site"
+    assert session.episode.intro_generated == GeneratedIntro(name="الاسم القديم", style="rise")
+
+
+def _probe_lecture(tmp_path, monkeypatch, cards=None):
+    """A saved lecture's session in its own folder, the job list empty (the review's probes)."""
+    from qurantext.gui.review import episode_dialog
+    from qurantext.gui.review.session import ReviewSession
+    from qurantext.jobs.project import CaptionCue, Project, load_project, save_project
+
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(episode_dialog, "list_jobs", lambda *a, **k: [])
+    folder = tmp_path / "probe"
+    folder.mkdir(exist_ok=True)
+    project = Project(
+        audio=folder / "dars.mp3",
+        mode="lecture",
+        captions=[CaptionCue(1.0, 2.0, "line")],
+        cards=cards or [],
+    )
+    save_project(project, folder / "dars.qalun.json")
+    return ReviewSession(load_project(folder / "dars.qalun.json"), duration=100.0), folder
+
+
+def test_a_part_set_to_none_keeps_its_remembered_settings(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    """Probe S2 (review M2): None changes the default's kind, not its name, phrase or link."""
+    from qurantext.gui.prefs import KEEP_DEFAULT
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+    from qurantext.jobs.episode_assets import GeneratedOutro
+
+    remembered = GeneratedOutro(link="example.org/dars", platform="telegram")
+    prefs.save_default_episode(KEEP_DEFAULT, KEEP_DEFAULT, outro_generated=remembered)
+    dialog = _generated_dialog(
+        episode_lecture, prefs, tmp_path, monkeypatch, outro=GeneratedOutro(link="example.org/dars")
+    )
+    dialog.outro_kind.setCurrentIndex(dialog.outro_kind.findData("none"))
+    dialog.ok_button.click()
+    # M9: OK after Generated → None: none in the session, none as the default's kind.
+    assert episode_lecture.episode.outro_generated is None
+    assert episode_lecture.episode.outro is None
+    assert prefs.default_episode_kinds[1] == "none" and prefs.default_outro_generated is None
+    assert prefs.remembered_outro_generated == remembered
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    dialog.outro_kind.setCurrentIndex(dialog.outro_kind.findData("generated"))
+    assert dialog.outro_link.text() == "example.org/dars"
+    assert dialog.outro_platform.currentData() == "telegram"
+    # Generated again without touching a field: the remembered settings, as the default.
+    dialog.ok_button.click()
+    assert prefs.default_episode_kinds[1] == "generated"
+    assert prefs.default_outro_generated == remembered
+
+
+def test_a_generated_part_with_nothing_to_show_is_refused(
+    qt_app, tmp_path, prefs, monkeypatch
+) -> None:
+    """Probe S3 (review M3): no words and no link would fail after the lecture's render."""
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+
+    session, folder = _probe_lecture(tmp_path, monkeypatch)
+    dialog = EpisodeDialog(session, prefs=prefs, job_dirs=[folder])
+    dialog.outro_kind.setCurrentIndex(dialog.outro_kind.findData("generated"))
+    dialog.outro_phrase.setCurrentIndex(dialog.outro_phrase.count() - 1)  # Custom…, empty
+    assert not dialog.ok_button.isEnabled()
+    assert dialog.outro_warning.text() == t("episode.gen.empty_outro")
+    dialog.outro_link.setText("example.org")
+    assert dialog.ok_button.isEnabled() and not _shown(dialog.outro_warning)
+    dialog.intro_kind.setCurrentIndex(dialog.intro_kind.findData("generated"))
+    assert dialog.intro_title.text() == "—", "no card names a surah"
+    assert not dialog.ok_button.isEnabled()
+    assert dialog.intro_warning.text() == t("episode.gen.empty_intro")
+    dialog._keep()  # a key press past the disabled button
+    assert dialog.result() != dialog.DialogCode.Accepted and session.episode.is_empty
+    dialog.intro_name_edit.setText("دروس")
+    assert dialog.ok_button.isEnabled() and not _shown(dialog.intro_warning)
 
 
 def test_ok_without_a_change_keeps_a_length_the_fields_would_round(
@@ -2681,6 +2818,101 @@ def test_cancel_changes_nothing_for_generated_parts(
     assert episode_lecture.episode == before and not episode_lecture.dirty
     assert episode_lecture.undo() and not episode_lecture.can_undo, "only the setup's step"
     assert prefs.default_episode_kinds == ("none", "none")
+
+
+def test_an_address_that_could_pass_for_another_or_cannot_be_drawn_is_warned(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    """Probe S6 (review M4): the written address is checked like the name and the phrase."""
+    from qurantext.core.title_cards import missing_glyphs
+    from qurantext.gui.i18n import t
+
+    dialog = _generated_dialog(episode_lecture, prefs, tmp_path, monkeypatch)
+    dialog.outro_link.setText("пример.рф/уроки")
+    assert dialog.ok_button.isEnabled(), "a real site may be named so: a warning, not a refusal"
+    chars = missing_glyphs("جزاكم الله خيرًا" + "пример.рф/уроки")
+    assert chars and dialog.outro_warning.text() == t("episode.gen.missing_glyphs", chars=chars)
+    dialog.outro_link.setText("pаypal.com")  # a Cyrillic «а»
+    assert t("episode.link_warning.mixed") in dialog.outro_warning.text()
+    dialog.outro_link.setText("рау.com")  # all Cyrillic, all Latin-looking
+    assert t("episode.link_warning.confusable") in dialog.outro_warning.text()
+    dialog.outro_link.setText("example.org/dars")
+    assert not _shown(dialog.outro_warning)
+
+
+def test_a_refused_link_cannot_be_kept_by_any_way_round_the_button(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    """Review M9 and probe S5: _keep itself refuses, and Return does not accept."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    dialog = _generated_dialog(episode_lecture, prefs, tmp_path, monkeypatch)
+    before = episode_lecture.episode
+    dialog.show()
+    dialog.outro_link.setFocus()
+    dialog.outro_link.setText("ftp://example.org")
+    QTest.keyClick(dialog.outro_link, Qt.Key.Key_Return)
+    assert dialog.isVisible() and dialog.result() != dialog.DialogCode.Accepted
+    dialog._keep()
+    assert dialog.result() != dialog.DialogCode.Accepted
+    assert episode_lecture.episode == before
+    assert prefs.default_episode_kinds == ("none", "none")
+    dialog.reject()
+
+
+def test_closing_the_dialog_stops_a_preview_waiting_for_typing(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    """Review M9: no preview is drawn for a dialog already closed."""
+    dialog = _generated_dialog(episode_lecture, prefs, tmp_path, monkeypatch)
+    dialog.intro_name_edit.setText("اسم آخر")
+    assert dialog._preview_timer.isActive()
+    dialog.reject()
+    assert not dialog._preview_timer.isActive()
+
+
+def test_the_dialog_fits_a_laptop_screen_with_warnings(qt_app, tmp_path, prefs, monkeypatch):
+    """Probe S7 (review M10): Arabic, portrait, both parts Generated, a warning under each."""
+    from qurantext.gui.language import apply_language
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+    from qurantext.jobs.episode_assets import EpisodeChoice, GeneratedIntro, GeneratedOutro
+
+    apply_language(qt_app, "ar")
+    session, folder = _probe_lecture(tmp_path, monkeypatch)
+    session.set_episode(
+        EpisodeChoice(
+            intro_generated=GeneratedIntro(name="Привет"),
+            outro_generated=GeneratedOutro(phrase="Спасибо", link="example.org/" + "a" * 500),
+        )
+    )
+    dialog = EpisodeDialog(session, prefs=prefs, job_dirs=[folder])
+    dialog.flush_previews()
+    assert _shown(dialog.intro_warning) and _shown(dialog.outro_warning)
+    hint = dialog.sizeHint()
+    assert hint.height() <= 700, hint
+    assert hint.width() <= 1000, "a long address does not widen the dialog"
+    dialog.reject()
+
+
+def test_a_dialog_opened_after_a_card_change_shows_the_new_campaign(
+    qt_app, tmp_path, prefs, monkeypatch
+) -> None:
+    """Review M6: the shown and copied links are read from the cards as they are on opening."""
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+    from qurantext.jobs.episode_assets import EpisodeChoice, GeneratedOutro
+
+    card = {"surah_num": 25, "surah_name": "الفرقان", "full_text": "وَقَالُواْ", "confidence": 0.9}
+    cards = [dict(card, from_ayah=44, to_ayah=44, start_time=1.0, end_time=4.0)]
+    session, folder = _probe_lecture(tmp_path, monkeypatch, cards=cards)
+    session.set_episode(EpisodeChoice(outro_generated=GeneratedOutro(link="example.org")))
+    dialog = EpisodeDialog(session, prefs=prefs, job_dirs=[folder])
+    assert "utm_campaign=qalun-025-044-044" in dialog.outro_tracked.text()
+    dialog.reject()
+    session.project.cards.append(dict(card, from_ayah=49, to_ayah=49, start_time=6.0, end_time=9.0))
+    dialog = EpisodeDialog(session, prefs=prefs, job_dirs=[folder])
+    assert "utm_campaign=qalun-025-044-049" in dialog.outro_tracked.text()
+    assert "utm_campaign=qalun-025-044-049" in dialog._description_link
 
 
 def test_the_generated_fields_mirror_in_arabic_and_links_stay_left_to_right(

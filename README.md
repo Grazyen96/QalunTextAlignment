@@ -172,22 +172,32 @@ YouTube, Instagram, Facebook, TikTok, Telegram or WhatsApp), `utm_medium=video`,
 `utm_content=outro-qr`, and `utm_campaign` naming the lecture
 (`qalun-025-044-049`: surah and ayat) unless your link already has a campaign of
 its own. Your link's other parameters and its `#fragment` are kept. The dialog
-shows this tracked link as it changes, with **Copy** to put it in the video's
-description too. Change the platform for the next upload and render again: the
-outro is made again with the new source.
+shows this tracked link as it changes. **Copy** gives the same link for the
+video's description, with `utm_content=description` instead, so description
+clicks and QR scans are counted apart in your analytics. The campaign follows
+the lecture's cards, so copy the link once they are final. Change the platform
+for the next upload and render again: the outro is made again with the new
+source.
 
 **Why the written address has no tracking.** Under the code Qalun writes the
 plain address, `example.org/dars`, without the scheme or any parameter: short
 enough for a viewer to read and type. Visits typed from it arrive without UTM
-parameters and show as direct traffic in your analytics, so comparing them with
-the QR code's visits tells you how many viewers typed the address rather than
-scanned it.
+parameters and show as direct traffic in your analytics, apart from the QR
+code's and the description's visits.
 
 The dialog refuses what is not a web link (only `http` and `https`, a real host
 name, no user name or password) and says why; leave the link empty for an outro
-without a QR code. It warns, too, when a link is too long for a QR code phones
-can read at the lecture's size, and when the name or phrase has letters the
-title font (Amiri) cannot draw.
+without a QR code. It refuses a generated part with nothing to show, too. It
+warns when a link is too long for a QR code phones can read at the size the
+next render makes (the job's preset), when the name, the phrase or the written
+address has letters the title font (Amiri) cannot draw, and when the address
+could pass for another site (a Cyrillic letter among Latin ones, say).
+
+New lectures start with the intro and outro you last chose. Only what you change
+in the dialog becomes the default, field by field: re-exporting an old lecture
+for another platform changes the default platform, not the default link. A part
+you set to None or My clip keeps its generated settings for the next time it is
+Generated.
 
 **More options**, folded away since most jobs don't need them: a Quran text
 other than the certified one that ships with the app, subtitles burned into

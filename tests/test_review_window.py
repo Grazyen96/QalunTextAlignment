@@ -2151,6 +2151,20 @@ def test_a_cancelled_episode_dialog_changes_nothing(qt_app, tmp_path, monkeypatc
     assert window.session.episode.is_empty and not window.session.can_undo
 
 
+def test_a_closed_episode_dialog_is_freed(qt_app, tmp_path, monkeypatch) -> None:
+    """Probe S8 (review M8): each opening does not leave a hidden dialog behind."""
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+
+    window = _lecture_window(qt_app, tmp_path)
+    _episode_answers(monkeypatch, tmp_path, accept=False)
+    for _ in range(3):
+        window.episode_button.click()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert window.findChildren(EpisodeDialog) == []
+
+
 def test_episode_on_follows_undo_redo_and_discard(qt_app, tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
     window = _lecture_window(qt_app, tmp_path)

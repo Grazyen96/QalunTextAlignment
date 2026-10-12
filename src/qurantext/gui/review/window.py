@@ -950,12 +950,17 @@ class ReviewWindow(QMainWindow):
         if self._rendering or not self._is_lecture():
             return
         dialog = EpisodeDialog(self.session, prefs=self._prefs, parent=self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-        # OK made the edit itself (the clips copied beside the project first).
-        if dialog.default_error:
-            self.statusBar().showMessage(dialog.default_error, 8000)
-        self._sync_state()
+        try:
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            # OK made the edit itself (the clips copied beside the project first).
+            if dialog.default_error:
+                self.statusBar().showMessage(dialog.default_error, 8000)
+            self._sync_state()
+        finally:
+            # Parented to the window, a closed dialog would live as long as it,
+            # with its previews and a hold on the session.
+            dialog.deleteLater()
 
     def show_notices(self, notices: tuple[str, ...] | list[str]) -> None:
         """Keep *notices* (what the job that made this project could not do) in view."""

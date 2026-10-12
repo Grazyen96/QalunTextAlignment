@@ -459,3 +459,60 @@ def test_text_that_needs_more_than_that_still_wraps_at_the_larger_size():
     # The same fit with a start it can keep to within 70 % stays on one line.
     near = _fit_text(text, TEXT_FONT_BOLD_PATH, width, 400, round(one.font.size / 0.75), 12, 2)
     assert near.lines == (text,)
+
+
+def test_a_pasted_1800_character_path_is_cut_short_quickly():
+    """Review M5: the cut is found by galloping and halving, not one character at a time."""
+    import time
+
+    from qurantext.config.paths import TEXT_FONT_PATH
+    from qurantext.core import title_cards
+    from qurantext.core.frame_renderer import load_font
+
+    font = load_font(TEXT_FONT_PATH, 24)
+    line = "example.org/" + "a" * 1800
+    measured = []
+    real = title_cards._bbox
+
+    def counted(text, *args):
+        measured.append(len(text))
+        return real(text, *args)
+
+    title_cards._ellipsize(line, font, 300, "ltr")  # warm the font
+    best = float("inf")
+    for _ in range(3):
+        start = time.perf_counter()
+        cut = title_cards._ellipsize(line, font, 300, "ltr")
+        best = min(best, time.perf_counter() - start)
+    assert best < 0.05, f"{best * 1000:.0f} ms"
+    assert cut.endswith("…") and cut.startswith("example.org/a")
+    box = real(cut, font, "ltr")
+    assert box[2] - box[0] <= 300
+    longer = line[: len(cut)] + "…"  # one more character does not fit
+    box = real(longer, font, "ltr")
+    assert box[2] - box[0] > 300
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(title_cards, "_bbox", counted)
+        title_cards._ellipsize(line, font, 300, "ltr")
+    assert len(measured) <= 30, len(measured)
+    assert sum(1 for n in measured if n > 200) <= 1, "only the whole line is measured long"
+
+
+def test_a_long_link_s_frame_and_fit_check_stay_fast():
+    """A preview and its fit check, as the dialog draws them, for a 1,800-character path."""
+    import time
+
+    from qurantext.core.title_cards import qr_fits
+    from qurantext.core.tracked_link import readable_link, tracked_link
+
+    link = "example.org/" + "a" * 1800
+    spec = OutroSpec(
+        phrase="جزاكم الله خيرًا",
+        link_text=readable_link(link),
+        qr_url=tracked_link(link, platform="youtube", campaign="qalun-lecture"),
+    )
+    render_title_frame(spec, NIGHT_GOLD, 320, 569, 3.0)  # encodes the code once
+    start = time.perf_counter()
+    render_title_frame(spec, NIGHT_GOLD, 320, 569, 3.0)
+    qr_fits(spec, 1080, 1920)
+    assert time.perf_counter() - start < 0.5

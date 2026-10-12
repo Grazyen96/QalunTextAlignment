@@ -264,12 +264,17 @@ this is the only place anyone hears each platform's build recognise speech.
       `episode.gen.seconds` («المدة (ث)»), `episode.gen.phrase` («عبارة الختام»),
       `episode.gen.custom` («عبارة أخرى…»), `episode.gen.link` («الرابط»),
       `episode.gen.platform` («النشر على»), `episode.gen.tracked` («الرابط داخل رمز QR»)
-      and its tooltip `episode.gen.tracked.tip`, `episode.gen.copy` («انسخ»),
-      `episode.gen.readable` («يُكتب تحت الرمز: …») and its tooltip
-      `episode.gen.readable.tip` («ليس فيه تتبّع، فتظهر زياراته زياراتٍ مباشرة»: is
-      «زيارات مباشرة» what analytics calls direct traffic in Arabic?); the warnings
-      `episode.gen.qr_too_big` and `episode.gen.missing_glyphs` («لا يستطيع خط العنوان
-      رسم …: ستظهر مربعاتٍ فارغة»); the link errors `episode.link_invalid` («أدخل عنوان
+      and its tooltip `episode.gen.tracked.tip`, `episode.gen.copy` («انسخ») and its
+      tooltip `episode.gen.copy.tip` («هو الرابط نفسه، معلَّمًا بأنه من الوصف، فتُحسب نقراته
+      منفصلةً عن مسح رمز QR»), `episode.gen.readable` («يُكتب تحت الرمز: …») and its tooltip
+      `episode.gen.readable.tip` («ليس فيه تتبّع، فتظهر زياراته زياراتٍ مباشرة، منفصلةً عن
+      زيارات الرمز وزيارات الوصف»: is «زيارات مباشرة» what analytics calls direct traffic in
+      Arabic?); the refusals `episode.gen.empty_intro` («ليس في المقدمة ما تعرضه») and
+      `episode.gen.empty_outro`; the warnings `episode.gen.qr_too_big`,
+      `episode.gen.missing_glyphs` («لا يستطيع خط العنوان رسم …: ستظهر مربعاتٍ فارغة»),
+      `episode.link_warning.mixed` («يخلط هذا العنوان أبجديات في اسم واحد») and
+      `episode.link_warning.confusable` («مكتوب بحروف تشبه اللاتينية وليست منها»); the link
+      errors `episode.link_invalid` («أدخل عنوان
       ويب يبدأ بـ http:// أو https://»), `episode.link_invalid.spaces`,
       `episode.link_invalid.slashes`, `episode.link_invalid.userinfo`,
       `episode.link_invalid.host` and `episode.link_invalid.port`; and the platform
