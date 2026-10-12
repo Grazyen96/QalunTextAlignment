@@ -2952,6 +2952,46 @@ def test_a_new_lecture_job_is_seeded_with_the_default_episode(tmp_path, monkeypa
     assert not [e for e in events if e.translated and e.stage == "detect" and "clip" in e.message]
 
 
+def test_new_lecture_is_seeded_with_generated_defaults(tmp_path, monkeypatch) -> None:
+    from qurantext.jobs.episode_assets import (
+        GeneratedIntro,
+        GeneratedOutro,
+        episode_dir_for,
+        project_episode,
+    )
+    from qurantext.jobs.project import load_project
+
+    intro, _outro = _default_clips(tmp_path)
+    jobs_module, spec = _lecture_setup(tmp_path, monkeypatch)
+    generated_intro = GeneratedIntro(name="دروس الشيخ أحمد", style="reveal")
+    generated_outro = GeneratedOutro(link="example.org/dars", platform="telegram", seconds=8)
+    # The intro's default clip is ignored for a part whose default is generated.
+    spec = replace(
+        spec,
+        episode_defaults=(str(intro), None),
+        episode_generated=(generated_intro, generated_outro),
+    )
+    events: list[ProgressEvent] = []
+    project = jobs_module.run_matching(spec, progress=events.append)
+
+    saved = load_project(project.path)
+    choice = project_episode(saved)
+    assert choice.intro_generated == generated_intro
+    assert choice.outro_generated == generated_outro
+    assert choice.intro is None and choice.outro is None
+    assert set(saved.episode) == {"intro_generated", "outro_generated"}
+    assert not episode_dir_for(project.path).exists(), "nothing is copied"
+    assert not [e for e in events if e.translated and e.stage == "detect" and "clip" in e.message]
+
+    # A recitation is never seeded, generated or not.
+    (tmp_path / "rec").mkdir()
+    rec_module, rec_spec = _rematch_setup(tmp_path / "rec", monkeypatch)
+    rec = rec_module.run_matching(
+        replace(rec_spec, episode_generated=(generated_intro, generated_outro))
+    )
+    assert load_project(rec.path).episode == {}
+
+
 def test_a_missing_default_clip_is_skipped_with_a_notice(tmp_path, monkeypatch) -> None:
     from qurantext.gui.i18n import t
     from qurantext.jobs.episode_assets import project_episode

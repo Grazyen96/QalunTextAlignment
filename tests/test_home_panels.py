@@ -1374,3 +1374,21 @@ def test_a_lecture_spec_carries_the_default_episode(
     assert panel.spec().episode_defaults == (str(stored), None)
     panel.recitation_button.setChecked(True)
     assert panel.spec().episode_defaults == (None, None)
+
+
+def test_a_lecture_spec_carries_the_default_generated_parts(
+    qt_app, prefs, store, tmp_path, monkeypatch
+) -> None:
+    """A part whose default is generated reaches the job as its settings, not as a clip."""
+    from qurantext.jobs.episode_assets import GeneratedOutro
+
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    outro = GeneratedOutro(link="example.org", platform="instagram")
+    prefs.save_default_episode(None, None, outro_generated=outro)
+
+    panel = _panel(prefs, store)
+    panel.lecture_button.setChecked(True)
+    assert panel.spec().episode_generated == (None, outro)
+    assert panel.spec().episode_defaults == (None, None)
+    panel.recitation_button.setChecked(True)
+    assert panel.spec().episode_generated == (None, None)

@@ -25,7 +25,12 @@ from qurantext.jobs.episode import (
     episode_path_for,
     recitation_video,
 )
-from qurantext.jobs.episode_assets import project_episode, seed_project_episode
+from qurantext.jobs.episode_assets import (
+    GeneratedIntro,
+    GeneratedOutro,
+    project_episode,
+    seed_project_episode,
+)
 from qurantext.jobs.look_assets import seed_project_look
 from qurantext.jobs.project import (
     JobSettings,
@@ -97,6 +102,10 @@ class JobSpec:
     #: Their original file names, shown in the Episode dialog (the copies are
     #: named by their content); None when unknown.
     episode_default_names: tuple[str | None, str | None] = (None, None)
+    #: The default generated intro and outro settings, for a part whose
+    #: default is generated rather than a clip (it then has no clip); nothing
+    #: is copied for them. Like the clips, only a brand-new lecture uses them.
+    episode_generated: tuple[GeneratedIntro | None, GeneratedOutro | None] = (None, None)
 
     @property
     def settings(self) -> JobSettings:
@@ -320,11 +329,16 @@ def run_matching(
         # and a brand-new lecture with the default intro and outro.
         if spec.style:
             seed_project_look(project, destination, spec.style)
-        if spec.mode == "lecture" and any(spec.episode_defaults):
+        if spec.mode == "lecture" and (any(spec.episode_defaults) or any(spec.episode_generated)):
             intro, outro = (Path(clip) if clip else None for clip in spec.episode_defaults)
             # A default clip that is gone is left out, and said as the backup is.
             seeded = seed_project_episode(
-                project, destination, intro, outro, names=spec.episode_default_names
+                project,
+                destination,
+                intro,
+                outro,
+                names=spec.episode_default_names,
+                generated=spec.episode_generated,
             )
             for key, fmt in seeded:
                 said = t(key, part=t(f"episode.part.{fmt['part']}"))

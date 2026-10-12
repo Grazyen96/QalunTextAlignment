@@ -421,3 +421,112 @@ def test_a_default_name_of_the_wrong_shape_is_unknown(settings, name):
     prefs = Prefs(settings)
     assert prefs.default_episode[0] == Path("/abs/intro.mp4")
     assert prefs.default_episode_names == (None, None)
+
+
+# --- generated intro and outro defaults -------------------------------------------
+
+
+def test_generated_defaults_round_trip(tmp_path, monkeypatch):
+    from PySide6.QtCore import QSettings
+
+    from qurantext.jobs.episode_assets import GeneratedIntro, GeneratedOutro
+
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    path = str(tmp_path / "prefs.ini")
+    intro = GeneratedIntro(name="دروس الشيخ أحمد", style="rise", seconds=4.5)
+    outro = GeneratedOutro(phrase="بارك الله فيكم", link="example.org/dars", platform="whatsapp")
+    written = Prefs(QSettings(path, QSettings.Format.IniFormat))
+    assert written.default_intro_generated is None and written.default_outro_generated is None
+    assert written.default_episode_kinds == ("none", "none")
+    written.save_default_episode(None, None, intro_generated=intro, outro_generated=outro)
+
+    prefs = Prefs(QSettings(path, QSettings.Format.IniFormat))  # a fresh process reads it back
+    assert prefs.default_intro_generated == intro
+    assert prefs.default_outro_generated == outro
+    assert prefs.default_episode == (None, None)
+    assert prefs.default_episode_kinds == ("generated", "generated")
+
+    prefs.save_default_episode(None, None, intro_generated=None, outro_generated=None)
+    assert prefs.default_intro_generated is None and prefs.default_outro_generated is None
+
+
+def test_keep_default_leaves_generated_settings(settings, tmp_path, monkeypatch):
+    from qurantext.gui.prefs import KEEP_DEFAULT
+    from qurantext.jobs.episode_assets import GeneratedIntro, GeneratedOutro
+
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    prefs = Prefs(settings)
+    intro = GeneratedIntro(name="دروس")
+    outro = GeneratedOutro(link="example.org", platform="telegram")
+    prefs.save_default_episode(None, None, intro_generated=intro, outro_generated=outro)
+
+    # Only the outro changed in the dialog: the intro's settings are left as they are.
+    newer = GeneratedOutro(link="example.org/new", platform="facebook")
+    prefs.save_default_episode(KEEP_DEFAULT, KEEP_DEFAULT, outro_generated=newer)
+    assert prefs.default_intro_generated == intro
+    assert prefs.default_outro_generated == newer
+
+    # A change to neither part's settings, as the clip-only dialog makes, keeps both.
+    prefs.save_default_episode(KEEP_DEFAULT, KEEP_DEFAULT)
+    assert (prefs.default_intro_generated, prefs.default_outro_generated) == (intro, newer)
+
+    # None for one part's settings removes them, and only them.
+    prefs.save_default_episode(KEEP_DEFAULT, KEEP_DEFAULT, intro_generated=None)
+    assert prefs.default_intro_generated is None
+    assert prefs.default_outro_generated == newer
+
+
+def test_a_generated_default_replaces_a_clip_default_for_that_part(settings, tmp_path, monkeypatch):
+    from qurantext.gui.prefs import KEEP_DEFAULT
+    from qurantext.jobs.episode_assets import GeneratedIntro, GeneratedOutro
+
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    prefs = Prefs(settings)
+    intro, outro = tmp_path / "intro.mp4", tmp_path / "outro.mov"
+    intro.write_bytes(b"intro")
+    outro.write_bytes(b"outro")
+    prefs.save_default_episode(intro, outro, names=("Channel.mp4", None))
+    copy = prefs.default_episode[0]
+    assert copy.is_file()
+
+    # Generated for the intro: its clip goes (from the settings and the app's folder);
+    # the outro, not changed, keeps its clip.
+    generated = GeneratedIntro(name="دروس")
+    prefs.save_default_episode(KEEP_DEFAULT, KEEP_DEFAULT, intro_generated=generated)
+    assert prefs.default_intro_generated == generated
+    assert prefs.default_episode[0] is None and prefs.default_episode_names[0] is None
+    assert prefs.default_episode[1] is not None
+    assert prefs.default_episode_kinds == ("generated", "clip")
+    assert not copy.exists(), "a clip no default names any more is removed"
+
+    # And the reverse: a clip for the intro removes its generated settings.
+    prefs.save_default_episode(intro, KEEP_DEFAULT)
+    assert prefs.default_intro_generated is None and prefs.default_episode[0] is not None
+    assert prefs.default_episode_kinds == ("clip", "clip")
+
+    # None for a part's clip ends the part, generated settings and all.
+    prefs.save_default_episode(KEEP_DEFAULT, KEEP_DEFAULT, outro_generated=GeneratedOutro())
+    assert prefs.default_episode_kinds == ("clip", "generated")
+    prefs.save_default_episode(KEEP_DEFAULT, None)
+    assert prefs.default_episode_kinds == ("clip", "none")
+
+    # A hand-edited file holding both for one part reads as generated, with no clip.
+    import json
+
+    stored = json.loads(settings.value("default_episode"))
+    stored["intro_generated"] = {"name": "x"}
+    settings.setValue("default_episode", json.dumps(stored))
+    assert prefs.default_episode[0] is None
+    assert prefs.default_intro_generated == GeneratedIntro(name="x")
+
+
+@pytest.mark.parametrize("junk", ["fade", 3, ["x"], None])
+def test_junk_generated_defaults_are_none(settings, junk):
+    import json
+
+    settings.setValue(
+        "default_episode", json.dumps({"intro_generated": junk, "outro_generated": junk})
+    )
+    prefs = Prefs(settings)
+    assert prefs.default_intro_generated is None and prefs.default_outro_generated is None
+    assert prefs.default_episode_kinds == ("none", "none")

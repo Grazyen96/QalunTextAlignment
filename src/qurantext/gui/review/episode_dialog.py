@@ -403,6 +403,10 @@ class EpisodeDialog(QDialog):
                 outro,
                 intro_name=pending.intro_name,
                 outro_name=pending.outro_name,
+                # A generated part this dialog does not show yet stays as it is
+                # unless the person chose or removed a clip for it here.
+                intro_generated=None if self._intro.touched else current.intro_generated,
+                outro_generated=None if self._outro.touched else current.outro_generated,
             )
         )
         rows = (self._intro, self._outro)

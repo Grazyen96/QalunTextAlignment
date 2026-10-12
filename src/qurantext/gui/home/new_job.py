@@ -770,6 +770,11 @@ class NewJobPanel(QWidget):
             episode_default_names=(
                 (None, None) if recitation else self._prefs.default_episode_names
             ),
+            episode_generated=(
+                (None, None)
+                if recitation
+                else (self._prefs.default_intro_generated, self._prefs.default_outro_generated)
+            ),
         )
 
     def _episode_defaults(self) -> tuple[str | None, str | None]:
