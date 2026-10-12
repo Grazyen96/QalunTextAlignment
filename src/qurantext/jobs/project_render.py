@@ -68,8 +68,14 @@ def render_project(
     studied_surah: int | None = None,
     progress: ProgressCallback | None = None,
     cancel: CancelToken | None = None,
+    save: bool = True,
 ) -> ExportResult:
     """Render *project*, remember the render, and save the project if it has a file.
+
+    *save* False records the render on *project* but leaves its file alone: a
+    caller that loaded the project for this render alone (the episode's
+    recitation) writes the record onto a fresh load instead, so a correction
+    saved meanwhile by an open review is not overwritten by this copy.
 
     The cards, captions, style and output choices are copied before anything runs, and the
     render is made and hashed from that copy. A render can take minutes in a
@@ -145,7 +151,7 @@ def render_project(
         fps=rendered.fps if rendered is not None else None,
         subtitles=subtitles,
     )
-    if project.path is not None:
+    if save and project.path is not None:
         save_project(project, project.path)
     return result
 

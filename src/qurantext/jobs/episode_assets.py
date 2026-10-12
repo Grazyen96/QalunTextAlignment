@@ -73,15 +73,16 @@ def import_episode_clip(project_path: Path, source: Path) -> Path:
     return copy_by_content(source, episode_dir_for(project_path), suffixes=EPISODE_SUFFIXES)
 
 
-def _project_dir(project: Project) -> Path:
-    return Path(project.path).parent if project.path is not None else Path.cwd()
+def _project_dir(project: Project) -> Path | None:
+    return Path(project.path).parent if project.path is not None else None
 
 
 def project_episode(project: Project) -> EpisodeChoice:
     """The project's episode, with each path resolved against the project folder.
 
     The file can be hand-edited or written by a newer build, so a value that is
-    not a non-empty string reads as "not chosen" rather than failing.
+    not a non-empty string reads as "not chosen" rather than failing, and so
+    does an intro or outro whose type is not one of :data:`EPISODE_SUFFIXES`.
     """
     episode = project.episode if isinstance(project.episode, dict) else {}
     folder = _project_dir(project)
@@ -90,7 +91,10 @@ def project_episode(project: Project) -> EpisodeChoice:
         value = episode.get(key)
         if not isinstance(value, str) or not value:
             return None
-        return _resolve_path(value, folder)
+        path = _resolve_path(value, folder)
+        if key != "recitation" and path.suffix.lower() not in EPISODE_SUFFIXES:
+            return None
+        return path
 
     return EpisodeChoice(*(part(key) for key in _PART_KEYS))
 
@@ -102,12 +106,15 @@ def set_project_episode(
 
     Each path is stored relative to *project_dir* when given, else to the
     folder of ``project.path`` (a project not yet saved names the folder it
-    will be saved in), and absolute when it is outside that folder. A part not
+    will be saved in), and absolute when it is outside that folder or when no
+    folder is known: a project with no file and no *project_dir*. A part not
     chosen is removed rather than written as null, so an empty choice returns
     the episode, and with it the content hash, to what it was before any was
     chosen.
     """
     folder = Path(project_dir) if project_dir is not None else _project_dir(project)
+    # _store_path(..., None) is absolute: a relative path with nothing known to
+    # be relative to would be read later against the project's folder and miss.
     current = project.episode if isinstance(project.episode, dict) else {}
     episode = {k: v for k, v in current.items() if k not in _PART_KEYS}
     for key in _PART_KEYS:

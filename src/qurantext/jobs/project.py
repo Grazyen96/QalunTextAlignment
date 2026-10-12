@@ -232,9 +232,12 @@ class Project:
                 "export": export,
                 "review": self.review,
                 "render": render,
-                "episode": self.episode,
             }
         )
+        # Absent rather than empty when no episode was chosen, so a project
+        # that never chose one is written exactly as before the episode existed.
+        if self.episode:
+            data["episode"] = self.episode
         return data
 
     @classmethod

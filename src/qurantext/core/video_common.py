@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import json
 import math
 import shutil
@@ -438,6 +439,34 @@ def require_binary(binary_name: str, install_hint: str | None = None) -> str:
     hint = f" {install_hint}" if install_hint else ""
     where = " (looked beside the application and on PATH)" if bundled else " in PATH"
     raise RuntimeError(f"{binary_name} was not found{where}.{hint}")
+
+
+@functools.lru_cache(maxsize=8)
+def ffmpeg_filters(ffmpeg_path: str) -> frozenset[str]:
+    """The names of the filters the FFmpeg at *ffmpeg_path* was built with.
+
+    Asked once per binary. A build that cannot be asked reads as having none,
+    so a caller falls back to what needs no optional filter.
+    """
+    try:
+        out = subprocess.run(
+            [ffmpeg_path, "-hide_banner", "-filters"],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return frozenset()
+    # Lines read " TSC name   V->V   description" below a legend that ends in "---".
+    names = set()
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and "->" in parts[2]:
+            names.add(parts[1])
+    return frozenset(names)
 
 
 def get_audio_duration(audio_path: Path) -> float:

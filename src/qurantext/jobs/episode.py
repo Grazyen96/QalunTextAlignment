@@ -7,8 +7,17 @@ lecture's own size and frame rate: an intro filmed on a phone, upright or on
 its side, comes out upright inside black bars rather than stretched. FFmpeg
 applies a clip's rotation metadata as it decodes, so a portrait clip recorded
 as a rotated landscape stream arrives upright without help; the rotation is
-then removed from the joined video, which is upright throughout. A part with no
-sound gets silence of its own length, so the episode's audio is continuous.
+then removed from the joined video, which is upright throughout. A clip whose
+pixels are not square is shown at its display shape. An HDR clip (a phone's
+HLG or PQ video) is tone-mapped to ordinary BT.709 first, and the joined video
+carries no colour tags, as the lecture's own render does not: one HDR intro
+must not make players read the whole episode as HDR.
+
+Each part's sound is made exactly as long as the part: sound that starts after
+the picture keeps its delay, a short track is padded with silence and a part
+with none gets silence of its own. The parts' lengths therefore add up to the
+episode's, which is what puts the lecture, and its shifted subtitles, where
+:attr:`EpisodeResult.lecture_offset` says.
 
 The episode is written to ``<output>.part.mp4`` and renamed into place only
 when it is complete; a failure or a cancel removes the partial file. Errors
@@ -26,19 +35,23 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from qurantext.core.video_common import require_binary
-from qurantext.jobs.project import job_settings, load_project
+from qurantext.core.video_common import ffmpeg_filters, require_binary
+from qurantext.jobs.catalog import RENDERED, job_status
+from qurantext.jobs.project import Project, job_settings, load_project, save_project
 from qurantext.jobs.project_render import default_video_path, render_project
 from qurantext.utils.progress import CancelToken, JobCancelled, ProgressCallback, report
 
 __all__ = [
     "EpisodeError",
     "EpisodeResult",
+    "REQUIRED_FILTERS",
     "STAGE",
+    "TONE_MAP_FILTERS",
     "PartInfo",
     "assemble_episode",
     "episode_path_for",
     "probe_part",
+    "recitation_needs_render",
     "recitation_video",
 ]
 
@@ -51,6 +64,12 @@ STAGE = "render"
 _PROBE_TIMEOUT_S = 60
 #: How many of FFmpeg's last error lines a failed join reports.
 _ERROR_LINES = 5
+#: Transfer characteristics of HDR video: PQ (HDR10, Dolby Vision) and HLG.
+_HDR_TRANSFERS = frozenset({"smpte2084", "arib-std-b67"})
+#: Filters every join needs, beyond FFmpeg's ever-present scale/pad/concat.
+REQUIRED_FILTERS = ("apad", "setparams", "sidedata")
+#: Filters an HDR part is tone-mapped with; without them it is only untagged.
+TONE_MAP_FILTERS = ("zscale", "tonemap")
 #: The frame renderer's encoding, so the episode looks like the lecture inside it.
 _ENCODE_ARGS = (
     "-c:v",
@@ -92,6 +111,20 @@ class PartInfo:
     duration: float
     has_video: bool
     has_audio: bool
+    #: The stream index of the picture: the first video that is not cover art.
+    video_stream: int = 0
+    #: The stream index of the sound: the first audio track FFmpeg can decode.
+    audio_stream: int | None = None
+    #: The picture's transfer characteristic as ffprobe names it, when tagged.
+    color_transfer: str | None = None
+    color_primaries: str | None = None
+    color_space: str | None = None
+    #: The picture's pixels are not square (an anamorphic recording).
+    anamorphic: bool = False
+
+    @property
+    def is_hdr(self) -> bool:
+        return self.color_transfer in _HDR_TRANSFERS
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,19 +143,55 @@ def episode_path_for(lecture_video: Path) -> Path:
     return lecture_video.with_name(f"{lecture_video.stem} – episode.mp4")
 
 
+def _same_file(a: Path, b: Path) -> bool:
+    """Whether *a* and *b* name one file, also on a file system that ignores case."""
+    a, b = Path(a), Path(b)
+    if a.resolve() == b.resolve():
+        return True
+    try:
+        return a.exists() and b.exists() and a.samefile(b)
+    except OSError:
+        return False
+
+
+def recitation_needs_render(project: Project, *, avoid: Path | None = None) -> bool:
+    """Whether :func:`recitation_video` would render *project* before using it.
+
+    It reuses the recorded render only when the job list calls it current
+    (nothing it was made from, nor the job's size or subtitles choice, has
+    changed since), its file is still there, and that file is not *avoid* —
+    the lecture's own video, which a recitation whose recording has the same
+    name may have been rendered over. The Episode dialog says "will be rendered
+    first" by this same rule.
+    """
+    render = project.render
+    if render is None or not render.get("video") or job_status(project) != RENDERED:
+        return True
+    video = Path(render["video"])
+    if not video.is_file():
+        return True
+    return avoid is not None and _same_file(video, avoid)
+
+
 def recitation_video(
     project_path: Path,
     *,
+    avoid: Path | None = None,
     progress: ProgressCallback | None = None,
     cancel: CancelToken | None = None,
 ) -> Path:
     """The current video of the recitation job at *project_path*, rendered first if need be.
 
-    A recorded render is used when its file is still there and nothing it was
-    made from has changed since. Otherwise the recitation is rendered again,
-    with its own job settings and no subtitle files, to the file a render from
-    the window would write; :func:`render_project` saves the recitation's
-    project with the new record, so the job list sees it as rendered.
+    A recorded render is used when :func:`recitation_needs_render` allows it.
+    Otherwise the recitation is rendered again with its own job settings and no
+    subtitle files, to the file a render from the window would write — unless
+    that is *avoid* (the lecture's video, when both recordings share a name),
+    in which case to ``<stem> – recitation.mp4`` beside it.
+
+    The render is made from the project as loaded here, but its record is
+    written onto the project file as it is when the render ends: a correction
+    saved meanwhile from an open review is kept, and reads as made after the
+    render (stale) rather than being overwritten.
 
     Raises :class:`EpisodeError` (``episode.error.recitation``) when the
     project is missing or unreadable, is not a recitation, or fails to render.
@@ -137,27 +206,50 @@ def recitation_video(
         raise EpisodeError(
             "episode.error.recitation", reason=f"{path.name} is not a recitation job."
         )
-    render = project.render
-    if render is not None and render.get("video") and not project.render_is_stale:
-        video = Path(render["video"])
-        if video.is_file():
-            return video
+    if not recitation_needs_render(project, avoid=avoid):
+        assert project.render is not None
+        return Path(project.render["video"])
+    target = default_video_path(project)
+    if avoid is not None and _same_file(target, avoid):
+        target = target.with_name(f"{target.stem} – recitation.mp4")
     settings = job_settings(project)
     try:
         result = render_project(
             project,
-            default_video_path(project),
+            target,
             preset=settings.preset,
-            subtitles="sidecar",
+            # The job's own choice, so the job list does not call the render
+            # "changed since"; a recitation has no live captions to burn.
+            subtitles=settings.subtitles,
             formats=(),
             progress=progress,
             cancel=cancel,
+            save=False,
         )
     except JobCancelled:
         raise
     except Exception as error:  # any render failure is the recitation's, said in a sentence
         raise EpisodeError("episode.error.recitation", reason=str(error)) from error
-    return Path(result.video)
+    video = Path(result.video)
+    _record_on_the_file(path, project.render, video)
+    return video
+
+
+def _record_on_the_file(path: Path, record: dict[str, Any] | None, video: Path) -> None:
+    """Write the render *record* of *video* onto the project file as it is now.
+
+    The video exists whatever happens here; the record only spares the next
+    episode a render. A project that cannot be read back or saved (moved,
+    deleted, a full disk) is left as it is, and the next episode renders again.
+    """
+    if record is None or not record.get("video") or not _same_file(record["video"], video):
+        return
+    try:
+        fresh = load_project(path)
+        fresh.render = dict(record)
+        save_project(fresh, path)
+    except (OSError, ValueError, KeyError, TypeError):
+        return
 
 
 def _duration(value: Any) -> float | None:
@@ -168,11 +260,88 @@ def _duration(value: Any) -> float | None:
     return seconds if math.isfinite(seconds) and seconds > 0 else None
 
 
+def _tag_duration(stream: dict[str, Any]) -> float | None:
+    """A Matroska stream's ``DURATION`` tag (``00:01:02.500000000``) in seconds."""
+    tags = stream.get("tags") or {}
+    value = next((v for k, v in tags.items() if str(k).upper() == "DURATION"), None)
+    if not isinstance(value, str):
+        return None
+    try:
+        hours, minutes, seconds = value.strip().split(":")
+        return _duration(int(hours) * 3600 + int(minutes) * 60 + float(seconds))
+    except ValueError:
+        return None
+
+
+def _packet_duration(ffprobe: str, path: Path, stream: int, start: float) -> float | None:
+    """The end of *stream*'s last packet, for a file that states no length.
+
+    A WebM recorded in a browser, or anything written as it went, has no
+    duration in its header; reading every packet's time is the honest answer.
+    """
+    try:
+        out = subprocess.run(
+            [
+                ffprobe,
+                "-v",
+                "error",
+                "-select_streams",
+                str(stream),
+                "-show_entries",
+                "packet=pts_time,duration_time",
+                "-of",
+                "csv=p=0",
+                str(path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=_PROBE_TIMEOUT_S,
+        ).stdout
+    except (subprocess.SubprocessError, OSError):
+        return None
+    end = None
+    for line in out.splitlines():
+        fields = line.strip().split(",")
+        pts = _number(fields[0]) if fields else None
+        if pts is None:
+            continue
+        length = _number(fields[1]) if len(fields) > 1 else None
+        stop = pts + (length or 0.0)
+        end = stop if end is None else max(end, stop)
+    return _duration(end - start) if end is not None else None
+
+
+def _number(value: str) -> float | None:
+    try:
+        number = float(value)
+    except ValueError:
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _anamorphic(stream: dict[str, Any]) -> bool:
+    num, _, den = str(stream.get("sample_aspect_ratio") or "").partition(":")
+    try:
+        n, d = int(num), int(den)
+    except ValueError:
+        return False
+    return n > 0 and d > 0 and n != d
+
+
+def _decodable(stream: dict[str, Any]) -> bool:
+    return str(stream.get("codec_name") or "none") != "none"
+
+
 def probe_part(path: Path) -> PartInfo:
     """Read *path*'s length and streams with ffprobe.
 
-    Raises :class:`EpisodeError` with ``episode.error.missing`` when the file is
-    not there, and with ``episode.error.not_video`` when ffprobe cannot read it,
+    The length is the container's, else the picture stream's, else its
+    Matroska ``DURATION`` tag, else the end of its last packet. Raises
+    :class:`EpisodeError` with ``episode.error.missing`` when the file is not
+    there, and with ``episode.error.not_video`` when ffprobe cannot read it,
     it holds no picture (an audio file's cover art is not one) or it has no
     length.
     """
@@ -196,48 +365,100 @@ def probe_part(path: Path) -> PartInfo:
         data = json.loads(completed.stdout or "{}")
     except (subprocess.SubprocessError, OSError, ValueError) as error:
         raise EpisodeError("episode.error.not_video", name=path.name) from error
-    streams = data.get("streams") if isinstance(data, dict) else None
-    streams = [s for s in streams or [] if isinstance(s, dict)]
+    if not isinstance(data, dict):
+        raise EpisodeError("episode.error.not_video", name=path.name)
+    streams = [s for s in data.get("streams") or [] if isinstance(s, dict)]
     video = next(
         (
             s
             for s in streams
             if s.get("codec_type") == "video"
+            and _decodable(s)
             and not (s.get("disposition") or {}).get("attached_pic")
         ),
         None,
     )
-    if video is None:
+    if video is None or not isinstance(video.get("index"), int):
         raise EpisodeError("episode.error.not_video", name=path.name)
-    duration = _duration((data.get("format") or {}).get("duration")) or _duration(
-        video.get("duration")
+    audio = next(
+        (
+            s
+            for s in streams
+            if s.get("codec_type") == "audio" and _decodable(s) and isinstance(s.get("index"), int)
+        ),
+        None,
+    )
+    fmt = data.get("format") or {}
+    duration = (
+        _duration(fmt.get("duration"))
+        or _duration(video.get("duration"))
+        or _tag_duration(video)
+        or _packet_duration(
+            ffprobe, path, video["index"], _number(str(fmt.get("start_time"))) or 0.0
+        )
     )
     if duration is None:
         raise EpisodeError("episode.error.not_video", name=path.name)
+
+    def tag(key: str) -> str | None:
+        value = video.get(key)
+        return value if isinstance(value, str) and value not in ("", "unknown") else None
+
     return PartInfo(
         path=path,
         duration=duration,
         has_video=True,
-        has_audio=any(s.get("codec_type") == "audio" for s in streams),
+        has_audio=audio is not None,
+        video_stream=video["index"],
+        audio_stream=audio["index"] if audio is not None else None,
+        color_transfer=tag("color_transfer"),
+        color_primaries=tag("color_primaries"),
+        color_space=tag("color_space"),
+        anamorphic=_anamorphic(video),
+    )
+
+
+def _tone_map(info: PartInfo) -> str:
+    """Filters that turn an HDR picture into ordinary 8-bit BT.709.
+
+    The input's transfer is named from the probe; primaries and matrix fall
+    back to BT.2020, which every HDR format uses, when the clip does not say.
+    """
+    given = f"tin={info.color_transfer}"
+    if info.color_primaries is None:
+        given += ":pin=bt2020"
+    if info.color_space is None:
+        given += ":min=2020_ncl"
+    return (
+        f"zscale={given}:t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,"
+        "tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p,"
     )
 
 
 def _filter_graph(
-    infos: list[PartInfo], width: int, height: int, fps: int
+    infos: list[PartInfo], width: int, height: int, fps: int, *, tone_map: bool = True
 ) -> tuple[list[str], str]:
-    """Extra lavfi inputs (silence for parts without audio) and the filter graph."""
+    """Extra lavfi inputs (silence for parts without audio) and the filter graph.
+
+    *tone_map* False leaves HDR pictures as they are (only untagged), for an
+    FFmpeg built without ``zscale``.
+    """
     extra_inputs: list[str] = []
     chains: list[str] = []
     labels: list[str] = []
     silence_index = len(infos)
     for i, info in enumerate(infos):
+        before = _tone_map(info) if tone_map and info.is_hdr else ""
+        if info.anamorphic:
+            before += "scale=trunc(iw*sar/2)*2:ih,setsar=1,"
         chains.append(
-            f"[{i}:v:0]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"[{i}:{info.video_stream}]{before}"
+            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
             f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps={fps},"
             f"format=yuv420p[v{i}]"
         )
-        if info.has_audio:
-            source = f"[{i}:a:0]"
+        if info.audio_stream is not None:
+            source = f"[{i}:{info.audio_stream}]"
         else:
             extra_inputs += [
                 "-f",
@@ -249,17 +470,25 @@ def _filter_graph(
             ]
             source = f"[{silence_index}:a:0]"
             silence_index += 1
+        # async + first_pts=0 keep sound that starts after the picture where it
+        # is, with silence before it; apad + atrim make it exactly the part's
+        # length, so the parts add up and nothing drifts after them.
         chains.append(
-            f"{source}aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-            f"atrim=0:{info.duration:.3f},asetpts=PTS-STARTPTS[a{i}]"
+            f"{source}aresample=48000:async=1:first_pts=0,"
+            "aformat=sample_fmts=fltp:channel_layouts=stereo,"
+            f"apad,atrim=0:{info.duration:.3f},asetpts=PTS-STARTPTS[a{i}]"
         )
         labels.append(f"[v{i}][a{i}]")
     # FFmpeg turns a rotated clip upright as it decodes, yet still hands its
     # rotation on to the joined frames, and the episode file would then tell
     # players to turn the whole video. Every part is upright by now: drop it.
+    # The first part's colour tags would likewise label the whole file (an HDR
+    # intro making the lecture read as HDR); the lecture's own render carries
+    # none, so neither does the episode.
     chains.append(
         f"{''.join(labels)}concat=n={len(infos)}:v=1:a=1[joined][a];"
-        "[joined]sidedata=mode=delete:type=DISPLAYMATRIX[v]"
+        "[joined]setparams=color_primaries=unknown:color_trc=unknown:colorspace=unknown,"
+        "sidedata=mode=delete:type=DISPLAYMATRIX[v]"
     )
     return extra_inputs, ";".join(chains)
 
@@ -272,13 +501,15 @@ def _last_lines(handle: Any, count: int) -> str:
 
 
 def _stop(process: subprocess.Popen[str]) -> None:
-    """End FFmpeg if it still runs, and reap it."""
+    """End FFmpeg at once if it still runs, and reap it.
+
+    Killed, not asked: the partial file is deleted anyway, and a polite stop
+    makes FFmpeg flush its encoder and rewrite the whole file for
+    ``+faststart`` first — seconds of work on a long lecture, while the person
+    who pressed Cancel waits.
+    """
     if process.poll() is None:
-        process.terminate()
-        try:
-            process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            process.kill()
+        process.kill()
     process.wait()
 
 
@@ -297,8 +528,9 @@ def assemble_episode(
 
     *lecture_index* is the lecture's place in *parts*; the result says how far
     into the episode it starts. Raises :class:`EpisodeError` for a part that is
-    missing or not a video and for a failed join, and ``JobCancelled`` when
-    *cancel* is set; either way no partial file is left.
+    missing or not a video and for a failed join (a folder that cannot be
+    written included), and ``JobCancelled`` when *cancel* is set; either way no
+    partial file is left.
     """
     if not parts:
         raise ValueError("An episode needs at least one part.")
@@ -311,11 +543,11 @@ def assemble_episode(
         ffmpeg = require_binary("ffmpeg", _INSTALL_HINT)
     except RuntimeError as error:
         raise EpisodeError("episode.error.ffmpeg", reason=str(error)) from error
+    tone_map = all(name in ffmpeg_filters(ffmpeg) for name in TONE_MAP_FILTERS)
 
     output = Path(output)
-    output.parent.mkdir(parents=True, exist_ok=True)
     partial = output.with_name(f"{output.name}.part.mp4")
-    extra_inputs, graph = _filter_graph(infos, width, height, fps)
+    extra_inputs, graph = _filter_graph(infos, width, height, fps, tone_map=tone_map)
     command = [ffmpeg, "-y", "-nostdin", "-v", "error", "-progress", "pipe:1", "-nostats"]
     for info in infos:
         command += ["-i", str(info.path)]
@@ -324,8 +556,13 @@ def assemble_episode(
 
     durations = tuple(info.duration for info in infos)
     total = sum(durations)
+    try:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        errors = tempfile.TemporaryFile()
+    except OSError as error:
+        raise EpisodeError("episode.error.ffmpeg", reason=str(error)) from error
     report(progress, STAGE, "Joining the episode", fraction=0.0)
-    with tempfile.TemporaryFile() as errors:
+    with errors:
         try:
             process = subprocess.Popen(
                 command,

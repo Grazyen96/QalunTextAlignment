@@ -762,3 +762,21 @@ class TestTranscriptionEngineChoice:
             .rstrip()
             .endswith("Rendering works; Transcription cannot run yet: see above.")
         )
+
+
+def test_an_ffmpeg_that_cannot_join_an_episode_is_named(monkeypatch) -> None:
+    """The join's filters are checked at the gate, not found missing in a person's first episode."""
+    full = frozenset({"apad", "setparams", "sidedata", "zscale", "tonemap"})
+    monkeypatch.setattr(preflight, "ffmpeg_filters", lambda path: full)
+    assert preflight._episode_join(release=True).status == Status.OK
+
+    monkeypatch.setattr(preflight, "ffmpeg_filters", lambda path: full - {"zscale"})
+    result = preflight._episode_join(release=True)
+    assert result.status == Status.WARN and "zscale" in result.detail and result.remedy
+
+    monkeypatch.setattr(preflight, "ffmpeg_filters", lambda path: full - {"sidedata"})
+    assert preflight._episode_join(release=False).status == Status.WARN
+    failed = preflight._episode_join(release=True)
+    assert failed.status == Status.FAIL and "sidedata" in failed.detail
+    report = format_report([failed], release=True)
+    assert "Cannot render" not in report, "the lecture still renders without it"

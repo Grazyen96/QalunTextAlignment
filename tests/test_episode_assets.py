@@ -102,3 +102,18 @@ def test_a_non_dict_episode_in_the_file_reads_as_empty(tmp_path, lecture_project
     data["episode"] = ["junk"]
     lecture_project.path.write_text(json.dumps(data), encoding="utf-8")
     assert load_project(lecture_project.path).episode == {}
+
+
+def test_an_intro_or_outro_of_an_unknown_type_is_ignored(lecture_project):
+    lecture_project.episode = {"intro": "notes.txt", "outro": "end.MOV", "recitation": "r.json"}
+    choice = project_episode(lecture_project)
+    assert choice.intro is None and choice.outro is not None and choice.recitation is not None
+
+
+def test_an_unsaved_project_stores_absolute_paths(tmp_path, monkeypatch):
+    """With no file and no folder given, a relative path would be read later against the wrong folder."""
+    monkeypatch.chdir(tmp_path)
+    project = Project(audio=tmp_path / "dars.mp3", mode="lecture")
+    clip = tmp_path / "clips" / "intro.mp4"
+    set_project_episode(project, EpisodeChoice(clip, None, None))
+    assert project.episode["intro"] == clip.resolve().as_posix()
