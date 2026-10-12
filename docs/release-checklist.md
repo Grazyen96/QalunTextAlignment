@@ -269,7 +269,8 @@ this is the only place anyone hears each platform's build recognise speech.
       منفصلةً عن مسح رمز QR»), `episode.gen.readable` («يُكتب تحت الرمز: …») and its tooltip
       `episode.gen.readable.tip` («ليس فيه تتبّع، فتظهر زياراته زياراتٍ مباشرة، منفصلةً عن
       زيارات الرمز وزيارات الوصف»: is «زيارات مباشرة» what analytics calls direct traffic in
-      Arabic?); the refusals `episode.gen.empty_intro` («ليس في المقدمة ما تعرضه») and
+      Arabic?); the line above OK and Cancel `episode.defaults_hint` («ما تغيّره هنا يصبح أيضًا الافتراضي
+      للدروس الجديدة»); the refusals `episode.gen.empty_intro` («ليس في المقدمة ما تعرضه») and
       `episode.gen.empty_outro`; the warnings `episode.gen.qr_too_big`,
       `episode.gen.missing_glyphs` («لا يستطيع خط العنوان رسم …: ستظهر مربعاتٍ فارغة»),
       `episode.link_warning.mixed` («يخلط هذا العنوان أبجديات في اسم واحد») and

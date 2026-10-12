@@ -51,7 +51,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtGui import QGuiApplication, QImage, QPixmap
+from PySide6.QtGui import QGuiApplication, QImage, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -373,6 +373,7 @@ class EpisodeDialog(QDialog):
             current.outro_generated or prefs.remembered_outro_generated or GeneratedOutro()
         )
         form.addRow(self.outro_fields)
+        _unclipped_labels(form)
         layout.addLayout(form)
         layout.addWidget(self.total_label)
 
@@ -380,6 +381,12 @@ class EpisodeDialog(QDialog):
         self.message_label.setWordWrap(True)
         self.message_label.setVisible(False)
         layout.addWidget(self.message_label)
+
+        #: OK keeps what changed as the default for new lectures; say so, quietly.
+        self.defaults_hint = QLabel(t("episode.defaults_hint"))
+        self.defaults_hint.setWordWrap(True)
+        self.defaults_hint.setForegroundRole(QPalette.ColorRole.PlaceholderText)
+        layout.addWidget(self.defaults_hint)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
@@ -402,7 +409,6 @@ class EpisodeDialog(QDialog):
         self._update_total()
         self._show_missing()
         self.flush_previews()
-        self.setMinimumWidth(480)
 
     def done(self, result: int) -> None:
         """Closing: a preview still waiting for typing to rest is not drawn."""
@@ -1000,7 +1006,21 @@ def _pixmap(image, size: QSize) -> QPixmap:  # noqa: ANN001 — a PIL image
     )
 
 
+def _unclipped_labels(form: QFormLayout) -> None:
+    """Keep each field label at least as wide as its text.
+
+    The label column then sizes to the longest label and the dialog grows to fit,
+    in every language, instead of the form squeezing a label until it is cut.
+    """
+    for row in range(form.rowCount()):
+        item = form.itemAt(row, QFormLayout.ItemRole.LabelRole)
+        label = item.widget() if item is not None else None
+        if isinstance(label, QLabel):
+            label.setMinimumWidth(label.sizeHint().width())
+
+
 def _beside_preview(box: QWidget, form: QFormLayout, preview: QLabel) -> QWidget:
+    _unclipped_labels(form)
     row = QHBoxLayout(box)
     # Set in from the part's own row, so the fields read as that part's.
     row.setContentsMargins(_FIELDS_INDENT, 0, 0, 0)
