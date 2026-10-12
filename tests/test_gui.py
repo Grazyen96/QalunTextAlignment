@@ -3006,6 +3006,29 @@ def test_a_part_no_longer_generated_leaves_no_clip_behind(tmp_path, monkeypatch)
     assert sorted(p.name for p in folder.iterdir()) == ["3f2a9c1b2d4e.mp4"]
 
 
+def test_a_generated_clip_the_episode_names_as_its_clip_is_kept(tmp_path, monkeypatch) -> None:
+    """A clip named like a generated one, chosen as the part itself, is not cleaned up."""
+    from qurantext.jobs.episode_assets import EpisodeChoice, episode_dir_for, set_project_episode
+
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch, episode={})
+    folder = episode_dir_for(project.path)
+    folder.mkdir()
+    named = {part: folder / f"generated-{part}-aaa.mp4" for part in ("intro", "outro")}
+    for clip in named.values():
+        clip.write_bytes(b"x")
+    (folder / "generated-intro-old.mp4").write_bytes(b"x")
+    set_project_episode(project, EpisodeChoice(named["intro"], None, named["outro"]))
+
+    outcome = jobs_module.run_render(project)
+    assert outcome.episode_error is None
+    assert sorted(p.name for p in folder.iterdir()) == [
+        "generated-intro-aaa.mp4",
+        "generated-outro-aaa.mp4",
+    ]
+    (joined,) = seen["assembled"]
+    assert joined["parts"][0] == named["intro"] and joined["parts"][-1] == named["outro"]
+
+
 def test_an_unforeseen_error_while_setting_up_a_part_names_the_part(
     tmp_path, monkeypatch, caplog
 ) -> None:

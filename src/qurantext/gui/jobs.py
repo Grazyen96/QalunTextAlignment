@@ -500,10 +500,11 @@ def _join_episode(
     """
     choice = project_episode(project)
     if project.path is not None:
-        # A part no longer generated leaves no clip of it behind.
+        # A part no longer generated leaves no clip of it behind, except a clip
+        # the episode names as that part itself (a generated clip chosen as My clip).
         for part in _CLIP_PARTS:
             if not choice.is_generated(part):
-                remove_generated_parts(project.path, part)
+                remove_generated_parts(project.path, part, keep=getattr(choice, part))
     if choice.is_empty:
         return None, None
     clips = {part: getattr(choice, part) for part in _CLIP_PARTS if getattr(choice, part)}
