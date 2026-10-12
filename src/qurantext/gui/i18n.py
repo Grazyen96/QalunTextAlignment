@@ -154,6 +154,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "job.stage.render": "Rendering the video…",
         "job.stage.export": "Writing subtitle files…",
         "job.stage.working": "Working…",
+        "job.stage.episode_lecture": "Rendering the lecture…",
         "job.stage.episode_recitation": "Preparing the recitation for the episode…",
         "job.stage.episode_join": "Joining the episode…",
         "app.title": "Qalun",
@@ -167,6 +168,14 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "home.progress.transcribing_eta": "Transcribing — {percent}%, about {eta} left",
         "home.progress.rendering": "Rendering — {percent}%",
         "home.progress.rendering_eta": "Rendering — {percent}%, about {eta} left",
+        "home.progress.episode_lecture": "Rendering the lecture — {percent}%",
+        "home.progress.episode_lecture_eta": "Rendering the lecture — {percent}%, about {eta} left",
+        "home.progress.episode_recitation": "Rendering the recitation — {percent}%",
+        "home.progress.episode_recitation_eta": (
+            "Rendering the recitation — {percent}%, about {eta} left"
+        ),
+        "home.progress.episode_join": "Joining the episode — {percent}%",
+        "home.progress.episode_join_eta": "Joining the episode — {percent}%, about {eta} left",
         "home.eta.seconds": "{seconds}s",
         "home.eta.minutes": "{minutes}m {seconds}s",
         "home.finished.matched": {
@@ -206,6 +215,10 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.mark_reviewed": "Mark as reviewed",
         "review.export": "Export subtitles…",
         "review.render": "Render with corrections",
+        "review.episode": "Episode…",
+        "review.episode.tip": "Add an intro, a recitation and an outro around this lecture.",
+        "review.episode_on": "Episode: on",
+        "review.episode_written": "The episode was written too: \u2068{name}\u2069",
         "review.remove": "Remove selected",
         "review.remove_none": "Select a row to remove.",
         "review.play": "Play",
@@ -276,6 +289,9 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "export.failed": "The subtitles were not written: {details}",
         "export.close": "Close",
         "render.running": "Rendering — {percent}%",
+        "render.running_lecture": "Lecture — {percent}%",
+        "render.running_recitation": "Recitation — {percent}%",
+        "render.running_join": "Joining — {percent}%",
         "render.done": "The video is ready: {path}",
         "render.show": "Show the video",
         "render.failed": "The render did not finish: {details}",
@@ -285,6 +301,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
             "This card's times follow its words; retime the words instead."
         ),
         "session.manual_lecture_only": "Ayah cards can only be placed by hand in a lecture.",
+        "session.episode_lecture_only": "Only a lecture can have an intro, a recitation and an outro.",
         "session.manual_bad_reference": "Surah {surah} has no ayat {first}–{last}.",
         "session.manual_store_unavailable": (
             "Could not read the Quran store, so no ayah card was made: {details}"
@@ -353,6 +370,14 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
             "The {part} clip is not a video Qalun can read, so the episode was not made."
         ),
         "episode.error.cancelled": "The episode was cancelled; the lecture video is kept.",
+        "episode.error.recitation_changed": (
+            "The recitation's video \u2068{name}\u2069 was rendered again while the episode "
+            "was being made, so the episode was not made. Render again to use the new one."
+        ),
+        "episode.error.locked": (
+            "\u2068{name}\u2069 could not be replaced: it may be open in another program, "
+            "such as a video player. Close it and render again."
+        ),
         "episode.part.intro": "intro",
         "episode.part.outro": "outro",
         "episode.seed.missing": (
@@ -361,6 +386,27 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "episode.seed.failed": (
             "The default {part} clip could not be copied beside this lecture, "
             "so it starts without it."
+        ),
+        "episode.title": "Episode",
+        "episode.intro": "Intro",
+        "episode.recitation": "Recitation",
+        "episode.outro": "Outro",
+        "episode.none": "None",
+        "episode.choose": "Choose…",
+        "episode.remove": "Remove",
+        "episode.rendered": "rendered",
+        "episode.render_first": "will be rendered first",
+        "episode.damaged": "damaged",
+        "episode.total": "Total length: {length}",
+        "episode.unknown": "?",
+        "episode.clip": "\u2068{name}\u2069 · {length}",
+        "episode.recitation_entry": "\u2068{name}\u2069 · {range} · {status}",
+        "episode.recitation_entry_no_range": "\u2068{name}\u2069 · {status}",
+        "episode.clip_filter": "Video clips",
+        "episode.clip_missing": "The {part} clip is missing: choose it again, or remove it.",
+        "episode.copy_failed": "The clip could not be copied beside the job: {reason}",
+        "episode.default_failed": (
+            "The episode is set, but it could not be kept for new lectures: {reason}"
         ),
     },
     # Drafted for the first release; a native speaker must review every line
@@ -477,6 +523,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "job.stage.render": "جارٍ إخراج الفيديو…",
         "job.stage.export": "جارٍ كتابة ملفات الترجمة النصية…",
         "job.stage.working": "جارٍ العمل…",
+        "job.stage.episode_lecture": "إخراج الدرس…",
         "job.stage.episode_recitation": "تجهيز التلاوة للحلقة…",
         "job.stage.episode_join": "تجميع الحلقة…",
         "app.title": "Qalun",
@@ -490,6 +537,14 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "home.progress.transcribing_eta": "تفريغ الصوت — \u2066{percent}%\u2069، يتبقى نحو {eta}",
         "home.progress.rendering": "إخراج الفيديو — \u2066{percent}%\u2069",
         "home.progress.rendering_eta": "إخراج الفيديو — \u2066{percent}%\u2069، يتبقى نحو {eta}",
+        "home.progress.episode_lecture": "إخراج الدرس — \u2066{percent}%\u2069",
+        "home.progress.episode_lecture_eta": "إخراج الدرس — \u2066{percent}%\u2069، يتبقى نحو {eta}",
+        "home.progress.episode_recitation": "إخراج التلاوة — \u2066{percent}%\u2069",
+        "home.progress.episode_recitation_eta": (
+            "إخراج التلاوة — \u2066{percent}%\u2069، يتبقى نحو {eta}"
+        ),
+        "home.progress.episode_join": "تجميع الحلقة — \u2066{percent}%\u2069",
+        "home.progress.episode_join_eta": "تجميع الحلقة — \u2066{percent}%\u2069، يتبقى نحو {eta}",
         "home.eta.seconds": "{seconds} ث",
         "home.eta.minutes": "{minutes} د {seconds} ث",
         "home.finished.matched": {
@@ -531,6 +586,10 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.mark_reviewed": "علِّم كمُراجَعة",
         "review.export": "صدِّر الترجمة النصية…",
         "review.render": "أخرِج الفيديو بالتصحيحات",
+        "review.episode": "الحلقة…",
+        "review.episode.tip": "أضف مقدمة وتلاوة وخاتمة حول هذا الدرس.",
+        "review.episode_on": "الحلقة: مفعّلة",
+        "review.episode_written": "كُتبت الحلقة أيضًا: \u2068{name}\u2069",
         "review.remove": "أزِل المحدد",
         "review.remove_none": "حدِّد صفًا لإزالته.",
         "review.play": "شغِّل",
@@ -615,6 +674,9 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "export.failed": "لم تُكتب الترجمة النصية: {details}",
         "export.close": "إغلاق",
         "render.running": "إخراج الفيديو — \u2066{percent}%\u2069",
+        "render.running_lecture": "الدرس — \u2066{percent}%\u2069",
+        "render.running_recitation": "التلاوة — \u2066{percent}%\u2069",
+        "render.running_join": "التجميع — \u2066{percent}%\u2069",
         "render.done": "الفيديو جاهز: {path}",
         "render.show": "اعرض الفيديو",
         "render.failed": "لم يكتمل إخراج الفيديو: {details}",
@@ -624,6 +686,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
             "توقيت هذه البطاقة يتبع كلماتها؛ عدِّل توقيت الكلمات بدلًا منها."
         ),
         "session.manual_lecture_only": "لا تُضاف بطاقات الآيات يدويًا إلا في الدروس.",
+        "session.episode_lecture_only": "لا تكون المقدمة والتلاوة والخاتمة إلا للدروس.",
         "session.manual_bad_reference": "لا تضمّ السورة {surah} الآيات {first}–{last}.",
         "session.manual_store_unavailable": (
             "تعذّرت قراءة قاعدة بيانات القرآن، فلم تُنشأ بطاقة الآية: {details}"
@@ -678,8 +741,10 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "look.image_failed": "تعذّر استخدام \u2068{name}\u2069 خلفيةً.",
         "look.image_missing": "صورة الخلفية مفقودة؛ تُعرض خلفية اللوحة بدلًا منها.",
         "look.image_unreadable": "تعذّرت قراءة صورة الخلفية؛ تُعرض خلفية اللوحة بدلًا منها.",
-        "episode.error.missing": "المقطع {name} مفقود، فلم تُصنع الحلقة.",
-        "episode.error.not_video": "{name} ليس فيديو يستطيع قالون قراءته، فلم تُصنع الحلقة.",
+        "episode.error.missing": "المقطع \u2068{name}\u2069 مفقود، فلم تُصنع الحلقة.",
+        "episode.error.not_video": (
+            "\u2068{name}\u2069 ليس فيديو يستطيع قالون قراءته، فلم تُصنع الحلقة."
+        ),
         "episode.error.recitation": "تعذّر استخدام مهمة التلاوة: {reason}",
         "episode.error.ffmpeg": "فشل تجميع الحلقة: {reason}",
         "episode.error.subtitles": "صُنعت الحلقة، لكن تعذّرت كتابة ملفات ترجمتها النصية: {reason}",
@@ -688,6 +753,14 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
             "مقطع \u2068{part}\u2069 ليس فيديو يستطيع قالون قراءته، فلم تُصنع الحلقة."
         ),
         "episode.error.cancelled": "أُلغيت الحلقة، وبقي فيديو المحاضرة كما هو.",
+        "episode.error.recitation_changed": (
+            "أُعيد إخراج فيديو التلاوة \u2068{name}\u2069 أثناء صنع الحلقة، فلم تُصنع الحلقة. "
+            "أعد الإخراج لاستخدام الجديد."
+        ),
+        "episode.error.locked": (
+            "تعذّر استبدال \u2068{name}\u2069: قد يكون مفتوحًا في برنامج آخر "
+            "كمشغّل فيديو. أغلقه ثم أعد الإخراج."
+        ),
         "episode.part.intro": "المقدمة",
         "episode.part.outro": "الخاتمة",
         "episode.seed.missing": (
@@ -696,6 +769,25 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "episode.seed.failed": (
             "تعذّر نسخ مقطع \u2068{part}\u2069 الافتراضي بجانب هذه المحاضرة، فتبدأ بدونه."
         ),
+        "episode.title": "الحلقة",
+        "episode.intro": "المقدمة",
+        "episode.recitation": "التلاوة",
+        "episode.outro": "الخاتمة",
+        "episode.none": "بدون",
+        "episode.choose": "اختر…",
+        "episode.remove": "أزل",
+        "episode.rendered": "مُخرَجة",
+        "episode.render_first": "ستُخرَج أولًا",
+        "episode.damaged": "تالفة",
+        "episode.total": "المدة الكاملة: {length}",
+        "episode.unknown": "؟",
+        "episode.clip": "\u200f\u2068{name}\u2069 · {length}",
+        "episode.recitation_entry": "\u200f\u2068{name}\u2069 · {range} · {status}",
+        "episode.recitation_entry_no_range": "\u200f\u2068{name}\u2069 · {status}",
+        "episode.clip_filter": "مقاطع الفيديو",
+        "episode.clip_missing": "مقطع \u2068{part}\u2069 مفقود: اختره من جديد أو أزله.",
+        "episode.copy_failed": "تعذّر نسخ المقطع بجانب المهمة: {reason}",
+        "episode.default_failed": "ضُبطت الحلقة، لكن تعذّر حفظها للدروس الجديدة: {reason}",
     },
 }
 LANGUAGES = tuple(STRINGS)

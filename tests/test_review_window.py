@@ -511,6 +511,9 @@ def test_export_writes_the_chosen_formats_and_saves_first(qt_app, tmp_path, stor
         ("Tafsir 25.7-11", ["Tafsir 25.7-11.srt", "Tafsir 25.7-11.vtt"]),
         ("Dars 12.10.2024", ["Dars 12.10.2024.srt", "Dars 12.10.2024.vtt"]),
         ("talk.srt", ["talk.srt", "talk.vtt"]),
+        # The video's own name typed in: its suffix goes, as a subtitle suffix does.
+        ("talk.mp4", ["talk.srt", "talk.vtt"]),
+        ("Tafsir 25.7-11.MOV", ["Tafsir 25.7-11.srt", "Tafsir 25.7-11.vtt"]),
     ],
 )
 def test_export_keeps_every_dot_in_the_name(qt_app, tmp_path, monkeypatch, typed, written) -> None:
@@ -1896,20 +1899,27 @@ def test_a_real_double_click_on_a_cards_ayah_cell_opens_the_picker(
 def test_a_lecture_window_fits_a_1280_px_screen_while_rendering(
     qt_app, tmp_path, db, language
 ) -> None:
+    """With the Episode button and "Episode: on" beside Render, idle and rendering."""
     from qurantext.gui.language import apply_language
+    from qurantext.jobs.episode_assets import EpisodeChoice
 
     apply_language(qt_app, language)
     window = _quoting_lecture_window(qt_app, tmp_path, db)
+    window.session.set_episode(EpisodeChoice(tmp_path / "intro.mp4", None, tmp_path / "end.mp4"))
+    window._after_edit()
     window.show()
     _spin(20)
+    assert not window.episode_label.isHidden() and not window.episode_button.isHidden()
     assert window.minimumSizeHint().width() <= 1280
+    window._render_progress_key = "render.running_recitation"  # the longest step's words
     window._set_render_running(True)
     try:
         assert window.minimumSizeHint().width() <= 1280
         assert not window.render_progress.isHidden() and not window.render_cancel_button.isHidden()
+        assert window.episode_button.isHidden() and not window.episode_label.isHidden()
     finally:
         window._set_render_running(False)
-    assert not window.render_button.isHidden()
+    assert not window.render_button.isHidden() and not window.episode_button.isHidden()
 
 
 def test_card_changes_wait_for_a_running_render(qt_app, tmp_path, db, monkeypatch) -> None:
@@ -2013,3 +2023,289 @@ def test_a_render_stopped_before_any_record_changes_nothing(qt_app, tmp_path, mo
     assert _wait_for(lambda: not window._rendering, 5000)
 
     assert window.session.project.render is None and saved_paths == []
+
+
+# -- the episode ------------------------------------------------------------------
+
+
+def _episode_answers(monkeypatch, tmp_path, *, intro=None, recitation=None, accept=True) -> list:
+    """Answer every Episode dialog through its own buttons; returns the dialogs opened.
+
+    *intro* (a file the test wrote) is chosen with Choose…, *recitation* (a
+    project path) is picked in the list, then OK is pressed (or the dialog
+    is cancelled). Only the outside world is faked: the file picker, ffprobe
+    and the job folders.
+    """
+    from PySide6.QtWidgets import QDialog
+
+    from qurantext.gui.review import episode_dialog
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+    from qurantext.jobs.catalog import NEEDS_REVIEW, JobEntry
+    from qurantext.jobs.episode import PartInfo
+
+    entries = []
+    if recitation is not None:
+        entries.append(JobEntry(recitation, "rec", "recitation", NEEDS_REVIEW, 1.0, 5, "25:7-11"))
+    monkeypatch.setattr(episode_dialog, "list_jobs", lambda *a, **k: entries)
+    monkeypatch.setattr(
+        episode_dialog,
+        "probe_part",
+        lambda path: PartInfo(path=path, duration=2.0, has_video=True, has_audio=True),
+    )
+    monkeypatch.setattr(episode_dialog, "get_audio_duration", lambda path: 10.0)
+    monkeypatch.setattr(
+        episode_dialog.QFileDialog,
+        "getOpenFileName",
+        staticmethod(lambda *a, **k: (str(intro), "")),
+    )
+    opened = []
+
+    def answer(dialog):
+        opened.append(dialog)
+        if intro is not None:
+            dialog.intro_choose.click()
+        if recitation is not None:
+            box = dialog.recitation_box
+            box.setCurrentIndex(box.findData(recitation))
+        if not accept:
+            dialog.reject()
+            return QDialog.DialogCode.Rejected
+        dialog.ok_button.click()
+        return dialog.result()
+
+    monkeypatch.setattr(EpisodeDialog, "exec", answer)
+    return opened
+
+
+def test_the_episode_button_is_offered_for_a_lecture_only(qt_app, tmp_path) -> None:
+    window = _lecture_window(qt_app, tmp_path)
+    assert not window.episode_button.isHidden()
+    assert window.episode_button.text() == t("review.episode")
+    assert window.episode_button.toolTip() == t("review.episode.tip")
+    assert window.episode_label.isHidden(), "no part chosen yet"
+    recitation, _, _ = _window(qt_app, tmp_path)
+    assert recitation.episode_button.isHidden() and recitation.episode_label.isHidden()
+
+
+def test_the_episode_button_opens_the_dialog_and_sets_the_episode(
+    qt_app, tmp_path, monkeypatch
+) -> None:
+    """Through the dialog's real OK: the copy beside the project is stored, in one step."""
+    from qurantext.jobs.episode_assets import episode_dir_for
+
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    window = _lecture_window(qt_app, tmp_path)
+    source = tmp_path / "Channel intro.mp4"
+    source.write_bytes(b"an intro")
+    recitation = tmp_path / "r_recitation.qalun.json"
+    opened = _episode_answers(monkeypatch, tmp_path, intro=source, recitation=recitation)
+    window.episode_button.click()
+
+    assert len(opened) == 1 and opened[0].parent() is window
+    episode = window.session.episode
+    folder = episode_dir_for(window.session.project.path).resolve()
+    assert episode.intro.parent == folder, "the copy beside the project, not the source"
+    assert episode.intro.read_bytes() == b"an intro"
+    assert episode.intro_name == "Channel intro.mp4"
+    assert episode.recitation == recitation.resolve()
+    assert window.undo_button.isEnabled() and window.windowTitle().endswith("*")
+    assert not window.episode_label.isHidden()
+    assert window.session.undo() and window.session.episode.is_empty
+    assert not window.session.can_undo, "exactly one undo step"
+
+    window.session.redo()
+    assert window.save()
+    reopened = load_project(window.session.project.path)
+    assert reopened.episode["intro"].startswith("dars.qalun.episode/")
+    assert reopened.episode["intro_name"] == "Channel intro.mp4"
+
+
+def test_a_cancelled_episode_dialog_changes_nothing(qt_app, tmp_path, monkeypatch) -> None:
+    window = _lecture_window(qt_app, tmp_path)
+    _episode_answers(
+        monkeypatch, tmp_path, recitation=tmp_path / "r_recitation.qalun.json", accept=False
+    )
+    window.episode_button.click()
+    assert window.session.episode.is_empty and not window.session.can_undo
+
+
+def test_episode_on_follows_undo_redo_and_discard(qt_app, tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    window = _lecture_window(qt_app, tmp_path)
+    source = tmp_path / "intro.mp4"
+    source.write_bytes(b"an intro")
+    _episode_answers(monkeypatch, tmp_path, intro=source)
+    window.episode_button.click()
+    assert not window.episode_label.isHidden()
+    assert window.episode_label.text() == t("review.episode_on")
+    window.undo()
+    assert window.episode_label.isHidden()
+    window.redo()
+    assert not window.episode_label.isHidden()
+    window.session.revert()  # what Discard does on close
+    window._after_edit()
+    assert window.episode_label.isHidden()
+
+
+def _held_render(monkeypatch, tmp_path, *, ending: str):
+    """A render that waits for its release, then finishes, is cancelled or fails."""
+    import threading
+
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.gui.jobs import JobOutcome
+
+    release = threading.Event()
+
+    def fake_render(project, *, cancel, **kwargs):
+        release.wait(timeout=5)
+        if ending == "cancelled":
+            cancel.cancel()
+            cancel.raise_if_cancelled("render")
+        if ending == "failed":
+            raise RuntimeError("no FFmpeg")
+        return JobOutcome(matches=project.matches, video=tmp_path / "v.mp4", cards=1)
+
+    monkeypatch.setattr(jobs_module, "run_render", fake_render)
+    return release
+
+
+@pytest.mark.parametrize("ending", ["finished", "cancelled", "failed"])
+def test_the_episode_button_hides_while_a_render_runs(
+    qt_app, tmp_path, monkeypatch, ending
+) -> None:
+    window = _lecture_window(qt_app, tmp_path)
+    window.show()
+    release = _held_render(monkeypatch, tmp_path, ending=ending)
+    monkeypatch.setattr(window, "_announce_render", lambda outcome: None)
+    monkeypatch.setattr(window, "_say_render", lambda kind, text: None)
+    opened = _episode_answers(monkeypatch, tmp_path)
+
+    window.render_requested.emit()
+    assert window._rendering
+    assert window.episode_button.isHidden() and not window.episode_button.isEnabled()
+    window._open_episode_dialog()
+    assert opened == [], "the episode waits for the render"
+    release.set()
+    assert _wait_for(lambda: not window._rendering, 5000)
+    assert not window.episode_button.isHidden() and window.episode_button.isEnabled()
+
+
+def test_a_render_s_episode_error_reaches_the_strip(qt_app, tmp_path, monkeypatch) -> None:
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.gui.jobs import JobOutcome
+
+    window = _lecture_window(qt_app, tmp_path)
+    window.show()
+    why = t("episode.error.cancelled")
+    outcomes = [
+        JobOutcome(
+            matches=tmp_path / "m.json", video=tmp_path / "v.mp4", cards=1, episode_error=why
+        ),
+        JobOutcome(
+            matches=tmp_path / "m.json",
+            video=tmp_path / "v.mp4",
+            cards=1,
+            episode_video=tmp_path / "v – episode.mp4",
+        ),
+    ]
+    monkeypatch.setattr(jobs_module, "run_render", lambda project, **kw: outcomes.pop(0))
+    announced: list = []
+    monkeypatch.setattr(window, "_announce_render", announced.append)
+
+    window.render_requested.emit()
+    assert _wait_for(lambda: len(announced) == 1 and not window._rendering, 5000)
+    assert html.escape(why) in window.warnings.text()
+    assert window.warnings.isVisibleTo(window)
+
+    window.render_requested.emit()  # the next render made its episode: the line goes
+    assert _wait_for(lambda: len(announced) == 2 and not window._rendering, 5000)
+    assert html.escape(why) not in window.warnings.text()
+
+
+def test_the_render_message_names_the_episode_or_why_it_was_not_made(tmp_path) -> None:
+    from qurantext.gui.i18n import path_text
+    from qurantext.gui.jobs import JobOutcome
+    from qurantext.gui.review.window import render_finished_text
+
+    video = tmp_path / "v.mp4"
+    done = t("render.done", path=path_text(video))
+    plain = JobOutcome(matches=tmp_path / "m.json", video=video, cards=1)
+    assert render_finished_text(plain) == done
+    written = JobOutcome(
+        matches=plain.matches, video=video, cards=1, episode_video=tmp_path / "v – episode.mp4"
+    )
+    assert render_finished_text(written) == (
+        f"{done}\n\n{t('review.episode_written', name='v – episode.mp4')}"
+    )
+    why = t("episode.error.cancelled")
+    failed = JobOutcome(matches=plain.matches, video=video, cards=1, episode_error=why)
+    assert render_finished_text(failed) == f"{done}\n\n{why}"
+
+
+def test_the_render_progress_names_each_step_of_an_episode(qt_app, tmp_path, monkeypatch) -> None:
+    from qurantext.jobs.episode_assets import EpisodeChoice
+    from qurantext.utils.progress import ProgressEvent
+
+    window = _lecture_window(qt_app, tmp_path)
+    window.session.set_episode(EpisodeChoice(tmp_path / "intro.mp4", None, None))
+    window.session.save()
+    release = _held_render(monkeypatch, tmp_path, ending="finished")
+    monkeypatch.setattr(window, "_announce_render", lambda outcome: None)
+    window.render_requested.emit()
+    try:
+        bar = window.render_progress
+        assert bar.format() == t("render.running_lecture", percent=0)
+        window._on_render_progress(ProgressEvent("render", "frames", fraction=0.5))
+        assert bar.format() == t("render.running_lecture", percent=50)
+        window._on_render_progress(
+            ProgressEvent("episode_recitation", t("job.stage.episode_recitation"), translated=True)
+        )
+        assert bar.format() == t("render.running_recitation", percent=0) and bar.value() == 0
+        assert bar.toolTip() == t("job.stage.episode_recitation")
+        window._on_render_progress(ProgressEvent("episode_recitation", "x", fraction=0.3))
+        assert bar.format() == t("render.running_recitation", percent=30)
+        window._on_render_progress(ProgressEvent("episode_join", "x", fraction=0.9))
+        assert bar.format() == t("render.running_join", percent=90)
+    finally:
+        release.set()
+        assert _wait_for(lambda: not window._rendering, 5000)
+
+
+def test_a_render_without_an_episode_keeps_its_plain_progress(
+    qt_app, tmp_path, monkeypatch
+) -> None:
+    from qurantext.utils.progress import ProgressEvent
+
+    window = _lecture_window(qt_app, tmp_path)
+    release = _held_render(monkeypatch, tmp_path, ending="finished")
+    monkeypatch.setattr(window, "_announce_render", lambda outcome: None)
+    window.render_requested.emit()
+    try:
+        window._on_render_progress(ProgressEvent("render", "frames", fraction=0.5))
+        assert window.render_progress.format() == t("render.running", percent=50)
+    finally:
+        release.set()
+        assert _wait_for(lambda: not window._rendering, 5000)
+
+
+def test_notices_handed_in_stay_in_the_strip(qt_app, tmp_path) -> None:
+    window = _lecture_window(qt_app, tmp_path)
+    notice = t("episode.seed.missing", part=t("episode.part.intro"))
+    window.show_notices((notice,))
+    assert html.escape(notice) in window.warnings.text()
+
+
+@pytest.mark.parametrize("ending", ["cancelled", "failed"])
+def test_a_stopped_render_does_not_keep_the_last_episode_error(
+    qt_app, tmp_path, monkeypatch, ending
+) -> None:
+    window = _lecture_window(qt_app, tmp_path)
+    window.show()
+    why = t("episode.error.cancelled")
+    window.warnings.set_episode_notice(why)  # what the render before said
+    release = _held_render(monkeypatch, tmp_path, ending=ending)
+    monkeypatch.setattr(window, "_say_render", lambda kind, text: None)
+    window.render_requested.emit()
+    release.set()
+    assert _wait_for(lambda: not window._rendering, 5000)
+    assert html.escape(why) not in window.warnings.text()

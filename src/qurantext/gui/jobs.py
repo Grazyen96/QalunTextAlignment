@@ -42,7 +42,13 @@ from qurantext.jobs.project_render import (
     render_project,
 )
 from qurantext.pipelines.detection import run_detection, run_recitation_range
-from qurantext.utils.progress import CancelToken, JobCancelled, ProgressCallback, report
+from qurantext.utils.progress import (
+    CancelToken,
+    JobCancelled,
+    ProgressCallback,
+    ProgressEvent,
+    report,
+)
 
 __all__ = [
     "JobSpec",
@@ -88,6 +94,9 @@ class JobSpec:
     #: default episode), as absolute paths; None for a part not set. Like the
     #: look, a re-match never uses them, and a recitation ignores them.
     episode_defaults: tuple[str | None, str | None] = (None, None)
+    #: Their original file names, shown in the Episode dialog (the copies are
+    #: named by their content); None when unknown.
+    episode_default_names: tuple[str | None, str | None] = (None, None)
 
     @property
     def settings(self) -> JobSettings:
@@ -314,7 +323,10 @@ def run_matching(
         if spec.mode == "lecture" and any(spec.episode_defaults):
             intro, outro = (Path(clip) if clip else None for clip in spec.episode_defaults)
             # A default clip that is gone is left out, and said as the backup is.
-            for key, fmt in seed_project_episode(project, destination, intro, outro):
+            seeded = seed_project_episode(
+                project, destination, intro, outro, names=spec.episode_default_names
+            )
+            for key, fmt in seeded:
                 said = t(key, part=t(f"episode.part.{fmt['part']}"))
                 report(progress, "detect", said, translated=True)
                 if notices is not None:
@@ -343,18 +355,22 @@ def run_render(
     settings = job_settings(project)
     chosen_subtitles = subtitles if subtitles is not None else settings.subtitles
     chosen_formats = tuple(formats) if formats is not None else settings.formats
+    lecture = str(project.mode).lower() == "lecture"
+    # With an episode to follow, the lecture's render is its first step, and
+    # is named so ("Rendering the lecture"), as the recitation and join are.
+    with_episode = lecture and not project_episode(project).is_empty
     result = render_project(
         project,
         default_video_path(project, output_dir=output_dir),
         preset=preset if preset is not None else settings.preset,
         subtitles=chosen_subtitles,
         formats=chosen_formats,
-        progress=progress,
+        progress=_as_stage(progress, "episode_lecture") if with_episode else progress,
         cancel=cancel,
     )
     episode_video: Path | None = None
     episode_error: str | None = None
-    if str(project.mode).lower() == "lecture":
+    if lecture:
         episode_video, episode_error = _make_episode(
             project,
             Path(result.video),
@@ -465,7 +481,10 @@ def _join_episode(
             translated=True,
         )
         recitation = recitation_video(
-            choice.recitation, avoid=lecture, progress=progress, cancel=cancel
+            choice.recitation,
+            avoid=lecture,
+            progress=_as_stage(progress, "episode_recitation"),
+            cancel=cancel,
         )
     parts = [p for p in (choice.intro, recitation) if p is not None]
     lecture_index = len(parts)
@@ -484,7 +503,7 @@ def _join_episode(
             width=width,
             height=height,
             fps=fps,
-            progress=progress,
+            progress=_as_stage(progress, "episode_join"),
             cancel=cancel,
         )
     except EpisodeError as error:
@@ -524,6 +543,22 @@ def _join_episode(
                 "episode.error.subtitles", reason=str(error) or type(error).__name__
             )
     return joined.output, None
+
+
+def _as_stage(progress: ProgressCallback | None, stage: str) -> ProgressCallback | None:
+    """*progress*, with every event reported under *stage*.
+
+    The recitation's render and the join report as ``render``, the stage of
+    the lecture's own render just before; under their own names the window
+    can say which part of the episode the percentage is of.
+    """
+    if progress is None:
+        return None
+
+    def relabelled(event: ProgressEvent) -> None:
+        progress(replace(event, stage=stage))
+
+    return relabelled
 
 
 def _lecture_geometry(project: Project) -> tuple[int, int, int]:

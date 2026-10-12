@@ -12,7 +12,7 @@ otherwise, the rule the look's image follows.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +34,11 @@ EPISODE_SUFFIXES = (".mp4", ".mov", ".mkv", ".webm")
 
 #: The episode keys the choice owns, in the order they play around the lecture.
 _PART_KEYS = ("intro", "recitation", "outro")
+#: The clip parts whose original file name is kept beside the stored path: the
+#: copy beside the project is named by its content (``3f2a9c1b2d4e.mp4``),
+#: which would tell the person nothing about which clip it is.
+_CLIP_PARTS = ("intro", "outro")
+_NAME_KEYS = tuple(f"{part}_name" for part in _CLIP_PARTS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,12 +46,16 @@ class EpisodeChoice:
     """What plays around the lecture: each part is a path, or None when not chosen.
 
     *intro* and *outro* are video clips; *recitation* is a recitation job's
-    project file, whose current video is used.
+    project file, whose current video is used. *intro_name* and *outro_name*
+    are the clips' original file names, for showing: the stored copies are
+    named by their content. None when unknown (or the part is not chosen).
     """
 
     intro: Path | None = None
     recitation: Path | None = None
     outro: Path | None = None
+    intro_name: str | None = None
+    outro_name: str | None = None
 
     @property
     def parts_set(self) -> tuple[str, ...]:
@@ -98,7 +107,15 @@ def project_episode(project: Project) -> EpisodeChoice:
             return None
         return path
 
-    return EpisodeChoice(*(part(key) for key in _PART_KEYS))
+    choice = EpisodeChoice(*(part(key) for key in _PART_KEYS))
+
+    def name(clip: str) -> str | None:
+        value = episode.get(f"{clip}_name")
+        if getattr(choice, clip) is None or not isinstance(value, str) or not value.strip():
+            return None
+        return value
+
+    return replace(choice, intro_name=name("intro"), outro_name=name("outro"))
 
 
 def set_project_episode(
@@ -118,16 +135,26 @@ def set_project_episode(
     # _store_path(..., None) is absolute: a relative path with nothing known to
     # be relative to would be read later against the project's folder and miss.
     current = project.episode if isinstance(project.episode, dict) else {}
-    episode = {k: v for k, v in current.items() if k not in _PART_KEYS}
+    owned = (*_PART_KEYS, *_NAME_KEYS)
+    episode = {k: v for k, v in current.items() if k not in owned}
     for key in _PART_KEYS:
         value = getattr(choice, key)
         if value is not None:
             episode[key] = _store_path(Path(value), folder)
+    for clip in _CLIP_PARTS:
+        name = getattr(choice, f"{clip}_name")
+        if getattr(choice, clip) is not None and name:
+            episode[f"{clip}_name"] = name
     project.episode = episode
 
 
 def seed_project_episode(
-    project: Project, project_path: Path, intro: Path | None, outro: Path | None
+    project: Project,
+    project_path: Path,
+    intro: Path | None,
+    outro: Path | None,
+    *,
+    names: tuple[str | None, str | None] = (None, None),
 ) -> list[tuple[str, dict[str, Any]]]:
     """Give a new lecture about to be saved at *project_path* the default *intro* and *outro*.
 
@@ -143,7 +170,9 @@ def seed_project_episode(
     :class:`~qurantext.jobs.episode.EpisodeError` does not. The one value,
     ``part``, is ``"intro"`` or ``"outro"``: the default's own file name is a
     content hash in the app's folder, which would tell the person nothing.
-    Never raises for a clip that is missing or refused.
+    *names* are the defaults' original file names, kept beside the copies so
+    the Episode dialog can show them. Never raises for a clip that is missing
+    or refused.
     """
     notices: list[tuple[str, dict[str, Any]]] = []
 
@@ -158,7 +187,12 @@ def seed_project_episode(
             notices.append(("episode.seed.failed", {"part": part}))
         return None
 
-    choice = EpisodeChoice(intro=copied("intro", intro), outro=copied("outro", outro))
+    choice = EpisodeChoice(
+        intro=copied("intro", intro),
+        outro=copied("outro", outro),
+        intro_name=names[0] or None,
+        outro_name=names[1] or None,
+    )
     if not choice.is_empty:
         set_project_episode(project, choice, project_dir=Path(project_path).parent)
     return notices

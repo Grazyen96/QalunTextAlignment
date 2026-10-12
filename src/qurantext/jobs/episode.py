@@ -194,11 +194,20 @@ def recitation_video(
     The render is made from the project as loaded here, but its record is
     written onto the project file as it is when the render ends: a correction
     saved meanwhile from an open review is kept, and reads as made after the
-    render (stale) rather than being overwritten.
+    render (stale) rather than being overwritten. Likewise a video that
+    appeared at the target, or changed there, while this render ran (the
+    recitation rendered again from its own review) is newer than this one and
+    is not moved over: ``episode.error.recitation_changed``, and the next
+    episode uses it. This is a check, not a lock: a render that lands in the
+    milliseconds between the check and the move (or between reading the
+    project and the first look) is still replaced, and its record then reads
+    stale, so the next episode renders again.
 
     Raises :class:`EpisodeError` (``episode.error.recitation``) when the
-    project is missing or unreadable, is not a recitation, or fails to render.
-    A cancel is not a failure and passes through as ``JobCancelled``.
+    project is missing or unreadable, is not a recitation, or fails to render;
+    ``episode.error.locked`` when the target cannot be replaced (on Windows, a
+    player has it open). A cancel is not a failure and passes through as
+    ``JobCancelled``.
     """
     path = Path(project_path)
     try:
@@ -221,6 +230,7 @@ def recitation_video(
     # target right now, and a cancel or failure here must not take the
     # earlier video with it (the renderer deletes what it was writing).
     partial = target.with_name(f".{target.stem}.{uuid.uuid4().hex[:8]}.part.mp4")
+    before = _stamp(target)
     try:
         result = render_project(
             project,
@@ -240,8 +250,15 @@ def recitation_video(
     except Exception as error:  # any render failure is the recitation's, said in a sentence
         partial.unlink(missing_ok=True)
         raise EpisodeError("episode.error.recitation", reason=str(error)) from error
+    if _stamp(target) != before:
+        # Rendered again (or made) meanwhile by someone else: newer than this.
+        Path(result.video).unlink(missing_ok=True)
+        raise EpisodeError("episode.error.recitation_changed", name=target.name)
     try:
         Path(result.video).replace(target)
+    except PermissionError as error:
+        Path(result.video).unlink(missing_ok=True)
+        raise EpisodeError("episode.error.locked", name=target.name) from error
     except OSError as error:
         Path(result.video).unlink(missing_ok=True)
         raise EpisodeError("episode.error.recitation", reason=str(error)) from error
@@ -250,6 +267,15 @@ def recitation_video(
         project.render["video"] = target.expanduser().resolve()
     _record_on_the_file(path, project.render, target)
     return target
+
+
+def _stamp(path: Path) -> tuple[int, int] | None:
+    """*path*'s modification time and size, or None when there is no such file."""
+    try:
+        stat = Path(path).stat()
+    except OSError:
+        return None
+    return stat.st_mtime_ns, stat.st_size
 
 
 def _record_on_the_file(path: Path, record: dict[str, Any] | None, video: Path) -> None:
@@ -550,8 +576,9 @@ def assemble_episode(
     *lecture_index* is the lecture's place in *parts*; the result says how far
     into the episode it starts. Raises :class:`EpisodeError` for a part that is
     missing or not a video and for a failed join (a folder that cannot be
-    written included), and ``JobCancelled`` when *cancel* is set; either way no
-    partial file is left.
+    written included, and ``episode.error.locked`` for an earlier episode that
+    cannot be replaced), and ``JobCancelled`` when *cancel* is set; either way
+    no partial file is left.
     """
     if not parts:
         raise ValueError("An episode needs at least one part.")
@@ -614,6 +641,9 @@ def assemble_episode(
                 raise EpisodeError("episode.error.ffmpeg", reason=reason)
             try:
                 partial.replace(output)
+            except PermissionError as error:
+                # On Windows: the earlier episode is open in a player.
+                raise EpisodeError("episode.error.locked", name=output.name) from error
             except OSError as error:
                 raise EpisodeError("episode.error.ffmpeg", reason=str(error)) from error
         except BaseException:

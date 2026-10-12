@@ -5,8 +5,8 @@ ends up here, and every rule about what an edit may do lives in
 ``core.timing_edit``. The widgets only draw this object and forward what the
 person did. That keeps the rules testable without a screen, and it means undo
 is one mechanism for every kind of edit: a snapshot of the cards, captions,
-review state, style (which holds the video's look) and the lecture's chosen
-studied surah before each change.
+review state, style (which holds the video's look), the lecture's chosen
+studied surah and its episode (intro, recitation, outro) before each change.
 
 A drag is many small edits and must undo as one, so a gesture brackets them:
 one snapshot at the start, none while it runs, and none at all if the gesture
@@ -45,6 +45,7 @@ from qurantext.core.video_common import (
 )
 from qurantext.data.quran_db import ayah_range_card, connect, surah_ayah_count
 from qurantext.gui.i18n import t
+from qurantext.jobs.episode_assets import EpisodeChoice, project_episode, set_project_episode
 from qurantext.jobs.look_assets import project_look, set_project_look
 from qurantext.jobs.project import (
     CaptionCue,
@@ -130,7 +131,12 @@ def _set_studied_surah(project: Project, surah: int | None) -> None:
 
 
 def _settled(
-    cards: list, captions: list[CaptionCue], review: dict, style: dict, studied: int | None
+    cards: list,
+    captions: list[CaptionCue],
+    review: dict,
+    style: dict,
+    studied: int | None,
+    episode: dict,
 ) -> tuple:
     """A state as a timing edit would leave it, for telling "no edit" from an edit.
 
@@ -144,8 +150,8 @@ def _settled(
     where they were was not retimed, whatever an edit on the way marked it.
     Cards without word timings pass through ``derive_card_windows`` untouched,
     and only a timing edit re-derives a timed card's window
-    (``set_card_times`` refuses them), so this holds in either mode. The style
-    and the studied surah are compared as they are.
+    (``set_card_times`` refuses them), so this holds in either mode. The style,
+    the studied surah and the episode are compared as they are.
     """
     settled_cards = []
     for card in derive_card_windows(cards):
@@ -158,7 +164,7 @@ def _settled(
         if data.get("words"):
             data["words"] = _unflagged(data["words"])
         settled_captions.append(data)
-    return settled_cards, settled_captions, review, style, studied
+    return settled_cards, settled_captions, review, style, studied, episode
 
 
 #: The shortest time a card the person places stays on screen, in milliseconds.
@@ -302,6 +308,7 @@ class ReviewSession:
                 "review": self.project.review,
                 "style": self.project.style,
                 "studied_surah": _studied_surah(self.project),
+                "episode": self.project.episode,
             },
             sort_keys=True,
             ensure_ascii=False,
@@ -315,16 +322,18 @@ class ReviewSession:
             copy.deepcopy(self.project.review),
             copy.deepcopy(self.project.style),
             _studied_surah(self.project),
+            copy.deepcopy(self.project.episode),
         )
 
     def _restore(self, snapshot: tuple) -> None:
-        cards, captions, review, style, studied = snapshot
+        cards, captions, review, style, studied, episode = snapshot
         self.project.cards = copy.deepcopy(cards)
         self.project.captions = copy.deepcopy(captions)
         self.project.review = copy.deepcopy(review)
         self.project.style = copy.deepcopy(style)
         if _studied_surah(self.project) != studied:
             _set_studied_surah(self.project, studied)
+        self.project.episode = copy.deepcopy(episode)
 
     def _before_change(self) -> None:
         if not self._in_gesture:
@@ -838,6 +847,40 @@ class ReviewSession:
         self._changed()
 
     @property
+    def episode(self) -> EpisodeChoice:
+        """What plays around the lecture: its intro, recitation and outro, resolved."""
+        return project_episode(self.project)
+
+    def set_episode(self, choice: EpisodeChoice) -> None:
+        """Choose the lecture's intro, recitation and outro; one undo step.
+
+        Nothing happens when *choice* is what the project already holds. The
+        clips are expected beside the project already (``import_episode_clip``):
+        this only records the paths. Refused (``ValueError``) outside a
+        lecture: a recitation is rendered alone.
+        """
+        if str(self.project.mode).lower() != "lecture":
+            raise ValueError(t("session.episode_lecture_only"))
+
+        def resolved_path(part: Path | None) -> Path | None:
+            return None if part is None else Path(part).expanduser().resolve()
+
+        resolved = replace(
+            choice,
+            intro=resolved_path(choice.intro),
+            recitation=resolved_path(choice.recitation),
+            outro=resolved_path(choice.outro),
+            # A name belongs to its clip: none for a part not chosen.
+            intro_name=choice.intro_name if choice.intro is not None else None,
+            outro_name=choice.outro_name if choice.outro is not None else None,
+        )
+        if resolved == self.episode:
+            return
+        self._before_change()
+        set_project_episode(self.project, resolved)
+        self._changed()
+
+    @property
     def missing_studied_surah(self) -> int | None:
         """The chosen studied surah when no card the frame draws is one of its ayat.
 
@@ -927,6 +970,7 @@ class ReviewSession:
             self.project.review,
             self.project.style,
             _studied_surah(self.project),
+            self.project.episode,
         )
         return _settled(*current) == _settled(*snapshot)
 
@@ -936,7 +980,7 @@ class ReviewSession:
         False also when the saved state has no word there: then the two states
         differ in shape and cannot settle to each other anyway.
         """
-        cards, captions, _review, _style, _studied = self._saved_snapshot
+        cards, captions, _review, _style, _studied, _episode = self._saved_snapshot
         if ref.kind == CARD:
             segments = [card.get("word_timings") or [] for card in cards]
         else:
@@ -948,13 +992,14 @@ class ReviewSession:
         return all(round(float(saved[k]), 3) == round(float(now[k]), 3) for k in ("start", "end"))
 
     def _is_exactly(self, snapshot: tuple) -> bool:
-        cards, captions, review, style, studied = snapshot
+        cards, captions, review, style, studied, episode = snapshot
         return (
             cards == self.project.cards
             and captions == self.project.captions
             and review == self.project.review
             and style == self.project.style
             and studied == _studied_surah(self.project)
+            and episode == self.project.episode
         )
 
     def undo(self) -> bool:

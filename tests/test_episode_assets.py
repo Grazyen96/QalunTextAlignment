@@ -117,3 +117,44 @@ def test_an_unsaved_project_stores_absolute_paths(tmp_path, monkeypatch):
     clip = tmp_path / "clips" / "intro.mp4"
     set_project_episode(project, EpisodeChoice(clip, None, None))
     assert project.episode["intro"] == clip.resolve().as_posix()
+
+
+def test_a_clip_keeps_its_original_name_beside_its_copy(tmp_path, lecture_project):
+    copy = import_episode_clip(lecture_project.path, _clip(tmp_path / "Channel intro.mp4"))
+    choice = EpisodeChoice(copy, None, None, intro_name="Channel intro.mp4")
+    set_project_episode(lecture_project, choice)
+    assert lecture_project.episode == {
+        "intro": f"lec.qalun.episode/{copy.name}",
+        "intro_name": "Channel intro.mp4",
+    }
+    save_project(lecture_project, lecture_project.path)
+    assert project_episode(load_project(lecture_project.path)) == choice
+
+
+def test_a_name_goes_with_its_clip(lecture_project, tmp_path):
+    """A name for a part not chosen is not stored; removing the clip drops its name."""
+    clip = tmp_path / "intro.mp4"
+    set_project_episode(lecture_project, EpisodeChoice(clip, None, None, intro_name="Intro.mp4"))
+    set_project_episode(lecture_project, EpisodeChoice(None, None, None, outro_name="End.mov"))
+    assert lecture_project.episode == {}
+
+
+@pytest.mark.parametrize("name", [3, "", "  ", ["x"]])
+def test_a_name_of_the_wrong_shape_is_unknown(lecture_project, name):
+    lecture_project.episode = {"intro": "intro.mp4", "intro_name": name, "outro_name": "x.mov"}
+    choice = project_episode(lecture_project)
+    assert choice.intro is not None and choice.intro_name is None
+    assert choice.outro_name is None, "a name without its clip is nothing"
+
+
+def test_seeding_keeps_the_default_s_name(tmp_path, lecture_project):
+    from qurantext.jobs.episode_assets import seed_project_episode
+
+    project = Project(audio=tmp_path / "new.mp3", mode="lecture")
+    default = _clip(tmp_path / "3f2a9c1b2d4e.mp4")  # the app keeps it by its content
+    notices = seed_project_episode(
+        project, tmp_path / "new.qalun.json", default, None, names=("Channel intro.mp4", None)
+    )
+    assert notices == []
+    assert project_episode(project).intro_name == "Channel intro.mp4"
+    assert project.episode["intro_name"] == "Channel intro.mp4"

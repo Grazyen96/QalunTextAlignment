@@ -348,3 +348,76 @@ def test_a_replaced_default_clip_is_removed_from_app_data(settings, tmp_path, mo
 
     prefs.save_default_episode(None, None)
     assert list(folder.iterdir()) == []
+
+
+def test_a_default_clip_a_running_job_holds_is_kept_until_it_ends(settings, tmp_path, monkeypatch):
+    """A new lecture's matching copies the default intro beside it only when it ends.
+
+    Choosing another default meanwhile must not delete the one that job was
+    started with; it goes once the job lets go of it.
+    """
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    prefs = Prefs(settings)
+    first, second = tmp_path / "one.mp4", tmp_path / "two.mp4"
+    first.write_bytes(b"first intro")
+    second.write_bytes(b"second intro")
+    prefs.save_default_episode(first, None)
+    held = prefs.default_episode
+
+    release = prefs.hold_default_clips(held)
+    prefs.save_default_episode(second, None)
+    assert held[0].read_bytes() == b"first intro", "deleted under the running job"
+    assert prefs.default_episode[0].read_bytes() == b"second intro"
+
+    release()
+    assert not held[0].exists(), "let go once the job ended"
+    assert prefs.default_episode[0].read_bytes() == b"second intro"
+    release()  # a second release changes nothing
+
+
+def test_a_held_clip_that_is_still_the_default_stays(settings, tmp_path, monkeypatch):
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    prefs = Prefs(settings)
+    clip = tmp_path / "one.mp4"
+    clip.write_bytes(b"intro")
+    prefs.save_default_episode(clip, None)
+    release = prefs.hold_default_clips(prefs.default_episode)
+    release()
+    assert prefs.default_episode[0].read_bytes() == b"intro"
+    folder = tmp_path / "data" / "episode"
+    before = sorted(folder.iterdir())
+    prefs.hold_default_clips((None, None))()  # holding nothing lets go of nothing
+    assert sorted(folder.iterdir()) == before
+
+
+def test_a_default_part_can_be_kept_while_the_other_changes(settings, tmp_path, monkeypatch):
+    """The Episode dialog changes only the part the person changed."""
+    from qurantext.gui.prefs import KEEP_DEFAULT
+
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    prefs = Prefs(settings)
+    intro, outro = tmp_path / "Channel intro.mp4", tmp_path / "end.mov"
+    intro.write_bytes(b"intro")
+    outro.write_bytes(b"outro")
+    prefs.save_default_episode(intro, None)
+    kept = prefs.default_episode[0]
+    intro.unlink()  # the original going away does not matter: the copy is kept
+
+    prefs.save_default_episode(KEEP_DEFAULT, outro, names=(None, "Outro 2024.mov"))
+    assert prefs.default_episode[0] == kept and kept.read_bytes() == b"intro"
+    assert prefs.default_episode_names == ("Channel intro.mp4", "Outro 2024.mov")
+    prefs.save_default_episode(None, KEEP_DEFAULT)
+    assert prefs.default_episode[0] is None and prefs.default_episode_names[0] is None
+    assert prefs.default_episode_names[1] == "Outro 2024.mov"
+
+
+@pytest.mark.parametrize("name", [3, "", "  ", None])
+def test_a_default_name_of_the_wrong_shape_is_unknown(settings, name):
+    import json
+
+    settings.setValue(
+        "default_episode", json.dumps({"intro": "/abs/intro.mp4", "intro_name": name})
+    )
+    prefs = Prefs(settings)
+    assert prefs.default_episode[0] == Path("/abs/intro.mp4")
+    assert prefs.default_episode_names == (None, None)

@@ -34,6 +34,7 @@ from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.gui.files import show_in_folder
 from qurantext.gui.i18n import plain_title, t, tn
 from qurantext.gui.review.session import ReviewSession
+from qurantext.jobs.episode_assets import EPISODE_SUFFIXES
 from qurantext.jobs.project_render import export_project_subtitles
 
 __all__ = ["ExportDialog"]
@@ -239,9 +240,11 @@ def _named_files(destination: Path) -> Path:
 
     The name is a stem ("Tafsir 25.7-11"), which ``with_suffix`` would cut at
     its last dot; a format suffix the person typed ("talk.srt") is dropped
-    rather than doubled.
+    rather than doubled, and so is a video's ("talk.mp4", the video's own name
+    typed in), which would otherwise give ``talk.mp4.srt``.
     """
     name = destination.name
-    if Path(name).suffix.lower().lstrip(".") in SUBTITLE_FORMATS:
+    suffix = Path(name).suffix.lower()
+    if suffix.lstrip(".") in SUBTITLE_FORMATS or suffix in EPISODE_SUFFIXES:
         name = Path(name).stem
     return destination.with_name(f"{name}.subtitles")

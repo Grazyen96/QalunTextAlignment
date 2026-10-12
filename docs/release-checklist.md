@@ -208,9 +208,33 @@ this is the only place anyone hears each platform's build recognise speech.
     - `episode.error.cancelled` («أُلغيت الحلقة، وبقي فيديو المحاضرة كما هو»);
     - the two notices a new lecture's default intro or outro can give,
       `episode.seed.missing` («مقطع المقدمة الافتراضي مفقود، فتبدأ هذه المحاضرة بدونه») and
-      `episode.seed.failed`.
+      `episode.seed.failed`;
+    - `episode.error.recitation_changed` («أُعيد إخراج فيديو التلاوة … أثناء صنع الحلقة») and
+      `episode.error.locked` («تعذّر استبدال …: قد يكون مفتوحًا في برنامج آخر»);
+    - the Episode dialog, read in a lecture's review: `episode.title` («الحلقة»),
+      `episode.intro`, `episode.recitation` («التلاوة»), `episode.outro`, `episode.none`
+      («بدون»), `episode.choose` («اختر…»), `episode.remove` («أزل»), the recitation states
+      `episode.rendered` («مُخرَجة»), `episode.render_first` («ستُخرَج أولًا») and
+      `episode.damaged` («تالفة»): do these agree with a recitation as feminine? They
+      use the render verb «أخرِج / إخراج», as `review.render` does, and not «صدِّر», which is
+      Export subtitles; is «مُخرَجة» natural here?
+      `episode.total` («المدة الكاملة»), `episode.unknown` («؟»), `episode.clip_missing`
+      («مقطع المقدمة مفقود: اختره من جديد أو أزله»), `episode.clip_filter`
+      («مقاطع الفيديو»), `episode.copy_failed`, `episode.default_failed` («ضُبطت الحلقة،
+      لكن تعذّر حفظها للدروس الجديدة») and `session.episode_lecture_only`;
+    - in the review's toolbar: `review.episode` («الحلقة…»), its tooltip
+      `review.episode.tip` («أضف مقدمة وتلاوة وخاتمة حول هذا الدرس»), `review.episode_on`
+      («الحلقة: مفعّلة») and, after a render, `review.episode_written` («كُتبت الحلقة
+      أيضًا»);
+    - the lecture step's sentence `job.stage.episode_lecture` («إخراج الدرس…»);
+    - the progress of each step: in the review's bar `render.running_lecture` («الدرس»),
+      `render.running_recitation` («التلاوة») and `render.running_join` («التجميع»), and on
+      the home window `home.progress.episode_lecture` («إخراج الدرس»),
+      `home.progress.episode_recitation` («إخراج التلاوة») and
+      `home.progress.episode_join` («تجميع الحلقة»), each with its `_eta` form.
 
-    Is «الحلقة» the right word for the episode?
+    Is «الحلقة» the right word for the episode, and «الدرس» or «المحاضرة» for the lecture
+    (both are used now)?
 - [ ] Keep every direction mark: the U+2066…U+2069 isolates and the U+200F marks,
       written as `\u2066`-style escapes in the source. The tests fail if a key goes
       missing.

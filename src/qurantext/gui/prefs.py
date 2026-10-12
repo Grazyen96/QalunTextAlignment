@@ -15,6 +15,9 @@ never crash the window.
 from __future__ import annotations
 
 import json
+import threading
+from collections import Counter
+from collections.abc import Callable, Iterable
 from dataclasses import replace
 from pathlib import Path
 
@@ -29,12 +32,29 @@ from qurantext.jobs.episode_assets import EPISODE_SUFFIXES
 from qurantext.jobs.look_assets import copy_by_content
 from qurantext.jobs.project import SUBTITLE_CHOICES
 
-__all__ = ["Prefs"]
+__all__ = ["KEEP_DEFAULT", "Prefs"]
 
 _MODES = ("recitation", "lecture")
 
 #: How many surahs there are: a remembered surah outside 1..114 is not one.
 _SURAH_COUNT = 114
+
+#: Default clips a running job was started with (``hold_default_clips``), each
+#: with how many jobs hold it. A new lecture's matching copies its default
+#: intro and outro beside it only when matching ends, so a default replaced
+#: meanwhile must stay on disk until then. Shared by every ``Prefs``: the
+#: window and its reviews may hold different ones over the same folder.
+_HELD_CLIPS: Counter[Path] = Counter()
+_HELD_LOCK = threading.Lock()
+
+
+#: Passed to ``save_default_episode`` for a part to leave as it is stored.
+KEEP_DEFAULT = object()
+
+
+def _held_clips() -> set[str]:
+    with _HELD_LOCK:
+        return {str(path) for path, count in _HELD_CLIPS.items() if count > 0}
 
 
 def _as_positive_int(value: object, highest: int | None = None) -> int | None:
@@ -262,50 +282,109 @@ class Prefs:
     # the app's own folder, so deleting or moving the original clip does not
     # lose it. The recitation is never a default: it differs per lecture.
 
-    @property
-    def default_episode(self) -> tuple[Path | None, Path | None]:
-        """The default intro and outro; ``(None, None)`` when unset or unreadable."""
+    def _default_episode_parts(self) -> dict[str, tuple[Path, str | None]]:
+        """The stored default clips, each as (path, original name), by part; tolerant."""
         raw = self._settings.value("default_episode", "")
         if not isinstance(raw, str) or not raw:
-            return None, None
+            return {}
         try:
             data = json.loads(raw)
         except ValueError:  # json.JSONDecodeError is a ValueError
-            return None, None
+            return {}
         if not isinstance(data, dict):
-            return None, None
-
-        def part(key: str) -> Path | None:
+            return {}
+        parts: dict[str, tuple[Path, str | None]] = {}
+        for key in ("intro", "outro"):
             value = data.get(key)
             if not isinstance(value, str) or not value:
-                return None
+                continue
             path = Path(value)
             if not path.is_absolute() or path.suffix.lower() not in EPISODE_SUFFIXES:
-                return None
-            return path
+                continue
+            name = data.get(f"{key}_name")
+            parts[key] = (path, name if isinstance(name, str) and name.strip() else None)
+        return parts
 
-        return part("intro"), part("outro")
+    @property
+    def default_episode(self) -> tuple[Path | None, Path | None]:
+        """The default intro and outro; ``(None, None)`` when unset or unreadable."""
+        parts = self._default_episode_parts()
+        intro, outro = parts.get("intro"), parts.get("outro")
+        return (intro[0] if intro else None, outro[0] if outro else None)
 
-    def save_default_episode(self, intro: Path | None, outro: Path | None) -> None:
+    @property
+    def default_episode_names(self) -> tuple[str | None, str | None]:
+        """The default clips' original file names (their copies are named by content)."""
+        parts = self._default_episode_parts()
+        intro, outro = parts.get("intro"), parts.get("outro")
+        return (intro[1] if intro else None, outro[1] if outro else None)
+
+    def save_default_episode(
+        self,
+        intro: Path | None | object,
+        outro: Path | None | object,
+        *,
+        names: tuple[str | None, str | None] = (None, None),
+    ) -> None:
         """Remember *intro* and *outro* for new lectures; None clears that part.
 
-        Each clip is copied into the app's own ``episode`` folder, named by its
-        content, and the stored path points there. Raises what
+        :data:`KEEP_DEFAULT` for a part leaves it as it is stored (the Episode
+        dialog changes only the part the person changed). Each new clip is
+        copied into the app's own ``episode`` folder, named by its content,
+        and the stored path points there; its original name (*names*, else the
+        clip's own file name) is kept beside it, for showing. Raises what
         :func:`~qurantext.jobs.look_assets.copy_by_content` raises
         (``ValueError``, ``OSError``) when a clip cannot be copied; nothing is
         stored then.
         """
         folder = user_data_dir() / "episode"
-
-        def stored(clip: Path | None) -> str | None:
-            if clip is None:
-                return None
-            return str(copy_by_content(Path(clip), folder, suffixes=EPISODE_SUFFIXES).resolve())
-
-        value = {"intro": stored(intro), "outro": stored(outro)}
+        current = self._default_episode_parts()
+        value: dict[str, str | None] = {}
+        for key, clip, name in (("intro", intro, names[0]), ("outro", outro, names[1])):
+            if clip is KEEP_DEFAULT:
+                kept = current.get(key)
+                value[key] = str(kept[0]) if kept else None
+                value[f"{key}_name"] = kept[1] if kept else None
+            elif clip is None:
+                value[key] = value[f"{key}_name"] = None
+            else:
+                clip = Path(clip)  # type: ignore[arg-type]
+                copy = copy_by_content(clip, folder, suffixes=EPISODE_SUFFIXES).resolve()
+                value[key] = str(copy)
+                value[f"{key}_name"] = name or clip.name
         self._settings.setValue("default_episode", json.dumps(value))
         self._settings.sync()
-        _remove_clips_but(folder, {v for v in value.values() if v is not None})
+        kept_paths = {value[key] for key in ("intro", "outro") if value[key] is not None}
+        _remove_clips_but(folder, kept_paths | _held_clips())  # type: ignore[arg-type]
+
+    def hold_default_clips(self, clips: Iterable[Path | None]) -> Callable[[], None]:
+        """Keep *clips* (a job's ``episode_defaults``) on disk until the returned call.
+
+        A job started with these defaults copies them later; another default
+        chosen meanwhile replaces them in the settings but does not delete
+        them. The returned function lets go (once; a second call does nothing)
+        and removes what no default and no other job names any more.
+        """
+        held = [Path(clip).resolve() for clip in clips if clip]
+        with _HELD_LOCK:
+            _HELD_CLIPS.update(held)
+        released = False
+
+        def release() -> None:
+            nonlocal released
+            if released:
+                return
+            released = True
+            with _HELD_LOCK:
+                _HELD_CLIPS.subtract(held)
+                for path in held:
+                    if _HELD_CLIPS[path] <= 0:
+                        del _HELD_CLIPS[path]
+            if held:
+                defaults = {str(clip.resolve()) for clip in self.default_episode if clip}
+                _remove_clips_but(user_data_dir() / "episode", defaults | _held_clips())
+
+        return release
 
     # -- more_options_open --------------------------------------------------
 

@@ -63,6 +63,7 @@ from qurantext.gui.jobs import JobOutcome
 from qurantext.gui.prefs import Prefs
 from qurantext.gui.review.ayah_picker import AyahPicker
 from qurantext.gui.review.background import BackgroundJobs
+from qurantext.gui.review.episode_dialog import EpisodeDialog
 from qurantext.gui.review.export_dialog import ExportDialog
 from qurantext.gui.review.frame_view import FrameView
 from qurantext.gui.review.look_panel import LookPanel, look_warning_text
@@ -84,7 +85,7 @@ from qurantext.gui.surahs import (
 from qurantext.jobs.project import Project, job_settings
 from qurantext.utils.progress import CancelToken, ProgressEvent
 
-__all__ = ["SCANCODE_KEYS", "ReviewWindow"]
+__all__ = ["SCANCODE_KEYS", "ReviewWindow", "render_finished_text"]
 
 #: The physical key behind each layout-dependent shortcut, by the code Qt reports
 #: for it (``nativeScanCode``; on macOS ``nativeVirtualKey``, the scan code is 0).
@@ -134,6 +135,12 @@ _DEFAULT_SPAN_S = 20.0
 _LIST_MIN_HEIGHT = 150
 #: The Look panel's width, in pixels: three palette swatches with their names.
 _LOOK_PANEL_WIDTH = 260
+#: What the render's progress bar says during each of the episode's steps.
+_EPISODE_PROGRESS_KEYS = {
+    "episode_lecture": "render.running_lecture",
+    "episode_recitation": "render.running_recitation",
+    "episode_join": "render.running_join",
+}
 
 
 def _platform_family() -> str:
@@ -240,6 +247,8 @@ class ReviewWindow(QMainWindow):
         self._render_project_copy: Project | None = None
         #: The segment list's edit triggers, saved while a render disables them.
         self._segment_list_edit_triggers: QAbstractItemView.EditTrigger | None = None
+        #: The progress bar's sentence for the running render's current step.
+        self._render_progress_key = "render.running"
 
         self._build()
         self._wire()
@@ -285,6 +294,11 @@ class ReviewWindow(QMainWindow):
         self.remove_button = QPushButton(t("review.remove"))
         self.export_button = QPushButton(t("review.export"))
         self.render_button = QPushButton(t("review.render"))
+        # A lecture's episode: what plays around it, and whether anything does.
+        self.episode_button = QPushButton(t("review.episode"))
+        self.episode_button.setToolTip(t("review.episode.tip"))
+        self.episode_label = QLabel(t("review.episode_on"))
+        self.episode_label.setVisible(False)
         self.render_progress = QProgressBar()
         self.render_progress.setRange(0, 100)
         self.render_progress.setFixedWidth(140)
@@ -311,11 +325,14 @@ class ReviewWindow(QMainWindow):
         lecture = str(self.session.project.mode).lower() == "lecture"
         self.studied_surah_label.setVisible(lecture)
         self.studied_surah_box.setVisible(lecture)
+        self.episode_button.setVisible(lecture)
         toolbar.addSpacing(12)
         toolbar.addWidget(self.studied_surah_label)
         toolbar.addWidget(self.studied_surah_box)
         toolbar.addStretch(1)
         toolbar.addWidget(self.export_button)
+        toolbar.addWidget(self.episode_label)
+        toolbar.addWidget(self.episode_button)
         toolbar.addWidget(self.render_button)
         toolbar.addWidget(self.render_progress)
         toolbar.addWidget(self.render_cancel_button)
@@ -422,6 +439,7 @@ class ReviewWindow(QMainWindow):
         self.export_button.clicked.connect(self.export_requested)
         self.render_button.clicked.connect(self.render_requested)
         self.render_cancel_button.clicked.connect(self._cancel_render)
+        self.episode_button.clicked.connect(self._open_episode_dialog)
         self.export_requested.connect(self._open_export_dialog)
         self.render_requested.connect(self._start_render)
         self.warnings.jump_requested.connect(self.seek)
@@ -881,6 +899,10 @@ class ReviewWindow(QMainWindow):
         self.setWindowTitle(plain_title(f"{title} *" if session.dirty else title))
         self._show_selection(self.strip.selected)
         self._show_studied_surah()
+        self.episode_label.setVisible(self._is_lecture() and not session.episode.is_empty)
+
+    def _is_lecture(self) -> bool:
+        return str(self.session.project.mode).lower() == "lecture"
 
     def _show_studied_surah(self) -> None:
         """Bring the picker back in line after undo, redo, discard or save, and say
@@ -921,6 +943,23 @@ class ReviewWindow(QMainWindow):
         dialog.saved.connect(self.saved)
         return dialog
 
+    def _open_episode_dialog(self) -> None:
+        """Choose the intro, recitation and outro; OK is one undoable edit."""
+        if self._rendering or not self._is_lecture():
+            return
+        dialog = EpisodeDialog(self.session, prefs=self._prefs, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        # OK made the edit itself (the clips copied beside the project first).
+        if dialog.default_error:
+            self.statusBar().showMessage(dialog.default_error, 8000)
+        self._sync_state()
+
+    def show_notices(self, notices: tuple[str, ...] | list[str]) -> None:
+        """Keep *notices* (what the job that made this project could not do) in view."""
+        for notice in notices:
+            self.warnings.add_notice(notice)
+
     def _start_render(self) -> None:
         """Save, then render a snapshot of the project's cards and captions in a worker.
 
@@ -938,6 +977,11 @@ class ReviewWindow(QMainWindow):
             return
         snapshot = copy.deepcopy(self.session.project)
         self._render_project_copy = snapshot
+        # With an episode, the bar names each step: the lecture, then the rest.
+        has_episode = self._is_lecture() and not self.session.episode.is_empty
+        self._render_progress_key = "render.running_lecture" if has_episode else "render.running"
+        # The last render's episode error is about that render, not this one.
+        self.warnings.set_episode_notice(None)
         self._set_render_running(True)
         # No preset or subtitles here: ``run_render`` reads the job's own, so
         # this renders what the job was started for.
@@ -968,6 +1012,8 @@ class ReviewWindow(QMainWindow):
         # Said before the announcement, which waits for the person to close it.
         for code in outcome.look_warnings:
             self.warnings.add_look_notice(look_warning_text(code))
+        # Why this render's episode was not made, until the next render says otherwise.
+        self.warnings.set_episode_notice(outcome.episode_error)
         self._announce_render(outcome)
 
     def _take_back_render(self, *, always: bool = False) -> None:
@@ -1002,11 +1048,16 @@ class ReviewWindow(QMainWindow):
             self.render_cancel_button.setEnabled(False)
 
     def _set_render_running(self, running: bool) -> None:
+        if not running:
+            self.render_progress.setToolTip("")
         self._rendering = running
         self.render_button.setEnabled(not running)
         # The progress bar and Cancel take the button's place, so the toolbar keeps
         # its width and the window fits a 1280 px screen while a render runs.
         self.render_button.setVisible(not running)
+        # The episode is part of what is rendered: chosen before, not during.
+        self.episode_button.setEnabled(not running)
+        self.episode_button.setVisible(not running and self._is_lecture())
         self.export_button.setEnabled(not running)
         self.strip.setEnabled(not running)
         self.selection_bar.setEnabled(not running)
@@ -1021,25 +1072,35 @@ class ReviewWindow(QMainWindow):
         self.render_cancel_button.setEnabled(running)
         if running:
             self.render_progress.setValue(0)
-            self.render_progress.setFormat(t("render.running", percent=0))
+            self.render_progress.setFormat(t(self._render_progress_key, percent=0))
         else:
             self._render_cancel = None
             self._render_project_copy = None
         self._sync_state()
 
     def _on_render_progress(self, event: ProgressEvent) -> None:
+        step = _EPISODE_PROGRESS_KEYS.get(event.stage)
+        if step is not None and step != self._render_progress_key:
+            # The lecture is done; the episode's next step starts from nothing.
+            self._render_progress_key = step
+            self.render_progress.setToolTip(t(f"job.stage.{event.stage}"))
+            if event.fraction is None:
+                self.render_progress.setValue(0)
+                self.render_progress.setFormat(t(step, percent=0))
         if event.fraction is None:
             return
         percent = int(max(0.0, min(1.0, event.fraction)) * 100)
         self.render_progress.setValue(percent)
-        self.render_progress.setFormat(t("render.running", percent=percent))
+        self.render_progress.setFormat(t(self._render_progress_key, percent=percent))
 
     def _announce_render(self, outcome: JobOutcome) -> None:
         """Say the render is ready, with a button to reveal it (the tests replace this)."""
         box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Information)
+        # An episode that was not made is a warning, though the lecture is ready.
+        failed = bool(outcome.episode_error)
+        box.setIcon(QMessageBox.Icon.Warning if failed else QMessageBox.Icon.Information)
         box.setWindowTitle(plain_title(t("review.render")))
-        box.setText(t("render.done", path=path_text(outcome.video)))
+        box.setText(render_finished_text(outcome))
         show_button = box.addButton(t("render.show"), QMessageBox.ButtonRole.ActionRole)
         box.addButton(QMessageBox.StandardButton.Ok)
         box.exec()
@@ -1190,3 +1251,13 @@ class ReviewWindow(QMainWindow):
         gaps = uncovered_from_levels(times, levels, floor, self.session.coverage_words())
         self.waveform.set_gaps([(gap.start, gap.end) for gap in gaps])
         self.warnings.set_gaps(gaps)
+
+
+def render_finished_text(outcome: JobOutcome) -> str:
+    """What a finished render says: the video, then its episode, written or not."""
+    lines = [t("render.done", path=path_text(outcome.video))]
+    if outcome.episode_video is not None:
+        lines.append(t("review.episode_written", name=Path(outcome.episode_video).name))
+    if outcome.episode_error:
+        lines.append(outcome.episode_error)
+    return "\n\n".join(lines)

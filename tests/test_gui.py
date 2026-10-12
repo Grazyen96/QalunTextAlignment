@@ -881,6 +881,9 @@ def _fake_review_class(created: list, *, refuse_close: bool = False):
             self.closed.emit()
             return True
 
+        def show_notices(self, notices):
+            self.notices = list(getattr(self, "notices", [])) + list(notices)
+
     return FakeReview
 
 
@@ -2895,3 +2898,277 @@ def test_start_hands_the_seed_notices_on_with_the_job(tmp_path, monkeypatch) -> 
     )
 
     assert finished.notices == (t("episode.seed.missing", part=t("episode.part.outro")),)
+
+
+def test_a_default_clip_is_kept_while_a_job_started_with_it_runs(
+    qt_app, home, prefs, reviews, tmp_path, monkeypatch
+) -> None:
+    """Choosing another default intro mid-job must not delete the one the job will copy."""
+    import threading
+
+    from qurantext.gui import main_window as module
+    from qurantext.jobs.project import load_project
+
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    first, second = tmp_path / "one.mp4", tmp_path / "two.mp4"
+    first.write_bytes(b"first intro")
+    second.write_bytes(b"second intro")
+    prefs.save_default_episode(first, None)
+    started_with = prefs.default_episode[0]
+    release = threading.Event()
+    finish = _blocked_until(
+        release,
+        finish=lambda spec: module._Finished(
+            load_project(_saved_job(Path(spec.output_dir), Path(spec.audio).stem))
+        ),
+    )
+    monkeypatch.setattr(module, "_match_then_render", finish)
+
+    spec = _spec(tmp_path, output_dir=tmp_path / "jobs", episode_defaults=(str(started_with), None))
+    home.new_job.start_requested.emit(spec)
+    _spin_until(qt_app, lambda: home._cancel is not None)
+    prefs.save_default_episode(second, None)  # in a review's Episode dialog, say
+    assert started_with.read_bytes() == b"first intro"
+
+    release.set()
+    _spin_until(qt_app, lambda: home._cancel is None)
+    assert not started_with.exists(), "let go once the job ended"
+    assert prefs.default_episode[0].read_bytes() == b"second intro"
+
+
+# --- the episode in the main window ------------------------------------------
+
+
+@pytest.mark.parametrize("episode_error", ["cancelled", "failed"])
+def test_render_right_away_says_when_the_episode_was_not_made(
+    qt_app, home, reviews, tmp_path, monkeypatch, episode_error
+) -> None:
+    """The lecture is saved either way; the line says so, then why there is no episode."""
+    from qurantext.gui import main_window as module
+    from qurantext.gui.jobs import JobOutcome
+
+    _fake_matching(monkeypatch)
+    why = (
+        module.t("episode.error.cancelled")
+        if episode_error == "cancelled"
+        else module.t("episode.error.part_missing", part=module.t("episode.part.intro"))
+    )
+
+    def fake_render(project, *, progress=None, cancel=None):
+        return JobOutcome(
+            matches=project.matches, video=tmp_path / "a.mp4", cards=1, episode_error=why
+        )
+
+    monkeypatch.setattr(module, "run_render", fake_render)
+    _run_start(qt_app, home, _spec(tmp_path, output_dir=tmp_path / "jobs", render_right_away=True))
+
+    rendered = module.t("home.finished.rendered", path=module.path_text(tmp_path / "a.mp4"))
+    assert home.new_job.status_label.text() == f"{rendered} {why}"
+
+
+def test_render_right_away_names_the_episode_it_wrote(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui import main_window as module
+    from qurantext.gui.jobs import JobOutcome
+
+    _fake_matching(monkeypatch)
+    episode = tmp_path / "a – episode.mp4"
+
+    def fake_render(project, *, progress=None, cancel=None):
+        return JobOutcome(
+            matches=project.matches, video=tmp_path / "a.mp4", cards=1, episode_video=episode
+        )
+
+    monkeypatch.setattr(module, "run_render", fake_render)
+    _run_start(qt_app, home, _spec(tmp_path, output_dir=tmp_path / "jobs", render_right_away=True))
+
+    rendered = module.t("home.finished.rendered", path=module.path_text(tmp_path / "a.mp4"))
+    written = module.t("review.episode_written", name=episode.name)
+    assert home.new_job.status_label.text() == f"{rendered} {written}"
+
+
+def test_seed_notices_stay_in_the_review_that_opens(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui import main_window as module
+    from qurantext.jobs.project import load_project
+
+    notice = module.t("episode.seed.missing", part=module.t("episode.part.intro"))
+
+    def finish(spec, *, progress=None, cancel=None):
+        project = load_project(_saved_job(Path(spec.output_dir), Path(spec.audio).stem))
+        return module._Finished(project, notices=(notice,))
+
+    monkeypatch.setattr(module, "_match_then_render", finish)
+    monkeypatch.setattr(module.QMessageBox, "warning", lambda *a: pytest.fail("no dialog"))
+    _run_start(qt_app, home, _spec(tmp_path, output_dir=tmp_path / "jobs"))
+
+    (review,) = reviews
+    assert review.notices == [notice]
+
+
+def test_seed_notices_after_a_render_right_away_wait_to_be_dismissed(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    """No review opens to keep them: a box does, and the status line says them too."""
+    from qurantext.gui import main_window as module
+    from qurantext.gui.jobs import JobOutcome
+    from qurantext.jobs.project import load_project
+
+    notice = module.t("episode.seed.failed", part=module.t("episode.part.outro"))
+
+    def finish(spec, *, progress=None, cancel=None):
+        project = load_project(_saved_job(Path(spec.output_dir), Path(spec.audio).stem))
+        outcome = JobOutcome(matches=project.matches, video=tmp_path / "a.mp4", cards=1)
+        return module._Finished(project, outcome, notices=(notice,))
+
+    shown: list = []
+    monkeypatch.setattr(module, "_match_then_render", finish)
+    monkeypatch.setattr(
+        module.QMessageBox, "warning", lambda parent, title, text: shown.append((title, text))
+    )
+    spec = _spec(tmp_path, output_dir=tmp_path / "jobs", render_right_away=True)
+    _run_start(qt_app, home, spec)
+
+    assert shown == [(module.t("episode.title"), notice)]
+    assert reviews == []
+    assert home.new_job.status_label.text().endswith(notice)
+
+
+@pytest.mark.parametrize(
+    ("stage", "key"),
+    [
+        ("episode_recitation", "home.progress.episode_recitation"),
+        ("episode_join", "home.progress.episode_join"),
+        ("episode_lecture", "home.progress.episode_lecture"),
+        ("render", "home.progress.rendering"),
+    ],
+)
+def test_the_episode_s_steps_are_named_in_the_progress(stage, key) -> None:
+    from qurantext.gui import main_window as module
+
+    event = ProgressEvent(stage=stage, message="Joining the episode", fraction=0.4)
+    assert module._progress_text(event) == module.t(key, percent=40)
+    eta = ProgressEvent(stage=stage, message="x", fraction=0.5, eta_seconds=30)
+    assert module._progress_text(eta) == module.t(
+        f"{key}_eta", percent=50, eta=module.t("home.eta.seconds", seconds=30)
+    )
+
+
+def test_the_recitation_render_and_the_join_report_under_their_own_stages(
+    tmp_path, monkeypatch
+) -> None:
+    """Both report as "render" inside; the window must be able to tell them from the lecture."""
+    from qurantext.jobs.episode import EpisodeResult
+    from qurantext.utils.progress import report
+
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch)
+
+    def recitation(path, *, avoid=None, progress=None, cancel=None):
+        report(progress, "render", "Rendering frames", fraction=0.5)
+        return seen["rec_video"]
+
+    def join(parts, output, *, progress=None, **kwargs):
+        report(progress, "render", "Joining the episode", fraction=0.25)
+        return EpisodeResult(output=output, durations=(2.0, 3.0, 10.0), lecture_offset=5.0)
+
+    monkeypatch.setattr(jobs_module, "recitation_video", recitation)
+    monkeypatch.setattr(jobs_module, "assemble_episode", join)
+    events: list[ProgressEvent] = []
+    jobs_module.run_render(project, progress=events.append)
+
+    fractions = [(e.stage, e.fraction) for e in events if e.fraction is not None]
+    assert fractions == [("episode_recitation", 0.5), ("episode_join", 0.25)]
+
+
+def test_a_language_switch_drops_what_the_job_said_in_the_old_one(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    """The episode error was said in English; after a switch only the rest is said again."""
+    from qurantext.gui import i18n
+    from qurantext.gui import main_window as module
+    from qurantext.gui.jobs import JobOutcome
+
+    _fake_matching(monkeypatch)
+    why = module.t("episode.error.cancelled")
+
+    def fake_render(project, *, progress=None, cancel=None):
+        return JobOutcome(
+            matches=project.matches, video=tmp_path / "a.mp4", cards=1, episode_error=why
+        )
+
+    monkeypatch.setattr(module, "run_render", fake_render)
+    _run_start(qt_app, home, _spec(tmp_path, output_dir=tmp_path / "jobs", render_right_away=True))
+    assert home.new_job.status_label.text().endswith(why)
+
+    assert home.set_language("ar")
+    said = home.new_job.status_label.text()
+    assert said == i18n.t("home.finished.rendered", path=i18n.path_text(tmp_path / "a.mp4"))
+
+
+def test_a_review_that_cannot_open_is_still_said_after_the_notices_box(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui import main_window as module
+    from qurantext.jobs.project import Project
+
+    notice = module.t("episode.seed.missing", part=module.t("episode.part.intro"))
+    broken = tmp_path / "jobs" / "a_lecture.qalun.json"
+    broken.parent.mkdir(parents=True)
+    broken.write_text("{not json")
+
+    def finish(spec, *, progress=None, cancel=None):
+        project = Project(audio=spec.audio, mode="lecture", matches=tmp_path / "m.json")
+        project.path = broken
+        return module._Finished(project, notices=(notice,))
+
+    shown: list = []
+    monkeypatch.setattr(module, "_match_then_render", finish)
+
+    def box(parent, title, text):
+        shown.append(text)
+        qt_app.processEvents()  # the job's end arrives while the box is up
+
+    monkeypatch.setattr(module.QMessageBox, "warning", box)
+    _run_start(qt_app, home, _spec(tmp_path, output_dir=tmp_path / "jobs"))
+
+    assert shown == [notice]
+    said = home.new_job.status_label.text()
+    prefix = module.t("home.review_failed", name=broken.name, details="\x00").split("\x00")[0]
+    assert said.startswith(prefix), said
+
+
+def test_the_lecture_s_own_render_is_named_when_an_episode_follows(tmp_path, monkeypatch) -> None:
+    from qurantext.utils.progress import report
+
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch)
+    real = jobs_module.render_project
+
+    def reporting(project, output, *, progress=None, **kwargs):
+        report(progress, "render", "Rendering frames", fraction=0.5)
+        return real(project, output, progress=progress, **kwargs)
+
+    monkeypatch.setattr(jobs_module, "render_project", reporting)
+    events: list[ProgressEvent] = []
+    jobs_module.run_render(project, progress=events.append)
+    assert [(e.stage, e.fraction) for e in events if e.fraction is not None][0] == (
+        "episode_lecture",
+        0.5,
+    )
+
+
+def test_a_lecture_without_an_episode_renders_as_before(tmp_path, monkeypatch) -> None:
+    from qurantext.utils.progress import report
+
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch, episode={})
+    real = jobs_module.render_project
+
+    def reporting(project, output, *, progress=None, **kwargs):
+        report(progress, "render", "Rendering frames", fraction=0.5)
+        return real(project, output, progress=progress, **kwargs)
+
+    monkeypatch.setattr(jobs_module, "render_project", reporting)
+    events: list[ProgressEvent] = []
+    jobs_module.run_render(project, progress=events.append)
+    assert [(e.stage, e.fraction) for e in events if e.fraction is not None] == [("render", 0.5)]

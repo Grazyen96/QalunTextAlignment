@@ -1,7 +1,8 @@
 """The line above the editor that says what needs a person's attention.
 
 Two kinds of thing end up here: notices (the recording is missing, playback is
-off, a background read failed, a lecture's chosen surah has no card) and the
+off, a background read failed, a lecture's chosen surah has no card, the last
+render's episode was not made) and the
 coverage check's result — the
 stretches of speech no word covers, each with a Jump link to it (the first
 few; the rest are counted), or a line saying the check is still running. The
@@ -41,6 +42,8 @@ class WarningsStrip(QLabel):
         self._look_notices: list[str] = []
         #: Why the cards are empty for the chosen studied surah, while they are.
         self._surah_notice: str | None = None
+        #: Why the last render's episode was not made, until the next render.
+        self._episode_notice: str | None = None
         #: ``None`` until a coverage check has reported; then its gaps (maybe none).
         self._gaps: list[UncoveredSpeech] | None = None
         #: Whether the recording's levels are being read for a first coverage check.
@@ -73,6 +76,13 @@ class WarningsStrip(QLabel):
         self._surah_notice = text
         self._render()
 
+    def set_episode_notice(self, text: str | None) -> None:
+        """Say why the last render's episode was not made, or (None) stop saying it."""
+        if text == self._episode_notice:
+            return
+        self._episode_notice = text or None
+        self._render()
+
     def set_gaps(self, gaps: list[UncoveredSpeech]) -> None:
         self._gaps = list(gaps)
         self._checking = False
@@ -87,6 +97,8 @@ class WarningsStrip(QLabel):
         notices = self._notices + [n for n in self._look_notices if n not in self._notices]
         if self._surah_notice and self._surah_notice not in notices:
             notices.append(self._surah_notice)
+        if self._episode_notice and self._episode_notice not in notices:
+            notices.append(self._episode_notice)
         lines = [html.escape(notice) for notice in notices]
         if self._gaps:
             lines.append(html.escape(tn("review.gaps", len(self._gaps))))

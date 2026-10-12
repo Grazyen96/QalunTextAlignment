@@ -131,6 +131,26 @@ back to and explains without reciting it — and a double-click on a card's Ayah
 cell (or "Change ayah…" in its menu) changes which ayat it shows. The text
 always comes from the Quran store, and a card placed by hand is marked ✎.
 
+**Episode: intro, recitation and outro.** In a lecture's review, "Episode…"
+(beside Render) chooses what plays around the lecture: an intro clip, the video
+of one of your recitation jobs, and an outro clip (MP4, MOV, MKV or WebM). The
+dialog shows each clip's length and the episode's total. Rendering the lecture
+then also writes `<name> – episode.mp4` beside it: the parts joined in order,
+each scaled and letterboxed to the lecture's size, so a phone clip filmed
+upright keeps black bars rather than being stretched. A recitation that changed
+since its last render is rendered first. When the job writes subtitle files,
+the episode gets its own, `<name> – episode.srt` and so on, moved to where the
+lecture starts in it. The lecture's own video is kept whatever happens to the
+episode: a clip gone missing, or a cancel during the joining, is said in the
+review and the episode is simply not written. The clips are copied beside the
+project (`<name>.qalun.episode/`), so the folder can be moved with them inside;
+the recitation is only referenced. An intro or outro you choose (or remove) in
+the dialog becomes what new lectures start with; a part you leave alone keeps
+its default, so setting only a lecture's recitation never clears the channel's
+intro. The review shows "Episode: on" when any part is set. Clips copied beside
+a project stay there after an Undo or a Remove (Redo needs them back); delete
+the `.qalun.episode` folder's unused files by hand if it grows.
+
 **More options**, folded away since most jobs don't need them: a Quran text
 other than the certified one that ships with the app, subtitles burned into
 the picture, written as files beside it, or both (and in which formats), an

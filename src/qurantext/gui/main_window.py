@@ -12,7 +12,8 @@ review windows it opens — one per project.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
 
@@ -64,6 +65,7 @@ _KNOWN_STAGES = frozenset(
         "match",
         "render",
         "export",
+        "episode_lecture",
         "episode_recitation",
         "episode_join",
     }
@@ -73,10 +75,11 @@ _PERCENT_KEYS = {
     "download": "home.progress.downloading",
     "transcribe": "home.progress.transcribing",
     "render": "home.progress.rendering",
-    # The episode's steps report their percentages as "render"; should one
-    # report its own, it is still rendering, not matching.
-    "episode_recitation": "home.progress.rendering",
-    "episode_join": "home.progress.rendering",
+    # The episode's steps, after the lecture's own render (``gui.jobs`` reports
+    # the recitation's render and the join under these names).
+    "episode_lecture": "home.progress.episode_lecture",
+    "episode_recitation": "home.progress.episode_recitation",
+    "episode_join": "home.progress.episode_join",
 }
 
 
@@ -90,9 +93,21 @@ class _Said:
     count: int | None = None
     #: Sentences said after this one, on the same line (a render's look warnings).
     then: tuple[_Said, ...] = ()
+    #: Set for a sentence the job already said in the window's language (an
+    #: episode error, a seed notice): shown as it is, in place of *key*.
+    raw: str | None = None
+
+    def without_raw(self) -> _Said | None:
+        """This sentence without its raw parts, which cannot be said in another language."""
+        if self.raw is not None:
+            return None
+        then = tuple(kept for more in self.then if (kept := more.without_raw()) is not None)
+        return replace(self, then=then)
 
     def text(self) -> str:
-        if self.count is None:
+        if self.raw is not None:
+            said = self.raw
+        elif self.count is None:
             said = t(self.key, **self.fmt)
         else:
             said = tn(self.key, self.count, **self.fmt)
@@ -140,6 +155,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(plain_title(t("app.title")))
 
         self._cancel: CancelToken | None = None
+        #: Lets go of the default intro and outro the running job was started
+        #: with, which ``Prefs`` keeps on disk until then (``hold_default_clips``).
+        self._release_clips: Callable[[], None] | None = None
         #: Runs the matching/render job off the UI thread.
         self._jobs = BackgroundJobs(self)
         #: Set once the window was closed while a job ran: the window is hidden,
@@ -250,7 +268,11 @@ class MainWindow(QMainWindow):
         if audio is not None:
             self.new_job.set_audio(audio)
         if self._status is not None:
-            self.new_job.show_status(self._status.text())  # said again, in the new language
+            # Said again in the new language; what the job said in the old one
+            # (an episode error, a seed notice) is dropped, as ``_show_raw`` is:
+            # the review or the box that showed it said it whole.
+            self._status = self._status.without_raw()
+            self.new_job.show_status(self._status.text() if self._status else "")
         # The combo just went with the old panels; a keyboard user stays where they were.
         self.language_combo.setFocus()
         return True
@@ -306,6 +328,9 @@ class MainWindow(QMainWindow):
         self.new_job.set_running(True)
         self.new_job.set_progress(None, starting)
         self.job_list.set_running(Path(spec.audio).name, starting)
+        # A new lecture copies these when its matching ends; a default chosen
+        # meanwhile (in a review's Episode dialog) must not delete them first.
+        self._release_clips = self._prefs.hold_default_clips(spec.episode_defaults)
 
         # The job may be a closure; every callback is a bound method, so it
         # runs on this (the UI) thread rather than the worker's.
@@ -390,12 +415,38 @@ class MainWindow(QMainWindow):
             if outcome.studied_surah_missing is not None:
                 label = surah_label(outcome.studied_surah_missing, stored_surah_names())
                 warnings += (_Said("review.studied_surah_missing", {"surah": label}),)
+            # The episode after it: written, or why not (a cancel included).
+            if outcome.episode_video is not None:
+                name = Path(outcome.episode_video).name
+                warnings += (_Said("review.episode_written", {"name": name}),)
+            if outcome.episode_error:
+                warnings += (_Said("", raw=outcome.episode_error),)
+            warnings += tuple(_Said("", raw=notice) for notice in finished.notices)
             self._ending = _Said(
                 "home.finished.rendered", {"path": path_text(outcome.video)}, then=warnings
             )
+            self._tell_notices(finished.notices)
             return
         problem = self._show_review(project_path)
+        # Set before any box: the job's ``done`` can arrive while the box is open.
         self._ending = problem or _Said("home.finished.matched", count=len(project.cards))
+        if problem is None and finished.notices:
+            # Shown in the review that just opened, until it closes.
+            review = self._review_of(project_path)
+            if review is not None:
+                review.show_notices(finished.notices)
+        elif finished.notices:
+            self._tell_notices(finished.notices)
+
+    def _tell_notices(self, notices: tuple[str, ...]) -> None:
+        """Say what matching could not do for a new job, until the person closes it.
+
+        A default intro gone means a lecture without it; the status line alone
+        would be overwritten by the next thing said, and no review opened to
+        keep it on show.
+        """
+        if notices:
+            QMessageBox.warning(self, plain_title(t("episode.title")), "\n".join(notices))
 
     def _on_failed(self, message: str) -> None:
         self._remember_matched_output()
@@ -439,6 +490,9 @@ class MainWindow(QMainWindow):
         self.job_list.end_running()
 
     def _on_done(self) -> None:
+        if self._release_clips is not None:
+            self._release_clips()
+            self._release_clips = None
         if self._closing:
             # The job's thread has quit (or is about to): join it, then leave.
             self._cancel = None
