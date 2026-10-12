@@ -2955,3 +2955,29 @@ def test_the_generated_fields_mirror_in_arabic_and_links_stay_left_to_right(
     assert dialog.outro_readable.text() == t("episode.gen.readable", link=ltr("example.org/dars"))
     assert "\u2066example.org/dars\u2069" in dialog.outro_readable.text()
     assert dialog.outro_tracked.text().startswith("https://example.org/dars?"), "no marks"
+
+
+def test_no_label_in_the_episode_dialog_is_clipped(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    from PySide6.QtWidgets import QLabel
+
+    from qurantext.gui.language import apply_language
+
+    for language in ("en", "ar"):
+        apply_language(qt_app, language)
+        dialog = _generated_dialog(episode_lecture, prefs, tmp_path, monkeypatch)
+        dialog.flush_previews()
+        dialog.show()
+        qt_app.processEvents()
+        clipped = [
+            (label.text(), label.width(), label.sizeHint().width())
+            for label in dialog.findChildren(QLabel)
+            if label.isVisible()
+            and not label.wordWrap()
+            and label.pixmap().isNull()
+            and label.text()
+            and label.width() < label.sizeHint().width()
+        ]
+        assert not clipped, (language, clipped)
+        dialog.reject()
