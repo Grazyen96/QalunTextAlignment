@@ -134,8 +134,11 @@ The spec also ships, beside the engine's binaries, the licences that have to
 travel with them: `sherpa_onnx/LICENSE` (Apache 2.0, from the wheel) and
 `sherpa_onnx/lib/onnxruntime-LICENSE` (MIT) with ONNX Runtime's
 `onnxruntime-ThirdPartyNotices.txt` beside it (both kept in [licenses/](licenses/)
-because the wheel does not carry them), and `THIRD_PARTY_NOTICES.md` and Qalun's
-own `LICENSE` at the top of `_internal/`. And it ships certifi's `cacert.pem`,
+because the wheel does not carry them), and `THIRD_PARTY_NOTICES.md`, Qalun's
+own `LICENSE` and `segno-LICENSE.txt` (the QR encoder's, BSD 3-Clause, kept in
+[licenses/](licenses/) because a pure-Python package's metadata stays out of the
+archive) at the top of `_internal/`. The Amiri text font's licence,
+`Amiri-OFL.txt`, travels inside `qurantext/assets/fonts/` beside the font. And it ships certifi's `cacert.pem`,
 which the model download trusts alongside the system's certificates. Verified in the frozen app with the
 system's certificates hidden (`SSL_CERT_FILE` and `SSL_CERT_DIR` pointed at
 nothing): the download completes through certifi alone, and fails with

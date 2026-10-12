@@ -59,6 +59,24 @@ text v10, obtained via `thetruetruth/quran-data-kfgqpc` at commit e35e7b5
 `tools/convert_mushaf_v10.py`. Its source is recorded here; the terms on which it
 may be redistributed are not, and are to be confirmed by the owner.
 
+## Amiri font
+
+The generated intro and outro write their titles in **Amiri**, release 1.003,
+https://github.com/aliftype/amiri/releases/tag/1.003, Copyright 2010-2022 The
+Amiri Project Authors (https://github.com/aliftype/amiri), licensed under the
+SIL Open Font License, Version 1.1. These files ship unmodified inside the app,
+the Python package and `qalun-source.zip`:
+
+- `qurantext/assets/fonts/Amiri-Regular.ttf`, sha256
+  `cd2550c0f4c05eb341bf97958211aaa39382bca96577ba3a67d4a3b4912c43c0`
+- `qurantext/assets/fonts/Amiri-Bold.ttf`, sha256
+  `8cfed49b66de57e360ac61631d882dddfa23095d3ddb39fc2133eaf93892e79a`
+
+The licence text is beside them, at `qurantext/assets/fonts/Amiri-OFL.txt`
+(in the app's folder, `_internal/qurantext/assets/fonts/Amiri-OFL.txt`), and in
+the source at `packaging/licenses/Amiri-OFL.txt`. The OFL is not the GPL; it lets
+the font be bundled with any software, and it stays under the OFL.
+
 ## Speech recognition model
 
 Qalun transcribes on your computer with **NVIDIA FastConformer Hybrid Large
@@ -163,6 +181,12 @@ https://github.com/certifi/python-certifi, Mozilla Public License 2.0. Qalun
 uses its certificate bundle (`cacert.pem`) to check the speech model's download.
 The licence text is in the app's folder, at
 `_internal/certifi-<version>.dist-info/licenses/LICENSE`.
+
+## segno
+
+https://github.com/heuer/segno, version 1.6.6 as published on PyPI, © Lars
+Heuer, BSD 3-Clause License. Qalun uses it to encode the generated outro's QR
+code. The licence text is in the app's folder, at `_internal/segno-LICENSE.txt`.
 
 ## The rest of the app
 

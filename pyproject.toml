@@ -33,6 +33,10 @@ dependencies = [
   # packaging/third-party-sources.txt describe this very build, so moving the pin
   # means updating them; tests/test_packaging_spec.py fails until they agree.
   "sherpa-onnx==1.13.8",
+  # The generated outro's QR code (BSD 3-Clause, pure Python). Pinned exactly:
+  # packaging/licenses/segno-LICENSE.txt is this release's licence, and
+  # tests/test_packaging_spec.py fails until the pin, the install and it agree.
+  "segno==1.6.6",
 ]
 
 [project.optional-dependencies]

@@ -288,3 +288,81 @@ def test_the_release_checklist_holds_the_first_tag_on_what_code_cannot_settle() 
     assert "## By ear, on Windows, macOS and Linux" in checklist
     assert "Check the words appear" in flat
     assert "__version__" in flat
+
+
+AMIRI_RELEASE = "1.003"
+AMIRI_SHA256 = {
+    "Amiri-Regular.ttf": "cd2550c0f4c05eb341bf97958211aaa39382bca96577ba3a67d4a3b4912c43c0",
+    "Amiri-Bold.ttf": "8cfed49b66de57e360ac61631d882dddfa23095d3ddb39fc2133eaf93892e79a",
+}
+
+
+def test_the_title_font_is_the_pinned_amiri_release() -> None:
+    """The generated intro and outro write their titles in Amiri (SIL OFL 1.1). The
+    files are the release's own, byte for byte, and the notice and the assets README
+    name that release and those hashes, so a swapped file fails here."""
+    import hashlib
+
+    fonts = ROOT / "src" / "qurantext" / "assets" / "fonts"
+    notice = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    section = notice.split("## Amiri", 1)[1].split("\n## ", 1)[0]
+    readme = (ROOT / "src" / "qurantext" / "assets" / "README.md").read_text(encoding="utf-8")
+    for name, digest in AMIRI_SHA256.items():
+        assert hashlib.sha256((fonts / name).read_bytes()).hexdigest() == digest, name
+        assert name in section and digest in section, name
+        assert name in readme and digest in readme, name
+    for text in (section, readme):
+        assert f"aliftype/amiri/releases/tag/{AMIRI_RELEASE}" in text
+        assert "SIL Open Font License" in text and "Amiri-OFL.txt" in text
+
+
+def test_amiris_licence_travels_with_the_font() -> None:
+    """The OFL asks for its text to go with every copy of the font. The font ships in
+    the wheel and in the app (the spec copies assets/ whole), so the licence sits
+    beside it in assets/fonts/; packaging/licenses/ keeps the same text."""
+    kept = SPEC.parent / "licenses" / "Amiri-OFL.txt"
+    beside = ROOT / "src" / "qurantext" / "assets" / "fonts" / "Amiri-OFL.txt"
+    body = kept.read_text(encoding="utf-8")
+    assert "SIL OPEN FONT LICENSE Version 1.1" in body
+    assert "The Amiri Project Authors" in body
+    assert beside.read_bytes() == kept.read_bytes()
+    assert '(str(ROOT / "src" / "qurantext" / "assets"), "qurantext/assets")' in (
+        SPEC.read_text(encoding="utf-8")
+    )
+    readme = (SPEC.parent / "licenses" / "README.md").read_text(encoding="utf-8")
+    assert "Amiri-OFL.txt" in readme
+
+
+def _segno_pin() -> str:
+    tomllib = pytest.importorskip("tomllib")
+    with (ROOT / "pyproject.toml").open("rb") as handle:
+        core = tomllib.load(handle)["project"]["dependencies"]
+    pins = [dep for dep in core if dep.startswith("segno")]
+    assert len(pins) == 1 and pins[0].startswith("segno=="), pins
+    return pins[0].removeprefix("segno==")
+
+
+def test_segno_is_pinned_credited_and_its_licence_shipped() -> None:
+    """segno (BSD 3-Clause) draws the outro's QR code. It is pure Python, so the app
+    carries it inside its archive, where its own licence file does not go; the
+    repository keeps that licence and the spec ships it beside the notice."""
+    from importlib.metadata import distribution
+
+    pin = _segno_pin()
+    assert f"segno=={pin}" in (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    installed = distribution("segno")
+    assert installed.version == pin, (
+        f"segno {installed.version} is installed but the pin says {pin}: reinstall with "
+        "`pip install -e .`, or move the pin and update THIRD_PARTY_NOTICES.md and "
+        "packaging/licenses/segno-LICENSE.txt"
+    )
+    kept = SPEC.parent / "licenses" / "segno-LICENSE.txt"
+    wheel = next(f for f in installed.files or () if f.name == "LICENSE")
+    assert kept.read_text(encoding="utf-8") == wheel.read_text(encoding="utf-8")
+    assert '"segno-LICENSE.txt"), ".")' in SPEC.read_text(encoding="utf-8")
+    notice = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    section = notice.split("## segno", 1)[1].split("\n## ", 1)[0]
+    assert f"version {pin}" in section and "BSD 3-Clause" in section
+    assert "_internal/segno-LICENSE.txt" in section
+    readme = (SPEC.parent / "licenses" / "README.md").read_text(encoding="utf-8")
+    assert "segno-LICENSE.txt" in readme and f"segno {pin}" in readme

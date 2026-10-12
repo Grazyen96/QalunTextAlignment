@@ -54,6 +54,9 @@ datas = [
     (str(ROOT / "THIRD_PARTY_NOTICES.md"), "."),
     # Qalun's own licence, GPL-3.0-only, the full text, in the same place.
     (str(ROOT / "LICENSE"), "."),
+    # segno (BSD 3-Clause) is pure Python, so its code goes into the archive and
+    # its metadata, with the licence, stays behind. The repository keeps it.
+    (str(ROOT / "packaging" / "licenses" / "segno-LICENSE.txt"), "."),
 ]
 
 # The local transcription engine. Its wheel carries native libraries
