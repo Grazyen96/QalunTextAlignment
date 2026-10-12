@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import functools
 import json
 import math
 import shutil
@@ -441,15 +440,24 @@ def require_binary(binary_name: str, install_hint: str | None = None) -> str:
     raise RuntimeError(f"{binary_name} was not found{where}.{hint}")
 
 
-@functools.lru_cache(maxsize=8)
+#: Filter lists already read, by FFmpeg path. Only answers are kept: a query
+#: that failed is asked again next time.
+_FILTERS: dict[str, frozenset[str]] = {}
+
+
 def ffmpeg_filters(ffmpeg_path: str) -> frozenset[str]:
     """The names of the filters the FFmpeg at *ffmpeg_path* was built with.
 
-    Asked once per binary. A build that cannot be asked reads as having none,
-    so a caller falls back to what needs no optional filter.
+    Asked once per binary. A build that cannot be asked (it would not start,
+    timed out or listed nothing) reads as having none this time, so a caller
+    falls back to what needs no optional filter; it is not remembered, so one
+    slow start does not turn tone mapping off for the rest of the session.
     """
+    known = _FILTERS.get(ffmpeg_path)
+    if known is not None:
+        return known
     try:
-        out = subprocess.run(
+        completed = subprocess.run(
             [ffmpeg_path, "-hide_banner", "-filters"],
             check=False,
             capture_output=True,
@@ -457,16 +465,19 @@ def ffmpeg_filters(ffmpeg_path: str) -> frozenset[str]:
             encoding="utf-8",
             errors="replace",
             timeout=30,
-        ).stdout
+        )
     except (OSError, subprocess.SubprocessError):
         return frozenset()
     # Lines read " TSC name   V->V   description" below a legend that ends in "---".
     names = set()
-    for line in out.splitlines():
+    for line in completed.stdout.splitlines():
         parts = line.split()
         if len(parts) >= 3 and "->" in parts[2]:
             names.add(parts[1])
-    return frozenset(names)
+    if completed.returncode != 0 or not names:
+        return frozenset()
+    _FILTERS[ffmpeg_path] = frozenset(names)
+    return _FILTERS[ffmpeg_path]
 
 
 def get_audio_duration(audio_path: Path) -> float:

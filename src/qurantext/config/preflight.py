@@ -141,6 +141,13 @@ def _episode_join(release: bool) -> CheckResult:
             "FFmpeg was not found, so no episode can be joined",
             "Install FFmpeg; see the FFmpeg line above.",
         )
+    if not have:
+        return CheckResult(
+            _EPISODE,
+            _strict(release),
+            "could not list this FFmpeg's filters, so the episode check could not run",
+            "Run `ffmpeg -filters` to see why FFmpeg will not answer, then check again.",
+        )
     missing = [name for name in REQUIRED_FILTERS if name not in have]
     if missing:
         return CheckResult(

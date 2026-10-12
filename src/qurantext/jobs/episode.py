@@ -455,7 +455,11 @@ def _filter_graph(
             f"[{i}:{info.video_stream}]{before}"
             f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
             f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps={fps},"
-            f"format=yuv420p[v{i}]"
+            # Untagged before concat, too: FFmpeg would otherwise convert every
+            # later part to the first part's colour matrix (a BT.709 phone clip
+            # or a tone-mapped HDR intro), shifting the lecture's colours.
+            "format=yuv420p,"
+            f"setparams=color_primaries=unknown:color_trc=unknown:colorspace=unknown[v{i}]"
         )
         if info.audio_stream is not None:
             source = f"[{i}:{info.audio_stream}]"

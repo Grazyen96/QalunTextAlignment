@@ -596,3 +596,101 @@ def test_a_folder_that_cannot_be_written_is_an_episode_error(tmp_path):
         assert error.value.key == "episode.error.ffmpeg"
     finally:
         locked.chmod(0o700)
+
+
+def _yuv_frame(path: Path, at: float, size: tuple[int, int] = (640, 360)):
+    import numpy as np
+
+    raw = subprocess.run(
+        [
+            "ffmpeg",
+            "-loglevel",
+            "error",
+            "-ss",
+            f"{at:.3f}",
+            "-i",
+            str(path),
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "yuv420p",
+            "-",
+        ],
+        check=True,
+        capture_output=True,
+    ).stdout
+    w, h = size
+    planes = np.frombuffer(raw, dtype=np.uint8).astype(np.int16)
+    y, u, v = planes[: w * h], planes[w * h : w * h * 5 // 4], planes[w * h * 5 // 4 :]
+    return y, u, v
+
+
+def _bt709_intro(path: Path) -> Path:
+    """An ordinary SDR phone clip, tagged BT.709."""
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=360x640:rate=25:duration=1",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-colorspace",
+            "bt709",
+            str(path),
+        ],
+        check=True,
+    )
+    return path
+
+
+@pytest.mark.parametrize("intro_kind", ["bt709", "hlg", "hlg-no-zscale"])
+def test_the_lecture_keeps_its_colours_whatever_comes_first(tmp_path, monkeypatch, intro_kind):
+    """A tagged intro first must not convert the lecture to its colour matrix."""
+    import numpy as np
+
+    from qurantext.jobs import episode
+
+    if intro_kind == "hlg-no-zscale":
+        monkeypatch.setattr(episode, "ffmpeg_filters", lambda path: frozenset())
+    intro = (_bt709_intro if intro_kind == "bt709" else _hlg)(tmp_path / "intro.mp4")
+    lecture = tmp_path / "lec.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "smptebars=size=640x360:rate=25:duration=2",
+            "-c:v",
+            "libx264",
+            "-qp",
+            "0",
+            "-pix_fmt",
+            "yuv420p",
+            str(lecture),
+        ],
+        check=True,
+    )
+    out = tmp_path / "ep.mp4"
+    result = assemble_episode([intro, lecture], out, lecture_index=1, width=640, height=360, fps=25)
+    source = _yuv_frame(lecture, 1.0)
+    joined = _yuv_frame(out, result.lecture_offset + 1.0)
+    for name, a, b in zip("YUV", source, joined, strict=True):
+        shift = float(np.abs(a - b).mean())
+        assert shift < 1.0, f"{name} moved by {shift:.2f} levels on average"
