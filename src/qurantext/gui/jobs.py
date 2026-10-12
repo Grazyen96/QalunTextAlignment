@@ -38,6 +38,7 @@ from qurantext.jobs.generated_parts import (
     ensure_generated_part,
     intro_spec_for,
     outro_spec_for,
+    remove_generated_parts,
 )
 from qurantext.jobs.look_assets import project_look, seed_project_look
 from qurantext.jobs.project import (
@@ -452,17 +453,24 @@ def _make_episode(
 _CLIP_PARTS = ("intro", "outro")
 
 
-def _part_error(error: EpisodeError, clips: dict[str, Path]) -> EpisodeError:
+def _part_error(
+    error: EpisodeError, clips: dict[str, Path], made: dict[str, Path] | None = None
+) -> EpisodeError:
     """*error*, said as "the intro clip …" when it names a clip by its copy's file name.
 
     The copies beside the project are named by their content (``3f2a9c1b2d4e.mp4``),
-    which tells the person nothing about which part is meant.
+    which tells the person nothing about which part is meant. A generated part
+    (*made*) is not a clip the person chose: one the join cannot use is said as
+    a part that could not be made.
     """
     kind = {"episode.error.missing": "missing", "episode.error.not_video": "not_video"}.get(
         error.key
     )
     if kind is None:
         return error
+    for part, clip in (made or {}).items():
+        if error.fmt.get("name") == clip.name:
+            return EpisodeError("episode.error.generate", part=t(f"episode.part.{part}"))
     for part, clip in clips.items():
         if error.fmt.get("name") == clip.name:
             return EpisodeError(f"episode.error.part_{kind}", part=t(f"episode.part.{part}"))
@@ -491,6 +499,11 @@ def _join_episode(
     written leaves the episode made, and says so.
     """
     choice = project_episode(project)
+    if project.path is not None:
+        # A part no longer generated leaves no clip of it behind.
+        for part in _CLIP_PARTS:
+            if not choice.is_generated(part):
+                remove_generated_parts(project.path, part)
     if choice.is_empty:
         return None, None
     clips = {part: getattr(choice, part) for part in _CLIP_PARTS if getattr(choice, part)}
@@ -538,7 +551,7 @@ def _join_episode(
             cancel=cancel,
         )
     except EpisodeError as error:
-        raise _part_error(error, {**clips, **made}) from error
+        raise _part_error(error, clips, made) from error
     # Recorded before the subtitle files, which are extra: the video is made.
     assert project.render is not None  # render_project has just recorded it
     project.render["episode"] = {
@@ -591,8 +604,8 @@ def _generated_parts(
     Each is reported as its own stage (``episode_intro``, ``episode_outro``).
     Raises :class:`EpisodeError` with the part said in the window's language.
     """
-    look = project_look(project)
-    names = stored_surah_names(QURAN_DB_PATH)
+    look = None
+    names: dict[int, str] = {}
     made: dict[str, Path] = {}
     for part in _CLIP_PARTS:
         settings = getattr(choice, f"{part}_generated")
@@ -601,6 +614,9 @@ def _generated_parts(
         stage = f"episode_{part}"
         report(progress, stage, t(f"job.stage.{stage}"), translated=True)
         try:
+            if look is None:
+                look = project_look(project)
+                names = stored_surah_names(QURAN_DB_PATH)
             spec_for = intro_spec_for if part == "intro" else outro_spec_for
             spec = spec_for(project, settings, names)
             made[part] = ensure_generated_part(
@@ -620,8 +636,12 @@ def _generated_parts(
             if str(fmt.get("part", "")).startswith("episode.part."):
                 fmt["part"] = t(str(fmt["part"]))
             raise EpisodeError(error.key, **fmt) from error
-        except ValueError as error:
-            # A link or a text the dialog refuses: only a hand-edited project has one.
+        except JobCancelled:
+            raise
+        except Exception as error:  # noqa: BLE001 — not the join's failure: this part's
+            # A link or a text the dialog refuses (only a hand-edited project has
+            # one), or odd data in the project: the person reads which part, the
+            # log has the cause.
             _log.warning("The generated %s could not be set up", part, exc_info=True)
             raise EpisodeError("episode.error.generate", part=t(f"episode.part.{part}")) from error
     return made

@@ -249,12 +249,17 @@ this is the only place anyone hears each platform's build recognise speech.
       `home.progress.episode_outro` («إعداد المقدمة»، «إعداد الخاتمة», each with its `_eta`
       form) and, in the review's bar, `render.running_intro` («المقدمة») and
       `render.running_outro` («الخاتمة»); the errors `episode.error.generate` («تعذّر إعداد
-      المقدمة، فلم تُصنع الحلقة») and `episode.error.qr_too_big` («رابط الخاتمة أطول من أن
+      المقدمة، فلم تُصنع الحلقة»), `episode.error.generate_empty` («ليس في المقدمة المُعدّة
+      كلمات ولا رابط تعرضه… أعطها اسمًا أو عبارة في نافذة الحلقة») and `episode.error.qr_too_big` («رابط الخاتمة أطول من أن
       تقرأ الهواتف رمز الاستجابة السريعة الخاص به في فيديو بحجم 1280×720…»): is «رمز
       الاستجابة السريعة» what a person calls a QR code, or «رمز QR»? And the intro's title
       line, drawn into the video itself from the lecture's cards: «سورة الفرقان، الآيات
       ٤٤–٤٩» and, for one ayah, «سورة الفرقان، الآية ٧» (Arabic-Indic digits, the Arabic
       comma and an en dash), with the outro's default phrase «جزاكم الله خيرًا».
+    - the 114 surah names as the intro's title writes them, in plain letters, listed in
+      `tests/test_surah_names.py` (`PLAIN_TITLES`): «سورة آل عمران», «سورة الشورى», «سورة
+      الأعلى», «سورة الضحى» and the rest. 34 «سبإ» and 78 «النبإ» keep the shipped text's
+      Uthmani hamza: should the title write «سبأ» and «النبأ», as most people do?
 
     Is «الحلقة» the right word for the episode, and «الدرس» or «المحاضرة» for the lecture
     (both are used now)?

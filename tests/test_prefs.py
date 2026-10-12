@@ -530,3 +530,16 @@ def test_junk_generated_defaults_are_none(settings, junk):
     prefs = Prefs(settings)
     assert prefs.default_intro_generated is None and prefs.default_outro_generated is None
     assert prefs.default_episode_kinds == ("none", "none")
+
+
+def test_settings_of_the_other_part_are_refused(settings, tmp_path, monkeypatch):
+    from qurantext.gui.prefs import KEEP_DEFAULT
+    from qurantext.jobs.episode_assets import GeneratedIntro, GeneratedOutro
+
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    prefs = Prefs(settings)
+    with pytest.raises(TypeError):
+        prefs.save_default_episode(KEEP_DEFAULT, KEEP_DEFAULT, intro_generated=GeneratedOutro())
+    with pytest.raises(TypeError):
+        prefs.save_default_episode(KEEP_DEFAULT, KEEP_DEFAULT, outro_generated=GeneratedIntro())
+    assert prefs.default_episode_kinds == ("none", "none"), "nothing was stored"

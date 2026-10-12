@@ -355,7 +355,12 @@ class EpisodeDialog(QDialog):
     # -- reading and keeping -----------------------------------------------------------
 
     def choice(self) -> EpisodeChoice:
-        """The parts as chosen in the dialog now; after OK, the copies that were stored."""
+        """The parts as chosen in the dialog now; after OK, the copies that were stored.
+
+        Generated parts are not shown here yet, so they are not in it: ``_keep``
+        carries the session's own for a row left alone (until the dialog offers
+        Generated).
+        """
         return EpisodeChoice(
             self._intro.path,
             self._recitation(),

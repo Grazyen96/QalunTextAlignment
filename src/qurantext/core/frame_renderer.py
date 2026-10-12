@@ -83,6 +83,7 @@ def placeholder_lines(
     *,
     reserve_caption_band: bool,
     title: str = DEFAULT_PLACEHOLDER_TITLE,
+    studied_surah: int | None = None,
 ) -> tuple[str, str]:
     """The (title, subtitle) drawn before any ayah has started.
 
@@ -95,9 +96,11 @@ def placeholder_lines(
     the same moment (``jobs.preview.render_preview``, the desktop review
     window's live frame) call this so the placeholder never disagrees between
     what a person previews and what the exported video actually draws.
+    *studied_surah* is the person's choice (``JobSettings.studied_surah``),
+    which a generated intro's title follows too.
     """
     if reserve_caption_band:
-        intro = lecture_intro_lines(matches)
+        intro = lecture_intro_lines(matches, studied_surah)
         if intro is not None:
             return intro
     return title, ""
@@ -1325,6 +1328,7 @@ def write_frame_video(
     progress: ProgressCallback | None = None,
     cancel: CancelToken | None = None,
     look: Look = NIGHT_GOLD,
+    studied_surah: int | None = None,
 ) -> tuple[str, ...]:
     """Render every frame and stream it into FFmpeg, producing the final MP4.
 
@@ -1355,7 +1359,10 @@ def write_frame_video(
     # announces the surah and the range of ayat the lecture ponders instead of
     # the generic title. Recitation renders (no captions) keep the plain title.
     placeholder_title, placeholder_subtitle = placeholder_lines(
-        sorted_matches, reserve_caption_band=reserve_caption_band, title=title
+        sorted_matches,
+        reserve_caption_band=reserve_caption_band,
+        title=title,
+        studied_surah=studied_surah,
     )
 
     # Pre-compute paginated body lines for every unique active match. Caching the
@@ -1555,6 +1562,7 @@ def render_frame_video(
     cancel: CancelToken | None = None,
     look: Look = NIGHT_GOLD,
     look_warnings: list[str] | None = None,
+    studied_surah: int | None = None,
 ) -> float:
     """Render a styled frame-by-frame video with its audio. Returns the duration.
 
@@ -1609,6 +1617,7 @@ def render_frame_video(
             progress=progress,
             cancel=cancel,
             look=look,
+            studied_surah=studied_surah,
         )
         if look_warnings is not None:
             look_warnings.extend(codes)

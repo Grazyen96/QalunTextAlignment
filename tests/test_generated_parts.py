@@ -110,23 +110,72 @@ def test_without_ayat_the_title_is_the_surah_and_without_a_surah_nothing(lecture
     assert title_for(lecture_project, {}) == ("", None, None, None)
 
 
-def test_without_a_chosen_surah_the_one_most_cards_name_is_used(lecture_project):
+def _opening_card(project: Project) -> tuple[str, str] | None:
+    """The lecture's own opening card, as the renderer draws it from these cards."""
+    from qurantext.core.video_common import (
+        cards_on_screen,
+        lecture_intro_lines,
+        validated_matches,
+    )
+
+    studied = job_settings(project).studied_surah
+    shown = cards_on_screen(validated_matches(project.cards, bridge_gaps=False), "lecture", studied)
+    return lecture_intro_lines(shown, studied)
+
+
+def test_hand_made_cross_references_do_not_choose_the_surah(lecture_project):
+    """Detected 25:44 and 25:49, and three hand-made cards of 2:255–257: the lecture is
+    al-Furqan, as its opening card says, and so are the intro and the link's campaign."""
     _studying(lecture_project, None)
     lecture_project.cards = [
-        _card(2, 255, 255, 0.0),
-        _card(25, 63, 63, 10.0),
-        _card(25, 70, 70, 20.0),
-        # Placed by hand, and shown whatever its surah: it names surah 2 too.
-        _card(2, 286, 286, 30.0, manual=True),
-        _card(25, 74, 74, 40.0),
+        _card(25, 44, 44, 0.0),
+        _card(25, 49, 49, 10.0),
+        _card(2, 255, 255, 20.0, manual=True),
+        _card(2, 256, 256, 30.0, manual=True),
+        _card(2, 257, 257, 40.0, manual=True),
     ]
-    assert job_settings(lecture_project).studied_surah is None
-    assert title_for(lecture_project, {2: "البقرة", 25: "الفرقان"}) == (
-        "سورة الفرقان، الآيات ٦٣–٧٤",
-        25,
-        63,
-        74,
+    names = {2: "البقرة", 25: "الفرقان"}
+    assert title_for(lecture_project, names) == ("سورة الفرقان، الآيات ٤٤–٤٩", 25, 44, 49)
+    assert _opening_card(lecture_project) == (
+        "سُورَةُ الفُرقَانِ",
+        "تدبر الآيات من الآية 44 إلى الآية 49",
     )
+    outro = outro_spec_for(lecture_project, GeneratedOutro(link="example.org/dars"), names)
+    assert "utm_campaign=qalun-025-044-049" in outro.qr_url
+
+
+def test_the_surah_heard_longest_is_the_lectures_when_none_is_chosen(lecture_project):
+    """More cards of another surah do not outvote the one heard longest."""
+    _studying(lecture_project, None)
+    long = {"end_time": 60.0}
+    lecture_project.cards = [
+        _card(2, 255, 255, 0.0),
+        _card(2, 256, 256, 5.0),
+        _card(25, 63, 63, 10.0, **long),
+        _card(2, 257, 257, 70.0),
+    ]
+    assert title_for(lecture_project, {})[1:] == (25, 63, 63)
+    assert _opening_card(lecture_project)[1] == "تدبر الآية 63"
+
+
+def test_when_every_card_is_hand_made_the_first_names_the_surah(lecture_project):
+    """No detected card to guess from: the first hand-made card by time, as the opening card."""
+    _studying(lecture_project, None)
+    lecture_project.cards = [
+        _card(2, 286, 286, 30.0, manual=True),
+        _card(25, 63, 63, 10.0, manual=True),
+        _card(25, 70, 70, 20.0, manual=True),
+    ]
+    assert title_for(lecture_project, {})[1:] == (25, 63, 70)
+    assert _opening_card(lecture_project) == (
+        "سُورَةُ الفُرقَانِ",
+        "تدبر الآيات من الآية 63 إلى الآية 70",
+    )
+
+
+def test_a_card_the_video_cannot_draw_does_not_widen_the_range(lecture_project):
+    lecture_project.cards = [*lecture_project.cards, _card(25, 77, 77, 30.0, end_time=30.0)]
+    assert title_for(lecture_project, {})[1:] == (25, 44, 49)
 
 
 def test_a_hand_made_card_of_the_studied_surah_widens_the_range(lecture_project):
@@ -248,10 +297,71 @@ def test_the_name_is_stable_across_runs_and_covers_size_and_rate(lecture_project
     # A sha256, so the name is the same in every run of the app (hash() is not).
     import hashlib
 
-    made_from = spec.cache_key() + repr(NIGHT_GOLD) + "1280x720@30"
+    from qurantext.jobs.generated_parts import _look_key
+
+    made_from = spec.cache_key() + _look_key(NIGHT_GOLD) + "1280x720@30"
     assert base.stem == "generated-intro-" + hashlib.sha256(made_from.encode()).hexdigest()[:12]
+    assert "PosixPath" not in made_from and "WindowsPath" not in made_from
     assert path(width=1280, height=720, fps=25) != base
     assert path(width=720, height=1280, fps=30) != base
+    # A colour the clip does not draw (the captions') does not remake it; one it draws does.
+    from dataclasses import replace
+
+    captions = replace(NIGHT_GOLD, caption_text=(1, 2, 3, 255))
+    assert (
+        generated_part_path(
+            lecture_project.path, "intro", spec, captions, width=1280, height=720, fps=30
+        )
+        == base
+    )
+    header = replace(NIGHT_GOLD, header_text=(1, 2, 3, 255))
+    assert (
+        generated_part_path(
+            lecture_project.path, "intro", spec, header, width=1280, height=720, fps=30
+        )
+        != base
+    )
+
+
+def _photo_look(image: Path):
+    from dataclasses import replace
+
+    from qurantext.core.looks import Background
+
+    background = Background("image", (0, 0, 0, 255), (0, 0, 0, 255), image=image)
+    return replace(NIGHT_GOLD, background=background)
+
+
+def test_the_background_photo_counts_by_its_content_not_its_path(lecture_project, tmp_path):
+    """A photo missing when the clip was made, and back now, makes a new clip; the same
+    photo in a moved project folder keeps the clip."""
+    from PIL import Image
+
+    from qurantext.jobs.generated_parts import generated_part_path
+
+    spec = intro_spec_for(lecture_project, GeneratedIntro(name="دروس"), {})
+    size = {"width": 640, "height": 360, "fps": 25}
+    photo = tmp_path / "dars.qalun.look" / "3f2a9c1b2d4e.png"
+    photo.parent.mkdir()
+
+    def path(project_path, image):
+        return generated_part_path(project_path, "intro", spec, _photo_look(image), **size)
+
+    missing = path(lecture_project.path, photo)
+    Image.new("RGB", (8, 8), (200, 30, 30)).save(photo)
+    present = path(lecture_project.path, photo)
+    assert present != missing, "the photo is back: the clip is made again with it"
+
+    moved = tmp_path / "moved"
+    moved.mkdir()
+    (moved / "dars.qalun.look").mkdir()
+    copy = moved / "dars.qalun.look" / photo.name
+    copy.write_bytes(photo.read_bytes())
+    again = path(moved / "dars.qalun.json", copy)
+    assert again.name == present.name, "the same photo in a moved folder: the same clip"
+
+    Image.new("RGB", (8, 8), (30, 200, 30)).save(copy)
+    assert path(moved / "dars.qalun.json", copy).name != present.name, "another photo"
 
 
 def test_parts_of_the_other_kind_are_left_alone(lecture_project, monkeypatch):
@@ -320,3 +430,63 @@ def test_an_unknown_kind_is_refused(lecture_project):
         ensure_generated_part(
             lecture_project, "middle", spec, NIGHT_GOLD, width=640, height=360, fps=25
         )
+
+
+def test_a_change_of_ayat_remakes_the_intro(lecture_project, monkeypatch):
+    """A corrected card changes the title, so the next render makes the intro again."""
+    calls = _fake_render(monkeypatch)
+    size = {"width": 640, "height": 360, "fps": 25}
+    settings = GeneratedIntro(name="دروس")
+    first = ensure_generated_part(
+        lecture_project, "intro", intro_spec_for(lecture_project, settings, {}), NIGHT_GOLD, **size
+    )
+    lecture_project.cards = [*lecture_project.cards, _card(25, 52, 52, 30.0)]
+    spec = intro_spec_for(lecture_project, settings, {})
+    assert spec.title == "سورة الفرقان، الآيات ٤٤–٥٢"
+    second = ensure_generated_part(lecture_project, "intro", spec, NIGHT_GOLD, **size)
+    assert second != first and len(calls) == 2 and not first.exists()
+
+
+@pytest.mark.parametrize(
+    ("kind", "spec"),
+    [
+        ("intro", lambda project: intro_spec_for(project, GeneratedIntro(name=" "), {})),
+        ("outro", lambda project: outro_spec_for(project, GeneratedOutro(phrase=""), {})),
+    ],
+)
+def test_a_part_with_nothing_to_show_is_refused(lecture_project, monkeypatch, kind, spec):
+    calls = _fake_render(monkeypatch)
+    _studying(lecture_project, None)
+    lecture_project.cards = []  # no surah: the intro's title is empty too
+    with pytest.raises(EpisodeError) as raised:
+        ensure_generated_part(
+            lecture_project, kind, spec(lecture_project), NIGHT_GOLD, width=640, height=360, fps=25
+        )
+    assert raised.value.key == "episode.error.generate_empty"
+    assert raised.value.fmt == {"part": f"episode.part.{kind}"}
+    assert calls == []
+    # A link alone is something to show.
+    link_only = outro_spec_for(lecture_project, GeneratedOutro(phrase="", link="example.org"), {})
+    ensure_generated_part(
+        lecture_project, "outro", link_only, NIGHT_GOLD, width=1280, height=720, fps=25
+    )
+
+
+def test_removing_a_kinds_clips_keeps_the_other_kind_and_the_persons_clips(lecture_project):
+    from qurantext.jobs.generated_parts import remove_generated_parts
+
+    folder = episode_dir_for(lecture_project.path)
+    folder.mkdir()
+    for name in ("generated-intro-aaa.mp4", "generated-intro-bbb.mp4", "generated-outro-ccc.mp4",
+                 "3f2a9c1b2d4e.mp4", ".generated-intro-aaa.1234.part.mp4"):  # fmt: skip
+        (folder / name).write_bytes(b"x")
+    remove_generated_parts(lecture_project.path, "intro", keep=folder / "generated-intro-bbb.mp4")
+    assert sorted(p.name for p in folder.iterdir()) == [
+        ".generated-intro-aaa.1234.part.mp4",
+        "3f2a9c1b2d4e.mp4",
+        "generated-intro-bbb.mp4",
+        "generated-outro-ccc.mp4",
+    ]
+    remove_generated_parts(lecture_project.path, "intro")
+    assert not (folder / "generated-intro-bbb.mp4").exists()
+    remove_generated_parts(lecture_project.path.with_name("never.qalun.json"), "intro")  # no folder

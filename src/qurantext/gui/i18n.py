@@ -382,6 +382,10 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         ),
         "episode.error.cancelled": "The episode was cancelled; the lecture video is kept.",
         "episode.error.generate": "The {part} could not be made, so the episode was not made.",
+        "episode.error.generate_empty": (
+            "The generated {part} has no words and no link to show, so the episode was not "
+            "made. Give it a name or a phrase in the Episode dialog."
+        ),
         "episode.error.qr_too_big": (
             "The outro's link is too long for a QR code phones can read in a {size} video, "
             "so the episode was not made. Shorten the link."
@@ -781,9 +785,13 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         ),
         "episode.error.cancelled": "أُلغيت الحلقة، وبقي فيديو المحاضرة كما هو.",
         "episode.error.generate": "تعذّر إعداد {part}، فلم تُصنع الحلقة.",
+        "episode.error.generate_empty": (
+            "ليس في {part} المُعدّة كلمات ولا رابط تعرضه، فلم تُصنع الحلقة. "
+            "أعطها اسمًا أو عبارة في نافذة الحلقة."
+        ),
         "episode.error.qr_too_big": (
             "رابط الخاتمة أطول من أن تقرأ الهواتف رمز الاستجابة السريعة الخاص به "
-            "في فيديو بحجم {size}، فلم تُصنع الحلقة. اختصر الرابط."
+            "في فيديو بحجم \u2066{size}\u2069، فلم تُصنع الحلقة. اختصر الرابط."
         ),
         "episode.error.recitation_changed": (
             "أُعيد إخراج فيديو التلاوة \u2068{name}\u2069 أثناء صنع الحلقة، فلم تُصنع الحلقة. "

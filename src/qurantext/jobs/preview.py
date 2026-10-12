@@ -124,7 +124,10 @@ def render_preview(request: PreviewRequest) -> PreviewResult:
     caption = captions[caption_index] if caption_index is not None else None
     reserve_band = bool(captions)
     title, placeholder_subtitle = placeholder_lines(
-        cards, reserve_caption_band=reserve_band, title=request.title or DEFAULT_PLACEHOLDER_TITLE
+        cards,
+        reserve_caption_band=reserve_band,
+        title=request.title or DEFAULT_PLACEHOLDER_TITLE,
+        studied_surah=request.studied_surah,
     )
 
     frame = render_frame_pillow(

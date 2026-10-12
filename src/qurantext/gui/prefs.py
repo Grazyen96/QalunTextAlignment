@@ -375,16 +375,24 @@ class Prefs:
           its generated settings go;
         - else None for its generated settings removes them, keeping its clip;
         - else (both kept) the part stays as it is.
+
+        Raises ``TypeError`` for settings of the other part's type.
         """
         folder = user_data_dir() / "episode"
         current = self._default_episode_parts()
         data = self._default_episode_data()
         value: dict[str, object] = {}
-        for key, clip, name, generated in (
-            ("intro", intro, names[0], intro_generated),
-            ("outro", outro, names[1], outro_generated),
+        for key, clip, name, generated, kind in (
+            ("intro", intro, names[0], intro_generated, GeneratedIntro),
+            ("outro", outro, names[1], outro_generated, GeneratedOutro),
         ):
-            if isinstance(generated, (GeneratedIntro, GeneratedOutro)):
+            if generated is not KEEP_DEFAULT and generated is not None:
+                if not isinstance(generated, kind):
+                    # An outro's settings given as the intro's would read back empty.
+                    raise TypeError(
+                        f"{key}_generated must be a {kind.__name__}, not {type(generated).__name__}"
+                    )
+            if isinstance(generated, kind):
                 clip = None
                 value[f"{key}_generated"] = generated.to_dict()
             elif clip is KEEP_DEFAULT and generated is KEEP_DEFAULT:

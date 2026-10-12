@@ -162,9 +162,10 @@ def render_video(
     # A lecture's card keeps to the surah it studies; quotes from elsewhere
     # stay in the captions only.
     mode = load_matches_meta(matches_path).get("mode")
+    lecture = str(mode or "").lower() == "lecture"
     studied_surah_missing = (
         request.studied_surah
-        if str(mode or "").lower() == "lecture"
+        if lecture
         and request.studied_surah is not None
         and not has_surah_cards(matches, request.studied_surah)
         else None
@@ -257,6 +258,8 @@ def render_video(
                 cancel=cancel,
                 look=request.look,
                 look_warnings=look_warnings,
+                # The opening card names the surah the person chose, as the cards keep to it.
+                studied_surah=request.studied_surah if lecture else None,
             )
             for code in look_warnings:
                 warn(look_warning_message(code))

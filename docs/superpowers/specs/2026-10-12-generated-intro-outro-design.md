@@ -151,9 +151,12 @@ time *t*:
   - **Fade:** everything fades in over the first 0.6 s and out over the last 0.6 s, alpha-blended
     over the background.
   - **Rise:** the text slides up 6 % of the height while fading in, and the end fades.
-  - **Reveal:** the background pattern draws in left to right over the first 40 %, or right to
-    left when the UI is in Arabic (the spec's `rtl` field, so it is in the cache key and a preview
-    matches its clip), then the text fades in. The QR code never animates: it is fully drawn from
+  - **Reveal:** the background pattern draws in over the first 40 %, from the edge the clip's
+    own text starts at: right to left for Arabic, left to right for a Latin name or phrase (the
+    intro's name, else its title, which is always Arabic; the outro's phrase). This is the spec's
+    `rtl` field, so it is in the cache key and a preview matches its clip. It does not follow the
+    window's language: the clip is read by the video's viewers, and switching the window to
+    English must not remake the same Arabic clip mirrored. Then the text fades in. The QR code never animates: it is fully drawn from
     14 % to 86 % of the outro, which is at least 70 % of its frames, so a viewer can scan it.
 
 `render_title_clip(spec, look, output, *, width, height, fps, progress, cancel) -> Path` streams
@@ -166,11 +169,17 @@ frames to FFmpeg:
 
 ### 4.2 `jobs/generated_parts.py` (new)
 
-- `intro_spec_for(project, settings) -> IntroSpec` builds the title from the project's on-screen
-  cards (`cards_on_screen`) and the studied surah.
-- `outro_spec_for(project, settings, platform) -> OutroSpec` uses `tracked_link` (§3).
-- `ensure_generated_part(project, kind, settings, *, width, height, fps, progress, cancel) -> Path`
-  returns the reused or newly made clip in the episode folder.
+- `title_for(project, surah_names)` builds the title from the project's on-screen cards
+  (`cards_on_screen`) and the studied surah, through `video_common.lecture_span`, the same rule
+  the lecture's own opening card uses: the chosen studied surah, else the automatic guess (hand-made
+  cards do not vote). The intro, its link's campaign and the opening card name the same surah. The
+  surah name is the store's, written in plain letters (`core.arabic.plain_surah_name`: marks that
+  form letters are joined, a final «يٰ» is «ى», the other marks go).
+- `intro_spec_for(project, settings, surah_names) -> IntroSpec` and
+  `outro_spec_for(project, settings, surah_names) -> OutroSpec`; the outro uses `tracked_link` (§3).
+- `ensure_generated_part(project, kind, spec, look, *, width, height, fps, progress, cancel) -> Path`
+  returns the reused or newly made clip in the episode folder. Its name covers the spec, what the
+  clip draws of the look (a background photo by its content, not its path), the size and the rate.
 
 ### 4.3 Text font
 

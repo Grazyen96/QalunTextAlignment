@@ -7,9 +7,12 @@ review shows in the next render. The outro's link is tracked
 person publishes on and a campaign naming the lecture's surah and ayat.
 
 A clip is made in the project's episode folder, named by a hash of all it is
-made from (``generated-intro-<hash12>.mp4``): its spec, the look, the size
-and the frame rate. A render that changes none of them reuses the clip; one
-that changes any makes a new one and removes the earlier ones of that part.
+made from (``generated-intro-<hash12>.mp4``): its spec, the look's colours and
+background (a background photo by its content, so a photo that was missing
+when a clip was made, and is back, makes a new one; moving the project folder
+does not), the size and the frame rate. A render that changes none of them
+reuses the clip; one that changes any makes a new one and removes the earlier
+ones of that part.
 
 Which edge "reveal" uncovers from (the spec's ``rtl``) is taken from the
 clip's own text, not from the window's language: the clip is read by the
@@ -28,6 +31,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from qurantext.core.arabic import surah_title
 from qurantext.core.looks import Look
 from qurantext.core.title_cards import (
     IntroSpec,
@@ -36,10 +40,10 @@ from qurantext.core.title_cards import (
     render_title_clip,
 )
 from qurantext.core.tracked_link import campaign_for, readable_link, tracked_link
-from qurantext.core.video_common import cards_on_screen, has_surah_cards
+from qurantext.core.video_common import cards_on_screen, is_drawable_card, lecture_span
 from qurantext.jobs.episode import EpisodeError
 from qurantext.jobs.episode_assets import GeneratedIntro, GeneratedOutro, episode_dir_for
-from qurantext.jobs.project import SURAH_COUNT, Project, job_settings
+from qurantext.jobs.project import Project, job_settings
 from qurantext.utils.progress import CancelToken, JobCancelled, ProgressCallback
 
 __all__ = [
@@ -48,6 +52,7 @@ __all__ = [
     "generated_part_path",
     "intro_spec_for",
     "outro_spec_for",
+    "remove_generated_parts",
     "title_for",
 ]
 
@@ -68,22 +73,14 @@ def _digits(number: int) -> str:
     return str(number).translate(_ARABIC_DIGITS)
 
 
-def _plain(text: str) -> str:
-    """*text* without its vowel marks and tatweel: a surah name as a title reads it."""
-    kept = (c for c in text if unicodedata.category(c) != "Mn" and c != "ـ")
-    return " ".join("".join(kept).split())
+def _surah_title(surah: int | str, names: Mapping[int, str], cards: list[dict[str, Any]]) -> str:
+    """«سورة الفرقان»: the store's name, else the cards' own, else the surah's number.
 
-
-def _is_surah(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= SURAH_COUNT
-
-
-def _is_ayah(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
-
-
-def _surah_title(surah: int, names: Mapping[int, str], cards: list[dict[str, Any]]) -> str:
-    """«سورة الفرقان»: the store's name, else the cards' own, else the surah's number."""
+    Written in plain letters (:func:`~qurantext.core.arabic.surah_title`): the
+    store spells names with their vowel marks («سُورَةُ آلِ عِمْرَانَ»).
+    """
+    if isinstance(surah, str):
+        return surah_title(surah)
     name = names.get(surah) or next(
         (
             str(card.get("surah_name"))
@@ -92,10 +89,7 @@ def _surah_title(surah: int, names: Mapping[int, str], cards: list[dict[str, Any
         ),
         "",
     )
-    name = _plain(str(name))
-    if not name:
-        return f"{_SURAH} {_digits(surah)}"
-    return name if name.startswith(_SURAH) else f"{_SURAH} {name}"
+    return surah_title(str(name)) or f"{_SURAH} {_digits(surah)}"
 
 
 def title_for(
@@ -103,46 +97,34 @@ def title_for(
 ) -> tuple[str, int | None, int | None, int | None]:
     """The intro's title line and what it names: ``(text, surah, from, to)``.
 
-    The surah is the lecture's studied surah when the person chose one, else
-    the surah most of the on-screen cards name (a tie going to the one shown
-    first). The range is the lowest and highest ayah of the on-screen cards of
-    that surah, hand-made cards included. The text is «سورة الفرقان، الآيات
-    ٤٤–٤٩» in Arabic-Indic digits, «سورة الفرقان، الآية ٧» for one ayah, the
-    surah's name alone without ayat, and "" without a surah.
+    The surah and range are the ones the lecture's own opening card announces
+    (:func:`~qurantext.core.video_common.lecture_span` over the cards the video
+    draws): the studied surah the person chose, else the automatic guess the
+    cards keep to, in which a hand-made card does not vote; the range is the
+    lowest and highest ayah of that surah's cards, hand-made ones included.
+    The intro, its link's campaign and the lecture's opening card therefore
+    always name the same surah.
 
-    *surah_names* are the store's (``data.quran_db.stored_surah_names``); a
-    surah missing from them is named as its cards name it.
+    The text is «سورة الفرقان، الآيات ٤٤–٤٩» in Arabic-Indic digits, «سورة
+    الفرقان، الآية ٧» for one ayah, the surah's name alone without ayat, and ""
+    without a surah. *surah_names* are the store's
+    (``data.quran_db.stored_surah_names``); a surah missing from them is named
+    as its cards name it. A surah its cards know only by name gives that name
+    and no number (the campaign is then ``qalun-lecture``).
     """
     studied = job_settings(project).studied_surah
-    cards = [card for card in project.cards if isinstance(card, dict)]
+    cards = [card for card in project.cards if isinstance(card, dict) and is_drawable_card(card)]
     shown = cards_on_screen(cards, project.mode, studied)
-    surah = studied
-    if surah is None:
-        counts: dict[int, int] = {}
-        for card in shown:
-            number = card.get("surah_num")
-            if _is_surah(number) and has_surah_cards([card], number):
-                counts[number] = counts.get(number, 0) + 1
-        # max() keeps the first of equals: the surah shown first.
-        surah = max(counts, key=lambda number: counts[number]) if counts else None
+    surah, low, high = lecture_span(shown, studied)
     if surah is None:
         return "", None, None, None
-
-    lows: list[int] = []
-    highs: list[int] = []
-    for card in shown:
-        first, last = card.get("from_ayah"), card.get("to_ayah")
-        if not _is_ayah(first) or not has_surah_cards([card], surah):
-            continue
-        lows.append(first)
-        highs.append(last if _is_ayah(last) and last >= first else first)
-    name = _surah_title(surah, surah_names, cards)
-    if not lows:
-        return name, surah, None, None
-    low, high = min(lows), max(highs)
+    name = _surah_title(surah, surah_names, shown)
+    number = surah if isinstance(surah, int) else None
+    if low is None or high is None:
+        return name, number, None, None
     if low == high:
-        return f"{name}{_COMMA} الآية {_digits(low)}", surah, low, high
-    return f"{name}{_COMMA} الآيات {_digits(low)}{_DASH}{_digits(high)}", surah, low, high
+        return f"{name}{_COMMA} الآية {_digits(low)}", number, low, high
+    return f"{name}{_COMMA} الآيات {_digits(low)}{_DASH}{_digits(high)}", number, low, high
 
 
 def _reads_right_to_left(*texts: str) -> bool:
@@ -215,6 +197,69 @@ def outro_spec_for(
     )
 
 
+#: The look's fields a title clip's pixels depend on, besides its background: the
+#: frame and card colours and the text and QR colours. A caption colour is not one.
+_DRAWN_LOOK_FIELDS = (
+    "frame_bg",
+    "card",
+    "card_border",
+    "header_text",
+    "body_text",
+    "placeholder_text",
+    "base_preset",
+)
+
+
+def _file_digest(path: Path) -> str:
+    """The sha256 of the file at *path*.
+
+    Read each time, not cached by size and time: a file rewritten within one
+    tick of the file system's clock keeps both. A look's photo is a few
+    megabytes, read twice a render.
+    """
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _image_key(look: Look) -> str:
+    """The background photo by its content: ``none``, ``unreadable`` or its sha256.
+
+    Not its path: the same photo in a moved project folder is the same clip,
+    and a photo that could not be read (the clip shows the preset's background
+    instead) is not the photo.
+    """
+    background = look.background
+    if background.kind != "image" or background.image is None:
+        return "none"
+    try:
+        return _file_digest(Path(background.image))
+    except (OSError, ValueError):  # missing, unreadable, a NUL in a hand-edited path
+        return "unreadable"
+
+
+def _look_key(look: Look) -> str:
+    """Everything of *look* a title clip draws, as stable text."""
+    background = look.background
+    drawn = [(name, getattr(look, name)) for name in _DRAWN_LOOK_FIELDS]
+    drawn.append(
+        (
+            "background",
+            (
+                background.kind,
+                background.colour,
+                background.colour2,
+                background.dim,
+                background.blur,
+            ),
+        )
+    )
+    drawn.append(("image", _image_key(look)))
+    return repr(drawn)
+
+
 def generated_part_path(
     project_path: Path,
     kind: str,
@@ -229,11 +274,36 @@ def generated_part_path(
 
     Named by the first 12 hex digits of a sha256 of all it is made from; never
     Python's ``hash()``, which differs from one run of the app to the next.
-    The spec's key covers the generator's version.
+    The spec's key covers the generator's version; the look counts by what a
+    clip draws of it (a background photo by its content).
     """
-    made_from = spec.cache_key() + repr(look) + f"{width}x{height}@{fps}"
+    made_from = spec.cache_key() + _look_key(look) + f"{width}x{height}@{fps}"
     key12 = hashlib.sha256(made_from.encode("utf-8")).hexdigest()[:12]
     return episode_dir_for(project_path) / f"generated-{kind}-{key12}.mp4"
+
+
+def remove_generated_parts(project_path: Path, kind: str, *, keep: Path | None = None) -> None:
+    """Remove *kind*'s generated clips beside the project, other than *keep*.
+
+    Made from something that has since changed, or for a part that is no
+    longer generated. A clip that will not go is left for the next time.
+    """
+    folder = episode_dir_for(project_path)
+    if not folder.is_dir():
+        return
+    for earlier in folder.glob(f"generated-{kind}-*.mp4"):
+        if earlier != keep:
+            try:
+                earlier.unlink()
+            except OSError:
+                continue
+
+
+def _is_empty(spec: IntroSpec | OutroSpec) -> bool:
+    """Whether *spec* would draw an empty panel: no words and no QR code."""
+    if isinstance(spec, IntroSpec):
+        return not (spec.name.strip() or spec.title.strip())
+    return not (spec.phrase.strip() or spec.qr_url or spec.link_text)
 
 
 def ensure_generated_part(
@@ -254,15 +324,19 @@ def ensure_generated_part(
     earlier clips are removed: they were made from something that has since
     changed. Raises :class:`EpisodeError`: ``episode.error.qr_too_big`` when
     the link's QR code cannot be drawn large enough for phones at this size
-    (the dialog says so first), else ``episode.error.generate`` naming the
-    part as its i18n key (``part="episode.part.intro"``), the cause logged.
-    A cancel raises ``JobCancelled`` and leaves no partial file.
+    (the dialog says so first), ``episode.error.generate_empty`` when the
+    part has no words and no link to show, else ``episode.error.generate``;
+    each names the part as its i18n key (``part="episode.part.intro"``), and
+    the cause of a failure is logged. A cancel raises ``JobCancelled`` and
+    leaves no partial file.
     """
     if kind not in KINDS:
         raise ValueError(f"unknown generated part {kind!r}; expected one of {KINDS}")
     part = f"episode.part.{kind}"
     if project.path is None:
         raise EpisodeError("episode.error.generate", part=part)
+    if _is_empty(spec):
+        raise EpisodeError("episode.error.generate_empty", part=part)
     output = generated_part_path(
         project.path, kind, spec, look, width=width, height=height, fps=fps
     )
@@ -292,10 +366,5 @@ def ensure_generated_part(
     except Exception as error:  # noqa: BLE001 — FFmpeg, the font, the disk: all one sentence
         _log.warning("The %s could not be made", kind, exc_info=True)
         raise EpisodeError("episode.error.generate", part=part) from error
-    for earlier in output.parent.glob(f"generated-{kind}-*.mp4"):
-        if earlier != output:
-            try:
-                earlier.unlink()
-            except OSError:
-                continue  # left for the next new clip to remove
+    remove_generated_parts(project.path, kind, keep=output)
     return output
