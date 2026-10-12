@@ -427,6 +427,10 @@ def test_the_edge_under_the_pointer_is_highlighted_until_the_pointer_leaves(qt_a
 
     session, strip = _strip(qt_app)
     strip.show()
+    # Until the offscreen window is exposed, Qt routes a move by the screen
+    # under the global point; the edge (global x about 804) lies outside the
+    # 800 px offscreen screen, so an early move would be dropped.
+    assert QTest.qWaitForWindowExposed(strip)
     first = session.words()[0]
     x_end = strip._viewport.x_for(first.end, strip.width())
     QTest.mouseMove(strip, QPoint(int(x_end), strip.height() // 2))
@@ -443,6 +447,10 @@ def test_the_edge_handle_shows_on_the_selected_word(qt_app) -> None:
 
     session, strip = _strip(qt_app)
     strip.show()
+    # Until the offscreen window is exposed, Qt routes a move by the screen
+    # under the global point; the edge (global x about 804) lies outside the
+    # 800 px offscreen screen, so an early move would be dropped.
+    assert QTest.qWaitForWindowExposed(strip)
     first = session.words()[0]
     strip.select(first.ref)
     x_end = strip._viewport.x_for(first.end, strip.width())
