@@ -123,12 +123,68 @@ def _ffmpeg_binary(name: str) -> CheckResult:
 _EPISODE = "Episode joining"
 
 
+#: How long one step of the release gate's trial join may take.
+_TRIAL_TIMEOUT_S = 30
+
+
+def _trial_join() -> str | None:
+    """Join two tiny made-up clips the way an episode is joined; None when it worked.
+
+    A filter can be present while an option the join passes to it has been
+    renamed (``sidedata``'s ``type``, say): the filter list cannot tell, a real
+    join can. The clips are a fifth of a second each, one landscape with sound
+    and one portrait without, so the run covers the letterbox and the silence
+    a part without sound gets, and takes well under a second. Returns what went
+    wrong, in FFmpeg's own words.
+    """
+    from qurantext.jobs.episode import EpisodeError, assemble_episode
+
+    try:
+        ffmpeg = require_binary("ffmpeg")
+    except RuntimeError as error:
+        return str(error)
+    clips = {
+        "a.mp4": [
+            "-f", "lavfi", "-i", "testsrc=size=64x36:rate=10:duration=0.2",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2",
+        ],
+        "b.mp4": ["-f", "lavfi", "-i", "color=c=gray:size=36x64:rate=10:duration=0.2"],
+    }  # fmt: skip
+    with tempfile.TemporaryDirectory(prefix="qalun-doctor-episode-") as folder:
+        parts = []
+        for name, inputs in clips.items():
+            part = Path(folder) / name
+            try:
+                made = subprocess.run(
+                    [ffmpeg, "-v", "error", "-y", *inputs, "-pix_fmt", "yuv420p", str(part)],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=_TRIAL_TIMEOUT_S,
+                )
+            except (OSError, subprocess.SubprocessError) as error:
+                return f"could not make a test clip: {error}"
+            if made.returncode != 0:
+                return f"could not make a test clip: {made.stderr.strip() or made.returncode}"
+            parts.append(part)
+        try:
+            assemble_episode(
+                parts, Path(folder) / "joined.mp4", lecture_index=0, width=64, height=36, fps=10
+            )
+        except EpisodeError as error:
+            return str(error.fmt.get("reason") or error)
+    return None
+
+
 def _episode_join(release: bool) -> CheckResult:
     """Can this FFmpeg join a lecture's episode?
 
     The join leans on filters a renamed option or a slimmed-down build could
     lose; without them every episode fails while the lecture still renders, so
     it is a note in a checkout and a failure in a release (the build gate).
+    The release gate also joins two tiny clips for real (``_trial_join``), so a
+    filter whose options changed fails the build rather than a person's first
+    episode.
     """
     from qurantext.jobs.episode import REQUIRED_FILTERS, TONE_MAP_FILTERS
 
@@ -156,6 +212,17 @@ def _episode_join(release: bool) -> CheckResult:
             f"this FFmpeg has no {_joined(missing)} filter, so no episode can be joined",
             "Use a full FFmpeg build (the BtbN or Homebrew builds have every filter needed).",
         )
+    if release:
+        failed = _trial_join()
+        if failed is not None:
+            first = failed.strip().splitlines()[0] if failed.strip() else "no reason given"
+            return CheckResult(
+                _EPISODE,
+                Status.FAIL,
+                f"a trial join of two tiny clips failed, so no episode can be joined: {first}",
+                "Use a full FFmpeg build (the BtbN or Homebrew builds), or check that the "
+                "episode's filter graph (jobs/episode.py) still matches this FFmpeg's options.",
+            )
     no_tone_map = [name for name in TONE_MAP_FILTERS if name not in have]
     if no_tone_map:
         return CheckResult(
@@ -164,7 +231,8 @@ def _episode_join(release: bool) -> CheckResult:
             f"joins, but without {_joined(no_tone_map)} an HDR phone clip is not tone-mapped",
             "Use an FFmpeg built with zimg (zscale) so HDR intros keep their colours.",
         )
-    return CheckResult(_EPISODE, Status.OK, "FFmpeg has every filter the episode uses")
+    joined = ", and a trial join worked" if release else ""
+    return CheckResult(_EPISODE, Status.OK, f"FFmpeg has every filter the episode uses{joined}")
 
 
 def _arabic_shaping() -> CheckResult:

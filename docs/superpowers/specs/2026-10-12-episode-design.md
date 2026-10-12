@@ -106,14 +106,20 @@ Out of scope:
 
 ### 3.2 Recitation part (`jobs/episode.py`)
 
-`recitation_video(path) -> Path` loads the referenced recitation project.
+`recitation_video(path, *, avoid, progress, cancel) -> Path` loads the referenced recitation
+project. *avoid* is the lecture video just written.
 
-- If its `render` is recorded, the video file exists, and `render_is_stale` is False, it returns
-  that video.
+- It reuses the recorded render when `recitation_needs_render` says it may: the job list calls the
+  render current (`job_status(project) == RENDERED`: nothing it was made from, nor the job's size
+  or subtitles choice, changed since), the video file exists, and it is not *avoid*. The Episode
+  dialog's "will be rendered first" follows the same rule.
 - Otherwise it renders the recitation with `jobs.project_render.render_project`, using the
-  recitation's own job settings (preset, look, subtitles **off**: `"sidecar"` with no formats, so
-  nothing extra is written beside it). The output goes to the recitation's own default video path,
-  and its project records the render, as a render from its review would.
+  recitation's own job settings (preset, look, and its **own** subtitles choice, so the job list
+  does not call the render "changed since"), with `formats=()` so no subtitle file is written
+  beside it. The output goes to the recitation's own default video path (or
+  `<stem> – recitation.mp4` when that is *avoid*), and the render record is written onto the
+  recitation's project file as it is when the render ends, so a correction saved meanwhile is
+  kept and reads as stale.
 - A recitation project that is missing or damaged raises `EpisodeError`, carrying a translated
   message key.
 
@@ -194,8 +200,8 @@ window's status line shows it for "render right away". Cancel stops whichever st
   - cancelling removes the `.part` file.
   
   These tests are skipped when FFmpeg is absent.
-- **`recitation_video`**: a current render is reused; a missing or stale render renders first (spy
-  on `render_project`); a damaged project raises.
+- **`recitation_video`**: a current render is reused; a missing, stale or "changed since" render
+  renders first (spy on `render_project`); a damaged project raises.
 - **Project:**
   - `episode` round-trips through save and reopen;
   - relative paths survive moving the folder;

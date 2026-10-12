@@ -138,6 +138,30 @@ def _first_cue(srt_text: str) -> str:
     return srt_text.strip().split("\n\n")[0]
 
 
+def _first_start(srt_text: str) -> float:
+    """The first cue's start in seconds, from its ``00:00:01,000 --> …`` line."""
+    clock = _first_cue(srt_text).splitlines()[1].split(" --> ")[0]
+    hours, minutes, rest = clock.split(":")
+    seconds, millis = rest.split(",")
+    return int(hours) * 3600 + int(minutes) * 60 + int(seconds) + int(millis) / 1000
+
+
+def test_subtitles_can_be_shifted_by_an_offset(tmp_path, store) -> None:
+    """The episode's files: the lecture's cues where the lecture starts in the joined video."""
+    project = _project(tmp_path)
+    project.record_render(tmp_path / "v.mp4", preset="social", basmala_offset_s=2.0)
+    (plain,) = export_project_subtitles(
+        project, tmp_path / "a", ("srt",), timeline="video", db_path=store
+    )
+    (shifted,) = export_project_subtitles(
+        project, tmp_path / "b", ("srt",), timeline="video", db_path=store, offset=5.0
+    )
+    before = _first_start(plain.read_text(encoding="utf-8-sig"))
+    after = _first_start(shifted.read_text(encoding="utf-8-sig"))
+    assert after == pytest.approx(before + 5.0, abs=0.001)
+    assert before >= 2.0, "the offset comes on top of the video timeline's own"
+
+
 def test_export_on_the_video_timeline_matches_a_render_with_a_real_basmala(
     tmp_path, store, monkeypatch
 ) -> None:

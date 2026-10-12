@@ -154,6 +154,8 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "job.stage.render": "Rendering the video…",
         "job.stage.export": "Writing subtitle files…",
         "job.stage.working": "Working…",
+        "job.stage.episode_recitation": "Preparing the recitation for the episode…",
+        "job.stage.episode_join": "Joining the episode…",
         "app.title": "Qalun",
         "home.progress.starting": "Starting…",
         "home.progress.stopping": "Stopping…",
@@ -343,6 +345,9 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         ),
         "episode.error.recitation": "The recitation job could not be used: {reason}",
         "episode.error.ffmpeg": "Joining the episode failed: {reason}",
+        "episode.error.subtitles": (
+            "The episode was made, but its subtitle files could not be written: {reason}"
+        ),
     },
     # Drafted for the first release; a native speaker must review every line
     # before it ships (spec §4). Keep the order and grouping of "en".
@@ -458,6 +463,8 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "job.stage.render": "جارٍ إخراج الفيديو…",
         "job.stage.export": "جارٍ كتابة ملفات الترجمة النصية…",
         "job.stage.working": "جارٍ العمل…",
+        "job.stage.episode_recitation": "تجهيز التلاوة للحلقة…",
+        "job.stage.episode_join": "تجميع الحلقة…",
         "app.title": "Qalun",
         "home.progress.starting": "جارٍ البدء…",
         "home.progress.stopping": "جارٍ الإيقاف…",
@@ -661,6 +668,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "episode.error.not_video": "{name} ليس فيديو يستطيع قالون قراءته، فلم تُصنع الحلقة.",
         "episode.error.recitation": "تعذّر استخدام مهمة التلاوة: {reason}",
         "episode.error.ffmpeg": "فشل تجميع الحلقة: {reason}",
+        "episode.error.subtitles": "صُنعت الحلقة، لكن تعذّرت كتابة ملفات ترجمتها النصية: {reason}",
     },
 }
 LANGUAGES = tuple(STRINGS)

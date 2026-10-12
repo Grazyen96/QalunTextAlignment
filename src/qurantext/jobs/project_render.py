@@ -163,18 +163,25 @@ def export_project_subtitles(
     *,
     timeline: str = "audio",
     db_path: Path = QURAN_DB_PATH,
+    offset: float = 0.0,
 ) -> list[Path]:
-    """Write subtitle files for *project* without rendering anything."""
+    """Write subtitle files for *project* without rendering anything.
+
+    *offset* seconds are added to every cue after the timeline's own shift:
+    the episode's files hold the lecture's cues where the lecture starts inside
+    the joined video, after its intro and recitation.
+    """
     if timeline not in SUBTITLE_TIMELINES:
         raise ValueError(f"timeline must be one of {', '.join(SUBTITLE_TIMELINES)}.")
-    offset = 0.0
+    shift = 0.0
     if timeline == "video":
         if project.render is None:
             raise ValueError(
                 "There is no rendered video to line the subtitles up with. "
                 "Render first, or export on the original recording's timeline."
             )
-        offset = float(project.render.get("basmala_offset_s") or 0.0)
+        shift = float(project.render.get("basmala_offset_s") or 0.0)
+    shift += float(offset)
 
     duration = get_audio_duration(Path(project.audio))
     cues = build_cues(
@@ -187,10 +194,8 @@ def export_project_subtitles(
     )
     if not cues:
         raise ValueError("No subtitle lines could be built from this project.")
-    if offset:
-        cues = [
-            Cue(start=c.start + offset, end=c.end + offset, text=c.text, ref=c.ref) for c in cues
-        ]
+    if shift:
+        cues = [Cue(start=c.start + shift, end=c.end + shift, text=c.text, ref=c.ref) for c in cues]
 
     width, height = _subtitle_size(project.render or {})
     stem = Path(stem)

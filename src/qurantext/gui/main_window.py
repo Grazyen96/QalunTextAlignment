@@ -55,13 +55,28 @@ _WINDOW_SIZE = (1024, 680)
 #: The stages the pipeline reports, each said in the window's words as
 #: ``job.stage.<stage>``; any other stage says ``job.stage.working``.
 _KNOWN_STAGES = frozenset(
-    {"download", "unpack", "transcribe", "transcribe_online", "detect", "match", "render", "export"}
+    {
+        "download",
+        "unpack",
+        "transcribe",
+        "transcribe_online",
+        "detect",
+        "match",
+        "render",
+        "export",
+        "episode_recitation",
+        "episode_join",
+    }
 )
 #: The percentage sentence of each stage that has its own; any other says "Matching".
 _PERCENT_KEYS = {
     "download": "home.progress.downloading",
     "transcribe": "home.progress.transcribing",
     "render": "home.progress.rendering",
+    # The episode's steps report their percentages as "render"; should one
+    # report its own, it is still rendering, not matching.
+    "episode_recitation": "home.progress.rendering",
+    "episode_join": "home.progress.rendering",
 }
 
 

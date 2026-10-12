@@ -18,6 +18,13 @@ from qurantext.config.paths import (
     RECITATION_MATCHING_OUTPUT_DIR,
 )
 from qurantext.gui.i18n import t
+from qurantext.jobs.episode import (
+    EpisodeError,
+    assemble_episode,
+    episode_path_for,
+    recitation_video,
+)
+from qurantext.jobs.episode_assets import project_episode
 from qurantext.jobs.look_assets import seed_project_look
 from qurantext.jobs.project import (
     JobSettings,
@@ -28,7 +35,11 @@ from qurantext.jobs.project import (
     save_project,
     set_job_settings,
 )
-from qurantext.jobs.project_render import default_video_path, render_project
+from qurantext.jobs.project_render import (
+    default_video_path,
+    export_project_subtitles,
+    render_project,
+)
 from qurantext.pipelines.detection import run_detection, run_recitation_range
 from qurantext.utils.progress import CancelToken, ProgressCallback, report
 
@@ -125,6 +136,12 @@ class JobOutcome:
     #: The chosen studied surah when none of its ayat had a card, so the video
     #: shows only its opening title card; None otherwise.
     studied_surah_missing: int | None = None
+    #: The joined episode (``<stem> – episode.mp4``) when a lecture's episode
+    #: was made; None when none was chosen or it failed.
+    episode_video: Path | None = None
+    #: Why the episode could not be made, already in the window's language;
+    #: the lecture's own video is kept whatever it says.
+    episode_error: str | None = None
 
 
 def _set_aside(path: Path) -> Path | None:
@@ -300,15 +317,28 @@ def run_render(
     job's choice; None means "use the job's".
     """
     settings = job_settings(project)
+    chosen_subtitles = subtitles if subtitles is not None else settings.subtitles
+    chosen_formats = tuple(formats) if formats is not None else settings.formats
     result = render_project(
         project,
         default_video_path(project, output_dir=output_dir),
         preset=preset if preset is not None else settings.preset,
-        subtitles=subtitles if subtitles is not None else settings.subtitles,
-        formats=tuple(formats) if formats is not None else settings.formats,
+        subtitles=chosen_subtitles,
+        formats=chosen_formats,
         progress=progress,
         cancel=cancel,
     )
+    episode_video: Path | None = None
+    episode_error: str | None = None
+    if str(project.mode).lower() == "lecture":
+        episode_video, episode_error = _make_episode(
+            project,
+            Path(result.video),
+            subtitles=chosen_subtitles,
+            formats=chosen_formats,
+            progress=progress,
+            cancel=cancel,
+        )
     return JobOutcome(
         matches=Path(project.matches),
         video=result.video,
@@ -318,4 +348,118 @@ def run_render(
         studied_surah_missing=(
             result.render.studied_surah_missing if result.render is not None else None
         ),
+        episode_video=episode_video,
+        episode_error=episode_error,
     )
+
+
+def _make_episode(
+    project: Project,
+    lecture: Path,
+    *,
+    subtitles: str,
+    formats: tuple[str, ...],
+    progress: ProgressCallback | None,
+    cancel: CancelToken | None,
+) -> tuple[Path | None, str | None]:
+    """Join the lecture just rendered (*lecture*) with its episode's parts.
+
+    Returns the episode written (None when the episode has no part besides
+    the lecture, or it could not be made) and what went wrong, in the window's
+    language (None when nothing did). The lecture's video and its record stay
+    as they are whatever happens here. A cancel passes through as
+    ``JobCancelled``: the lecture is complete, and the join leaves no partial
+    file.
+    """
+    try:
+        return _join_episode(
+            project, lecture, subtitles=subtitles, formats=formats, progress=progress, cancel=cancel
+        )
+    except EpisodeError as error:
+        return None, t(error.key, **error.fmt)
+
+
+def _join_episode(
+    project: Project,
+    lecture: Path,
+    *,
+    subtitles: str,
+    formats: tuple[str, ...],
+    progress: ProgressCallback | None,
+    cancel: CancelToken | None,
+) -> tuple[Path | None, str | None]:
+    """:func:`_make_episode`'s work; raises :class:`EpisodeError` for what stops it.
+
+    When the job writes subtitle files, the episode gets its own, holding the
+    lecture's cues moved to where the lecture starts in it. The episode is
+    recorded in the project's render, and saved, before they are written: a
+    subtitle file that cannot be written leaves the episode made, and says so.
+    """
+    choice = project_episode(project)
+    if choice.is_empty:
+        return None, None
+    recitation: Path | None = None
+    if choice.recitation is not None:
+        report(
+            progress,
+            "episode_recitation",
+            t("job.stage.episode_recitation"),
+            translated=True,
+        )
+        recitation = recitation_video(
+            choice.recitation, avoid=lecture, progress=progress, cancel=cancel
+        )
+    parts = [p for p in (choice.intro, recitation) if p is not None]
+    lecture_index = len(parts)
+    parts.append(lecture)
+    if choice.outro is not None:
+        parts.append(choice.outro)
+    if len(parts) == 1:
+        return None, None
+    width, height, fps = _lecture_geometry(project)
+    report(progress, "episode_join", t("job.stage.episode_join"), translated=True)
+    joined = assemble_episode(
+        parts,
+        episode_path_for(lecture),
+        lecture_index=lecture_index,
+        width=width,
+        height=height,
+        fps=fps,
+        progress=progress,
+        cancel=cancel,
+    )
+    # Recorded before the subtitle files, which are extra: the video is made.
+    assert project.render is not None  # render_project has just recorded it
+    project.render["episode"] = {
+        "video": str(joined.output),
+        "lecture_offset": round(joined.lecture_offset, 3),
+        "durations": [round(d, 3) for d in joined.durations],
+    }
+    if project.path is not None:
+        save_project(project, project.path)
+    if subtitles in ("sidecar", "both") and formats:
+        stem = joined.output.with_name(f"{lecture.stem} – episode")
+        try:
+            export_project_subtitles(
+                project,
+                stem,
+                tuple(formats),
+                timeline="video",
+                offset=joined.lecture_offset,
+            )
+        except ValueError:
+            pass  # no cue to write: the lecture's render wrote no subtitle file either
+        except OSError as error:
+            return joined.output, t("episode.error.subtitles", reason=str(error))
+    return joined.output, None
+
+
+def _lecture_geometry(project: Project) -> tuple[int, int, int]:
+    """The size and frame rate the lecture was just rendered at, as its record says."""
+    render = project.render or {}
+    try:
+        return int(render["width"]), int(render["height"]), int(render["fps"])
+    except (KeyError, TypeError, ValueError):
+        raise EpisodeError(
+            "episode.error.ffmpeg", reason="the lecture's size was not recorded"
+        ) from None

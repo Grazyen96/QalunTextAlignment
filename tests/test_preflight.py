@@ -782,6 +782,47 @@ def test_an_ffmpeg_that_cannot_join_an_episode_is_named(monkeypatch) -> None:
     assert "Cannot render" not in report, "the lecture still renders without it"
 
 
+_HAS_FFMPEG = shutil.which("ffmpeg") is not None
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="needs FFmpeg")
+def test_the_release_gate_joins_two_tiny_clips_for_real(monkeypatch) -> None:
+    """A renamed filter option passes the filter list; only a real join finds it."""
+    import time
+
+    from qurantext.jobs import episode
+
+    started = time.monotonic()
+    passed = preflight._episode_join(release=True)
+    assert passed.status in (Status.OK, Status.WARN), passed.detail
+    assert "trial join" in passed.detail or passed.status == Status.WARN
+    assert time.monotonic() - started < 5, "the gate stays quick"
+
+    real_graph = episode._filter_graph
+
+    def renamed_option(*args, **kwargs):
+        inputs, graph = real_graph(*args, **kwargs)
+        return inputs, graph.replace("type=DISPLAYMATRIX", "kind=DISPLAYMATRIX")
+
+    monkeypatch.setattr(episode, "_filter_graph", renamed_option)
+    failed = preflight._episode_join(release=True)
+    assert failed.status == Status.FAIL and "trial join" in failed.detail and failed.remedy
+    # A developer's checkout is only told about the filters; it does not join.
+    assert preflight._episode_join(release=False).status in (Status.OK, Status.WARN)
+
+
+def test_the_trial_join_runs_only_at_the_release_gate(monkeypatch) -> None:
+    full = frozenset({"apad", "setparams", "sidedata", "zscale", "tonemap"})
+    monkeypatch.setattr(preflight, "ffmpeg_filters", lambda path: full)
+    monkeypatch.setattr(preflight, "require_binary", lambda name, *a: f"/usr/bin/{name}")
+    calls: list[bool] = []
+    monkeypatch.setattr(preflight, "_trial_join", lambda: calls.append(True) or "boom")
+
+    assert preflight._episode_join(release=False).status == Status.OK and calls == []
+    failed = preflight._episode_join(release=True)
+    assert calls == [True] and failed.status == Status.FAIL and "boom" in failed.detail
+
+
 def test_an_ffmpeg_that_cannot_list_its_filters_is_not_called_incomplete(monkeypatch) -> None:
     monkeypatch.setattr(preflight, "ffmpeg_filters", lambda path: frozenset())
     result = preflight._episode_join(release=True)
