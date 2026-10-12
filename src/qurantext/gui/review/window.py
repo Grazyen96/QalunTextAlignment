@@ -137,6 +137,7 @@ _LIST_MIN_HEIGHT = 150
 _LOOK_PANEL_WIDTH = 260
 #: What the render's progress bar says during each of the episode's steps.
 _EPISODE_PROGRESS_KEYS = {
+    "episode_lecture": "render.running_lecture",
     "episode_recitation": "render.running_recitation",
     "episode_join": "render.running_join",
 }
@@ -949,9 +950,7 @@ class ReviewWindow(QMainWindow):
         dialog = EpisodeDialog(self.session, prefs=self._prefs, parent=self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        # OK has set it already (with the clips copied beside the project);
-        # this is then no edit at all.
-        self.session.set_episode(dialog.choice())
+        # OK made the edit itself (the clips copied beside the project first).
         if dialog.default_error:
             self.statusBar().showMessage(dialog.default_error, 8000)
         self._sync_state()
@@ -981,6 +980,8 @@ class ReviewWindow(QMainWindow):
         # With an episode, the bar names each step: the lecture, then the rest.
         has_episode = self._is_lecture() and not self.session.episode.is_empty
         self._render_progress_key = "render.running_lecture" if has_episode else "render.running"
+        # The last render's episode error is about that render, not this one.
+        self.warnings.set_episode_notice(None)
         self._set_render_running(True)
         # No preset or subtitles here: ``run_render`` reads the job's own, so
         # this renders what the job was started for.

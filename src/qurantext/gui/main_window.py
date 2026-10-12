@@ -13,7 +13,7 @@ review windows it opens — one per project.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
 
@@ -65,6 +65,7 @@ _KNOWN_STAGES = frozenset(
         "match",
         "render",
         "export",
+        "episode_lecture",
         "episode_recitation",
         "episode_join",
     }
@@ -76,6 +77,7 @@ _PERCENT_KEYS = {
     "render": "home.progress.rendering",
     # The episode's steps, after the lecture's own render (``gui.jobs`` reports
     # the recitation's render and the join under these names).
+    "episode_lecture": "home.progress.episode_lecture",
     "episode_recitation": "home.progress.episode_recitation",
     "episode_join": "home.progress.episode_join",
 }
@@ -94,6 +96,13 @@ class _Said:
     #: Set for a sentence the job already said in the window's language (an
     #: episode error, a seed notice): shown as it is, in place of *key*.
     raw: str | None = None
+
+    def without_raw(self) -> _Said | None:
+        """This sentence without its raw parts, which cannot be said in another language."""
+        if self.raw is not None:
+            return None
+        then = tuple(kept for more in self.then if (kept := more.without_raw()) is not None)
+        return replace(self, then=then)
 
     def text(self) -> str:
         if self.raw is not None:
@@ -259,7 +268,11 @@ class MainWindow(QMainWindow):
         if audio is not None:
             self.new_job.set_audio(audio)
         if self._status is not None:
-            self.new_job.show_status(self._status.text())  # said again, in the new language
+            # Said again in the new language; what the job said in the old one
+            # (an episode error, a seed notice) is dropped, as ``_show_raw`` is:
+            # the review or the box that showed it said it whole.
+            self._status = self._status.without_raw()
+            self.new_job.show_status(self._status.text() if self._status else "")
         # The combo just went with the old panels; a keyboard user stays where they were.
         self.language_combo.setFocus()
         return True
@@ -415,6 +428,8 @@ class MainWindow(QMainWindow):
             self._tell_notices(finished.notices)
             return
         problem = self._show_review(project_path)
+        # Set before any box: the job's ``done`` can arrive while the box is open.
+        self._ending = problem or _Said("home.finished.matched", count=len(project.cards))
         if problem is None and finished.notices:
             # Shown in the review that just opened, until it closes.
             review = self._review_of(project_path)
@@ -422,7 +437,6 @@ class MainWindow(QMainWindow):
                 review.show_notices(finished.notices)
         elif finished.notices:
             self._tell_notices(finished.notices)
-        self._ending = problem or _Said("home.finished.matched", count=len(project.cards))
 
     def _tell_notices(self, notices: tuple[str, ...]) -> None:
         """Say what matching could not do for a new job, until the person closes it.

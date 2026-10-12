@@ -456,3 +456,13 @@ def test_a_file_name_in_an_episode_error_is_isolated_in_every_language(key) -> N
     """A name that starts with digits ("12 intro.mp4") must not reorder the sentence."""
     for language in i18n.LANGUAGES:
         assert "\u2068{name}\u2069" in i18n.STRINGS[language][key], language
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["episode.recitation_entry", "episode.recitation_entry_no_range", "review.episode_written"],
+)
+def test_a_job_or_file_name_in_an_episode_line_is_isolated_in_every_language(key) -> None:
+    """An Arabic job name («الفرقان44-49») must not pull the ayat after it out of order."""
+    for language in i18n.LANGUAGES:
+        assert "\u2068{name}\u2069" in i18n.STRINGS[language][key], language

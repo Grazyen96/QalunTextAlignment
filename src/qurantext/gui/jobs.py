@@ -94,6 +94,9 @@ class JobSpec:
     #: default episode), as absolute paths; None for a part not set. Like the
     #: look, a re-match never uses them, and a recitation ignores them.
     episode_defaults: tuple[str | None, str | None] = (None, None)
+    #: Their original file names, shown in the Episode dialog (the copies are
+    #: named by their content); None when unknown.
+    episode_default_names: tuple[str | None, str | None] = (None, None)
 
     @property
     def settings(self) -> JobSettings:
@@ -320,7 +323,10 @@ def run_matching(
         if spec.mode == "lecture" and any(spec.episode_defaults):
             intro, outro = (Path(clip) if clip else None for clip in spec.episode_defaults)
             # A default clip that is gone is left out, and said as the backup is.
-            for key, fmt in seed_project_episode(project, destination, intro, outro):
+            seeded = seed_project_episode(
+                project, destination, intro, outro, names=spec.episode_default_names
+            )
+            for key, fmt in seeded:
                 said = t(key, part=t(f"episode.part.{fmt['part']}"))
                 report(progress, "detect", said, translated=True)
                 if notices is not None:
@@ -349,18 +355,22 @@ def run_render(
     settings = job_settings(project)
     chosen_subtitles = subtitles if subtitles is not None else settings.subtitles
     chosen_formats = tuple(formats) if formats is not None else settings.formats
+    lecture = str(project.mode).lower() == "lecture"
+    # With an episode to follow, the lecture's render is its first step, and
+    # is named so ("Rendering the lecture"), as the recitation and join are.
+    with_episode = lecture and not project_episode(project).is_empty
     result = render_project(
         project,
         default_video_path(project, output_dir=output_dir),
         preset=preset if preset is not None else settings.preset,
         subtitles=chosen_subtitles,
         formats=chosen_formats,
-        progress=progress,
+        progress=_as_stage(progress, "episode_lecture") if with_episode else progress,
         cancel=cancel,
     )
     episode_video: Path | None = None
     episode_error: str | None = None
-    if str(project.mode).lower() == "lecture":
+    if lecture:
         episode_video, episode_error = _make_episode(
             project,
             Path(result.video),

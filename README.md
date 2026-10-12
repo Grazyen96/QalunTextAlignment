@@ -144,8 +144,12 @@ lecture starts in it. The lecture's own video is kept whatever happens to the
 episode: a clip gone missing, or a cancel during the joining, is said in the
 review and the episode is simply not written. The clips are copied beside the
 project (`<name>.qalun.episode/`), so the folder can be moved with them inside;
-the recitation is only referenced. The last intro and outro chosen are what new
-lectures start with, and the review shows "Episode: on" when any part is set.
+the recitation is only referenced. An intro or outro you choose (or remove) in
+the dialog becomes what new lectures start with; a part you leave alone keeps
+its default, so setting only a lecture's recitation never clears the channel's
+intro. The review shows "Episode: on" when any part is set. Clips copied beside
+a project stay there after an Undo or a Remove (Redo needs them back); delete
+the `.qalun.episode` folder's unused files by hand if it grows.
 
 **More options**, folded away since most jobs don't need them: a Quran text
 other than the certified one that ships with the app, subtitles burned into

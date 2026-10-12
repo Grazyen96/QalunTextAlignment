@@ -767,6 +767,9 @@ class NewJobPanel(QWidget):
             style=self._prefs.default_look_style(),
             studied_surah=None if recitation else self.studied_surah_box.currentData(),
             episode_defaults=(None, None) if recitation else self._episode_defaults(),
+            episode_default_names=(
+                (None, None) if recitation else self._prefs.default_episode_names
+            ),
         )
 
     def _episode_defaults(self) -> tuple[str | None, str | None]:

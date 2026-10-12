@@ -1770,6 +1770,7 @@ def _recitation_jobs(monkeypatch, tmp_path, lecture_path) -> dict:
 
     rendered = Project(audio=tmp_path / "fatiha.mp3", mode="recitation")
     rendered.record_render(tmp_path / "fatiha.mp4", preset="social", basmala_offset_s=0.0)
+    (tmp_path / "fatiha.mp4").write_bytes(b"video")  # its render is there to reuse
     save_project(rendered, tmp_path / "fatiha.qalun.json")
     fresh = Project(audio=tmp_path / "furqan.mp3", mode="recitation")
     save_project(fresh, tmp_path / "furqan.qalun.json")
@@ -1823,23 +1824,27 @@ def test_the_episode_dialog_starts_from_the_sessions_choice(
     jobs = _recitation_jobs(monkeypatch, tmp_path, episode_lecture.project.path)
     _fake_probe(monkeypatch, {"intro.mp4": 65.0, "fatiha.mp4": 30.0})
     intro = tmp_path / "dars.qalun.episode" / "intro.mp4"
-    episode_lecture.set_episode(EpisodeChoice(intro, jobs["rendered"], None))
+    choice = EpisodeChoice(intro, jobs["rendered"], None, intro_name="Channel intro.mp4")
+    episode_lecture.set_episode(choice)
     episode_lecture.save()
 
     dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
     assert jobs["asked"] == [[tmp_path]]
-    assert dialog.intro_label.text() == t("episode.clip", name="intro.mp4", length="01:05")
+    # By its original name: the copy beside the project is named by its content.
+    assert dialog.intro_label.text() == t("episode.clip", name="Channel intro.mp4", length="01:05")
     assert dialog.intro_remove.isEnabled()
     assert dialog.outro_label.text() == t("episode.none")
     assert not dialog.outro_remove.isEnabled()
     assert dialog.recitation_box.currentData() == jobs["rendered"].resolve()
-    assert dialog.choice() == EpisodeChoice(intro.resolve(), jobs["rendered"].resolve(), None)
+    assert dialog.choice() == EpisodeChoice(
+        intro.resolve(), jobs["rendered"].resolve(), None, intro_name="Channel intro.mp4"
+    )
 
 
 def test_the_recitation_list_shows_each_jobs_state_and_hides_the_lecture(
     qt_app, episode_lecture, prefs, tmp_path, monkeypatch
 ) -> None:
-    from qurantext.gui.i18n import t
+    from qurantext.gui.i18n import ltr, t
     from qurantext.gui.review.episode_dialog import EpisodeDialog
 
     jobs = _recitation_jobs(monkeypatch, tmp_path, episode_lecture.project.path)
@@ -1849,12 +1854,12 @@ def test_the_recitation_list_shows_each_jobs_state_and_hides_the_lecture(
     assert _items(dialog.recitation_box) == [
         (t("episode.none"), None, True),
         (
-            t(entry, name="fatiha", range="1:1-7", status=t("episode.rendered")),
+            t(entry, name="fatiha", range=ltr("1:1-7"), status=t("episode.rendered")),
             jobs["rendered"],
             True,
         ),
         (
-            t(entry, name="furqan", range="25:7-11", status=t("episode.render_first")),
+            t(entry, name="furqan", range=ltr("25:7-11"), status=t("episode.render_first")),
             jobs["fresh"],
             True,
         ),
@@ -1962,6 +1967,9 @@ def test_ok_copies_the_clip_sets_the_episode_and_keeps_it_as_the_default(
     assert choice.intro.parent == episode_dir_for(episode_lecture.project.path).resolve()
     assert choice.intro.read_bytes() == b"an intro"
     assert choice.recitation == jobs["fresh"].resolve() and choice.outro is None
+    assert choice.intro_name == "intro.mp4", "the original name is kept beside the copy"
+    assert dialog.choice() == choice, "after OK the dialog names what was stored"
+    assert prefs.default_episode_names == ("intro.mp4", None)
     assert episode_lecture.dirty and episode_lecture.undo(), "one undo step"
     assert episode_lecture.episode.is_empty and not episode_lecture.can_undo
     intro, outro = prefs.default_episode
@@ -1999,19 +2007,21 @@ def test_a_default_that_cannot_be_kept_still_sets_the_episode(
     from qurantext.gui.i18n import t
     from qurantext.gui.review.episode_dialog import EpisodeDialog
 
-    jobs = _recitation_jobs(monkeypatch, tmp_path, episode_lecture.project.path)
-    _fake_probe(monkeypatch, {})
+    _recitation_jobs(monkeypatch, tmp_path, episode_lecture.project.path)
+    source = tmp_path / "intro.mp4"
+    source.write_bytes(b"an intro")
+    _fake_probe(monkeypatch, {"intro.mp4": 5.0})
 
-    def refused(intro, outro):
+    def refused(intro, outro, **kwargs):
         raise OSError("read-only")
 
     monkeypatch.setattr(prefs, "save_default_episode", refused)
     dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
-    box = dialog.recitation_box
-    box.setCurrentIndex(box.findData(jobs["rendered"]))
+    _choose_file(monkeypatch, source)
+    dialog.intro_choose.click()
     dialog.ok_button.click()
     assert dialog.result() == dialog.DialogCode.Accepted
-    assert episode_lecture.episode.recitation == jobs["rendered"].resolve()
+    assert episode_lecture.episode.intro_name == "intro.mp4"
     assert dialog.default_error == t("episode.default_failed", reason="read-only")
 
 
@@ -2070,3 +2080,213 @@ def test_a_chosen_recitation_no_longer_listed_is_kept(
     )
     dialog.ok_button.click()
     assert episode_lecture.episode.recitation == hidden.path.resolve()
+
+
+def test_a_seeded_clip_without_its_name_is_called_by_its_part(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    """Never by the content hash its copy beside the project is named by."""
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+    from qurantext.jobs.episode_assets import EpisodeChoice
+
+    _recitation_jobs(monkeypatch, tmp_path, episode_lecture.project.path)
+    _fake_probe(monkeypatch, {"5e16d067e52c.mp4": 12.0, "outro.mov": 3.0})
+    copy = tmp_path / "dars.qalun.episode" / "5e16d067e52c.mp4"
+    elsewhere = tmp_path / "outro.mov"
+    episode_lecture.set_episode(EpisodeChoice(copy, None, elsewhere))
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    part = t("episode.part.intro")
+    assert dialog.intro_label.text() == t("episode.clip", name=part, length="00:12")
+    assert dialog.outro_label.text() == t("episode.clip", name="outro.mov", length="00:03")
+
+
+def test_a_seeded_lecture_shows_the_default_s_own_name(
+    qt_app, prefs, tmp_path, monkeypatch
+) -> None:
+    """Default chosen from "Channel intro 2024.mp4"; a new lecture seeded from it says so."""
+    from qurantext.gui.i18n import t
+    from qurantext.gui.jobs import JobSpec, run_matching
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+    from qurantext.gui.review.session import ReviewSession
+    from qurantext.jobs.project import CaptionCue, Project
+
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    source = tmp_path / "Channel intro 2024.mp4"
+    source.write_bytes(b"an intro")
+    prefs.save_default_episode(source, None)
+    assert prefs.default_episode_names == ("Channel intro 2024.mp4", None)
+
+    from qurantext.gui import jobs as jobs_module
+
+    def matched(**kwargs):
+        kwargs["output"].parent.mkdir(parents=True, exist_ok=True)
+        kwargs["output"].write_text('{"matches": [], "meta": {"mode": "lecture"}}')
+
+    monkeypatch.setattr(jobs_module, "run_detection", matched)
+    monkeypatch.setattr(
+        jobs_module.Project,
+        "from_match_file",
+        classmethod(
+            lambda cls, path, audio, mode: Project(
+                audio=audio, mode=mode, matches=path, captions=[CaptionCue(1.0, 2.0, "x")]
+            )
+        ),
+    )
+    audio = tmp_path / "dars.mp3"
+    audio.write_bytes(b"")
+    quran = tmp_path / "q.txt"
+    quran.write_text("x")
+    intro, outro = prefs.default_episode
+    spec = JobSpec(
+        audio=audio,
+        quran=quran,
+        mode="lecture",
+        output_dir=tmp_path / "jobs",
+        episode_defaults=(str(intro), None),
+        episode_default_names=prefs.default_episode_names,
+    )
+    project = run_matching(spec)
+    _recitation_jobs(monkeypatch, tmp_path, project.path)
+    _fake_probe(monkeypatch, {intro.name: 7.0})
+    dialog = EpisodeDialog(ReviewSession(project, duration=60.0), prefs=prefs, job_dirs=[])
+    assert dialog.intro_label.text() == t(
+        "episode.clip", name="Channel intro 2024.mp4", length="00:07"
+    )
+
+
+def test_ok_changes_only_the_default_of_a_part_changed_here(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    """An old lecture without an intro: setting its recitation keeps the channel's intro."""
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+
+    jobs = _recitation_jobs(monkeypatch, tmp_path, episode_lecture.project.path)
+    _fake_probe(monkeypatch, {})
+    channel = tmp_path / "channel.mp4"
+    channel.write_bytes(b"the channel's intro")
+    prefs.save_default_episode(channel, None)
+    before = (prefs.default_episode, prefs.default_episode_names)
+
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    box = dialog.recitation_box
+    box.setCurrentIndex(box.findData(jobs["fresh"]))
+    dialog.ok_button.click()
+    assert episode_lecture.episode.recitation == jobs["fresh"].resolve()
+    assert (prefs.default_episode, prefs.default_episode_names) == before
+
+
+def test_removing_a_clip_clears_its_default_and_keeps_the_other(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+    from qurantext.jobs.episode_assets import EpisodeChoice, import_episode_clip
+
+    _recitation_jobs(monkeypatch, tmp_path, episode_lecture.project.path)
+    intro, outro = tmp_path / "in.mp4", tmp_path / "out.mp4"
+    intro.write_bytes(b"intro")
+    outro.write_bytes(b"outro")
+    prefs.save_default_episode(intro, outro)
+    kept_outro = prefs.default_episode[1]
+    copy = import_episode_clip(episode_lecture.project.path, intro)
+    episode_lecture.set_episode(EpisodeChoice(copy, None, None, intro_name="in.mp4"))
+    _fake_probe(monkeypatch, {copy.name: 2.0})
+
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    dialog.intro_remove.click()
+    dialog.ok_button.click()
+    assert episode_lecture.episode.is_empty
+    assert prefs.default_episode == (None, kept_outro)
+    assert prefs.default_episode_names == (None, "out.mp4")
+
+
+def test_a_clip_that_is_gone_is_said_on_opening(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+    from qurantext.jobs.episode_assets import EpisodeChoice
+
+    _recitation_jobs(monkeypatch, tmp_path, episode_lecture.project.path)
+    _fake_probe(monkeypatch, {"end.mov": 3.0})
+    gone = tmp_path / "dars.qalun.episode" / "abc.mp4"
+    episode_lecture.set_episode(EpisodeChoice(gone, None, None, intro_name="Intro.mp4"))
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    said = t("episode.clip_missing", part=t("episode.part.intro"))
+    assert dialog.message_label.text() == said and not dialog.message_label.isHidden()
+    end = tmp_path / "end.mov"
+    _choose_file(monkeypatch, end)
+    dialog.intro_choose.click()  # another intro: the line goes
+    assert dialog.message_label.isHidden()
+
+
+def test_a_recitation_whose_video_is_gone_will_be_rendered_first(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    """The job list calls it rendered; the episode would render it first all the same."""
+    from qurantext.gui.i18n import ltr, t
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+
+    jobs = _recitation_jobs(monkeypatch, tmp_path, episode_lecture.project.path)
+    (tmp_path / "fatiha.mp4").unlink()
+    _fake_probe(monkeypatch, {})
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    box = dialog.recitation_box
+    assert box.itemText(box.findData(jobs["rendered"])) == t(
+        "episode.recitation_entry",
+        name="fatiha",
+        range=ltr("1:1-7"),
+        status=t("episode.render_first"),
+    )
+
+
+def test_an_unreadable_recitation_job_is_listed_as_damaged(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    """Read by the real ``list_jobs``: a broken file has no mode, only its name says it."""
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+
+    _fake_probe(monkeypatch, {})
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    (jobs / "fatiha_recitation.qalun.json").write_text("{not json")
+    (jobs / "notes_lecture.qalun.json").write_text("{not json")
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[jobs])
+    assert _items(dialog.recitation_box)[1:] == [
+        (
+            t(
+                "episode.recitation_entry_no_range",
+                name="fatiha_recitation",
+                status=t("episode.damaged"),
+            ),
+            jobs / "fatiha_recitation.qalun.json",
+            False,
+        )
+    ]
+
+
+def test_an_arabic_job_name_keeps_its_ayat_in_order(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    """«الفرقان44-49 · 25:44-49 · …»: the name is isolated, the range runs left to right."""
+    from qurantext.gui.review import episode_dialog
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+    from qurantext.jobs.catalog import NEEDS_REVIEW, JobEntry
+
+    _fake_probe(monkeypatch, {})
+    entry = JobEntry(
+        tmp_path / "x.qalun.json", "دروس الفرقان", "recitation", NEEDS_REVIEW, 1.0, 5, "25:7-11"
+    )
+    monkeypatch.setattr(episode_dialog, "list_jobs", lambda *a, **k: [entry])
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    text = dialog.recitation_box.itemText(1)
+    assert text.startswith("\u2068دروس الفرقان\u2069 · ")
+    assert "\u206625:7-11\u2069" not in text, "English: the range is not wrapped"
+    assert "25:7-11" in text
+    from qurantext.gui.i18n import set_language
+
+    set_language("ar")
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    text = dialog.recitation_box.itemText(1)
+    assert "\u2068دروس الفرقان\u2069" in text and "\u206625:7-11\u2069" in text

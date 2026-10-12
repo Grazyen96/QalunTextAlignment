@@ -384,4 +384,40 @@ def test_a_held_clip_that_is_still_the_default_stays(settings, tmp_path, monkeyp
     release = prefs.hold_default_clips(prefs.default_episode)
     release()
     assert prefs.default_episode[0].read_bytes() == b"intro"
-    assert prefs.hold_default_clips((None, None)) is not None
+    folder = tmp_path / "data" / "episode"
+    before = sorted(folder.iterdir())
+    prefs.hold_default_clips((None, None))()  # holding nothing lets go of nothing
+    assert sorted(folder.iterdir()) == before
+
+
+def test_a_default_part_can_be_kept_while_the_other_changes(settings, tmp_path, monkeypatch):
+    """The Episode dialog changes only the part the person changed."""
+    from qurantext.gui.prefs import KEEP_DEFAULT
+
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    prefs = Prefs(settings)
+    intro, outro = tmp_path / "Channel intro.mp4", tmp_path / "end.mov"
+    intro.write_bytes(b"intro")
+    outro.write_bytes(b"outro")
+    prefs.save_default_episode(intro, None)
+    kept = prefs.default_episode[0]
+    intro.unlink()  # the original going away does not matter: the copy is kept
+
+    prefs.save_default_episode(KEEP_DEFAULT, outro, names=(None, "Outro 2024.mov"))
+    assert prefs.default_episode[0] == kept and kept.read_bytes() == b"intro"
+    assert prefs.default_episode_names == ("Channel intro.mp4", "Outro 2024.mov")
+    prefs.save_default_episode(None, KEEP_DEFAULT)
+    assert prefs.default_episode[0] is None and prefs.default_episode_names[0] is None
+    assert prefs.default_episode_names[1] == "Outro 2024.mov"
+
+
+@pytest.mark.parametrize("name", [3, "", "  ", None])
+def test_a_default_name_of_the_wrong_shape_is_unknown(settings, name):
+    import json
+
+    settings.setValue(
+        "default_episode", json.dumps({"intro": "/abs/intro.mp4", "intro_name": name})
+    )
+    prefs = Prefs(settings)
+    assert prefs.default_episode[0] == Path("/abs/intro.mp4")
+    assert prefs.default_episode_names == (None, None)

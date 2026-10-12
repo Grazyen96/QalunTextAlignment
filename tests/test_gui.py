@@ -3041,6 +3041,7 @@ def test_seed_notices_after_a_render_right_away_wait_to_be_dismissed(
     [
         ("episode_recitation", "home.progress.episode_recitation"),
         ("episode_join", "home.progress.episode_join"),
+        ("episode_lecture", "home.progress.episode_lecture"),
         ("render", "home.progress.rendering"),
     ],
 )
@@ -3079,3 +3080,95 @@ def test_the_recitation_render_and_the_join_report_under_their_own_stages(
 
     fractions = [(e.stage, e.fraction) for e in events if e.fraction is not None]
     assert fractions == [("episode_recitation", 0.5), ("episode_join", 0.25)]
+
+
+def test_a_language_switch_drops_what_the_job_said_in_the_old_one(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    """The episode error was said in English; after a switch only the rest is said again."""
+    from qurantext.gui import i18n
+    from qurantext.gui import main_window as module
+    from qurantext.gui.jobs import JobOutcome
+
+    _fake_matching(monkeypatch)
+    why = module.t("episode.error.cancelled")
+
+    def fake_render(project, *, progress=None, cancel=None):
+        return JobOutcome(
+            matches=project.matches, video=tmp_path / "a.mp4", cards=1, episode_error=why
+        )
+
+    monkeypatch.setattr(module, "run_render", fake_render)
+    _run_start(qt_app, home, _spec(tmp_path, output_dir=tmp_path / "jobs", render_right_away=True))
+    assert home.new_job.status_label.text().endswith(why)
+
+    assert home.set_language("ar")
+    said = home.new_job.status_label.text()
+    assert said == i18n.t("home.finished.rendered", path=i18n.path_text(tmp_path / "a.mp4"))
+
+
+def test_a_review_that_cannot_open_is_still_said_after_the_notices_box(
+    qt_app, home, reviews, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui import main_window as module
+    from qurantext.jobs.project import Project
+
+    notice = module.t("episode.seed.missing", part=module.t("episode.part.intro"))
+    broken = tmp_path / "jobs" / "a_lecture.qalun.json"
+    broken.parent.mkdir(parents=True)
+    broken.write_text("{not json")
+
+    def finish(spec, *, progress=None, cancel=None):
+        project = Project(audio=spec.audio, mode="lecture", matches=tmp_path / "m.json")
+        project.path = broken
+        return module._Finished(project, notices=(notice,))
+
+    shown: list = []
+    monkeypatch.setattr(module, "_match_then_render", finish)
+
+    def box(parent, title, text):
+        shown.append(text)
+        qt_app.processEvents()  # the job's end arrives while the box is up
+
+    monkeypatch.setattr(module.QMessageBox, "warning", box)
+    _run_start(qt_app, home, _spec(tmp_path, output_dir=tmp_path / "jobs"))
+
+    assert shown == [notice]
+    said = home.new_job.status_label.text()
+    prefix = module.t("home.review_failed", name=broken.name, details="\x00").split("\x00")[0]
+    assert said.startswith(prefix), said
+
+
+def test_the_lecture_s_own_render_is_named_when_an_episode_follows(tmp_path, monkeypatch) -> None:
+    from qurantext.utils.progress import report
+
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch)
+    real = jobs_module.render_project
+
+    def reporting(project, output, *, progress=None, **kwargs):
+        report(progress, "render", "Rendering frames", fraction=0.5)
+        return real(project, output, progress=progress, **kwargs)
+
+    monkeypatch.setattr(jobs_module, "render_project", reporting)
+    events: list[ProgressEvent] = []
+    jobs_module.run_render(project, progress=events.append)
+    assert [(e.stage, e.fraction) for e in events if e.fraction is not None][0] == (
+        "episode_lecture",
+        0.5,
+    )
+
+
+def test_a_lecture_without_an_episode_renders_as_before(tmp_path, monkeypatch) -> None:
+    from qurantext.utils.progress import report
+
+    project, jobs_module, seen = _episode_job(tmp_path, monkeypatch, episode={})
+    real = jobs_module.render_project
+
+    def reporting(project, output, *, progress=None, **kwargs):
+        report(progress, "render", "Rendering frames", fraction=0.5)
+        return real(project, output, progress=progress, **kwargs)
+
+    monkeypatch.setattr(jobs_module, "render_project", reporting)
+    events: list[ProgressEvent] = []
+    jobs_module.run_render(project, progress=events.append)
+    assert [(e.stage, e.fraction) for e in events if e.fraction is not None] == [("render", 0.5)]

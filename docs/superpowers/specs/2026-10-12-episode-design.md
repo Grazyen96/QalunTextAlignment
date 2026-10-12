@@ -68,9 +68,11 @@ Out of scope:
     the lecture's subtitles shifted by the episode offset (see §3.4). The lecture's own subtitle
     files are written as today.
 - **Defaults:**
-  - When the person saves the dialog with an intro or outro, those clips become the default.
+  - An intro or outro the person chooses in the dialog becomes the default when OK is pressed.
   - A new lecture job starts with the default intro and outro, and no recitation.
-  - Clearing them in the dialog clears the default too, because it is the last choice.
+  - Removing one in the dialog clears that default too. A part left alone in the dialog leaves its
+    default alone, so setting only a lecture's recitation never clears the default intro (ruling,
+    Phase 3 fix wave).
 - **Job list:** a lecture whose episode choices changed after its last render shows "changed since
   render", as a look change does.
 

@@ -861,11 +861,18 @@ class ReviewSession:
         """
         if str(self.project.mode).lower() != "lecture":
             raise ValueError(t("session.episode_lecture_only"))
-        resolved = EpisodeChoice(
-            *(
-                None if part is None else Path(part).expanduser().resolve()
-                for part in (choice.intro, choice.recitation, choice.outro)
-            )
+
+        def resolved_path(part: Path | None) -> Path | None:
+            return None if part is None else Path(part).expanduser().resolve()
+
+        resolved = replace(
+            choice,
+            intro=resolved_path(choice.intro),
+            recitation=resolved_path(choice.recitation),
+            outro=resolved_path(choice.outro),
+            # A name belongs to its clip: none for a part not chosen.
+            intro_name=choice.intro_name if choice.intro is not None else None,
+            outro_name=choice.outro_name if choice.outro is not None else None,
         )
         if resolved == self.episode:
             return

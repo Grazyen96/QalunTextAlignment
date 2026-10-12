@@ -198,7 +198,10 @@ def recitation_video(
     appeared at the target, or changed there, while this render ran (the
     recitation rendered again from its own review) is newer than this one and
     is not moved over: ``episode.error.recitation_changed``, and the next
-    episode uses it.
+    episode uses it. This is a check, not a lock: a render that lands in the
+    milliseconds between the check and the move (or between reading the
+    project and the first look) is still replaced, and its record then reads
+    stale, so the next episode renders again.
 
     Raises :class:`EpisodeError` (``episode.error.recitation``) when the
     project is missing or unreadable, is not a recitation, or fails to render;
