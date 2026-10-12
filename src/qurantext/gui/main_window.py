@@ -12,6 +12,7 @@ review windows it opens — one per project.
 
 from __future__ import annotations
 
+import html
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from functools import partial
@@ -26,7 +27,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
-    QPushButton,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -212,13 +212,20 @@ class MainWindow(QMainWindow):
             self.language_combo.addItem(i18n.LANGUAGE_NAMES[code], code)
         self._select_language_in_combo(i18n.current_language())
         self.language_combo.activated.connect(self._language_chosen)
-        # Beside the language, the window's one other setting-like control: where
-        # the error log is, for whoever is asked to send it after something broke.
-        self.log_button = QPushButton(t("home.open_log_folder"))
-        self.log_button.setToolTip(t("home.open_log_folder.tip", path=path_text(user_log_file())))
-        self.log_button.clicked.connect(self._open_log_folder)
+        # In the footer with the language, at its other end: the window's one other
+        # setting-like control, where the error log is, for whoever is asked to
+        # send it after something broke. A link, not a button: as tall as the
+        # language's own label, where a button's frame around Arabic letters
+        # made the footer, and so the whole window, 8 px taller.
+        self.log_link = QLabel(f'<a href="logs">{html.escape(t("home.open_log_folder"))}</a>')
+        self.log_link.setTextInteractionFlags(
+            Qt.TextInteractionFlag.LinksAccessibleByMouse
+            | Qt.TextInteractionFlag.LinksAccessibleByKeyboard
+        )
+        self.log_link.setToolTip(t("home.open_log_folder.tip", path=path_text(user_log_file())))
+        self.log_link.linkActivated.connect(self._open_log_folder)
         footer = QHBoxLayout()
-        footer.addWidget(self.log_button)
+        footer.addWidget(self.log_link)
         footer.addStretch(1)
         footer.addWidget(QLabel(t("home.language")))
         footer.addWidget(self.language_combo)
@@ -291,7 +298,7 @@ class MainWindow(QMainWindow):
 
     # -- the error log ----------------------------------------------------------
 
-    def _open_log_folder(self) -> None:
+    def _open_log_folder(self, _link: str = "") -> None:
         """Show the folder the error log is written to, or say why it cannot be shown."""
         folder = user_log_dir()
         if not open_folder(folder):

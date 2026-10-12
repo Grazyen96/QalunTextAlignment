@@ -8,10 +8,16 @@ thread and turn its callbacks into Qt signals.
 
 Qt objects belong to the thread that created them, so the job never touches a
 widget. It emits; the window's slots run on the UI thread and do the drawing.
+
+A job that fails is shown to the person as a sentence, and that is all most
+failures need: FFmpeg refusing a file, a missing model, a folder that cannot be
+written. A failure nobody wrote a sentence for is a bug, and its traceback goes
+to the log (``config.app_log``), which is what someone is asked to send.
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -20,6 +26,12 @@ from PySide6.QtCore import QObject, Qt, QThread, Signal
 from qurantext.utils.progress import CancelToken, JobCancelled, ProgressEvent
 
 __all__ = ["JobWorker", "run_in_thread"]
+
+_log = logging.getLogger(__name__)
+
+#: Subclasses of the foreseen types below that are bugs wherever they come from:
+#: code nobody finished, a recursion with no end, a text that could not be encoded.
+_NEVER_FORESEEN = (NotImplementedError, RecursionError, UnicodeError)
 
 
 class JobWorker(QObject):
@@ -48,6 +60,12 @@ class JobWorker(QObject):
         except JobCancelled:
             self.cancelled.emit()
         except Exception as error:  # noqa: BLE001 — a window must never die on a job
+            if _foreseen(error):
+                # Said to the person in full; the log keeps a line of it, for the
+                # timeline, but no traceback: nothing here needs fixing in the code.
+                _log.warning("The job stopped: %s", _readable(error))
+            else:
+                _log.error("The job failed unexpectedly", exc_info=True)
             self.failed.emit(_readable(error))
         else:
             self.finished.emit(result)
@@ -56,6 +74,32 @@ class JobWorker(QObject):
 
     def _emit(self, event: ProgressEvent) -> None:
         self.progressed.emit(event)
+
+
+def _foreseen(error: Exception) -> bool:
+    """Is *error* one the code meant to raise, with a sentence for the person?
+
+    Two kinds are. Anything the operating system refused (``OSError``: a file
+    not found, a folder not writable, a full disk), which no code change fixes.
+    And a ``ValueError`` or ``RuntimeError`` with a message, raised by Qalun's
+    own code: that is how every module says "this cannot be done" (FFmpeg
+    failed, a bad range, the store unreadable, and the episode's, transcription's
+    and store's own error types, which are all ``RuntimeError``). The same types
+    raised from inside a library (numpy, json) are a call that went wrong, a bug.
+    """
+    if isinstance(error, _NEVER_FORESEEN):
+        return False
+    if isinstance(error, OSError):
+        return True
+    if not isinstance(error, ValueError | RuntimeError) or not str(error).strip():
+        return False
+    tb = error.__traceback__
+    if tb is None:
+        return False
+    while tb.tb_next is not None:
+        tb = tb.tb_next
+    module = tb.tb_frame.f_globals.get("__name__", "")
+    return module == "qurantext" or module.startswith("qurantext.")
 
 
 def _readable(error: Exception) -> str:

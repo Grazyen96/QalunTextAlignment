@@ -7,6 +7,7 @@ takes the application's direction when it is made); the autouse fixture in
 
 from __future__ import annotations
 
+import html
 import json
 import re
 import shutil
@@ -128,7 +129,8 @@ def _texts(root: QWidget) -> Iterator[str]:
         if not (isinstance(widget, QLineEdit) and widget.toolTip() == widget.text()):
             yield widget.toolTip()
         if isinstance(widget, QLabel):
-            yield widget.text()
+            # A link's markup (``<a href="logs">``) is not read; the words inside it are.
+            yield html.unescape(re.sub(r"<[^>]*>", "", widget.text()))
         if isinstance(widget, QAbstractButton):
             yield widget.text()
         if isinstance(widget, QGroupBox):
@@ -324,11 +326,12 @@ def test_no_english_is_left_in_the_arabic_windows(
     from the pipeline would pass that. The windows are busy ones: a job row, a
     running job, its progress, the job's context menu and a lecture review.
     """
+    from qurantext.config.paths import user_log_file
     from qurantext.gui.home import job_list as job_list_module
     from qurantext.gui.main_window import MainWindow
     from qurantext.utils.progress import ProgressEvent
 
-    # The log button's tip names the log file: under tmp_path, not the person's own.
+    # The log link's tip names the log file: under tmp_path, not the person's own.
     monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path))
     prefs = _prefs(tmp_path)
     jobs_dir = tmp_path / "jobs"
@@ -367,7 +370,8 @@ def test_no_english_is_left_in_the_arabic_windows(
 
     fixture_words = set(_LATIN_WORD.findall(str(tmp_path)))
     fixture_words |= {"jobs", "lesson", "m4a", "recitation", "missing", "mp3", "m", "Hello"}
-    fixture_words |= {"logs", "qalun", "log"}  # the log file's path, in the log button's tip
+    # The log file's path, in the log link's tip: a path is data, like the fixture's own.
+    fixture_words |= set(_LATIN_WORD.findall(str(user_log_file())))
     allowed = _LATIN_THE_TABLE_KEEPS | _KEY_CAPS | fixture_words
     roots = (main, review_window, review_window._make_export_dialog(), lecture_review_window)
     for root in roots:
