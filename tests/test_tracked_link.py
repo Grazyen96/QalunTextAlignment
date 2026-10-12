@@ -213,3 +213,40 @@ def test_international_hosts_are_encoded_as_browsers_do(host, ascii_host):
     url = tracked_link(f"https://{host}/x", platform="youtube", campaign="c")
     assert urlsplit(url).hostname == ascii_host
     assert readable_link(url).split("/")[0] == host.lower()
+
+
+def test_the_description_link_differs_from_the_qr_link_only_in_its_content():
+    """Scans and description clicks are counted apart (organisation rule: all measurable)."""
+    url = "https://ex.org/d?ref=yt&utm_campaign=ramadan#top"
+    qr = tracked_link(url, platform="youtube", campaign="qalun-025")
+    assert qr == tracked_link(url, platform="youtube", campaign="qalun-025", content="outro-qr")
+    description = tracked_link(url, platform="youtube", campaign="qalun-025", content="description")
+    assert _q(qr)["utm_content"] == "outro-qr" and _q(description)["utm_content"] == "description"
+    assert description == qr.replace("utm_content=outro-qr", "utm_content=description")
+    assert urlsplit(description).fragment == "top" and _q(description)["ref"] == "yt"
+
+
+def test_an_unknown_content_is_refused():
+    with pytest.raises(ValueError, match="content"):
+        tracked_link("example.org", platform="youtube", campaign="c", content="banner")
+
+
+@pytest.mark.parametrize(
+    ("url", "warning"),
+    [
+        ("example.org/dars", None),
+        ("pаypal.com", "mixed"),  # a Cyrillic «а» among Latin letters
+        ("xn--pypal-4ve.com", "mixed"),  # the same, as punycode
+        ("рау.com", "confusable"),  # all Cyrillic, every letter Latin-looking
+        ("пример.рф/уроки", None),  # Cyrillic that reads as Cyrillic
+        ("موقع.مصر", None),
+        ("例え.jp", None),  # kana and kanji are one script here
+        ("straße.de", None),
+        ("http://[::1]:8000/x", None),
+        ("127.0.0.1", None),
+    ],
+)
+def test_an_address_that_could_pass_for_another_is_named(url, warning):
+    from qurantext.core.tracked_link import lookalike_host
+
+    assert lookalike_host(url) == warning

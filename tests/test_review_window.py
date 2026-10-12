@@ -1895,23 +1895,45 @@ def test_a_real_double_click_on_a_cards_ayah_cell_opens_the_picker(
     assert table.verticalScrollBar().value() == 0
 
 
+@pytest.mark.parametrize("parts", ["clips", "generated"])
 @pytest.mark.parametrize("language", ["en", "ar"])
 def test_a_lecture_window_fits_a_1280_px_screen_while_rendering(
-    qt_app, tmp_path, db, language
+    qt_app, tmp_path, db, language, parts
 ) -> None:
-    """With the Episode button and "Episode: on" beside Render, idle and rendering."""
+    """With the Episode button and "Episode: on" beside Render, idle and rendering.
+
+    A generated intro and outro say "Episode: on" too, and their steps' words fit.
+    """
+    from qurantext.gui.i18n import t
     from qurantext.gui.language import apply_language
-    from qurantext.jobs.episode_assets import EpisodeChoice
+    from qurantext.jobs.episode_assets import EpisodeChoice, GeneratedIntro, GeneratedOutro
 
     apply_language(qt_app, language)
     window = _quoting_lecture_window(qt_app, tmp_path, db)
-    window.session.set_episode(EpisodeChoice(tmp_path / "intro.mp4", None, tmp_path / "end.mp4"))
+    if parts == "clips":
+        choice = EpisodeChoice(tmp_path / "intro.mp4", None, tmp_path / "end.mp4")
+    else:
+        choice = EpisodeChoice(
+            intro_generated=GeneratedIntro(name="دروس"),
+            outro_generated=GeneratedOutro(link="example.org/dars"),
+        )
+    window.session.set_episode(choice)
     window._after_edit()
     window.show()
     _spin(20)
     assert not window.episode_label.isHidden() and not window.episode_button.isHidden()
+    assert window.episode_label.text() == t("review.episode_on")
     assert window.minimumSizeHint().width() <= 1280
-    window._render_progress_key = "render.running_recitation"  # the longest step's words
+    # The longest step's words.
+    window._render_progress_key = max(
+        (
+            "render.running_recitation",
+            "render.running_intro",
+            "render.running_outro",
+            "render.running_join",
+        ),
+        key=lambda key: len(t(key)),
+    )
     window._set_render_running(True)
     try:
         assert window.minimumSizeHint().width() <= 1280
@@ -2127,6 +2149,20 @@ def test_a_cancelled_episode_dialog_changes_nothing(qt_app, tmp_path, monkeypatc
     )
     window.episode_button.click()
     assert window.session.episode.is_empty and not window.session.can_undo
+
+
+def test_a_closed_episode_dialog_is_freed(qt_app, tmp_path, monkeypatch) -> None:
+    """Probe S8 (review M8): each opening does not leave a hidden dialog behind."""
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+
+    window = _lecture_window(qt_app, tmp_path)
+    _episode_answers(monkeypatch, tmp_path, accept=False)
+    for _ in range(3):
+        window.episode_button.click()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert window.findChildren(EpisodeDialog) == []
 
 
 def test_episode_on_follows_undo_redo_and_discard(qt_app, tmp_path, monkeypatch) -> None:

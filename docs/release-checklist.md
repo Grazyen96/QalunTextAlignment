@@ -256,6 +256,35 @@ this is the only place anyone hears each platform's build recognise speech.
       line, drawn into the video itself from the lecture's cards: «سورة الفرقان، الآيات
       ٤٤–٤٩» and, for one ayah, «سورة الفرقان، الآية ٧» (Arabic-Indic digits, the Arabic
       comma and an en dash), with the outro's default phrase «جزاكم الله خيرًا».
+    - the Episode dialog's generated intro and outro: the kinds `episode.kind.none`
+      («بدون»), `episode.kind.clip` («مقطعي») and `episode.kind.generated` («مُولَّد»);
+      the fields `episode.gen.name` («الاسم»), `episode.gen.title` («العنوان»),
+      `episode.gen.style` («النمط») with `episode.gen.style.fade` («تلاشٍ»),
+      `episode.gen.style.rise` («صعود») and `episode.gen.style.reveal` («كشف»),
+      `episode.gen.seconds` («المدة (ث)»), `episode.gen.phrase` («عبارة الختام»),
+      `episode.gen.custom` («عبارة أخرى…»), `episode.gen.link` («الرابط»),
+      `episode.gen.platform` («النشر على»), `episode.gen.tracked` («الرابط داخل رمز QR»)
+      and its tooltip `episode.gen.tracked.tip`, `episode.gen.copy` («انسخ») and its
+      tooltip `episode.gen.copy.tip` («هو الرابط نفسه، معلَّمًا بأنه من الوصف، فتُحسب نقراته
+      منفصلةً عن مسح رمز QR»), `episode.gen.readable` («يُكتب تحت الرمز: …») and its tooltip
+      `episode.gen.readable.tip` («ليس فيه تتبّع، فتظهر زياراته زياراتٍ مباشرة، منفصلةً عن
+      زيارات الرمز وزيارات الوصف»: is «زيارات مباشرة» what analytics calls direct traffic in
+      Arabic?); the refusals `episode.gen.empty_intro` («ليس في المقدمة ما تعرضه») and
+      `episode.gen.empty_outro`; the warnings `episode.gen.qr_too_big`,
+      `episode.gen.missing_glyphs` («لا يستطيع خط العنوان رسم …: ستظهر مربعاتٍ فارغة»),
+      `episode.link_warning.mixed` («يخلط هذا العنوان أبجديات في اسم واحد») and
+      `episode.link_warning.confusable` («مكتوب بحروف تشبه اللاتينية وليست منها»); the link
+      errors `episode.link_invalid` («أدخل عنوان
+      ويب يبدأ بـ http:// أو https://»), `episode.link_invalid.spaces`,
+      `episode.link_invalid.slashes`, `episode.link_invalid.userinfo`,
+      `episode.link_invalid.host` and `episode.link_invalid.port`; and the platform
+      names `platform.youtube` («يوتيوب»), `platform.instagram` («إنستغرام»),
+      `platform.facebook` («فيسبوك»), `platform.tiktok` («تيك توك»), `platform.telegram`
+      («تيليغرام») and `platform.whatsapp` («واتساب»). Is «مقطعي» clear for "my own
+      clip", and «مُولَّد» for a clip Qalun makes? The three closing phrases the outro
+      offers are the video's words and are the same in both languages: «جزاكم الله
+      خيرًا», «بارك الله فيكم» and «سبحانك اللهم وبحمدك، أشهد أن لا إله إلا أنت،
+      أستغفرك وأتوب إليك».
     - the 114 surah names as the intro's title writes them, in plain letters, listed in
       `tests/test_surah_names.py` (`PLAIN_TITLES`): «سورة آل عمران», «سورة الشورى», «سورة
       الأعلى», «سورة الضحى» and the rest. 34 «سبأ» and 78 «النبأ» are written as most people

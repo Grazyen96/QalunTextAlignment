@@ -38,6 +38,7 @@ import subprocess
 import tempfile
 import unicodedata
 import uuid
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -237,25 +238,43 @@ def _ellipsize(line: str, font: Any, max_width: int, direction: str) -> str:
     """*line*, cut short with an ellipsis at its logical end until it fits *max_width*.
 
     Cut between words when a whole word fits; inside a word (one long word, a
-    link) only when none does.
+    link) only when none does. The longest cut that fits is found by halving
+    (a longer start is never narrower), so a pasted link of 2,000 characters
+    is measured about a dozen times, not 2,000.
     """
 
-    def fits(candidate: str) -> bool:
-        box = _bbox(candidate, font, direction)
+    def fits(cut: int) -> bool:
+        box = _bbox(line[:cut].rstrip() + _ELLIPSIS, font, direction)
         return box[2] - box[0] <= max_width
 
-    if fits(line + _ELLIPSIS):
+    if fits(len(line)):
         return line + _ELLIPSIS
-    spaces = [i for i, char in enumerate(line) if char == " "]
-    for cut in reversed(spaces):
-        candidate = line[:cut].rstrip() + _ELLIPSIS
-        if line[:cut].strip() and fits(candidate):
-            return candidate
-    for cut in range(len(line) - 1, 0, -1):
-        candidate = line[:cut].rstrip() + _ELLIPSIS
-        if fits(candidate):
-            return candidate
-    return _ELLIPSIS
+    spaces = [i for i, char in enumerate(line) if char == " " and line[:i].strip()]
+    best = _last_that_fits(spaces, fits)
+    if best is None:
+        best = _last_that_fits(range(1, len(line)), fits)
+    return _ELLIPSIS if best is None else line[:best].rstrip() + _ELLIPSIS
+
+
+def _last_that_fits(cuts: Sequence[int], fits: Callable[[int], bool]) -> int | None:
+    """The last of *cuts* (in rising order) that *fits*, when fitting holds for a start of them.
+
+    Galloping from the start (1, 2, 4… cuts), then halving: the cuts measured
+    stay short when only a short start fits, as it does for a long link.
+    """
+    if not cuts or not fits(cuts[0]):
+        return None
+    low, step = 0, 1
+    while low + step < len(cuts) and fits(cuts[low + step]):
+        low, step = low + step, step * 2
+    found, low, high = cuts[low], low + 1, min(len(cuts) - 1, low + step - 1)
+    while low <= high:
+        middle = (low + high) // 2
+        if fits(cuts[middle]):
+            found, low = cuts[middle], middle + 1
+        else:
+            high = middle - 1
+    return found
 
 
 @dataclass(frozen=True)
@@ -322,15 +341,26 @@ def _fit_text(
         )
         if one_line is not None:
             return one_line
-    while True:
+
+    def attempt(size: int) -> tuple[Any, tuple[str, ...], _Block | None]:
         font, lines = fit_font_size(probe, text, font_file, max_width, max_height, size, size)
         lines = tuple(lines)
         width, height = _block_size(lines, font, direction)
         if len(lines) <= max_lines and width <= max_width and height <= max_height:
-            return _Block(lines, font, direction, width, height)
-        if size <= minimum:
-            break
-        size = max(minimum, size - max(2, size // 12))
+            return font, lines, _Block(lines, font, direction, width, height)
+        return font, lines, None
+
+    # The smallest size first: text that does not fit even there fits at no
+    # larger size, and is cut short at once rather than measured at every size
+    # (a pasted link of 2,000 characters would take seconds).
+    font, lines, block = attempt(minimum)
+    if block is not None:
+        while size > minimum:
+            _, _, larger = attempt(size)
+            if larger is not None:
+                return larger
+            size = max(minimum, size - max(2, size // 12))
+        return block
     if exact:
         return None
     kept = list(lines[:max_lines])

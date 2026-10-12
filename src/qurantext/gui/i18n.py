@@ -428,6 +428,75 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "episode.default_failed": (
             "The episode is set, but it could not be kept for new lectures: {reason}"
         ),
+        "episode.kind.none": "None",
+        "episode.kind.clip": "My clip",
+        "episode.kind.generated": "Generated",
+        "episode.gen.name": "Name",
+        "episode.gen.title": "Title",
+        "episode.gen.style": "Style",
+        "episode.gen.style.fade": "Fade",
+        "episode.gen.style.rise": "Rise",
+        "episode.gen.style.reveal": "Reveal",
+        "episode.gen.seconds": "Length (s)",
+        "episode.gen.phrase": "Closing phrase",
+        "episode.gen.custom": "Custom…",
+        "episode.gen.link": "Link",
+        "episode.gen.platform": "Publishing on",
+        "episode.gen.tracked": "Link in the QR code",
+        "episode.gen.tracked.tip": (
+            "The link the QR code opens, with tracking that says the visit came from this "
+            "video's QR code on this platform."
+        ),
+        "episode.gen.copy": "Copy",
+        "episode.gen.copy.tip": (
+            "Copy the link for the video's description: the same link, marked as the "
+            "description's, so its clicks are counted apart from the QR code's scans. "
+            "Copy it once the lecture's cards are final: they name its campaign."
+        ),
+        "episode.gen.readable": "Written under the code: {link}",
+        "episode.gen.readable.tip": (
+            "The address viewers can type. It has no tracking, so typed visits show as "
+            "direct traffic, apart from the QR code's and the description's visits."
+        ),
+        "episode.gen.empty_intro": (
+            "The intro has nothing to show: give it a name (this lecture's cards name no surah)."
+        ),
+        "episode.gen.empty_outro": (
+            "The outro has nothing to show: choose a closing phrase or give a link."
+        ),
+        "episode.link_warning.mixed": (
+            "This address mixes alphabets in one name, like a Cyrillic letter among Latin "
+            "ones: it could pass for another site. Check it."
+        ),
+        "episode.link_warning.confusable": (
+            "This address is written in letters that look Latin but are not: it could pass "
+            "for another site. Check it."
+        ),
+        "episode.gen.qr_too_big": (
+            "This link is too long for a QR code phones can read in a {size} video. "
+            "Shorten it, or the episode will not be made."
+        ),
+        "episode.gen.missing_glyphs": (
+            "The title font cannot draw \u2068{chars}\u2069: these would show as empty boxes."
+        ),
+        "episode.link_invalid": "Enter a web address starting with http:// or https://.",
+        "episode.link_invalid.spaces": ("A link cannot have spaces or invisible characters in it."),
+        "episode.link_invalid.slashes": ("Start the link with https:// — a colon and two slashes."),
+        "episode.link_invalid.userinfo": (
+            "A link with a user name or password cannot go in a video."
+        ),
+        "episode.link_invalid.host": (
+            "This is not a web address: check the site's name, like example.org."
+        ),
+        "episode.link_invalid.port": (
+            "The port after the site's name must be a number from 1 to 65535."
+        ),
+        "platform.youtube": "YouTube",
+        "platform.instagram": "Instagram",
+        "platform.facebook": "Facebook",
+        "platform.tiktok": "TikTok",
+        "platform.telegram": "Telegram",
+        "platform.whatsapp": "WhatsApp",
     },
     # Drafted for the first release; a native speaker must review every line
     # before it ships (spec §4). Keep the order and grouping of "en".
@@ -828,6 +897,69 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "episode.clip_missing": "مقطع \u2068{part}\u2069 مفقود: اختره من جديد أو أزله.",
         "episode.copy_failed": "تعذّر نسخ المقطع بجانب المهمة: {reason}",
         "episode.default_failed": "ضُبطت الحلقة، لكن تعذّر حفظها للدروس الجديدة: {reason}",
+        "episode.kind.none": "بدون",
+        "episode.kind.clip": "مقطعي",
+        "episode.kind.generated": "مُولَّد",
+        "episode.gen.name": "الاسم",
+        "episode.gen.title": "العنوان",
+        "episode.gen.style": "النمط",
+        "episode.gen.style.fade": "تلاشٍ",
+        "episode.gen.style.rise": "صعود",
+        "episode.gen.style.reveal": "كشف",
+        "episode.gen.seconds": "المدة (ث)",
+        "episode.gen.phrase": "عبارة الختام",
+        "episode.gen.custom": "عبارة أخرى…",
+        "episode.gen.link": "الرابط",
+        "episode.gen.platform": "النشر على",
+        "episode.gen.tracked": "الرابط داخل رمز QR",
+        "episode.gen.tracked.tip": (
+            "الرابط الذي يفتحه رمز QR، ومعه تتبّع يبيّن أن الزيارة جاءت من رمز هذا الفيديو "
+            "على هذه المنصة."
+        ),
+        "episode.gen.copy": "انسخ",
+        "episode.gen.copy.tip": (
+            "انسخ الرابط لوصف الفيديو: هو الرابط نفسه، معلَّمًا بأنه من الوصف، فتُحسب نقراته "
+            "منفصلةً عن مسح رمز QR. انسخه بعد أن تستقر بطاقات الدرس، فهي تسمّي حملته."
+        ),
+        "episode.gen.readable": "يُكتب تحت الرمز: {link}",
+        "episode.gen.readable.tip": (
+            "العنوان الذي يستطيع المشاهد كتابته. ليس فيه تتبّع، فتظهر زياراته زياراتٍ مباشرة، "
+            "منفصلةً عن زيارات الرمز وزيارات الوصف."
+        ),
+        "episode.gen.empty_intro": (
+            "ليس في المقدمة ما تعرضه: أعطها اسمًا (فبطاقات هذا الدرس لا تذكر سورة)."
+        ),
+        "episode.gen.empty_outro": "ليس في الخاتمة ما تعرضه: اختر عبارة ختام أو أعطها رابطًا.",
+        "episode.link_warning.mixed": (
+            "يخلط هذا العنوان أبجديات في اسم واحد، كحرف كيريلي بين حروف لاتينية: "
+            "قد يُظنّ موقعًا آخر. تحقّق منه."
+        ),
+        "episode.link_warning.confusable": (
+            "هذا العنوان مكتوب بحروف تشبه اللاتينية وليست منها: قد يُظنّ موقعًا آخر. تحقّق منه."
+        ),
+        "episode.gen.qr_too_big": (
+            "هذا الرابط أطول من أن تقرأ الهواتف رمز QR الخاص به في فيديو بحجم {size}. "
+            "اختصره، وإلا فلن تُصنع الحلقة."
+        ),
+        "episode.gen.missing_glyphs": ("لا يستطيع خط العنوان رسم {chars}: ستظهر مربعاتٍ فارغة."),
+        "episode.link_invalid": "أدخل عنوان ويب يبدأ بـ \u2066http://\u2069 أو \u2066https://\u2069.",
+        "episode.link_invalid.spaces": "لا يصح أن يحوي الرابط مسافات أو محارف غير مرئية.",
+        "episode.link_invalid.slashes": (
+            "ابدأ الرابط بـ \u2066https://\u2069: نقطتان رأسيتان ثم شرطتان مائلتان."
+        ),
+        "episode.link_invalid.userinfo": ("لا يصح وضع رابط فيه اسم مستخدم أو كلمة مرور في فيديو."),
+        "episode.link_invalid.host": (
+            "هذا ليس عنوان ويب: تحقق من اسم الموقع، مثل \u2066example.org\u2069."
+        ),
+        "episode.link_invalid.port": (
+            "يجب أن يكون المنفذ بعد اسم الموقع رقمًا من \u20661\u2069 إلى \u206665535\u2069."
+        ),
+        "platform.youtube": "يوتيوب",
+        "platform.instagram": "إنستغرام",
+        "platform.facebook": "فيسبوك",
+        "platform.tiktok": "تيك توك",
+        "platform.telegram": "تيليغرام",
+        "platform.whatsapp": "واتساب",
     },
 }
 LANGUAGES = tuple(STRINGS)

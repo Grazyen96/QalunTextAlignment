@@ -265,7 +265,9 @@ def test_more_options_points_the_way_arabic_reads(
 
 #: The Latin words the Arabic table itself keeps: the app's name, subtitle
 #: formats, key names, the package to install, "English" in the language menu,
-#: and the online engine, its service and the setting and file its token goes in.
+#: the online engine, its service and the setting and file its token goes in,
+#: and the outro's QR code with the link schemes and the example address its
+#: link errors name ("http://", "example.org").
 _LATIN_THE_TABLE_KEEPS = {
     "Qalun",
     "SRT",
@@ -283,6 +285,11 @@ _LATIN_THE_TABLE_KEEPS = {
     "API",
     "TOKEN",
     "env",
+    "QR",
+    "http",
+    "https",
+    "example",
+    "org",
 }
 #: The letters of the key caps Qt itself writes into a tip (Save's Ctrl+S): a
 #: key's letter is what is printed on it, in either language.
