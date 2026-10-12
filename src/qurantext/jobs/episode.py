@@ -27,7 +27,9 @@ from pathlib import Path
 from typing import Any
 
 from qurantext.core.video_common import require_binary
-from qurantext.utils.progress import CancelToken, ProgressCallback, report
+from qurantext.jobs.project import job_settings, load_project
+from qurantext.jobs.project_render import default_video_path, render_project
+from qurantext.utils.progress import CancelToken, JobCancelled, ProgressCallback, report
 
 __all__ = [
     "EpisodeError",
@@ -37,6 +39,7 @@ __all__ = [
     "assemble_episode",
     "episode_path_for",
     "probe_part",
+    "recitation_video",
 ]
 
 _INSTALL_HINT = "Install FFmpeg and try again."
@@ -105,6 +108,56 @@ def episode_path_for(lecture_video: Path) -> Path:
     """``lec.mp4`` gets its episode beside it as ``lec – episode.mp4``."""
     lecture_video = Path(lecture_video)
     return lecture_video.with_name(f"{lecture_video.stem} – episode.mp4")
+
+
+def recitation_video(
+    project_path: Path,
+    *,
+    progress: ProgressCallback | None = None,
+    cancel: CancelToken | None = None,
+) -> Path:
+    """The current video of the recitation job at *project_path*, rendered first if need be.
+
+    A recorded render is used when its file is still there and nothing it was
+    made from has changed since. Otherwise the recitation is rendered again,
+    with its own job settings and no subtitle files, to the file a render from
+    the window would write; :func:`render_project` saves the recitation's
+    project with the new record, so the job list sees it as rendered.
+
+    Raises :class:`EpisodeError` (``episode.error.recitation``) when the
+    project is missing or unreadable, is not a recitation, or fails to render.
+    A cancel is not a failure and passes through as ``JobCancelled``.
+    """
+    path = Path(project_path)
+    try:
+        project = load_project(path)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise EpisodeError("episode.error.recitation", reason=str(error)) from error
+    if str(project.mode).lower() != "recitation":
+        raise EpisodeError(
+            "episode.error.recitation", reason=f"{path.name} is not a recitation job."
+        )
+    render = project.render
+    if render is not None and render.get("video") and not project.render_is_stale:
+        video = Path(render["video"])
+        if video.is_file():
+            return video
+    settings = job_settings(project)
+    try:
+        result = render_project(
+            project,
+            default_video_path(project),
+            preset=settings.preset,
+            subtitles="sidecar",
+            formats=(),
+            progress=progress,
+            cancel=cancel,
+        )
+    except JobCancelled:
+        raise
+    except Exception as error:  # any render failure is the recitation's, said in a sentence
+        raise EpisodeError("episode.error.recitation", reason=str(error)) from error
+    return Path(result.video)
 
 
 def _duration(value: Any) -> float | None:

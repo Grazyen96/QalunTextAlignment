@@ -17,7 +17,7 @@ import copy
 from dataclasses import replace
 from pathlib import Path
 
-from qurantext.config.paths import QURAN_DB_PATH
+from qurantext.config.paths import QURAN_DB_PATH, VIDEOS_OUTPUT_DIR
 from qurantext.config.settings import VIDEO_PRESETS
 from qurantext.core.looks import Look
 from qurantext.core.subtitles import Cue, write_subtitles
@@ -27,12 +27,28 @@ from qurantext.jobs.look_assets import project_look, set_project_look
 from qurantext.jobs.project import Project, job_settings, save_project, set_job_settings
 from qurantext.utils.progress import CancelToken, ProgressCallback
 
-__all__ = ["SUBTITLE_TIMELINES", "export_project_subtitles", "render_project"]
+__all__ = [
+    "SUBTITLE_TIMELINES",
+    "default_video_path",
+    "export_project_subtitles",
+    "render_project",
+]
 
 #: Which clock exported subtitles follow.
 SUBTITLE_TIMELINES = ("video", "audio")
 
 _DEFAULT_SIZE = (1080, 1920)
+
+
+def default_video_path(project: Project, *, output_dir: Path | None = None) -> Path:
+    """Where a render of *project* is written: ``<folder>/<audio stem>.mp4``.
+
+    The folder is *output_dir* when given, else the job's own choice, else the
+    default videos folder. A render from the window and the recitation an
+    episode renders first both use it, so they write the same file.
+    """
+    folder = Path(output_dir or job_settings(project).output_dir or VIDEOS_OUTPUT_DIR)
+    return folder / f"{Path(project.audio).stem}.mp4"
 
 
 def render_project(
