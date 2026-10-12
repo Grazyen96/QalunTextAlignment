@@ -132,6 +132,9 @@ jobs:
           path: artifacts
       - uses: softprops/action-gh-release@v2
         with:
+          # Until the release checklist's blockers are settled (and the app is 1.0),
+          # a release is a pre-release: never shown as the repository's latest.
+          prerelease: ${{ startsWith(github.ref_name, 'v0.') }}
           files: artifacts/**/*.zip
           body: |
             Download the file for your system, unzip it, and run **Qalun**.
