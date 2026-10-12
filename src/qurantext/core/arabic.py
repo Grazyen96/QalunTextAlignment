@@ -112,6 +112,10 @@ _LETTER_MARKS = (
 # A word-final yeh (or alef maksura) carrying a dagger alef is an alef maksura:
 # the store's «الشُّورَيٰ» is «الشورى», not «الشوري».
 _FINAL_YEH_ALEF = re.compile("[\u064a\u0649]([\u064b-\u0652]*)\u0670(?=[\u064b-\u0652]*(?:\\s|$))")
+# A word-final hamza on an alef carrier after a letter is written «أ» in a title: the
+# shipped text's Uthmani «سبإ» and «النبإ» (surahs 34 and 78) read as «سبأ» and «النبأ».
+# A word-initial «إ» («إبراهيم», «الإسراء») is untouched.
+_FINAL_HAMZA_BELOW = re.compile("(?<=[\u0621-\u064a])\u0625(?=\\s|$)")
 _SURAH_WORD = "سورة"
 
 
@@ -119,7 +123,8 @@ def plain_surah_name(name: str) -> str:
     """*name* (the store's «سُورَةُ آلِ عِمْرَانَ») as a title writes it: «سورة آل عمران».
 
     Marks that form letters are joined into them first and a final «يٰ» becomes
-    «ى»; then every other mark and the tatweel go. Not a blanket NFC
+    «ى»; then every other mark and the tatweel go, and a word-final «إ» after a
+    letter is written «أ», as most people write «سبأ» and «النبأ». Not a blanket NFC
     composition: that would join the store's yeh and hamza above (U+064A
     U+0654) in surah 21 into «الأنبئاء», where a title writes «الأنبياء».
     Spaces are collapsed.
@@ -127,9 +132,10 @@ def plain_surah_name(name: str) -> str:
     text = str(name)
     for pattern, letter in _LETTER_MARKS:
         text = pattern.sub(letter, text)
-    text = _FINAL_YEH_ALEF.sub("ى\\1", text)
-    kept = (c for c in text if unicodedata.category(c) != "Mn" and c != "ـ")
-    return " ".join("".join(kept).split())
+    text = _FINAL_YEH_ALEF.sub("\u0649\\1", text)
+    kept = (c for c in text if unicodedata.category(c) != "Mn" and c != "\u0640")
+    plain = " ".join("".join(kept).split())
+    return _FINAL_HAMZA_BELOW.sub("\u0623", plain)
 
 
 def surah_title(name: str) -> str:

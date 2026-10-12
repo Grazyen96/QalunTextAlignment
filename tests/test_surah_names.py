@@ -13,8 +13,9 @@ import pytest
 from qurantext.core.arabic import plain_surah_name, surah_title
 from qurantext.data.quran_db import stored_surah_names
 
-#: Every surah's title, read and checked (2026-10-12). 34 «سبإ» and 78 «النبإ» keep the
-#: store's Uthmani hamza; most people write «سبأ» and «النبأ» (on the native-speaker list).
+#: Every surah's title, read and checked (2026-10-12). 34 «سبأ» and 78 «النبأ» are written
+#: as most people write them, not as the shipped text's Uthmani «سبإ» and «النبإ» (the
+#: native speaker is asked to confirm).
 PLAIN_TITLES = {
     1: "سورة الفاتحة",
     2: "سورة البقرة",
@@ -49,7 +50,7 @@ PLAIN_TITLES = {
     31: "سورة لقمان",
     32: "سورة السجدة",
     33: "سورة الأحزاب",
-    34: "سورة سبإ",
+    34: "سورة سبأ",
     35: "سورة فاطر",
     36: "سورة يس",
     37: "سورة الصافات",
@@ -93,7 +94,7 @@ PLAIN_TITLES = {
     75: "سورة القيامة",
     76: "سورة الإنسان",
     77: "سورة المرسلات",
-    78: "سورة النبإ",
+    78: "سورة النبأ",
     79: "سورة النازعات",
     80: "سورة عبس",
     81: "سورة التكوير",
@@ -149,6 +150,10 @@ def test_every_surah_name_reads_as_reviewed(store):
         (87, "سورة الأعلى"),
         (93, "سورة الضحى"),
         (36, "سورة يس"),  # the madda over a lone letter goes
+        (34, "سورة سبأ"),  # a word-final «إ» after a letter is «أ»
+        (78, "سورة النبأ"),
+        (14, "سورة إبراهيم"),  # a word-initial «إ» stays
+        (17, "سورة الإسراء"),
     ],
 )
 def test_the_names_a_mark_used_to_misspell(store, number, title):
@@ -167,3 +172,5 @@ def test_the_rules_on_their_own():
     assert surah_title("الفرقان") == "سورة الفرقان"
     assert surah_title("سُورَةُ الفُرقَانِ") == "سورة الفرقان", "never «سورة» twice"
     assert surah_title("  ") == ""
+    assert plain_surah_name("سَبَإٍ") == "سبأ"
+    assert plain_surah_name("إِبْرَاهِيمَ الإِخْلَاص") == "إبراهيم الإخلاص"
