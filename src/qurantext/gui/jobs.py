@@ -42,7 +42,13 @@ from qurantext.jobs.project_render import (
     render_project,
 )
 from qurantext.pipelines.detection import run_detection, run_recitation_range
-from qurantext.utils.progress import CancelToken, JobCancelled, ProgressCallback, report
+from qurantext.utils.progress import (
+    CancelToken,
+    JobCancelled,
+    ProgressCallback,
+    ProgressEvent,
+    report,
+)
 
 __all__ = [
     "JobSpec",
@@ -465,7 +471,10 @@ def _join_episode(
             translated=True,
         )
         recitation = recitation_video(
-            choice.recitation, avoid=lecture, progress=progress, cancel=cancel
+            choice.recitation,
+            avoid=lecture,
+            progress=_as_stage(progress, "episode_recitation"),
+            cancel=cancel,
         )
     parts = [p for p in (choice.intro, recitation) if p is not None]
     lecture_index = len(parts)
@@ -484,7 +493,7 @@ def _join_episode(
             width=width,
             height=height,
             fps=fps,
-            progress=progress,
+            progress=_as_stage(progress, "episode_join"),
             cancel=cancel,
         )
     except EpisodeError as error:
@@ -524,6 +533,22 @@ def _join_episode(
                 "episode.error.subtitles", reason=str(error) or type(error).__name__
             )
     return joined.output, None
+
+
+def _as_stage(progress: ProgressCallback | None, stage: str) -> ProgressCallback | None:
+    """*progress*, with every event reported under *stage*.
+
+    The recitation's render and the join report as ``render``, the stage of
+    the lecture's own render just before; under their own names the window
+    can say which part of the episode the percentage is of.
+    """
+    if progress is None:
+        return None
+
+    def relabelled(event: ProgressEvent) -> None:
+        progress(replace(event, stage=stage))
+
+    return relabelled
 
 
 def _lecture_geometry(project: Project) -> tuple[int, int, int]:

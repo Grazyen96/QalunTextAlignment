@@ -74,10 +74,10 @@ _PERCENT_KEYS = {
     "download": "home.progress.downloading",
     "transcribe": "home.progress.transcribing",
     "render": "home.progress.rendering",
-    # The episode's steps report their percentages as "render"; should one
-    # report its own, it is still rendering, not matching.
-    "episode_recitation": "home.progress.rendering",
-    "episode_join": "home.progress.rendering",
+    # The episode's steps, after the lecture's own render (``gui.jobs`` reports
+    # the recitation's render and the join under these names).
+    "episode_recitation": "home.progress.episode_recitation",
+    "episode_join": "home.progress.episode_join",
 }
 
 
@@ -91,9 +91,14 @@ class _Said:
     count: int | None = None
     #: Sentences said after this one, on the same line (a render's look warnings).
     then: tuple[_Said, ...] = ()
+    #: Set for a sentence the job already said in the window's language (an
+    #: episode error, a seed notice): shown as it is, in place of *key*.
+    raw: str | None = None
 
     def text(self) -> str:
-        if self.count is None:
+        if self.raw is not None:
+            said = self.raw
+        elif self.count is None:
             said = t(self.key, **self.fmt)
         else:
             said = tn(self.key, self.count, **self.fmt)
@@ -397,12 +402,37 @@ class MainWindow(QMainWindow):
             if outcome.studied_surah_missing is not None:
                 label = surah_label(outcome.studied_surah_missing, stored_surah_names())
                 warnings += (_Said("review.studied_surah_missing", {"surah": label}),)
+            # The episode after it: written, or why not (a cancel included).
+            if outcome.episode_video is not None:
+                name = Path(outcome.episode_video).name
+                warnings += (_Said("review.episode_written", {"name": name}),)
+            if outcome.episode_error:
+                warnings += (_Said("", raw=outcome.episode_error),)
+            warnings += tuple(_Said("", raw=notice) for notice in finished.notices)
             self._ending = _Said(
                 "home.finished.rendered", {"path": path_text(outcome.video)}, then=warnings
             )
+            self._tell_notices(finished.notices)
             return
         problem = self._show_review(project_path)
+        if problem is None and finished.notices:
+            # Shown in the review that just opened, until it closes.
+            review = self._review_of(project_path)
+            if review is not None:
+                review.show_notices(finished.notices)
+        elif finished.notices:
+            self._tell_notices(finished.notices)
         self._ending = problem or _Said("home.finished.matched", count=len(project.cards))
+
+    def _tell_notices(self, notices: tuple[str, ...]) -> None:
+        """Say what matching could not do for a new job, until the person closes it.
+
+        A default intro gone means a lecture without it; the status line alone
+        would be overwritten by the next thing said, and no review opened to
+        keep it on show.
+        """
+        if notices:
+            QMessageBox.warning(self, plain_title(t("episode.title")), "\n".join(notices))
 
     def _on_failed(self, message: str) -> None:
         self._remember_matched_output()
