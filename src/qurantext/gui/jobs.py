@@ -9,6 +9,7 @@ calls, so the window can put review between them.
 from __future__ import annotations
 
 import copy
+import logging
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
@@ -51,6 +52,8 @@ __all__ = [
     "run_matching",
     "run_render",
 ]
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -401,6 +404,9 @@ def _make_episode(
     except JobCancelled:
         return None, t("episode.error.cancelled")
     except Exception as error:  # noqa: BLE001 — the lecture's render must stand
+        # Not a failure the episode foresaw: the person gets a sentence, and
+        # whoever reads the log gets the traceback a bug needs.
+        _log.error("The episode step failed unexpectedly", exc_info=True)
         return None, t("episode.error.ffmpeg", reason=str(error) or type(error).__name__)
 
 
@@ -512,6 +518,8 @@ def _join_episode(
         except ValueError:
             pass  # no cue to write: the lecture's render wrote no subtitle file either
         except Exception as error:  # noqa: BLE001 — OSError, or ffprobe unable to read
+            if not isinstance(error, OSError):
+                _log.error("The episode's subtitle files failed unexpectedly", exc_info=True)
             return joined.output, t(
                 "episode.error.subtitles", reason=str(error) or type(error).__name__
             )

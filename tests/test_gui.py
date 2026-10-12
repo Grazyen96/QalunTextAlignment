@@ -2772,7 +2772,12 @@ def test_the_job_list_calls_a_lecture_rendered_after_its_episode(tmp_path, monke
     assert job_status(saved) == RENDERED and job_status(project) == RENDERED
 
 
-def test_an_unexpected_error_in_the_episode_keeps_the_lecture(tmp_path, monkeypatch) -> None:
+def test_an_unexpected_error_in_the_episode_keeps_the_lecture_and_logs_it(
+    tmp_path, monkeypatch, caplog
+) -> None:
+    """The person reads a sentence; the log keeps the traceback a bug report needs."""
+    import logging
+
     from qurantext.gui.i18n import t
 
     project, jobs_module, _seen = _episode_job(tmp_path, monkeypatch)
@@ -2781,11 +2786,33 @@ def test_an_unexpected_error_in_the_episode_keeps_the_lecture(tmp_path, monkeypa
         raise RuntimeError("boom")
 
     monkeypatch.setattr(jobs_module, "assemble_episode", boom)
-    outcome = jobs_module.run_render(project)
+    with caplog.at_level(logging.ERROR, logger="qurantext.gui.jobs"):
+        outcome = jobs_module.run_render(project)
 
     assert outcome.video == (tmp_path / "videos").resolve() / "lec.mp4"
     assert outcome.episode_video is None
     assert outcome.episode_error == t("episode.error.ffmpeg", reason="boom")
+    (record,) = [r for r in caplog.records if r.name == "qurantext.gui.jobs"]
+    assert record.levelno == logging.ERROR and record.exc_info is not None
+    assert record.exc_info[0] is RuntimeError
+    assert "Traceback" in caplog.text and "in boom" in caplog.text
+
+
+def test_a_foreseen_episode_failure_is_not_logged_as_a_bug(tmp_path, monkeypatch, caplog) -> None:
+    import logging
+
+    from qurantext.jobs.episode import EpisodeError
+
+    project, jobs_module, _seen = _episode_job(tmp_path, monkeypatch)
+
+    def missing(parts, output, **kwargs):
+        raise EpisodeError("episode.error.missing", name="rec.mp4")
+
+    monkeypatch.setattr(jobs_module, "assemble_episode", missing)
+    with caplog.at_level(logging.ERROR, logger="qurantext.gui.jobs"):
+        outcome = jobs_module.run_render(project)
+    assert outcome.episode_error is not None
+    assert not [r for r in caplog.records if r.name == "qurantext.gui.jobs"]
 
 
 def test_an_episode_record_that_cannot_be_saved_keeps_the_episode(tmp_path, monkeypatch) -> None:
@@ -2804,7 +2831,11 @@ def test_an_episode_record_that_cannot_be_saved_keeps_the_episode(tmp_path, monk
     assert project.render["episode"]["lecture_offset"] == 5.0, "the review copies it back"
 
 
-def test_episode_subtitles_that_ffprobe_cannot_time_keep_the_episode(tmp_path, monkeypatch) -> None:
+def test_episode_subtitles_that_ffprobe_cannot_time_keep_the_episode(
+    tmp_path, monkeypatch, caplog
+) -> None:
+    import logging
+
     from qurantext.gui.i18n import t
 
     project, jobs_module, _seen = _episode_job(tmp_path, monkeypatch)
@@ -2813,12 +2844,15 @@ def test_episode_subtitles_that_ffprobe_cannot_time_keep_the_episode(tmp_path, m
         raise RuntimeError("ffprobe could not read the recording")
 
     monkeypatch.setattr(jobs_module, "export_project_subtitles", unreadable)
-    outcome = jobs_module.run_render(project)
+    with caplog.at_level(logging.ERROR, logger="qurantext.gui.jobs"):
+        outcome = jobs_module.run_render(project)
 
     assert outcome.episode_video is not None
     assert outcome.episode_error == t(
         "episode.error.subtitles", reason="ffprobe could not read the recording"
     )
+    (record,) = [r for r in caplog.records if r.name == "qurantext.gui.jobs"]
+    assert record.exc_info is not None and "in unreadable" in caplog.text
 
 
 def test_a_missing_intro_is_named_before_the_recitation_is_rendered(tmp_path, monkeypatch) -> None:
