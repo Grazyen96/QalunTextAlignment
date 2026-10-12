@@ -334,6 +334,15 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "look.image_unreadable": (
             "The background image could not be read; the palette's background is shown instead."
         ),
+        # The episode: intro, recitation, lecture and outro joined into one video.
+        "episode.error.missing": (
+            "The clip \u2068{name}\u2069 is missing, so the episode was not made."
+        ),
+        "episode.error.not_video": (
+            "\u2068{name}\u2069 is not a video Qalun can read, so the episode was not made."
+        ),
+        "episode.error.recitation": "The recitation job could not be used: {reason}",
+        "episode.error.ffmpeg": "Joining the episode failed: {reason}",
     },
     # Drafted for the first release; a native speaker must review every line
     # before it ships (spec §4). Keep the order and grouping of "en".
@@ -648,6 +657,10 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "look.image_failed": "تعذّر استخدام \u2068{name}\u2069 خلفيةً.",
         "look.image_missing": "صورة الخلفية مفقودة؛ تُعرض خلفية اللوحة بدلًا منها.",
         "look.image_unreadable": "تعذّرت قراءة صورة الخلفية؛ تُعرض خلفية اللوحة بدلًا منها.",
+        "episode.error.missing": "المقطع {name} مفقود، فلم تُصنع الحلقة.",
+        "episode.error.not_video": "{name} ليس فيديو يستطيع قالون قراءته، فلم تُصنع الحلقة.",
+        "episode.error.recitation": "تعذّر استخدام مهمة التلاوة: {reason}",
+        "episode.error.ffmpeg": "فشل تجميع الحلقة: {reason}",
     },
 }
 LANGUAGES = tuple(STRINGS)

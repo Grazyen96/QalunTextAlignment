@@ -193,6 +193,10 @@ this is the only place anyone hears each platform's build recognise speech.
     أخرى», shown under a preview of more than five ayat) and `ayah_picker.no_store`, and the three
     errors `session.manual_lecture_only`, `session.manual_bad_reference` («لا تضمّ
     السورة 25 الآيات 1–99») and `session.manual_store_unavailable`.
+  - the episode (intro, recitation, lecture and outro joined into one video), read where
+    a lecture render reports it: the four errors `episode.error.missing` («المقطع … مفقود،
+    فلم تُصنع الحلقة»), `episode.error.not_video`, `episode.error.recitation` and
+    `episode.error.ffmpeg` («فشل تجميع الحلقة»). Is «الحلقة» the right word for the episode?
 - [ ] Keep every direction mark: the U+2066…U+2069 isolates and the U+200F marks,
       written as `\u2066`-style escapes in the source. The tests fail if a key goes
       missing.
