@@ -35,18 +35,21 @@ def qr_modules(data: str) -> int:
     return _encode(data).symbol_size(border=0)[0]
 
 
-def qr_image(data: str, side_px: int, dark: RGB, light: RGB) -> Image.Image:
+def qr_image(
+    data: str, side_px: int, dark: RGB, light: RGB, *, min_module_px: int = _MIN_MODULE_PX
+) -> Image.Image:
     """An RGB square of exactly ``side_px`` with the code for ``data`` centred in it.
 
     The light colour fills the square, so the quiet zone is at least 4 modules on
     every side (more when ``side_px`` is not an exact multiple of the module).
     Raises ``ValueError`` when ``data`` does not fit at level M, or when the square
-    is too small for modules of 4 px.
+    is too small for modules of 4 px. Only a preview that nobody scans (a
+    thumbnail in a dialog) passes a smaller *min_module_px*.
     """
     code = _encode(data)
     modules = code.symbol_size(border=0)[0]
     module = side_px // (modules + 2 * _QUIET)
-    if module < _MIN_MODULE_PX:
+    if module < max(1, min_module_px):
         raise ValueError("QR code too small to scan")
     img = Image.new("RGB", (side_px, side_px), tuple(light))
     offset = (side_px - module * modules) // 2
