@@ -248,7 +248,10 @@ def export_job(
         if cues:
             written = write_subtitles(
                 cues,
-                output.with_suffix(""),
+                # The video's own path, whose ``.mp4`` each format replaces: a
+                # bare stem would lose everything after a dot in the name
+                # ("Tafsir 25.7-11" written as "Tafsir 25.srt").
+                output,
                 request.formats,
                 width=render_result.width,
                 height=render_result.height,

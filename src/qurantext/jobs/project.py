@@ -23,6 +23,7 @@ import json
 import os
 import stat
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from os import PathLike
@@ -217,6 +218,7 @@ class Project:
             render = dict(self.render)
             if render.get("video"):
                 render["video"] = _store_path(Path(render["video"]), relative_to)
+            render = _with_episode_video(render, lambda v: _store_path(Path(v), relative_to))
         export = dict(self.export)
         if isinstance(export.get("output_dir"), str) and export["output_dir"]:
             export["output_dir"] = _store_path(Path(export["output_dir"]), relative_to)
@@ -253,6 +255,7 @@ class Project:
             render = dict(render)
             if render.get("video"):
                 render["video"] = _resolve_path(str(render["video"]), base_dir)
+            render = _with_episode_video(render, lambda v: str(_resolve_path(v, base_dir)))
         else:
             render = None
         export = dict(data.get("export") or {})
@@ -494,6 +497,20 @@ def save_project(project: Project, destination: str | PathLike[str]) -> Path:
         raise
     project.path = path
     return path
+
+
+def _with_episode_video(render: dict[str, Any], convert: Callable[[str], str]) -> dict[str, Any]:
+    """*render* with its episode record's video path passed through *convert*.
+
+    The episode is written beside the lecture's video, so its path is stored
+    by the same rule (relative inside the project folder) and follows the
+    folder when it moves. A record that is not the expected shape is left as
+    it is.
+    """
+    episode = render.get("episode")
+    if isinstance(episode, dict) and isinstance(episode.get("video"), str) and episode["video"]:
+        render["episode"] = {**episode, "video": convert(episode["video"])}
+    return render
 
 
 def _mode_for(path: Path) -> int:

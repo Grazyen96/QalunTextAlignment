@@ -1357,3 +1357,20 @@ def test_a_recitation_spec_carries_no_studied_surah(qt_app, prefs, store) -> Non
     panel.recitation_button.setChecked(True)
     assert panel.spec().studied_surah is None
     assert panel.spec().settings.studied_surah is None
+
+
+def test_a_lecture_spec_carries_the_default_episode(
+    qt_app, prefs, store, tmp_path, monkeypatch
+) -> None:
+    """A new lecture starts with the remembered intro and outro; a recitation ignores them."""
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    intro = tmp_path / "intro.mp4"
+    intro.write_bytes(b"intro")
+    prefs.save_default_episode(intro, None)
+    stored, _ = prefs.default_episode
+
+    panel = _panel(prefs, store)
+    panel.lecture_button.setChecked(True)
+    assert panel.spec().episode_defaults == (str(stored), None)
+    panel.recitation_button.setChecked(True)
+    assert panel.spec().episode_defaults == (None, None)

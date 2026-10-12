@@ -161,8 +161,10 @@ this is the only place anyone hears each platform's build recognise speech.
   - the Cancel and Close forms
   - `review.save` used as a dialog title
   - `home.reading`
-  - the nine `job.stage.*` lines, among them `download`, `unpack`, `transcribe` and
-    `transcribe_online`
+  - the eleven `job.stage.*` lines, among them `download`, `unpack`, `transcribe`,
+    `transcribe_online` and the episode's two, `episode_recitation` («تجهيز التلاوة للحلقة…»)
+    and `episode_join` («تجميع الحلقة…»): the other stage lines open with «جارٍ»; should
+    these two as well?
   - the transcription choice and its progress: `home.engine`, `home.engine.local`,
     `home.engine.whisperx`, `home.engine.no_token`, `home.engine.folded`,
     `home.progress.downloading`, `home.progress.downloading_eta`,
@@ -194,9 +196,21 @@ this is the only place anyone hears each platform's build recognise speech.
     errors `session.manual_lecture_only`, `session.manual_bad_reference` («لا تضمّ
     السورة 25 الآيات 1–99») and `session.manual_store_unavailable`.
   - the episode (intro, recitation, lecture and outro joined into one video), read where
-    a lecture render reports it: the four errors `episode.error.missing` («المقطع … مفقود،
-    فلم تُصنع الحلقة»), `episode.error.not_video`, `episode.error.recitation` and
-    `episode.error.ffmpeg` («فشل تجميع الحلقة»). Is «الحلقة» the right word for the episode?
+    a lecture render reports it:
+    - the errors `episode.error.missing` («المقطع … مفقود، فلم تُصنع الحلقة»),
+      `episode.error.not_video`, `episode.error.recitation`, `episode.error.ffmpeg` («فشل
+      تجميع الحلقة») and `episode.error.subtitles` («صُنعت الحلقة، لكن تعذّرت كتابة ملفات
+      ترجمتها النصية»);
+    - the errors that name a part, `episode.error.part_missing` («مقطع المقدمة مفقود، فلم
+      تُصنع الحلقة») and `episode.error.part_not_video`, with the part names
+      `episode.part.intro` («المقدمة») and `episode.part.outro` («الخاتمة»): are these the
+      right words for an episode's opening and closing clips?
+    - `episode.error.cancelled` («أُلغيت الحلقة، وبقي فيديو المحاضرة كما هو»);
+    - the two notices a new lecture's default intro or outro can give,
+      `episode.seed.missing` («مقطع المقدمة الافتراضي مفقود، فتبدأ هذه المحاضرة بدونه») and
+      `episode.seed.failed`.
+
+    Is «الحلقة» the right word for the episode?
 - [ ] Keep every direction mark: the U+2066…U+2069 isolates and the U+200F marks,
       written as `\u2066`-style escapes in the source. The tests fail if a key goes
       missing.

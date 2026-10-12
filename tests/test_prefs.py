@@ -281,3 +281,70 @@ def test_junk_in_settings_is_night_gold(settings) -> None:
     for junk in ("{not json", "[1, 2]", "7", "null"):
         settings.setValue("default_look", junk)
         assert prefs.default_look == NIGHT_GOLD, junk
+
+
+def test_default_episode_round_trips_and_copies_into_app_data(settings, tmp_path, monkeypatch):
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    prefs = Prefs(settings)
+    clip = tmp_path / "intro.mp4"
+    clip.write_bytes(b"x" * 10)
+    prefs.save_default_episode(clip, None)
+    intro, outro = prefs.default_episode
+    assert intro.parent == (tmp_path / "data" / "episode").resolve() and outro is None
+    prefs.save_default_episode(None, None)
+    assert prefs.default_episode == (None, None)
+
+
+def test_junk_default_episode_is_none(settings):
+    settings.setValue("default_episode", "{not json")
+    assert Prefs(settings).default_episode == (None, None)
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        "[1, 2]",
+        '{"intro": 3, "outro": null}',
+        '{"intro": "relative/intro.mp4"}',
+        '{"intro": "/abs/not-a-clip.txt"}',
+    ],
+)
+def test_a_default_episode_of_the_wrong_shape_is_none(settings, stored):
+    settings.setValue("default_episode", stored)
+    assert Prefs(settings).default_episode == (None, None)
+
+
+def test_a_default_episode_that_cannot_be_copied_stores_nothing(settings, tmp_path, monkeypatch):
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    prefs = Prefs(settings)
+    kept = tmp_path / "outro.mov"
+    kept.write_bytes(b"outro")
+    prefs.save_default_episode(None, kept)
+    before = prefs.default_episode
+
+    with pytest.raises(FileNotFoundError):
+        prefs.save_default_episode(tmp_path / "gone.mp4", None)
+    with pytest.raises(ValueError):
+        prefs.save_default_episode(tmp_path / "notes.txt", None)
+    assert prefs.default_episode == before and before[1] is not None
+    assert before[1].read_bytes() == b"outro"
+
+
+def test_a_replaced_default_clip_is_removed_from_app_data(settings, tmp_path, monkeypatch):
+    """Intros can be large; trying a few must not leave every one behind."""
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    prefs = Prefs(settings)
+    first, second, outro = (tmp_path / n for n in ("one.mp4", "two.mp4", "end.mov"))
+    first.write_bytes(b"first intro")
+    second.write_bytes(b"second intro")
+    outro.write_bytes(b"outro")
+    folder = tmp_path / "data" / "episode"
+
+    prefs.save_default_episode(first, outro)
+    prefs.save_default_episode(second, prefs.default_episode[1])
+    intro, kept_outro = prefs.default_episode
+    assert sorted(p.read_bytes() for p in folder.iterdir()) == [b"outro", b"second intro"]
+    assert intro.read_bytes() == b"second intro" and kept_outro.read_bytes() == b"outro"
+
+    prefs.save_default_episode(None, None)
+    assert list(folder.iterdir()) == []

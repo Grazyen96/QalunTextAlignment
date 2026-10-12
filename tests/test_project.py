@@ -366,3 +366,47 @@ def test_an_atomic_save_keeps_ordinary_permissions(tmp_path) -> None:
     path.chmod(0o640)
     save_project(_project(tmp_path), path)
     assert path.stat().st_mode & 0o777 == 0o640
+
+
+def test_the_episode_record_follows_the_project_folder(tmp_path) -> None:
+    """The joined episode is beside the lecture's video, and moves with it."""
+    folder = tmp_path / "job"
+    project = Project(audio=folder / "dars.mp3", mode="lecture")
+    project.record_render(folder / "videos" / "dars.mp4", preset="social", basmala_offset_s=0.0)
+    project.render["episode"] = {
+        "video": str((folder / "videos" / "dars – episode.mp4").resolve()),
+        "lecture_offset": 5.0,
+        "durations": [5.0, 10.0],
+    }
+    path = save_project(project, folder / "job.qalun.json")
+
+    stored = json.loads(path.read_text(encoding="utf-8"))["render"]
+    assert stored["episode"] == {
+        "video": "videos/dars – episode.mp4",
+        "lecture_offset": 5.0,
+        "durations": [5.0, 10.0],
+    }
+    assert project.render["episode"]["video"].startswith("/"), "the live record is unchanged"
+
+    moved = tmp_path / "elsewhere"
+    moved.mkdir()
+    (moved / "job.qalun.json").write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    loaded = load_project(moved / "job.qalun.json").render
+    assert loaded["episode"]["video"] == str((moved / "videos" / "dars – episode.mp4").resolve())
+    assert loaded["video"] == (moved / "videos" / "dars.mp4").resolve()
+
+
+def test_an_episode_record_outside_the_folder_stays_absolute_and_junk_is_kept(tmp_path) -> None:
+    outside = (tmp_path.parent / "dars – episode.mp4").resolve()
+    project = Project(audio=tmp_path / "dars.mp3", mode="lecture")
+    project.record_render(tmp_path / "dars.mp4", preset="social", basmala_offset_s=0.0)
+    project.render["episode"] = {"video": str(outside)}
+    path = save_project(project, tmp_path / "job.qalun.json")
+    assert json.loads(path.read_text(encoding="utf-8"))["render"]["episode"]["video"] == str(
+        outside.as_posix()
+    )
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["render"]["episode"] = {"video": 7}
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert load_project(path).render["episode"] == {"video": 7}

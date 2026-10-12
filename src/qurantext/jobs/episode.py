@@ -31,6 +31,7 @@ import json
 import math
 import subprocess
 import tempfile
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -187,6 +188,8 @@ def recitation_video(
     subtitle files, to the file a render from the window would write — unless
     that is *avoid* (the lecture's video, when both recordings share a name),
     in which case to ``<stem> – recitation.mp4`` beside it.
+    It is written under a temporary name in that folder and moved into place
+    when complete, so a cancel or failure leaves the earlier video as it was.
 
     The render is made from the project as loaded here, but its record is
     written onto the project file as it is when the render ends: a correction
@@ -213,10 +216,15 @@ def recitation_video(
     if avoid is not None and _same_file(target, avoid):
         target = target.with_name(f"{target.stem} – recitation.mp4")
     settings = job_settings(project)
+    # Rendered under a name of its own and moved into place when complete: a
+    # render of the same recitation from its own review may be writing the
+    # target right now, and a cancel or failure here must not take the
+    # earlier video with it (the renderer deletes what it was writing).
+    partial = target.with_name(f".{target.stem}.{uuid.uuid4().hex[:8]}.part.mp4")
     try:
         result = render_project(
             project,
-            target,
+            partial,
             preset=settings.preset,
             # The job's own choice, so the job list does not call the render
             # "changed since"; a recitation has no live captions to burn.
@@ -227,12 +235,21 @@ def recitation_video(
             save=False,
         )
     except JobCancelled:
+        partial.unlink(missing_ok=True)
         raise
     except Exception as error:  # any render failure is the recitation's, said in a sentence
+        partial.unlink(missing_ok=True)
         raise EpisodeError("episode.error.recitation", reason=str(error)) from error
-    video = Path(result.video)
-    _record_on_the_file(path, project.render, video)
-    return video
+    try:
+        Path(result.video).replace(target)
+    except OSError as error:
+        Path(result.video).unlink(missing_ok=True)
+        raise EpisodeError("episode.error.recitation", reason=str(error)) from error
+    if project.render is not None and project.render.get("video"):
+        # The record names the file where it now is, not where it was made.
+        project.render["video"] = target.expanduser().resolve()
+    _record_on_the_file(path, project.render, target)
+    return target
 
 
 def _record_on_the_file(path: Path, record: dict[str, Any] | None, video: Path) -> None:

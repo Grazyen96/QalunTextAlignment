@@ -25,6 +25,7 @@ from qurantext.config.settings import ENGINES, VIDEO_PRESETS
 from qurantext.core.looks import NIGHT_GOLD, Look, look_from_style
 from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.gui.i18n import LANGUAGES
+from qurantext.jobs.episode_assets import EPISODE_SUFFIXES
 from qurantext.jobs.look_assets import copy_by_content
 from qurantext.jobs.project import SUBTITLE_CHOICES
 
@@ -256,6 +257,56 @@ class Prefs:
         look = self.default_look
         return {} if look == NIGHT_GOLD else look.to_dict()
 
+    # -- default_episode --------------------------------------------------------
+    # The intro and outro new lectures start with. Stored as absolute paths into
+    # the app's own folder, so deleting or moving the original clip does not
+    # lose it. The recitation is never a default: it differs per lecture.
+
+    @property
+    def default_episode(self) -> tuple[Path | None, Path | None]:
+        """The default intro and outro; ``(None, None)`` when unset or unreadable."""
+        raw = self._settings.value("default_episode", "")
+        if not isinstance(raw, str) or not raw:
+            return None, None
+        try:
+            data = json.loads(raw)
+        except ValueError:  # json.JSONDecodeError is a ValueError
+            return None, None
+        if not isinstance(data, dict):
+            return None, None
+
+        def part(key: str) -> Path | None:
+            value = data.get(key)
+            if not isinstance(value, str) or not value:
+                return None
+            path = Path(value)
+            if not path.is_absolute() or path.suffix.lower() not in EPISODE_SUFFIXES:
+                return None
+            return path
+
+        return part("intro"), part("outro")
+
+    def save_default_episode(self, intro: Path | None, outro: Path | None) -> None:
+        """Remember *intro* and *outro* for new lectures; None clears that part.
+
+        Each clip is copied into the app's own ``episode`` folder, named by its
+        content, and the stored path points there. Raises what
+        :func:`~qurantext.jobs.look_assets.copy_by_content` raises
+        (``ValueError``, ``OSError``) when a clip cannot be copied; nothing is
+        stored then.
+        """
+        folder = user_data_dir() / "episode"
+
+        def stored(clip: Path | None) -> str | None:
+            if clip is None:
+                return None
+            return str(copy_by_content(Path(clip), folder, suffixes=EPISODE_SUFFIXES).resolve())
+
+        value = {"intro": stored(intro), "outro": stored(outro)}
+        self._settings.setValue("default_episode", json.dumps(value))
+        self._settings.sync()
+        _remove_clips_but(folder, {v for v in value.values() if v is not None})
+
     # -- more_options_open --------------------------------------------------
 
     @property
@@ -369,3 +420,21 @@ class Prefs:
                 ordered.append(resolved)
         self._settings.setValue("job_dirs", [str(path) for path in ordered])
         self._settings.sync()
+
+
+def _remove_clips_but(folder: Path, kept: set[str]) -> None:
+    """Delete the clips in *folder* other than *kept*: earlier defaults no one names now.
+
+    The folder is the app's own, written only by ``save_default_episode``, and
+    an intro can be hundreds of megabytes; trying a few must not leave them
+    all behind. A clip that will not go is left for the next save.
+    """
+    if not folder.is_dir():
+        return
+    keep = {Path(path).resolve() for path in kept}
+    for clip in folder.iterdir():
+        if clip.suffix.lower() in EPISODE_SUFFIXES and clip.resolve() not in keep:
+            try:
+                clip.unlink()
+            except OSError:
+                continue

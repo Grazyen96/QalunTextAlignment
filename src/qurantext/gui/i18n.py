@@ -154,6 +154,8 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "job.stage.render": "Rendering the video…",
         "job.stage.export": "Writing subtitle files…",
         "job.stage.working": "Working…",
+        "job.stage.episode_recitation": "Preparing the recitation for the episode…",
+        "job.stage.episode_join": "Joining the episode…",
         "app.title": "Qalun",
         "home.progress.starting": "Starting…",
         "home.progress.stopping": "Stopping…",
@@ -343,6 +345,23 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         ),
         "episode.error.recitation": "The recitation job could not be used: {reason}",
         "episode.error.ffmpeg": "Joining the episode failed: {reason}",
+        "episode.error.subtitles": (
+            "The episode was made, but its subtitle files could not be written: {reason}"
+        ),
+        "episode.error.part_missing": "The {part} clip is missing, so the episode was not made.",
+        "episode.error.part_not_video": (
+            "The {part} clip is not a video Qalun can read, so the episode was not made."
+        ),
+        "episode.error.cancelled": "The episode was cancelled; the lecture video is kept.",
+        "episode.part.intro": "intro",
+        "episode.part.outro": "outro",
+        "episode.seed.missing": (
+            "The default {part} clip is missing, so this lecture starts without it."
+        ),
+        "episode.seed.failed": (
+            "The default {part} clip could not be copied beside this lecture, "
+            "so it starts without it."
+        ),
     },
     # Drafted for the first release; a native speaker must review every line
     # before it ships (spec §4). Keep the order and grouping of "en".
@@ -458,6 +477,8 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "job.stage.render": "جارٍ إخراج الفيديو…",
         "job.stage.export": "جارٍ كتابة ملفات الترجمة النصية…",
         "job.stage.working": "جارٍ العمل…",
+        "job.stage.episode_recitation": "تجهيز التلاوة للحلقة…",
+        "job.stage.episode_join": "تجميع الحلقة…",
         "app.title": "Qalun",
         "home.progress.starting": "جارٍ البدء…",
         "home.progress.stopping": "جارٍ الإيقاف…",
@@ -661,6 +682,20 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "episode.error.not_video": "{name} ليس فيديو يستطيع قالون قراءته، فلم تُصنع الحلقة.",
         "episode.error.recitation": "تعذّر استخدام مهمة التلاوة: {reason}",
         "episode.error.ffmpeg": "فشل تجميع الحلقة: {reason}",
+        "episode.error.subtitles": "صُنعت الحلقة، لكن تعذّرت كتابة ملفات ترجمتها النصية: {reason}",
+        "episode.error.part_missing": "مقطع \u2068{part}\u2069 مفقود، فلم تُصنع الحلقة.",
+        "episode.error.part_not_video": (
+            "مقطع \u2068{part}\u2069 ليس فيديو يستطيع قالون قراءته، فلم تُصنع الحلقة."
+        ),
+        "episode.error.cancelled": "أُلغيت الحلقة، وبقي فيديو المحاضرة كما هو.",
+        "episode.part.intro": "المقدمة",
+        "episode.part.outro": "الخاتمة",
+        "episode.seed.missing": (
+            "مقطع \u2068{part}\u2069 الافتراضي مفقود، فتبدأ هذه المحاضرة بدونه."
+        ),
+        "episode.seed.failed": (
+            "تعذّر نسخ مقطع \u2068{part}\u2069 الافتراضي بجانب هذه المحاضرة، فتبدأ بدونه."
+        ),
     },
 }
 LANGUAGES = tuple(STRINGS)

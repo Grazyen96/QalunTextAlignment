@@ -782,6 +782,107 @@ def test_an_ffmpeg_that_cannot_join_an_episode_is_named(monkeypatch) -> None:
     assert "Cannot render" not in report, "the lecture still renders without it"
 
 
+_HAS_FFMPEG = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="needs FFmpeg and ffprobe")
+def test_the_release_gate_joins_two_tiny_clips_for_real(monkeypatch) -> None:
+    """A renamed filter option passes the filter list; only a real join finds it."""
+    import time
+
+    from qurantext.jobs import episode
+
+    started = time.monotonic()
+    passed = preflight._episode_join(release=True)
+    assert passed.status in (Status.OK, Status.WARN), passed.detail
+    assert "trial join" in passed.detail or passed.status == Status.WARN
+    assert time.monotonic() - started < 5, "the gate stays quick"
+
+    real_graph = episode._filter_graph
+
+    def renamed_option(*args, **kwargs):
+        inputs, graph = real_graph(*args, **kwargs)
+        return inputs, graph.replace("type=DISPLAYMATRIX", "kind=DISPLAYMATRIX")
+
+    monkeypatch.setattr(episode, "_filter_graph", renamed_option)
+    failed = preflight._episode_join(release=True)
+    assert failed.status == Status.FAIL and "trial join" in failed.detail and failed.remedy
+    # A developer's checkout is only told about the filters; it does not join.
+    assert preflight._episode_join(release=False).status in (Status.OK, Status.WARN)
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="needs FFmpeg and ffprobe")
+def test_the_trial_join_runs_the_tone_map_chain_when_ffmpeg_has_it(monkeypatch) -> None:
+    """An HDR phone intro is tone-mapped; a renamed zscale option must fail the gate too."""
+    from qurantext.core.video_common import ffmpeg_filters, require_binary
+    from qurantext.jobs import episode
+
+    if not all(n in ffmpeg_filters(require_binary("ffmpeg")) for n in episode.TONE_MAP_FILTERS):
+        pytest.skip("this FFmpeg cannot tone-map")
+    graphs: list[str] = []
+    real_graph = episode._filter_graph
+
+    def spy(*args, **kwargs):
+        inputs, graph = real_graph(*args, **kwargs)
+        graphs.append(graph)
+        return inputs, graph.replace("tonemap=hable:desat=0", "tonemap=hable:desaturate=0")
+
+    monkeypatch.setattr(episode, "_filter_graph", spy)
+    assert preflight._trial_join(tone_map=False) is None, "no HDR clip, no tone-map"
+    failed = preflight._trial_join(tone_map=True)
+    assert failed is not None and "tonemap" in graphs[-1]
+
+
+def test_a_trial_join_that_cannot_make_its_folder_fails_politely(monkeypatch) -> None:
+    def refused(*args, **kwargs):
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(preflight.tempfile, "TemporaryDirectory", refused)
+    assert "No space left" in (preflight._trial_join() or "")
+    full = frozenset({"apad", "setparams", "sidedata", "zscale", "tonemap"})
+    monkeypatch.setattr(preflight, "ffmpeg_filters", lambda path: full)
+    monkeypatch.setattr(preflight, "require_binary", lambda name, *a: f"/usr/bin/{name}")
+    result = preflight._episode_join(release=True)
+    assert result.status == Status.FAIL and "No space left" in result.detail
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="needs FFmpeg and ffprobe")
+def test_a_trial_join_that_runs_too_long_is_stopped(monkeypatch) -> None:
+    monkeypatch.setattr(preflight, "_TRIAL_JOIN_TIMEOUT_S", 0)
+    said = preflight._trial_join()
+    assert said is not None and "took longer than 0 s" in said
+
+
+def test_a_failed_trial_join_quotes_ffmpegs_last_line(monkeypatch) -> None:
+    full = frozenset({"apad", "setparams", "sidedata", "zscale", "tonemap"})
+    monkeypatch.setattr(preflight, "ffmpeg_filters", lambda path: full)
+    monkeypatch.setattr(preflight, "require_binary", lambda name, *a: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        preflight, "_trial_join", lambda **kwargs: "Parsed_sidedata_1 @ 0x1\nOption not found"
+    )
+    failed = preflight._episode_join(release=True)
+    assert failed.detail.endswith("FFmpeg said: Option not found")
+
+
+def test_the_trial_join_runs_only_at_the_release_gate(monkeypatch) -> None:
+    full = frozenset({"apad", "setparams", "sidedata", "zscale", "tonemap"})
+    monkeypatch.setattr(preflight, "ffmpeg_filters", lambda path: full)
+    monkeypatch.setattr(preflight, "require_binary", lambda name, *a: f"/usr/bin/{name}")
+    calls: list[bool] = []
+    monkeypatch.setattr(
+        preflight, "_trial_join", lambda **kwargs: calls.append(kwargs["tone_map"]) or "boom"
+    )
+
+    assert preflight._episode_join(release=False).status == Status.OK and calls == []
+    failed = preflight._episode_join(release=True)
+    assert calls == [True], "an FFmpeg that can tone-map joins an HDR clip too"
+    assert failed.status == Status.FAIL and "boom" in failed.detail
+
+    monkeypatch.setattr(preflight, "ffmpeg_filters", lambda path: full - {"zscale"})
+    preflight._episode_join(release=True)
+    assert calls == [True, False]
+
+
 def test_an_ffmpeg_that_cannot_list_its_filters_is_not_called_incomplete(monkeypatch) -> None:
     monkeypatch.setattr(preflight, "ffmpeg_filters", lambda path: frozenset())
     result = preflight._episode_join(release=True)

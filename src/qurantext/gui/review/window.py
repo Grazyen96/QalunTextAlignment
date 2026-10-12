@@ -962,20 +962,35 @@ class ReviewWindow(QMainWindow):
         and finished after it still lands on the live project once the
         window is shown again.
         """
-        if self._render_project_copy is not None:
-            # ``render`` is the only field the job changes: copy it back rather
-            # than the whole snapshot, so it never overwrites an edit made
-            # meanwhile (the look stays editable during a render).
-            self.session.project.render = copy.deepcopy(self._render_project_copy.render)
-        if self.session.project.path is not None:
-            # The render recorded itself in the project file (``render_project`` saves it).
-            self.saved.emit(self.session.project.path)
+        self._take_back_render(always=True)
         if self._closed:
             return
         # Said before the announcement, which waits for the person to close it.
         for code in outcome.look_warnings:
             self.warnings.add_look_notice(look_warning_text(code))
         self._announce_render(outcome)
+
+    def _take_back_render(self, *, always: bool = False) -> None:
+        """Copy the job's render record onto the live project, and say the file changed.
+
+        ``render`` is the only field the job changes: it is copied back rather
+        than the whole snapshot, so it never overwrites an edit made meanwhile
+        (the look stays editable during a render). A render that stopped or
+        failed after its video was written and recorded (a lecture whose
+        episode step was then cancelled, say) has saved that record too; it
+        is taken back as well, or the session's next save would write the
+        old record over it. *always* announces the save even when the record
+        is unchanged, as a finished render does.
+        """
+        copied = self._render_project_copy
+        if copied is not None and (always or copied.render != self.session.project.render):
+            self.session.project.render = copy.deepcopy(copied.render)
+            changed = True
+        else:
+            changed = False
+        if (always or changed) and self.session.project.path is not None:
+            # The render recorded itself in the project file (``render_project`` saves it).
+            self.saved.emit(self.session.project.path)
 
     def _on_render_done(self) -> None:
         # Runs even after close, so the flags are right if the window reopens.
@@ -1041,11 +1056,13 @@ class ReviewWindow(QMainWindow):
         box.exec()
 
     def _on_render_failed(self, message: str) -> None:
+        self._take_back_render()
         if self._closed:
             return
         self._say_render("failed", t("render.failed", details=message))
 
     def _on_render_cancelled(self) -> None:
+        self._take_back_render()
         if self._closed:
             return
         self._say_render("cancelled", t("render.cancelled"))

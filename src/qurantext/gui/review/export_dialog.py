@@ -204,7 +204,7 @@ class ExportDialog(QDialog):
                 self.saved.emit(self._session.save())
             written = export_project_subtitles(
                 self._session.project,
-                self.destination(),
+                _named_files(self.destination()),
                 formats,
                 timeline=self.timeline(),
                 db_path=self._db_path,
@@ -232,3 +232,16 @@ class ExportDialog(QDialog):
     def _show_written(self) -> None:
         if self._written:
             show_in_folder(self._written[0])
+
+
+def _named_files(destination: Path) -> Path:
+    """A path whose suffix each format replaces, keeping every dot the name has.
+
+    The name is a stem ("Tafsir 25.7-11"), which ``with_suffix`` would cut at
+    its last dot; a format suffix the person typed ("talk.srt") is dropped
+    rather than doubled.
+    """
+    name = destination.name
+    if Path(name).suffix.lower().lstrip(".") in SUBTITLE_FORMATS:
+        name = Path(name).stem
+    return destination.with_name(f"{name}.subtitles")
