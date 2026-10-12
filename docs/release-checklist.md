@@ -136,6 +136,10 @@ this is the only place anyone hears each platform's build recognise speech.
       (`collect-linux.sh` installs them there), so the doctor's playback check on CI,
       which has no sound device, does not prove this.
 - [ ] On Linux, start the window in an X11 session as well as a Wayland one.
+- [ ] In the packaged app, click **Open log folder** at the foot of the home window. The
+      file manager must open the `logs` folder that `qalun --doctor` names on its
+      "error log in" line, with `qalun.log` in it. The gate never opens the window,
+      so it never makes this folder; only a real start does.
 
 ## Arabic, on a real desktop
 
@@ -235,6 +239,10 @@ this is the only place anyone hears each platform's build recognise speech.
 
     Is «الحلقة» the right word for the episode, and «الدرس» or «المحاضرة» for the lecture
     (both are used now)?
+  - the error log, on the button at the foot of the home window, beside the language:
+    `home.open_log_folder` («افتح مجلد السجلات»), its tooltip `home.open_log_folder.tip`
+    («حيث يدوّن قالون ما حدث من أخطاء») and `home.open_log_failed` («تعذّر فتح مجلد السجلات»). Is «السجلات» what a person
+    would look for, or «سجل الأخطاء»?
 - [ ] Keep every direction mark: the U+2066…U+2069 isolates and the U+200F marks,
       written as `\u2066`-style escapes in the source. The tests fail if a key goes
       missing.

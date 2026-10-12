@@ -888,3 +888,14 @@ def test_an_ffmpeg_that_cannot_list_its_filters_is_not_called_incomplete(monkeyp
     result = preflight._episode_join(release=True)
     assert result.status == Status.FAIL and "could not list" in result.detail and result.remedy
     assert "no apad" not in result.detail
+
+
+def test_the_report_names_the_error_log(tmp_path, monkeypatch) -> None:
+    """The doctor is what someone runs after a crash; it says where the traceback went."""
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+
+    report = format_report([CheckResult("A", Status.OK, "fine")])
+
+    expected = tmp_path / "data" / "logs" / "qalun.log"
+    assert f"  error log in {expected}" in report.splitlines()
+    assert not expected.parent.exists(), "naming the log does not make its folder"

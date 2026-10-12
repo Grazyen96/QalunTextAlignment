@@ -29,6 +29,21 @@ def _name_the_app() -> None:
     QCoreApplication.setApplicationName(_APP_NAME)
 
 
+def _start_the_log() -> None:
+    """Keep errors in a file, before anything that could raise one is imported.
+
+    A windowed build has no standard error, so without this a traceback from a
+    slot or a background thread is gone. Never in the way: the window opens
+    whatever happens here.
+    """
+    try:
+        from qurantext.config.app_log import configure
+
+        configure()
+    except Exception:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     try:
         from PySide6.QtWidgets import QApplication
@@ -38,6 +53,8 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+
+    _start_the_log()
 
     from qurantext.gui.main_window import MainWindow
 

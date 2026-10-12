@@ -1805,6 +1805,84 @@ def test_the_app_names_itself_before_any_settings_are_read(qt_app) -> None:
         QCoreApplication.setApplicationName(before[1])
 
 
+def test_starting_the_log_never_stops_the_window(monkeypatch) -> None:
+    from qurantext.config import app_log
+    from qurantext.gui import app as app_module
+
+    calls: list = []
+
+    def broken() -> None:
+        calls.append(True)
+        raise RuntimeError("no log today")
+
+    monkeypatch.setattr(app_log, "configure", broken)
+    app_module._start_the_log()  # does not raise
+    assert calls == [True]
+
+
+# --- the error log ---------------------------------------------------------------
+
+
+class _FakeDesktop:
+    """Stands in for ``QDesktopServices``: records each URL instead of opening it."""
+
+    opened: list = []
+    answer = True
+
+    @classmethod
+    def openUrl(cls, url):  # noqa: N802 - Qt's name
+        cls.opened.append(url)
+        return cls.answer
+
+
+@pytest.fixture()
+def desktop(monkeypatch):
+    from qurantext.gui import files
+
+    class Fake(_FakeDesktop):
+        opened: list = []
+
+    monkeypatch.setattr(files, "QDesktopServices", Fake)
+    return Fake
+
+
+def test_open_log_folder_opens_the_logs_folder(
+    qt_app, home, desktop, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui.i18n import t
+
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    assert home.log_button.text() == t("home.open_log_folder")
+
+    home.log_button.click()
+
+    folder = tmp_path / "data" / "logs"
+    assert [url.toLocalFile() for url in desktop.opened] == [str(folder)]
+    assert folder.is_dir(), "made first, so the file manager has something to open"
+    assert home._status is None, "nothing to say when it opened"
+
+
+def test_open_log_folder_says_when_it_could_not(
+    qt_app, home, desktop, tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    desktop.answer = False
+
+    home.log_button.click()
+
+    assert home._status is not None and home._status.key == "home.open_log_failed"
+    from qurantext.gui.i18n import path_text
+
+    assert path_text(tmp_path / "data" / "logs") in home._status.text()
+
+
+def test_open_log_folder_is_rebuilt_in_the_new_language(qt_app, home) -> None:
+    from qurantext.gui import i18n
+
+    assert home.set_language("ar")
+    assert home.log_button.text() == i18n.STRINGS["ar"]["home.open_log_folder"]
+
+
 # --- the window's language -----------------------------------------------------
 
 

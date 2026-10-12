@@ -194,6 +194,9 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "home.language_busy": (
             "Close the open reviews and wait for the job to finish before changing the language."
         ),
+        "home.open_log_folder": "Open log folder",
+        "home.open_log_folder.tip": "Where Qalun writes down what went wrong: {path}",
+        "home.open_log_failed": "Could not open the log folder {path}.",
         "main.saved": "Corrections saved to {path}",
         "player.unavailable": "Playback is off on this machine: {details}",
         "player.unavailable_short": "Playback is off: install PySide6-Addons to hear the recording.",
@@ -565,6 +568,9 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "home.review_failed": "تعذّر فتح {name} للمراجعة: {details}",
         "home.language": "اللغة",
         "home.language_busy": "أغلق المراجعات المفتوحة وانتظر انتهاء المهمة قبل تغيير اللغة.",
+        "home.open_log_folder": "افتح مجلد السجلات",
+        "home.open_log_folder.tip": "حيث يدوّن قالون ما حدث من أخطاء: {path}",
+        "home.open_log_failed": "تعذّر فتح مجلد السجلات {path}.",
         "main.saved": "حُفظت التصحيحات في {path}",
         "player.unavailable": "التشغيل غير متاح على هذا الجهاز: {details}",
         "player.unavailable_short": "التشغيل غير متاح: ثبّت PySide6-Addons لسماع التسجيل.",

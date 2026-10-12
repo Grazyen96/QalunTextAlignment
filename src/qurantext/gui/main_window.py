@@ -26,14 +26,20 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QPushButton,
     QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
-from qurantext.config.paths import DEFAULT_QURAN_PATH, QURAN_INPUT_DIR
+from qurantext.config.paths import (
+    DEFAULT_QURAN_PATH,
+    QURAN_INPUT_DIR,
+    user_log_dir,
+    user_log_file,
+)
 from qurantext.gui import i18n
-from qurantext.gui.files import show_in_folder
+from qurantext.gui.files import open_folder, show_in_folder
 from qurantext.gui.home.job_list import JobListPanel
 from qurantext.gui.home.new_job import NewJobPanel
 from qurantext.gui.i18n import path_text, plain_title, t, tn
@@ -206,7 +212,13 @@ class MainWindow(QMainWindow):
             self.language_combo.addItem(i18n.LANGUAGE_NAMES[code], code)
         self._select_language_in_combo(i18n.current_language())
         self.language_combo.activated.connect(self._language_chosen)
+        # Beside the language, the window's one other setting-like control: where
+        # the error log is, for whoever is asked to send it after something broke.
+        self.log_button = QPushButton(t("home.open_log_folder"))
+        self.log_button.setToolTip(t("home.open_log_folder.tip", path=path_text(user_log_file())))
+        self.log_button.clicked.connect(self._open_log_folder)
         footer = QHBoxLayout()
+        footer.addWidget(self.log_button)
         footer.addStretch(1)
         footer.addWidget(QLabel(t("home.language")))
         footer.addWidget(self.language_combo)
@@ -276,6 +288,14 @@ class MainWindow(QMainWindow):
         # The combo just went with the old panels; a keyboard user stays where they were.
         self.language_combo.setFocus()
         return True
+
+    # -- the error log ----------------------------------------------------------
+
+    def _open_log_folder(self) -> None:
+        """Show the folder the error log is written to, or say why it cannot be shown."""
+        folder = user_log_dir()
+        if not open_folder(folder):
+            self._answer(_Said("home.open_log_failed", {"path": path_text(folder)}))
 
     # -- the status line ------------------------------------------------------
 

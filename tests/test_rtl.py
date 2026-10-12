@@ -328,6 +328,8 @@ def test_no_english_is_left_in_the_arabic_windows(
     from qurantext.gui.main_window import MainWindow
     from qurantext.utils.progress import ProgressEvent
 
+    # The log button's tip names the log file: under tmp_path, not the person's own.
+    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path))
     prefs = _prefs(tmp_path)
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir()
@@ -365,6 +367,7 @@ def test_no_english_is_left_in_the_arabic_windows(
 
     fixture_words = set(_LATIN_WORD.findall(str(tmp_path)))
     fixture_words |= {"jobs", "lesson", "m4a", "recitation", "missing", "mp3", "m", "Hello"}
+    fixture_words |= {"logs", "qalun", "log"}  # the log file's path, in the log button's tip
     allowed = _LATIN_THE_TABLE_KEEPS | _KEY_CAPS | fixture_words
     roots = (main, review_window, review_window._make_export_dialog(), lecture_review_window)
     for root in roots:
