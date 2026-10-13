@@ -163,7 +163,12 @@ corrections happen before anything is rendered.
   ayah's words read in their own order: the recording's start is on the right,
   ← steps to the next word and → to the previous, and `,` / `.` nudge the
   selected edge left (later) / right (earlier). Times and numbers stay Western
-  digits, left to right.
+  digits, left to right. A time ruler with labels sits above the waveform
+  (click or drag it to seek), and the transport row has previous/next word,
+  Play, a one-click speed (1x, 0.75x, 0.5x) and the nudges. A card above the
+  table says when something needs attention (a missing recording, a finished
+  render with its Play and Reveal buttons). `?` opens a sheet of every
+  shortcut, and a double-click on the preview opens the frame at full size.
 - *Surah on the cards.* In a lecture the card shows one surah, the one it
   studies ("Surah on the cards", automatic by default). Ayat quoted from other
   surahs stay in the subtitles.

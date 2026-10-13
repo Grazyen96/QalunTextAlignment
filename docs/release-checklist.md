@@ -171,7 +171,7 @@ this is the only place anyone hears each platform's build recognise speech.
       look at every image in both themes and both languages: primary buttons filled,
       icons on the buttons the phase A spec lists (Start, Cancel, Close and the nudge
       buttons have none by design), nothing unreadable or cut off, including the Settings
-      tabs and the empty first launch.
+      tabs and the empty first launch, and the review window's shortcut sheet and full-size preview.
 
 ## Words
 

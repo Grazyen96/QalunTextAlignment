@@ -178,6 +178,17 @@ def _shoot(app: QApplication, out_dir: Path, themes, languages) -> list[Path]:
                         written.append(_grab(picker, out_dir / f"ayah-picker-{tag}.png"))
                         picker.close()
                         picker.deleteLater()
+                        review.show_shortcuts()
+                        written.append(
+                            _grab(review.shortcut_sheet, out_dir / f"shortcuts-{tag}.png")
+                        )
+                        review.shortcut_sheet.hide()
+                        review._show_full_frame(1.2)
+                        _spin(300)
+                        written.append(
+                            _grab(review._full_frame, out_dir / f"review-full-frame-{tag}.png")
+                        )
+                        review._full_frame.hide()
                     else:
                         episode = EpisodeDialog(review.session, prefs=prefs, parent=review)
                         written.append(_grab(episode, out_dir / f"episode-{tag}.png"))
