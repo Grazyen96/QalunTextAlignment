@@ -1,19 +1,23 @@
 """The new-job panel: drop an audio file, say what it is, press Start.
 
-Everything a job needs is collected here — audio, Quran text, mode, range,
-video size, and the rarely-changed choices folded under "More options" — so
-``spec()`` always answers "the job this panel would run right now" and
-``problem()`` always answers "what stops it". The home window listens to
-``start_requested``/``cancel_requested`` and drives ``set_running``/
+The form holds the job's own choices — audio, mode, range, video size, and
+the rarely-changed ones folded under "More options" — in one column. The
+machine's settings (the Quran text, the output folder, the engine) are the
+Settings dialog's; the form reads them from ``prefs`` and is told to read
+them again with ``reload_settings``. So ``spec()`` always answers "the job
+this panel would run right now" and ``problem()`` always answers "what
+stops it". The home window listens to ``start_requested``/
+``cancel_requested``/``settings_requested`` and drives ``set_running``/
 ``set_progress``; this panel never runs anything itself.
 """
 
 from __future__ import annotations
 
+import html
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, Qt, Signal
-from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDropEvent
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, Signal
+from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDropEvent, QPalette
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -32,12 +36,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from qurantext.config.paths import QURAN_DB_PATH, QURAN_INPUT_DIR
-from qurantext.config.settings import ENGINES, VIDEO_PRESETS, env_dir, get_settings
+from qurantext.config.paths import QURAN_DB_PATH
+from qurantext.config.settings import VIDEO_PRESETS, env_dir, get_settings
 from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.data.quran_db import ensure_quran_db, list_surahs
+from qurantext.gui import theme
 from qurantext.gui.i18n import path_text, plain_title, t, tn
-from qurantext.gui.icons import set_icon
+from qurantext.gui.icons import icon, set_icon
 from qurantext.gui.jobs import JobSpec
 from qurantext.gui.prefs import Prefs
 from qurantext.gui.surahs import fill_studied_surah_box, select_studied_surah
@@ -61,8 +66,12 @@ _SUBTITLE_KEYS = {
     "sidecar": "home.subtitles.sidecar",
     "both": "home.subtitles.both",
 }
-#: The drop zone's height: room for the file's name, its folder and "Choose…".
-_DROP_ZONE_HEIGHT = 96
+#: The drop zone's height: room for its icon, the file's name, its folder and "Choose…".
+_DROP_ZONE_HEIGHT = 112
+#: The form's widest: a column of choices reads down, not across a wide window.
+_COLUMN_WIDTH = 560
+#: The drop zone's icon, in px.
+_DROP_ICON_SIZE = 24
 
 _FORMAT_KEYS = {
     "srt": "format.srt",
@@ -78,6 +87,8 @@ class NewJobPanel(QWidget):
     start_requested = Signal(object)
     #: Cancel was pressed while a job was running.
     cancel_requested = Signal()
+    #: The engine note's link was followed: the window opens Settings.
+    settings_requested = Signal()
 
     def __init__(
         self,
@@ -92,19 +103,18 @@ class NewJobPanel(QWidget):
         self._quran_default = quran_default
         self._db_path = db_path
         self._audio: Path | None = None
-        self._quran_override: Path | None = prefs.quran_override
-        self._output_dir: Path | None = prefs.output_dir
         #: True while the surah list is being filled and set back to the
         #: remembered choice, so those steps are not remembered as new choices.
         self._restoring_range = False
+        #: True between ``set_running(True)`` and ``set_running(False)``: a
+        #: settings reload meanwhile must not wake the inputs or Start's reason.
+        self._running = False
         self.setAcceptDrops(True)
 
         self.format_boxes: dict[str, QCheckBox] = {}
         self.subtitle_buttons: dict[str, QRadioButton] = {}
 
         self._build()
-        self._update_quran_label()
-        self._update_output_dir_label()
         self._load_surahs()
         self._apply_prefs()
         self._refresh()
@@ -112,9 +122,17 @@ class NewJobPanel(QWidget):
     # -- construction -----------------------------------------------------------
 
     def _build(self) -> None:
-        layout = QVBoxLayout(self)
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        # One column, no wider than a form reads well; the stretch keeps it at
+        # the leading edge (the layout mirrors it in Arabic).
+        self.column = QWidget()
+        self.column.setMaximumWidth(_COLUMN_WIDTH)
+        outer.addWidget(self.column, 1)
+        outer.addStretch(0)
+        layout = QVBoxLayout(self.column)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
+        layout.setSpacing(theme.SP_12)
 
         self.heading = SectionHeader(t("home.new_job"))
         self.heading_label = self.heading.label
@@ -129,8 +147,12 @@ class NewJobPanel(QWidget):
         self.drop_zone.setFixedHeight(_DROP_ZONE_HEIGHT)
         self.drop_zone.setProperty("dragOver", False)
         drop_layout = self.drop_zone.body
-        drop_layout.setContentsMargins(12, 8, 12, 8)
-        drop_layout.setSpacing(4)
+        drop_layout.setContentsMargins(12, 6, 12, 6)
+        drop_layout.setSpacing(2)
+        self.drop_icon = QLabel()
+        self.drop_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        drop_layout.addWidget(self.drop_icon)
+        self._show_drop_icon()
         self.drop_label = QLabel(t("home.drop"))
         self.drop_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.drop_label.setWordWrap(True)
@@ -164,6 +186,13 @@ class NewJobPanel(QWidget):
         mode_row.addStretch(1)
         layout.addLayout(mode_row)
         self._mode_group.buttonToggled.connect(self._mode_changed)
+
+        # What the chosen mode does, in a quieter voice under it.
+        self.description_label = QLabel()
+        self.description_label.setWordWrap(True)
+        self.description_label.setFont(theme.font("secondary"))
+        self.description_label.setForegroundRole(QPalette.ColorRole.PlaceholderText)
+        layout.addWidget(self.description_label)
 
         form_widget = QWidget()
         form = QFormLayout(form_widget)
@@ -218,67 +247,11 @@ class NewJobPanel(QWidget):
         self.more_button.toggled.connect(self._toggle_more_options)
         layout.addWidget(self.more_button)
 
-        # With More options folded, the engine row and its no-token note are out
-        # of sight; a job that uploads the recording, or cannot start, says so here.
-        self.engine_hint_label = QLabel()
-        self.engine_hint_label.setWordWrap(True)
-        self.engine_hint_label.setVisible(False)
-        layout.addWidget(self.engine_hint_label)
-
         # Labelled rows like the form above, so each choice says what it is
         # and its value text need not repeat it.
         self.more_group = QWidget()
         self.more_form = QFormLayout(self.more_group)
         self.more_form.setContentsMargins(0, 0, 0, 0)
-
-        self.quran_row = QWidget()
-        quran_row = QHBoxLayout(self.quran_row)
-        quran_row.setContentsMargins(0, 0, 0, 0)
-        self.quran_label = QLabel()
-        self.quran_label.setWordWrap(True)
-        quran_row.addWidget(self.quran_label, 1)
-        self.quran_choose_button = QPushButton(t("home.choose"))
-        self.quran_choose_button.clicked.connect(self._choose_quran_override)
-        quran_row.addWidget(self.quran_choose_button)
-        self.quran_reset_button = QPushButton(t("home.quran_override.reset"))
-        self.quran_reset_button.clicked.connect(lambda: self.set_quran(None))
-        quran_row.addWidget(self.quran_reset_button)
-        self.more_form.addRow(t("home.quran_text"), self.quran_row)
-
-        self.output_row = QWidget()
-        output_row = QHBoxLayout(self.output_row)
-        output_row.setContentsMargins(0, 0, 0, 0)
-        self.output_label = QLabel()
-        self.output_label.setWordWrap(True)
-        output_row.addWidget(self.output_label, 1)
-        self.output_choose_button = QPushButton(t("home.choose"))
-        self.output_choose_button.clicked.connect(self._choose_output_dir)
-        output_row.addWidget(self.output_choose_button)
-        self.output_reset_button = QPushButton(t("home.output_dir.reset"))
-        self.output_reset_button.clicked.connect(lambda: self.set_output_dir(None))
-        output_row.addWidget(self.output_reset_button)
-        self.more_form.addRow(t("home.output_dir"), self.output_row)
-
-        self.engine_row = QWidget()
-        engine_row = QVBoxLayout(self.engine_row)
-        engine_row.setContentsMargins(0, 0, 0, 0)
-        choices = QHBoxLayout()
-        self._engine_group = QButtonGroup(self)
-        self._engine_group.setExclusive(True)
-        self.engine_buttons: dict[str, QRadioButton] = {}
-        for value in ENGINES:
-            button = QRadioButton(t(f"home.engine.{value}"))
-            self.engine_buttons[value] = button
-            self._engine_group.addButton(button)
-            choices.addWidget(button)
-        choices.addStretch(1)
-        engine_row.addLayout(choices)
-        self.no_token_label = QLabel()
-        self.no_token_label.setWordWrap(True)
-        self.no_token_label.setVisible(False)
-        engine_row.addWidget(self.no_token_label)
-        self.more_form.addRow(t("home.engine"), self.engine_row)
-        self._engine_group.buttonToggled.connect(self._engine_changed)
 
         self.subtitles_row = QWidget()
         subtitles_row = QHBoxLayout(self.subtitles_row)
@@ -311,31 +284,42 @@ class NewJobPanel(QWidget):
 
         layout.addWidget(self.more_group)
 
-        buttons_row = QHBoxLayout()
+        # Said here, not chosen here: the engine is a machine setting now.
+        self.engine_note = QLabel()
+        self.engine_note.setWordWrap(True)
+        self.engine_note.setTextFormat(Qt.TextFormat.RichText)
+        self.engine_note.setTextInteractionFlags(
+            Qt.TextInteractionFlag.LinksAccessibleByMouse
+            | Qt.TextInteractionFlag.LinksAccessibleByKeyboard
+        )
+        self.engine_note.linkActivated.connect(lambda _link: self.settings_requested.emit())
+        self.engine_note.setVisible(False)
+        layout.addWidget(self.engine_note)
+
+        start_row = QHBoxLayout()
         self.start_button = QPushButton(t("home.start"))
         self.start_button.setDefault(True)
         make_primary(self.start_button)
         self.start_button.clicked.connect(lambda: self.start_requested.emit(self.spec()))
+        # While a job runs the bar stands where Start stood, as tall, and says the stage.
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setFixedHeight(max(36, self.start_button.sizeHint().height()))
+        self.progress_bar.setVisible(False)
         self.cancel_button = QPushButton(t("home.cancel"))
+        set_icon(self.cancel_button, "x", size=16)
         self.cancel_button.clicked.connect(self.cancel_requested.emit)
         self.cancel_button.setVisible(False)
-        buttons_row.addWidget(self.start_button)
-        buttons_row.addWidget(self.cancel_button)
-        # What stops Start is said beside it, where the eye already is.
+        start_row.addWidget(self.start_button, 1)
+        start_row.addWidget(self.progress_bar, 1)
+        start_row.addWidget(self.cancel_button)
+        layout.addLayout(start_row)
+        # What stops Start is said under it, in a quieter voice.
         self.problem_label = QLabel()
         self.problem_label.setWordWrap(True)
-        buttons_row.addWidget(self.problem_label, 1)
-        # Takes the room the hidden label leaves, so Start keeps its own width.
-        buttons_row.addStretch(0)
-        layout.addLayout(buttons_row)
-
-        self.progress_bar = QProgressBar()
-        # The status line under it says what is happening; a percentage
-        # beside the bar would only say it twice.
-        self.progress_bar.setTextVisible(False)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setVisible(False)
-        layout.addWidget(self.progress_bar)
+        self.problem_label.setFont(theme.font("secondary"))
+        layout.addWidget(self.problem_label)
 
         self.status_label = QLabel()
         self.status_label.setWordWrap(True)
@@ -376,13 +360,22 @@ class NewJobPanel(QWidget):
         for fmt, box in self.format_boxes.items():
             box.setChecked(fmt in chosen)
 
-        self.engine_buttons[self._prefs.engine].setChecked(True)
-        self._show_engine_notes()
-
         self.render_right_away_box.setChecked(self._prefs.render_right_away)
 
         self.more_button.setChecked(self._prefs.more_options_open)
         self._set_more_options_visibility(self._prefs.more_options_open)
+        self._show_engine_note()
+
+    def reload_settings(self) -> None:
+        """The Settings dialog changed something this form shows or sends: read it again."""
+        self._load_surahs()  # refills from the (possibly new) store and puts the remembered surah back
+        self._show_engine_note()
+        self._refresh()
+
+    def select_mode(self, mode: str) -> None:
+        """Choose *mode* for the person (the empty state's cards) and move them to the file."""
+        (self.recitation_button if mode == "recitation" else self.lecture_button).setChecked(True)
+        self.choose_button.setFocus(Qt.FocusReason.OtherFocusReason)
 
     # -- the Quran store ----------------------------------------------------------
 
@@ -392,8 +385,9 @@ class NewJobPanel(QWidget):
         The choice itself stays in ``prefs``: a file on a drive that is not
         plugged in right now must not erase it, only step aside for the default.
         """
-        if self._quran_override is not None and self._quran_override.is_file():
-            return self._quran_override
+        override = self._prefs.quran_override
+        if override is not None and override.is_file():
+            return override
         return None
 
     def _effective_quran(self) -> Path | None:
@@ -454,7 +448,7 @@ class NewJobPanel(QWidget):
             self._surah_changed()
             return
 
-        self.surah_box.setEnabled(True)
+        self.surah_box.setEnabled(not self._running)
         fill_studied_surah_box(
             self.studied_surah_box, {int(s["surah_num"]): str(s["name"]) for s in surahs}
         )
@@ -522,6 +516,19 @@ class NewJobPanel(QWidget):
             self._show_audio_lines()
         return super().eventFilter(watched, event)
 
+    def changeEvent(self, event: QEvent) -> None:  # noqa: N802 — Qt's name
+        # A label's pixmap is not a button's icon: ``refresh_icons`` does not
+        # reach it, so a theme switch redraws it here.
+        if event.type() in (QEvent.Type.PaletteChange, QEvent.Type.ApplicationPaletteChange):
+            self._show_drop_icon()
+        super().changeEvent(event)
+
+    def _show_drop_icon(self) -> None:
+        """An upload arrow until a file is chosen; then the file, in the text's colour."""
+        name, role = ("upload", "secondary") if self._audio is None else ("file-music", "text")
+        size = QSize(_DROP_ICON_SIZE, _DROP_ICON_SIZE)
+        self.drop_icon.setPixmap(icon(name, role).pixmap(size))
+
     def _show_audio_lines(self) -> None:
         """The chosen file's name and folder, each elided in the middle to fit the label.
 
@@ -530,6 +537,7 @@ class NewJobPanel(QWidget):
         unisolated. A label not shown yet has no width of its own to fit, so
         it keeps the whole lines until it is shown.
         """
+        self._show_drop_icon()
         if self._audio is None:
             return
         name, folder = self._audio.name, str(self._audio.parent)
@@ -540,53 +548,6 @@ class NewJobPanel(QWidget):
             folder = metrics.elidedText(folder, Qt.TextElideMode.ElideMiddle, width)
         self.drop_label.setText(f"{name}\n{path_text(folder)}")
 
-    def _choose_quran_override(self) -> None:
-        name, _ = QFileDialog.getOpenFileName(
-            self,
-            plain_title(t("home.quran_override.dialog_title")),
-            str(QURAN_INPUT_DIR),
-            _file_filter(t("home.filter.text"), [".txt"]),
-        )
-        if name:
-            self.set_quran(Path(name))
-
-    def set_quran(self, path: Path | None) -> None:
-        """Set (``path``) or clear (``None``) the Quran text override."""
-        self._quran_override = path
-        self._prefs.quran_override = path
-        self._update_quran_label()
-        self._load_surahs()
-        self._refresh()
-
-    def _choose_output_dir(self) -> None:
-        name = QFileDialog.getExistingDirectory(
-            self, plain_title(t("home.output_dir.dialog_title")), str(Path.home())
-        )
-        if name:
-            self.set_output_dir(Path(name))
-
-    def set_output_dir(self, path: Path | None) -> None:
-        """Set (``path``) or clear (``None``) the output folder override."""
-        self._output_dir = path
-        self._prefs.output_dir = path
-        self._update_output_dir_label()
-        self._refresh()
-
-    def _update_quran_label(self) -> None:
-        override = self._usable_override()
-        if override is not None:
-            self.quran_label.setText(t("home.quran_override.custom", path=path_text(override)))
-        elif self._quran_default is not None:
-            self.quran_label.setText(t("home.quran_override.default"))
-        else:
-            self.quran_label.setText(t("home.quran_missing"))
-
-    def _update_output_dir_label(self) -> None:
-        if self._output_dir is not None:
-            self.output_label.setText(t("home.output_dir.custom", path=path_text(self._output_dir)))
-        else:
-            self.output_label.setText(t("home.output_dir.default"))
-
     # -- controls -------------------------------------------------------------------
 
     def _mode_changed(self) -> None:
@@ -596,6 +557,8 @@ class NewJobPanel(QWidget):
         self._refresh()
 
     def _set_mode_visibility(self, recitation: bool) -> None:
+        key = "home.mode.recitation.desc" if recitation else "home.mode.lecture.desc"
+        self.description_label.setText(t(key))
         shown = {
             self.surah_box: recitation,
             self.range_widget: recitation,
@@ -653,7 +616,6 @@ class NewJobPanel(QWidget):
         # Down when the options show; else along the reading direction (the
         # icon module mirrors it in Arabic).
         set_icon(self.more_button, "chevron-down" if open_ else "chevron-right", size=16)
-        self._show_engine_notes()
 
     def _current_subtitles(self) -> str:
         for value, button in self.subtitle_buttons.items():
@@ -667,37 +629,21 @@ class NewJobPanel(QWidget):
         self._set_formats_visibility(value)
         self._refresh()
 
-    def _current_engine(self) -> str:
-        for value, button in self.engine_buttons.items():
-            if button.isChecked():
-                return value
-        return "local"
+    def _show_engine_note(self) -> None:
+        """Say before Start, not after an upload, that this job goes online, and how to change it.
 
-    def _engine_changed(self) -> None:
-        value = self._current_engine()
-        self._prefs.engine = value
-        self._show_engine_notes()
-        self._refresh()
-
-    def _show_engine_notes(self) -> None:
-        """Say before Start, not after a failed upload, that WhisperX has no token.
-
-        Under the engine row while More options is open; folded, under its
-        button instead, together with the fact that this job goes online.
+        Only for WhisperX: the engine is chosen in Settings, so the form only
+        says it, adds that the token is missing when it is, and links there.
         """
-        whisperx = self._current_engine() == "whisperx"
-        note = (
-            t("home.engine.no_token", folder=path_text(env_dir()))
-            if whisperx and _token_missing()
-            else ""
-        )
-        self.no_token_label.setText(note)
-        self.no_token_label.setVisible(bool(note))
-        folded = whisperx and not self.more_button.isChecked()
-        self.engine_hint_label.setText(
-            " ".join(text for text in (t("home.engine.folded"), note) if text) if folded else ""
-        )
-        self.engine_hint_label.setVisible(folded)
+        if self._prefs.engine != "whisperx":
+            self.engine_note.setVisible(False)
+            return
+        parts = [html.escape(t("home.engine.note"))]
+        if _token_missing():
+            parts.append(html.escape(t("home.engine.no_token", folder=path_text(env_dir()))))
+        parts.append(f'<a href="settings">{html.escape(t("home.engine.change"))}</a>')
+        self.engine_note.setText(" ".join(parts))
+        self.engine_note.setVisible(True)
 
     def _set_formats_visibility(self, subtitles: str) -> None:
         """Show the file formats, and their label, only when there are files to write."""
@@ -734,8 +680,8 @@ class NewJobPanel(QWidget):
             subtitles=self._current_subtitles(),
             formats=formats,
             render_right_away=self.render_right_away_box.isChecked(),
-            engine=self._current_engine(),
-            output_dir=self._output_dir,
+            engine=self._prefs.engine,
+            output_dir=self._prefs.output_dir,
             style=self._prefs.default_look_style(),
             studied_surah=None if recitation else self.studied_surah_box.currentData(),
             episode_defaults=(None, None) if recitation else self._episode_defaults(),
@@ -764,13 +710,15 @@ class NewJobPanel(QWidget):
     def _refresh(self) -> None:
         problem = self.problem()
         self.problem_label.setText(t(problem) if problem else "")
-        self.problem_label.setVisible(problem is not None)
+        # Start's reason has no Start to stand under while the bar is there.
+        self.problem_label.setVisible(problem is not None and not self._running)
         self.start_button.setEnabled(problem is None)
 
     # -- running --------------------------------------------------------------------
 
     def set_running(self, running: bool) -> None:
-        """Disable every input and swap Start for Cancel while a job runs."""
+        """Disable every input and put the bar and Cancel where Start stood while a job runs."""
+        self._running = running
         for widget in (
             self.choose_button,
             self.recitation_button,
@@ -780,11 +728,6 @@ class NewJobPanel(QWidget):
             self.range_widget,
             self.preset_box,
             self.more_button,
-            self.quran_choose_button,
-            self.quran_reset_button,
-            self.output_choose_button,
-            self.output_reset_button,
-            *self.engine_buttons.values(),
             *self.subtitle_buttons.values(),
             *self.format_boxes.values(),
             self.render_right_away_box,
@@ -792,25 +735,33 @@ class NewJobPanel(QWidget):
             widget.setEnabled(not running)
         self.setAcceptDrops(not running)
         self.start_button.setVisible(not running)
-        self.cancel_button.setVisible(running)
         self.progress_bar.setVisible(running)
-        self.status_label.setVisible(running)
-        if not running:
-            self._refresh()
+        self.cancel_button.setVisible(running)
+        if running:
+            self.progress_bar.setRange(0, 0)
+            self.progress_bar.setFormat("")
+            self.status_label.setVisible(False)
+        # The status line is shown again by ``show_status``, with the outcome.
+        self._refresh()
 
     def set_progress(self, fraction: float | None, text: str | None) -> None:
-        """Update the progress bar (``None`` for an indeterminate stage) and status line.
+        """Show how far the job is: on the bar when it knows a fraction, on the line when it does not.
 
-        *text* None leaves the status line as it is: the window keeps an answer
-        to the person up there while the bar moves on.
+        A busy bar draws no text, so a stage without a fraction says its
+        sentence on the status line; a stage with one says it on the bar and
+        the line goes quiet. *text* None leaves whatever is said as it is: the
+        window keeps an answer to the person up there while the bar moves on.
         """
         if fraction is None:
             self.progress_bar.setRange(0, 0)
-        else:
-            self.progress_bar.setRange(0, 100)
-            self.progress_bar.setValue(int(max(0.0, min(1.0, fraction)) * 100))
+            if text is not None:
+                self.show_status(text)
+            return
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(int(max(0.0, min(1.0, fraction)) * 100))
         if text is not None:
-            self.status_label.setText(text)
+            self.progress_bar.setFormat(text)
+            self.show_status("")
 
     def show_status(self, text: str) -> None:
         """Show *text* on the status line (hidden when empty), running or not.

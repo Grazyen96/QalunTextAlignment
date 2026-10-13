@@ -1300,7 +1300,7 @@ def test_the_running_row_shows_during_the_job_and_goes_after(
 
     _spin_until(qt_app, lambda: any("40%" in text for text in _running_rows(home)))
     assert _running_rows(home)[0].startswith("\u2068a.mp3\u2069")  # the name, isolated
-    assert "40%" in home.new_job.status_label.text()
+    assert "40%" in home.new_job.progress_bar.format()  # a stage with a fraction says it on the bar
 
     release.set()
     _spin_until(qt_app, lambda: home._cancel is None)
@@ -1323,9 +1323,10 @@ def test_the_status_line_says_each_stage_in_the_window_s_words(qt_app, home) -> 
     assert status.text() == module.t("job.stage.export")
     home._on_progress(ProgressEvent("tuning", "Something new..."))
     assert status.text() == module.t("job.stage.working")
-    # With a fraction the line is the table's percentage sentence, as before.
+    # With a fraction the bar says the table's percentage sentence, and the line goes quiet.
     home._on_progress(ProgressEvent("render", "  Segments 4/10", fraction=0.4))
-    assert status.text() == module.t("home.progress.rendering", percent=40)
+    assert home.new_job.progress_bar.format() == module.t("home.progress.rendering", percent=40)
+    assert status.text() == ""
 
 
 @pytest.mark.parametrize("language", ["en", "ar"])
@@ -1337,6 +1338,7 @@ def test_the_model_download_says_its_own_stage_not_matching(qt_app, home, langua
     i18n.set_language(language)
     try:
         status = home.new_job.status_label
+        bar = home.new_job.progress_bar
         matching = module.t("home.progress.matching", percent=12)
         home._on_progress(
             ProgressEvent("detect", module.t("job.progress.detecting"), translated=True)
@@ -1347,19 +1349,19 @@ def test_the_model_download_says_its_own_stage_not_matching(qt_app, home, langua
         home._on_progress(
             ProgressEvent("download", "12 MB of 108 MB", fraction=0.12, eta_seconds=95)
         )
-        assert status.text() == module.t(
+        assert bar.format() == module.t(
             "home.progress.downloading_eta", percent=12, eta=module._minutes(95)
         )
-        assert matching.split("—")[0].strip() not in status.text()
+        assert matching.split("—")[0].strip() not in bar.format()
         home._on_progress(ProgressEvent("download", "Downloaded.", fraction=1.0, done=True))
-        assert status.text() == module.t("home.progress.downloading", percent=100)
+        assert bar.format() == module.t("home.progress.downloading", percent=100)
         home._on_progress(ProgressEvent("unpack", "Unpacking and checking the speech model..."))
         assert status.text() == module.t("job.stage.unpack")
         # Back to matching: its own sentence again, then its own percentage.
         home._on_progress(ProgressEvent("detect", "[2/3] Aligning 12 ayat..."))
         assert status.text() == module.t("job.stage.detect")
         home._on_progress(ProgressEvent("detect", "x", fraction=0.12))
-        assert status.text() == matching
+        assert bar.format() == matching
     finally:
         i18n.set_language("en")
 
@@ -1373,6 +1375,7 @@ def test_local_transcription_says_its_own_stage_not_matching(qt_app, home, langu
     i18n.set_language(language)
     try:
         status = home.new_job.status_label
+        bar = home.new_job.progress_bar
         matching = module.t("home.progress.matching", percent=40)
         # The events engine_local.transcribe_local sends: first the stage, before the model loads.
         home._on_progress(ProgressEvent("transcribe", "Transcribing on this computer..."))
@@ -1385,14 +1388,14 @@ def test_local_transcription_says_its_own_stage_not_matching(qt_app, home, langu
                 eta_seconds=95,
             )
         )
-        assert status.text() == module.t(
+        assert bar.format() == module.t(
             "home.progress.transcribing_eta", percent=40, eta=module._minutes(95)
         )
-        assert matching.split("—")[0].strip() not in status.text()
+        assert matching.split("—")[0].strip() not in bar.format()
         home._on_progress(
             ProgressEvent("transcribe", "Transcribed on this computer.", fraction=1.0, done=True)
         )
-        assert status.text() == module.t("home.progress.transcribing", percent=100)
+        assert bar.format() == module.t("home.progress.transcribing", percent=100)
     finally:
         i18n.set_language("en")
 

@@ -787,7 +787,8 @@ def test_spec_reflects_every_control(qt_app, prefs, tmp_path, store) -> None:
     panel.format_boxes["vtt"].setChecked(True)
     out_dir = tmp_path / "out"
     out_dir.mkdir()
-    panel.set_output_dir(out_dir)
+    prefs.output_dir = out_dir  # a machine setting: the Settings dialog sets it
+    panel.reload_settings()
     panel.render_right_away_box.setChecked(True)
 
     spec = panel.spec()
@@ -934,18 +935,19 @@ def test_the_form_reads_top_down_with_choose_inside_the_drop_zone(qt_app, prefs,
     panel.show()
 
     assert panel.heading_label.text() == "New job"
-    assert panel.drop_zone.height() == panel.drop_zone.maximumHeight() == 96
+    assert panel.drop_zone.height() == panel.drop_zone.maximumHeight() == 112
     assert panel.choose_button.parentWidget() is panel.drop_zone
     assert panel.choose_button.text() == t("home.choose")
 
-    # The reason Start is disabled sits beside Start, not at the far end of the form.
+    # The reason Start is disabled sits right under Start, not at the far end of the form.
     row = panel.start_button.parentWidget().layout()
-    buttons_row = next(
-        item.layout()
-        for item in (row.itemAt(i) for i in range(row.count()))
+    items = [row.itemAt(i) for i in range(row.count())]
+    start_at = next(
+        i
+        for i, item in enumerate(items)
         if isinstance(item.layout(), QHBoxLayout) and item.layout().indexOf(panel.start_button) >= 0
     )
-    assert buttons_row.indexOf(panel.problem_label) >= 0
+    assert items[start_at + 1].widget() is panel.problem_label
 
     # The free space goes to the bottom, so the controls stay together at the top.
     last = row.itemAt(row.count() - 1)
@@ -978,9 +980,7 @@ def test_the_surah_picker_and_file_filters_read_from_the_string_table(
 
     monkeypatch.setattr(module.QFileDialog, "getOpenFileName", fake_open)
     panel._choose_audio()
-    panel._choose_quran_override()
     assert filters[0].startswith(t("home.filter.audio") + " (")
-    assert filters[1].startswith(t("home.filter.text") + " (")
     assert all(f.endswith(t("home.filter.all") + " (*)") for f in filters)
 
 
@@ -1086,11 +1086,6 @@ def test_a_drop_puts_the_zone_back_to_normal(qt_app, prefs, store, tmp_path) -> 
     assert panel.drop_zone.property("dragOver") is False
 
 
-def test_the_progress_bar_leaves_the_words_to_the_status_line(qt_app, prefs, store) -> None:
-    panel = _panel(prefs, store)
-    assert not panel.progress_bar.isTextVisible()
-
-
 def test_the_range_labels_name_their_spin_boxes(qt_app, prefs, store) -> None:
     panel = _panel(prefs, store)
     assert panel.range_from_label.buddy() is panel.from_spin
@@ -1101,17 +1096,10 @@ def test_the_more_options_are_labelled_rows_that_hide_together(qt_app, prefs, st
     panel = _panel(prefs, store)
     form = panel.more_form
     labels = {
-        form.labelForField(panel.quran_row).text(): panel.quran_row,
-        form.labelForField(panel.output_row).text(): panel.output_row,
         form.labelForField(panel.subtitles_row).text(): panel.subtitles_row,
         form.labelForField(panel.formats_widget).text(): panel.formats_widget,
     }
-    assert set(labels) == {
-        t("home.quran_text"),
-        t("home.output_dir"),
-        t("home.subtitles"),
-        t("home.formats"),
-    }
+    assert set(labels) == {t("home.subtitles"), t("home.formats")}
     panel.subtitle_buttons["burn"].setChecked(True)
     assert panel.formats_widget.isHidden()
     assert form.labelForField(panel.formats_widget).isHidden()
@@ -1121,8 +1109,8 @@ def test_the_more_options_are_labelled_rows_that_hide_together(qt_app, prefs, st
 
 
 def test_the_value_texts_no_longer_repeat_their_labels(qt_app, prefs, store) -> None:
-    panel = _panel(prefs, store)
-    assert panel.quran_label.text() == t("home.quran_override.default")
+    # The Settings dialog shows these now (its tests read its labels); the
+    # strings still must not repeat the row label beside them.
     assert ":" not in t("home.quran_override.default")
     assert ":" not in t("home.output_dir.default")
 
@@ -1134,83 +1122,8 @@ def test_the_two_forms_share_one_label_column(qt_app, prefs, store) -> None:
     panel.show()
     spin(50)
     upper = panel.surah_box.x()
-    lower = panel.quran_row.x()
+    lower = panel.subtitles_row.x()
     assert abs(upper - lower) <= 2
-
-
-def test_a_folded_whisperx_choice_without_a_token_is_still_said(
-    qt_app, prefs, store, monkeypatch
-) -> None:
-    """More options is folded by default; the note must not fold away with it."""
-    from qurantext.config.settings import env_dir, get_settings
-
-    monkeypatch.setenv("REPLICATE_API_TOKEN", "")
-    get_settings.cache_clear()
-    try:
-        prefs.engine = "whisperx"
-        prefs.more_options_open = False
-        panel = _panel(prefs, store)
-        assert panel.more_group.isHidden()
-        assert not panel.engine_hint_label.isHidden()
-        hint = panel.engine_hint_label.text()
-        assert hint.startswith(t("home.engine.folded"))
-        assert t("home.engine.no_token", folder=path_text(env_dir())) in hint
-
-        # Open, the note sits under the engine row instead, and only there.
-        panel.more_button.setChecked(True)
-        assert panel.engine_hint_label.isHidden()
-        assert not panel.no_token_label.isHidden()
-        panel.more_button.setChecked(False)
-        assert not panel.engine_hint_label.isHidden()
-    finally:
-        get_settings.cache_clear()
-
-
-def test_a_folded_whisperx_choice_says_the_recording_goes_online(
-    qt_app, prefs, store, monkeypatch
-) -> None:
-    from qurantext.config.settings import get_settings
-
-    monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_test")
-    get_settings.cache_clear()
-    try:
-        prefs.engine = "whisperx"
-        prefs.more_options_open = False
-        panel = _panel(prefs, store)
-        assert not panel.engine_hint_label.isHidden()
-        assert panel.engine_hint_label.text() == t("home.engine.folded")
-    finally:
-        get_settings.cache_clear()
-
-
-def test_the_folded_hint_does_not_widen_the_panel(qt_app, prefs, store, monkeypatch, tmp_path):
-    from PySide6.QtCore import QSettings
-
-    from qurantext.config.settings import get_settings
-
-    monkeypatch.setenv("REPLICATE_API_TOKEN", "")
-    get_settings.cache_clear()
-    try:
-        local = Prefs(QSettings(str(tmp_path / "local.ini"), QSettings.Format.IniFormat))
-        local.more_options_open = False
-        baseline = _panel(local, store).minimumSizeHint().width()
-        prefs.engine = "whisperx"
-        prefs.more_options_open = False
-        assert _panel(prefs, store).minimumSizeHint().width() <= baseline
-    finally:
-        get_settings.cache_clear()
-
-
-def test_a_folded_local_choice_needs_no_hint(qt_app, prefs, store) -> None:
-    prefs.more_options_open = False
-    panel = _panel(prefs, store)
-    assert panel.engine_hint_label.isHidden()
-    panel.more_button.setChecked(True)
-    panel.engine_buttons["whisperx"].setChecked(True)
-    assert panel.engine_hint_label.isHidden(), "open, the engine row itself shows the choice"
-    panel.engine_buttons["local"].setChecked(True)
-    panel.more_button.setChecked(False)
-    assert panel.engine_hint_label.isHidden()
 
 
 @pytest.mark.parametrize("more_open", [False, True])
@@ -1228,10 +1141,12 @@ def test_a_malformed_setting_with_whisperx_remembered_still_opens(
         prefs.engine = "whisperx"
         prefs.more_options_open = more_open
         panel = _panel(prefs, store)
-        assert panel.engine_buttons["whisperx"].isChecked()
-        assert panel.no_token_label.isHidden(), "the token is unknown, not missing"
-        panel.engine_buttons["local"].setChecked(True)
-        panel.engine_buttons["whisperx"].setChecked(True)
+        assert not panel.engine_note.isHidden()
+        assert "REPLICATE_API_TOKEN" not in panel.engine_note.text(), "unknown, not missing"
+        prefs.engine = "local"
+        panel.reload_settings()
+        prefs.engine = "whisperx"
+        panel.reload_settings()
         assert panel.spec().engine == "whisperx"
     finally:
         get_settings.cache_clear()
@@ -1248,20 +1163,13 @@ def test_a_malformed_setting_with_whisperx_remembered_still_opens_the_window(
     try:
         prefs.engine = "whisperx"
         window = MainWindow(prefs=prefs)
-        assert window.new_job.engine_buttons["whisperx"].isChecked()
+        assert window.new_job.spec().engine == "whisperx"
+        assert not window.new_job.engine_note.isHidden()
         window.close()
         window.deleteLater()
         spin(50)
     finally:
         get_settings.cache_clear()
-
-
-def test_the_engine_cannot_change_while_a_job_runs(qt_app, prefs, store) -> None:
-    panel = _panel(prefs, store)
-    panel.set_running(True)
-    assert not any(button.isEnabled() for button in panel.engine_buttons.values())
-    panel.set_running(False)
-    assert all(button.isEnabled() for button in panel.engine_buttons.values())
 
 
 # -- a lecture's studied surah ------------------------------------------------------
@@ -1504,5 +1412,122 @@ def test_a_disabled_start_still_shows_its_text(qt_app, prefs, store) -> None:
         assert panel.start_button.property("primary") is True
         rule = _rule(qt_app.styleSheet(), 'QPushButton[primary="true"]:disabled')
         assert contrast(QColor(rule["color"]), QColor(rule["background"])) >= 4.5
+    finally:
+        panel.deleteLater()
+
+
+def test_the_form_is_a_column_of_the_jobs_own_choices(qt_app, prefs, store) -> None:
+    from PySide6.QtWidgets import QFormLayout
+
+    from qurantext.gui.i18n import t
+
+    panel = _panel(prefs, store)
+    try:
+        assert panel.column.maximumWidth() == 560
+        labels = [
+            panel.more_form.itemAt(row, QFormLayout.ItemRole.LabelRole).widget().text()
+            for row in range(panel.more_form.rowCount())
+            if panel.more_form.itemAt(row, QFormLayout.ItemRole.LabelRole) is not None
+        ]
+        assert labels == [t("home.subtitles"), t("home.formats")]
+        assert not hasattr(panel, "quran_row") and not hasattr(panel, "engine_row")
+        assert panel.description_label.text() == t("home.mode.recitation.desc")
+        panel.lecture_button.setChecked(True)
+        assert panel.description_label.text() == t("home.mode.lecture.desc")
+        assert panel.start_button.property("primary") is True
+        assert panel.problem_label.isVisibleTo(panel)  # no file yet: the reason sits under Start
+    finally:
+        panel.deleteLater()
+
+
+def test_the_engine_note_shows_for_whisperx_and_links_to_settings(
+    qt_app, prefs, store, monkeypatch
+) -> None:
+    from qurantext.gui.home import new_job as module
+    from qurantext.gui.i18n import t
+
+    monkeypatch.setattr(module, "_token_missing", lambda: True)
+    panel = _panel(prefs, store)
+    try:
+        assert not panel.engine_note.isVisibleTo(panel)
+        prefs.engine = "whisperx"
+        panel.reload_settings()
+        assert panel.engine_note.isVisibleTo(panel)
+        assert t("home.engine.note") in panel.engine_note.text()
+        assert t("home.engine.change") in panel.engine_note.text()
+        asked = []
+        panel.settings_requested.connect(lambda: asked.append(1))
+        panel.engine_note.linkActivated.emit("settings")
+        assert asked == [1]
+        assert panel.spec().engine == "whisperx"
+        prefs.engine = "local"
+        panel.reload_settings()
+        assert not panel.engine_note.isVisibleTo(panel)
+    finally:
+        panel.deleteLater()
+
+
+def test_the_spec_reads_the_machine_settings_from_prefs(qt_app, prefs, store, tmp_path) -> None:
+    panel = _panel(prefs, store)
+    try:
+        prefs.output_dir = tmp_path
+        custom = tmp_path / "my.txt"
+        custom.write_text("x", encoding="utf-8")
+        prefs.quran_override = custom
+        panel.reload_settings()
+        spec = panel.spec()
+        assert spec.output_dir == tmp_path and spec.quran == custom
+    finally:
+        panel.deleteLater()
+
+
+def test_reload_keeps_the_remembered_surah_when_the_store_still_has_it(
+    qt_app, prefs, store
+) -> None:
+    """Review Focus 4: a Quran change refills the surahs and keeps the choice."""
+    panel = _panel(prefs, store)
+    try:
+        index = next(
+            i
+            for i in range(panel.surah_box.count())
+            if panel.surah_box.itemData(i)["surah_num"] == 25
+        )
+        panel.surah_box.setCurrentIndex(index)
+        panel.from_spin.setValue(7)
+        prefs.quran_override = None
+        panel.reload_settings()
+        assert panel.surah_box.currentData()["surah_num"] == 25
+        assert panel.from_spin.value() == 7
+    finally:
+        panel.deleteLater()
+
+
+def test_while_running_the_bar_takes_starts_slot_and_says_the_stage(qt_app, prefs, store) -> None:
+    panel = _panel(prefs, store)
+    try:
+        panel.set_running(True)
+        assert not panel.start_button.isVisibleTo(panel)
+        assert panel.progress_bar.isVisibleTo(panel) and panel.cancel_button.isVisibleTo(panel)
+        assert panel.progress_bar.isTextVisible()
+        assert panel.progress_bar.height() >= 32
+        panel.set_progress(0.42, "Transcribing — 42%")
+        assert panel.progress_bar.format() == "Transcribing — 42%"
+        assert panel.progress_bar.value() == 42
+        assert not panel.status_label.isVisibleTo(panel)
+        panel.set_progress(None, "Starting…")  # a busy bar draws no text: the line says it
+        assert panel.status_label.text() == "Starting…"
+        panel.set_running(False)
+        assert panel.start_button.isVisibleTo(panel) and not panel.progress_bar.isVisibleTo(panel)
+    finally:
+        panel.deleteLater()
+
+
+def test_select_mode_checks_the_button_and_focuses_choose(qt_app, prefs, store) -> None:
+    panel = _panel(prefs, store)
+    try:
+        panel.show()
+        panel.select_mode("lecture")
+        assert panel.lecture_button.isChecked()
+        assert panel.choose_button.hasFocus() or panel.focusWidget() is panel.choose_button
     finally:
         panel.deleteLater()

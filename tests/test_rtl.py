@@ -292,6 +292,7 @@ _LATIN_THE_TABLE_KEEPS = {
     "https",
     "example",
     "org",
+    "GitHub",
 }
 #: The letters of the key caps Qt itself writes into a tip (Save's Ctrl+S): a
 #: key's letter is what is printed on it, in either language.
@@ -446,10 +447,8 @@ def test_the_windows_show_every_path_through_path_text(
     shutil.copyfile(QURAN_FILE, quran)
     prefs = _prefs(tmp_path)
     prefs.quran_override = quran
+    # The Quran text and output folder are shown by the Settings dialog now.
     panel = NewJobPanel(prefs, quran_default=QURAN_FILE, db_path=store)
-    assert i18n.path_text(quran.resolve()) in panel.quran_label.text()
-    panel.set_output_dir(folder)
-    assert i18n.path_text(folder) in panel.output_label.text()
     audio = folder / "تلاوة.mp3"
     audio.touch()
     panel.set_audio(audio)
@@ -619,10 +618,10 @@ def test_the_folded_engine_hint_keeps_whisperx_in_its_place(qt_app) -> None:
     assert left_to_right(line, parts) == parts, line
 
 
-def test_the_folded_engine_hint_wraps_inside_the_panel(
+def test_the_engine_note_wraps_inside_the_panel(
     qt_app, tmp_path, store, no_default_job_dirs, monkeypatch
 ) -> None:
-    """The hint and its no-token sentence wrap; they never widen the Arabic panel."""
+    """The note and its no-token sentence wrap; they never widen the Arabic panel."""
     from qurantext.config.settings import get_settings
 
     monkeypatch.setenv("REPLICATE_API_TOKEN", "")
@@ -640,7 +639,7 @@ def test_the_folded_engine_hint_wraps_inside_the_panel(
         panel.resize(panel.minimumSizeHint().width(), 700)
         panel.show()
         qt_app.processEvents()
-        hint = panel.engine_hint_label
+        hint = panel.engine_note
         assert hint.isVisible() and hint.layoutDirection() == RTL
         assert hint.geometry().right() <= panel.width()
         assert hint.height() > hint.fontMetrics().height(), "the long note wraps"
