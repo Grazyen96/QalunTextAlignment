@@ -85,6 +85,7 @@ from qurantext.gui.i18n import ltr, plain_title, t
 from qurantext.gui.prefs import KEEP_DEFAULT, Prefs
 from qurantext.gui.review.session import ReviewSession
 from qurantext.gui.surahs import stored_surah_names
+from qurantext.gui.widgets import make_primary
 from qurantext.jobs.catalog import (
     DAMAGED,
     RENDERED,
@@ -393,6 +394,7 @@ class EpisodeDialog(QDialog):
         )
         self.ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
         self.ok_button.setDefault(True)
+        make_primary(self.ok_button)
         buttons.rejected.connect(self.reject)
         self.ok_button.clicked.connect(self._keep)
         layout.addWidget(buttons)

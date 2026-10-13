@@ -1838,6 +1838,7 @@ def test_the_episode_dialog_starts_from_the_sessions_choice(
 
     dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
     assert jobs["asked"] == [[tmp_path]]
+    assert dialog.ok_button.property("primary") is True and dialog.ok_button.isDefault()
     # By its original name: the copy beside the project is named by its content.
     assert dialog.intro_label.text() == t("episode.clip", name="Channel intro.mp4", length="01:05")
     assert dialog.intro_remove.isEnabled()

@@ -2349,3 +2349,59 @@ def test_a_stopped_render_does_not_keep_the_last_episode_error(
     release.set()
     assert _wait_for(lambda: not window._rendering, 5000)
     assert html.escape(why) not in window.warnings.text()
+
+
+def test_the_review_window_wears_the_presentation_layer(qt_app, tmp_path) -> None:
+    from qurantext.gui import theme
+
+    theme.apply_theme(qt_app, "light")
+    window, player, _ = _window(qt_app, tmp_path)
+    try:
+        expected = {
+            window.save_button: "save",
+            window.undo_button: "undo-2",
+            window.redo_button: "redo-2",
+            window.reviewed_button: "circle-check",
+            window.remove_button: "trash",
+            window.export_button: "download",
+            window.episode_button: "sparkles",
+            window.render_button: "film",
+            window.play_button: "play",
+        }
+        for button, name in expected.items():
+            assert button.property("qalun.icon")[0] == name, name
+        assert window.render_button.property("primary") is True
+        assert window.time_label.font().pointSizeF() == theme.font("clock").pointSizeF()
+        player.play()
+        assert window.play_button.property("qalun.icon")[0] == "pause"
+        player.pause()
+        assert window.play_button.property("qalun.icon")[0] == "play"
+        assert window.look_panel.header.label.text() == "Look"
+        assert window.look_panel.customise_toggle.property("qalun.icon")[0] == "chevron-right"
+        window.look_panel.customise_toggle.setChecked(True)
+        assert window.look_panel.customise_toggle.property("qalun.icon")[0] == "chevron-down"
+        assert window.look_panel.image_button.property("qalun.icon")[0] == "image"
+        assert window.look_panel.default_button.property("qalun.icon")[0] == "circle-check"
+        assert window.look_panel.reset_button.property("qalun.icon")[0] == "refresh-cw"
+        assert window.selection_bar.snap_button.icon().isNull()  # no icons on the nudge row
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_the_dialogs_confirming_buttons_are_primary(qt_app, tmp_path) -> None:
+    from qurantext.config.paths import QURAN_DB_PATH
+    from qurantext.gui.review.ayah_picker import AyahPicker
+    from qurantext.gui.review.export_dialog import ExportDialog
+
+    window, _, _ = _window(qt_app, tmp_path)
+    try:
+        export = ExportDialog(window.session, window)
+        assert export._go_button.property("primary") is True and export._go_button.isDefault()
+        export.deleteLater()
+        picker = AyahPicker(window, surah=25, from_ayah=7, to_ayah=11, db_path=QURAN_DB_PATH)
+        assert picker.ok_button.property("primary") is True and picker.ok_button.isDefault()
+        picker.deleteLater()
+    finally:
+        window.close()
+        window.deleteLater()

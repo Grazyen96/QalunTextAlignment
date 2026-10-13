@@ -41,6 +41,7 @@ from qurantext.config.paths import DEFAULT_FONT_PATH, QURAN_DB_PATH
 from qurantext.data.quran_db import ayah_range_card, connect, list_surahs
 from qurantext.gui.i18n import plain_title, t, tn
 from qurantext.gui.surahs import surah_label
+from qurantext.gui.widgets import make_primary
 from qurantext.jobs.project import SURAH_COUNT
 
 __all__ = ["PREVIEW_LINES", "AyahPicker"]
@@ -155,6 +156,7 @@ class AyahPicker(QDialog):
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
         )
         self.ok_button: QPushButton = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        make_primary(self.ok_button)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)

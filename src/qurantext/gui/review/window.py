@@ -57,8 +57,10 @@ from qurantext.config.settings import VIDEO_PRESETS
 from qurantext.core.coverage import speech_levels, uncovered_from_levels
 from qurantext.core.waveform import Peaks, load_or_compute_peaks, peaks_path_for
 from qurantext.gui import jobs as jobs_module
+from qurantext.gui import theme
 from qurantext.gui.files import show_in_folder
 from qurantext.gui.i18n import clock, path_text, plain_title, t
+from qurantext.gui.icons import set_icon
 from qurantext.gui.jobs import JobOutcome
 from qurantext.gui.prefs import Prefs
 from qurantext.gui.review.ayah_picker import AyahPicker
@@ -82,6 +84,7 @@ from qurantext.gui.surahs import (
     stored_surah_names,
     surah_label,
 )
+from qurantext.gui.widgets import make_primary
 from qurantext.jobs.project import Project, job_settings
 from qurantext.utils.progress import CancelToken, ProgressEvent
 
@@ -296,6 +299,7 @@ class ReviewWindow(QMainWindow):
         self.remove_button = QPushButton(t("review.remove"))
         self.export_button = QPushButton(t("review.export"))
         self.render_button = QPushButton(t("review.render"))
+        self.render_button.setToolTip(t("review.render.tip"))
         # A lecture's episode: what plays around it, and whether anything does.
         self.episode_button = QPushButton(t("review.episode"))
         self.episode_button.setToolTip(t("review.episode.tip"))
@@ -307,6 +311,18 @@ class ReviewWindow(QMainWindow):
         self.render_progress.setVisible(False)
         self.render_cancel_button = QPushButton(t("render.cancel"))
         self.render_cancel_button.setVisible(False)
+        for button, name in (
+            (self.save_button, "save"),
+            (self.undo_button, "undo-2"),
+            (self.redo_button, "redo-2"),
+            (self.reviewed_button, "circle-check"),
+            (self.remove_button, "trash"),
+            (self.export_button, "download"),
+            (self.episode_button, "sparkles"),
+            (self.render_button, "film"),
+        ):
+            set_icon(button, name)
+        make_primary(self.render_button)
         buttons = (
             self.save_button,
             self.undo_button,
@@ -406,9 +422,11 @@ class ReviewWindow(QMainWindow):
 
         transport = QHBoxLayout()
         self.play_button = QPushButton(t("review.play"))
+        set_icon(self.play_button, "play")
         # The transport row mirrors (Play leads on the right in Arabic); the
         # clock is a number and reads left to right, as numbers do here.
         self.time_label = QLabel(clock(0.0))
+        self.time_label.setFont(theme.font("clock"))
         self.time_label.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         self.rate_combo = QComboBox()
         for rate in RATES:
@@ -614,6 +632,7 @@ class ReviewWindow(QMainWindow):
 
     def _on_playing_changed(self, playing: bool) -> None:
         self.play_button.setText(t("review.pause") if playing else t("review.play"))
+        set_icon(self.play_button, "pause" if playing else "play")
         if self.player.available:
             # The tip names the button's action, which just changed; without a
             # player the tip is the reason instead, and stays so.

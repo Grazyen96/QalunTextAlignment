@@ -34,6 +34,7 @@ from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.gui.files import show_in_folder
 from qurantext.gui.i18n import plain_title, t, tn
 from qurantext.gui.review.session import ReviewSession
+from qurantext.gui.widgets import make_primary
 from qurantext.jobs.episode_assets import EPISODE_SUFFIXES
 from qurantext.jobs.project_render import export_project_subtitles
 
@@ -118,6 +119,7 @@ class ExportDialog(QDialog):
             t("export.go"), QDialogButtonBox.ButtonRole.AcceptRole
         )
         self._go_button.setDefault(True)
+        make_primary(self._go_button)
         self.close_button = self.buttons.addButton(
             t("export.close"), QDialogButtonBox.ButtonRole.RejectRole
         )

@@ -338,6 +338,10 @@ def test_rows_on_screen_take_the_new_amber_when_the_theme_switches(qt_app, prefs
     dark = QPalette()
     dark.setColor(QPalette.ColorRole.Window, QColor(53, 53, 53))
     dark.setColor(QPalette.ColorRole.Base, QColor(35, 35, 35))
+    # A bare palette switch, as before the theme existed: a sheet an earlier test
+    # applied would keep the palette change from reaching the row.
+    sheet = qt_app.styleSheet()
+    qt_app.setStyleSheet("")
     qt_app.setPalette(light)
     try:
         panel = _listed(prefs)
@@ -351,6 +355,7 @@ def test_rows_on_screen_take_the_new_amber_when_the_theme_switches(qt_app, prefs
         panel.close()
     finally:
         qt_app.setPalette(before)
+        qt_app.setStyleSheet(sheet)
 
 
 def test_a_selected_row_draws_its_lines_in_the_highlighted_text(qt_app, prefs) -> None:
@@ -1425,7 +1430,6 @@ def test_the_footer_offers_the_theme_and_applies_it(qt_app, prefs, no_default_jo
         window.deleteLater()
 
 
-@pytest.mark.xfail(strict=True, reason="icons land in Task 9")
 def test_a_theme_switch_retints_an_open_review_window(qt_app, prefs, tmp_path) -> None:
     """Review Focus 1: the strip, the rows and every icon follow the switch."""
     from PySide6.QtGui import QPalette

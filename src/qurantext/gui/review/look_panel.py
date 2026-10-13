@@ -67,8 +67,10 @@ from qurantext.core.looks import (
 )
 from qurantext.gui.colors import warning_color
 from qurantext.gui.i18n import is_rtl, plain_title, t
+from qurantext.gui.icons import set_icon
 from qurantext.gui.prefs import Prefs
 from qurantext.gui.review.session import ReviewSession
+from qurantext.gui.widgets import SectionHeader
 from qurantext.jobs.look_assets import import_look_image
 
 __all__ = ["LOOK_WARNING_KEYS", "LookPanel", "look_warning_key", "look_warning_text"]
@@ -309,11 +311,8 @@ class LookPanel(QWidget):
         column = QVBoxLayout(self)
         column.setContentsMargins(4, 0, 4, 0)
 
-        title = QLabel(t("look.title"))
-        font = title.font()
-        font.setBold(True)
-        title.setFont(font)
-        column.addWidget(title)
+        self.header = SectionHeader(t("look.title"))
+        column.addWidget(self.header)
 
         palette_row = QHBoxLayout()
         palette_row.addWidget(QLabel(t("look.palette")))
@@ -352,7 +351,7 @@ class LookPanel(QWidget):
         self.customise_toggle.setCheckable(True)
         self.customise_toggle.setAutoRaise(True)
         self.customise_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.customise_toggle.setArrowType(self._customise_arrow(open_=False))
+        set_icon(self.customise_toggle, "chevron-right", size=16)
         column.addWidget(self.customise_toggle)
 
         self.customise_box = QWidget()
@@ -392,6 +391,7 @@ class LookPanel(QWidget):
         column.addWidget(self.background_combo)
 
         self.image_button = QPushButton(t("look.choose_image"))
+        set_icon(self.image_button, "image", size=16)
         column.addWidget(self.image_button)
         if self._session.project.path is None:
             # The image is copied beside the project file; without one there is nowhere.
@@ -420,7 +420,9 @@ class LookPanel(QWidget):
         column.addLayout(sliders)
 
         self.default_button = QPushButton(t("look.use_for_new"))
+        set_icon(self.default_button, "circle-check", size=16)
         self.reset_button = QPushButton(t("look.reset"))
+        set_icon(self.reset_button, "refresh-cw", size=16)
         column.addWidget(self.default_button)
         column.addWidget(self.reset_button)
         column.addStretch(1)
@@ -445,17 +447,9 @@ class LookPanel(QWidget):
         self.default_button.clicked.connect(self._use_for_new_videos)
         self.reset_button.clicked.connect(lambda: self._apply(NIGHT_GOLD))
 
-    def _customise_arrow(self, *, open_: bool) -> Qt.ArrowType:
-        """Down when open; else toward where the line reads on (left in Arabic)."""
-        if open_:
-            return Qt.ArrowType.DownArrow
-        if is_rtl():
-            return Qt.ArrowType.LeftArrow
-        return Qt.ArrowType.RightArrow
-
     def _toggle_customise(self, open_: bool) -> None:
         self.customise_box.setVisible(open_)
-        self.customise_toggle.setArrowType(self._customise_arrow(open_=open_))
+        set_icon(self.customise_toggle, "chevron-down" if open_ else "chevron-right", size=16)
 
     # -- reading the look back --------------------------------------------------
 

@@ -646,3 +646,28 @@ def test_the_folded_engine_hint_wraps_inside_the_panel(
         assert hint.height() > hint.fontMetrics().height(), "the long note wraps"
     finally:
         get_settings.cache_clear()
+
+
+def test_mirrored_chevrons_survive_a_theme_switch(qt_app, review_window) -> None:
+    """Review Focus 3: a switch rebuilds the icons; the Arabic ones stay mirrored."""
+    from PySide6.QtCore import QSize
+
+    from qurantext.gui import icons, theme
+
+    toggle = review_window.look_panel.customise_toggle
+    assert toggle.property("qalun.icon")[0] == "chevron-right"
+    theme.apply_theme(qt_app, "dark")
+    try:
+        rtl = toggle.icon().pixmap(QSize(16, 16)).toImage()
+        # The reference is drawn left to right, where "chevron-left" is itself.
+        qt_app.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        try:
+            ltr_left = icons.icon("chevron-left").pixmap(QSize(16, 16)).toImage()
+            ltr_right = icons.icon("chevron-right").pixmap(QSize(16, 16)).toImage()
+        finally:
+            qt_app.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        # Under RTL, "chevron-right" is drawn as chevron-left, in the dark theme's colour.
+        assert rtl == ltr_left
+        assert rtl != ltr_right
+    finally:
+        theme.apply_theme(qt_app, "light")
