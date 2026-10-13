@@ -162,6 +162,9 @@ this is the only place anyone hears each platform's build recognise speech.
       This has not been seen on a real machine yet.
 - [ ] On macOS, after choosing a language, check that the settings file is at
       `~/Library/Preferences/com.qalun.Qalun.plist`, as `README.md` says.
+- [ ] Run `QT_QPA_PLATFORM=offscreen venv/bin/python tools/screenshots.py output/shots` and
+      look at every image in both themes and both languages: primary buttons filled,
+      icons on every button, nothing unreadable.
 
 ## Words
 

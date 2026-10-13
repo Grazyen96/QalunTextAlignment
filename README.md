@@ -273,6 +273,9 @@ is running). Arabic lays the window out right to left; the review timeline runs
 right to left in both languages (see above). The Arabic text is a draft awaiting
 review by a native speaker.
 
+The window follows the desktop's light or dark scheme; **Theme** in the footer
+pins it to Light or Dark.
+
 **Where settings live.** The window's settings (the language, the last choices
 on the form, hidden jobs and job output folders) are kept where Qt keeps
 settings for an app named Qalun:
