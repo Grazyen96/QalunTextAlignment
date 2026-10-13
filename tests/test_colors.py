@@ -37,8 +37,8 @@ def _palette(window: QColor, base: QColor) -> QPalette:
     return palette
 
 
-LIGHT = _palette(QColor(239, 239, 239), QColor(255, 255, 255))
-DARK = _palette(QColor(53, 53, 53), QColor(35, 35, 35))
+LIGHT = _palette(QColor("#F4F3F0"), QColor("#FFFFFF"))
+DARK = _palette(QColor("#1C1B1A"), QColor("#262523"))
 
 
 def test_lightness_is_read_from_the_window_colour() -> None:
