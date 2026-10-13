@@ -24,6 +24,7 @@ def test_defaults_on_an_empty_ini(settings) -> None:
     assert prefs.hidden_jobs == set()
     assert prefs.job_dirs == []
     assert (prefs.surah_num, prefs.from_ayah, prefs.to_ayah) == (None, None, None)
+    assert prefs.theme == "system"
 
 
 def test_every_key_round_trips(tmp_path) -> None:
@@ -43,9 +44,11 @@ def test_every_key_round_trips(tmp_path) -> None:
     written.hide_job(tmp_path / "b.qalun.json")
     written.job_dirs = [tmp_path / "extra1", tmp_path / "extra2"]
     written.surah_num, written.from_ayah, written.to_ayah = 25, 7, 11
+    written.theme = "dark"
 
     reread = Prefs(QSettings(path, QSettings.Format.IniFormat))
     assert reread.mode == "lecture"
+    assert reread.theme == "dark"
     assert reread.preset == "high"
     assert reread.subtitles == "both"
     assert reread.formats == ("srt", "vtt", "ass")
@@ -579,3 +582,16 @@ def test_generated_settings_are_remembered_apart_from_the_kind(settings, tmp_pat
     assert prefs.default_episode_kinds == ("generated", "none")
     with pytest.raises(TypeError):
         prefs.save_default_episode(KEEP_DEFAULT, KEEP_DEFAULT, intro_remembered=newer)
+
+
+def test_theme_round_trips_and_an_unknown_value_reads_as_system(tmp_path) -> None:
+    from PySide6.QtCore import QSettings
+
+    ini = tmp_path / "prefs.ini"
+    prefs = Prefs(QSettings(str(ini), QSettings.Format.IniFormat))
+    prefs.theme = "dark"
+    assert Prefs(QSettings(str(ini), QSettings.Format.IniFormat)).theme == "dark"
+    with pytest.raises(ValueError):
+        prefs.theme = "amoled"
+    ini.write_text("[General]\ntheme=amoled\n", encoding="utf-8")
+    assert Prefs(QSettings(str(ini), QSettings.Format.IniFormat)).theme == "system"

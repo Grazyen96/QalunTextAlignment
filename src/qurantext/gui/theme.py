@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QPalette
 
 __all__ = [
@@ -27,8 +28,11 @@ __all__ = [
     "SP_24",
     "SP_32",
     "Tokens",
+    "apply_theme",
+    "current_tokens",
     "font",
     "palette",
+    "resolve",
     "stylesheet",
     "tokens_for",
 ]
@@ -225,3 +229,84 @@ def font(role: str) -> QFont:
     elif role == "clock" and hasattr(QFont, "setFeature") and hasattr(QFont, "Tag"):
         base.setFeature(QFont.Tag("tnum"), 1)
     return base
+
+
+#: Application properties: the tokens in force and the mode they came from.
+TOKENS_PROPERTY = "qalun.tokens"
+MODE_PROPERTY = "qalun.theme_mode"
+_CONNECTED_PROPERTY = "qalun.scheme_connected"
+_FUSION_PROPERTY = "qalun.fusion_set"
+
+
+def _style_hints(app):
+    """Qt's style hints; a seam the tests replace with a scheme of their choosing."""
+    return app.styleHints()
+
+
+def resolve(mode: str, app) -> Tokens:
+    """The tokens *mode* means right now; ``system`` asks the desktop, Unknown counts as light."""
+    if mode not in MODES:
+        raise ValueError(f"Unknown theme {mode!r}; choose from {', '.join(MODES)}.")
+    if mode != "system":
+        return tokens_for(mode)
+    hints = _style_hints(app)
+    scheme = hints.colorScheme() if hasattr(hints, "colorScheme") else None
+    return DARK if scheme == Qt.ColorScheme.Dark else LIGHT
+
+
+def current_tokens(app=None) -> Tokens:
+    """The tokens in force on *app* (the running application by default); LIGHT before any apply."""
+    if app is None:
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+    tokens = app.property(TOKENS_PROPERTY) if app is not None else None
+    return tokens if isinstance(tokens, Tokens) else LIGHT
+
+
+def apply_theme(app, mode: str) -> Tokens:
+    """Put *mode*'s palette and stylesheet on *app* and re-tint every window's icons.
+
+    Fusion is set once, so the palette draws the same on every platform.
+    In ``system`` mode the desktop's scheme is followed: the change signal
+    is connected once per application, and the slot re-applies only while
+    the mode is still ``system``.
+    """
+    tokens = resolve(mode, app)
+    if not app.property(_FUSION_PROPERTY):
+        # Not asked of app.style(): once a sheet is set that is Qt's sheet proxy, never "fusion".
+        app.setStyle("Fusion")
+        app.setProperty(_FUSION_PROPERTY, True)
+    app.setProperty(MODE_PROPERTY, mode)
+    app.setProperty(TOKENS_PROPERTY, tokens)
+    app.setPalette(palette(tokens))
+    app.setStyleSheet(stylesheet(tokens))
+    _follow_the_desktop(app)
+    _refresh_every_window(app)
+    return tokens
+
+
+def _follow_the_desktop(app) -> None:
+    if app.property(_CONNECTED_PROPERTY):
+        return
+    hints = _style_hints(app)
+    signal = getattr(hints, "colorSchemeChanged", None)
+    if signal is None:
+        return  # a Qt before 6.5: system resolves once, on apply
+    signal.connect(lambda _scheme=None: _on_scheme_changed(app))
+    app.setProperty(_CONNECTED_PROPERTY, True)
+
+
+def _on_scheme_changed(app) -> None:
+    if app.property(MODE_PROPERTY) == "system":
+        apply_theme(app, "system")
+
+
+def _refresh_every_window(app) -> None:
+    """Re-tint the icons on every top-level widget (a no-op until ``gui.icons`` exists)."""
+    try:
+        from qurantext.gui.icons import refresh_icons
+    except ImportError:
+        return
+    for widget in app.topLevelWidgets():
+        refresh_icons(widget)

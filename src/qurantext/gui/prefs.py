@@ -28,6 +28,7 @@ from qurantext.config.settings import ENGINES, VIDEO_PRESETS
 from qurantext.core.looks import NIGHT_GOLD, Look, look_from_style
 from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.gui.i18n import LANGUAGES
+from qurantext.gui.theme import MODES as THEME_MODES
 from qurantext.jobs.episode_assets import EPISODE_SUFFIXES, GeneratedIntro, GeneratedOutro
 from qurantext.jobs.look_assets import copy_by_content
 from qurantext.jobs.project import SUBTITLE_CHOICES
@@ -124,6 +125,21 @@ class Prefs:
             self._settings.setValue("language", value)
         else:
             raise ValueError(f"Unknown language {value!r}; choose from {', '.join(LANGUAGES)}.")
+        self._settings.sync()
+
+    # -- theme ------------------------------------------------------------------
+
+    @property
+    def theme(self) -> str:
+        """``system`` (follow the desktop), ``light`` or ``dark``; anything else reads as ``system``."""
+        value = self._settings.value("theme", "system")
+        return value if isinstance(value, str) and value in THEME_MODES else "system"
+
+    @theme.setter
+    def theme(self, value: str) -> None:
+        if value not in THEME_MODES:
+            raise ValueError(f"Unknown theme {value!r}; choose from {', '.join(THEME_MODES)}.")
+        self._settings.setValue("theme", value)
         self._settings.sync()
 
     # -- mode -----------------------------------------------------------------

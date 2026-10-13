@@ -118,3 +118,84 @@ def test_spacing_is_an_eight_point_scale() -> None:
         24,
         32,
     )
+
+
+from PySide6.QtCore import Qt  # noqa: E402
+
+
+class _Hints:
+    """Stands in for QStyleHints: a scheme the test chooses, and the signal Qt would emit."""
+
+    def __init__(self, scheme) -> None:
+        self._scheme = scheme
+        self._slots = []
+
+    def colorScheme(self):  # noqa: N802 - Qt's name
+        return self._scheme
+
+    class _Signal:
+        def __init__(self, hints) -> None:
+            self._hints = hints
+
+        def connect(self, slot) -> None:
+            self._hints._slots.append(slot)
+
+    @property
+    def colorSchemeChanged(self):  # noqa: N802 - Qt's name
+        return self._Signal(self)
+
+    def change(self, scheme) -> None:
+        self._scheme = scheme
+        for slot in list(self._slots):
+            slot(scheme)
+
+
+@pytest.fixture()
+def hints(qt_app, monkeypatch):
+    stand_in = _Hints(Qt.ColorScheme.Light)
+    monkeypatch.setattr(theme, "_style_hints", lambda app: stand_in)
+    # An earlier apply may have connected the real hints; let this test connect the stand-in.
+    qt_app.setProperty(theme._CONNECTED_PROPERTY, False)
+    yield stand_in
+    qt_app.setProperty(theme._CONNECTED_PROPERTY, False)
+    theme.apply_theme(qt_app, "light")
+
+
+def test_light_and_dark_apply_their_palette_and_sheet(qt_app, hints) -> None:
+    tokens = theme.apply_theme(qt_app, "dark")
+    assert tokens is theme.DARK
+    assert qt_app.palette().color(QPalette.ColorRole.Window).name().upper() == theme.DARK.window
+    assert theme.DARK.accent in qt_app.styleSheet()
+    assert theme.current_tokens(qt_app) is theme.DARK
+    assert theme.apply_theme(qt_app, "light") is theme.LIGHT
+    qt_app.setStyleSheet("")  # with a sheet set, style() is Qt's sheet proxy, not Fusion
+    assert qt_app.style().objectName().lower() == "fusion"
+
+
+def test_system_follows_the_desktop_live(qt_app, hints) -> None:
+    hints.change(Qt.ColorScheme.Dark)
+    assert theme.apply_theme(qt_app, "system") is theme.DARK
+    hints.change(Qt.ColorScheme.Light)
+    assert theme.current_tokens(qt_app) is theme.LIGHT
+    hints.change(Qt.ColorScheme.Dark)
+    assert theme.current_tokens(qt_app) is theme.DARK
+
+
+def test_a_fixed_theme_ignores_the_desktop(qt_app, hints) -> None:
+    theme.apply_theme(qt_app, "light")
+    hints.change(Qt.ColorScheme.Dark)
+    assert theme.current_tokens(qt_app) is theme.LIGHT
+
+
+def test_an_unknown_scheme_counts_as_light(qt_app, hints) -> None:
+    hints.change(Qt.ColorScheme.Unknown)
+    assert theme.apply_theme(qt_app, "system") is theme.LIGHT
+
+
+def test_an_unknown_mode_is_refused(qt_app, hints) -> None:
+    with pytest.raises(ValueError):
+        theme.apply_theme(qt_app, "sepia")
+
+
+def test_current_tokens_before_any_apply_is_light() -> None:
+    assert theme.current_tokens(None) is theme.LIGHT
