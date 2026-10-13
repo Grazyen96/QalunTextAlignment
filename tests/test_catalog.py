@@ -84,6 +84,12 @@ def test_ayah_range() -> None:
     assert ayah_range([]) is None
 
 
+def test_one_ayah_reads_as_one_ayah_not_a_span() -> None:
+    assert ayah_range([_card(25, 7, 7)]) == "25:7"
+    assert ayah_range([_card(25, 7, 7), _card(25, 7, 7)]) == "25:7"
+    assert ayah_range([_card(25, 7, 7), _card(26, 7, 7)]) == "25:7–26:7"  # two surahs still span
+
+
 def test_a_malformed_card_marks_only_that_job_damaged(tmp_path) -> None:
     _save(tmp_path, "good")
     bad_path = tmp_path / "bad_recitation.qalun.json"

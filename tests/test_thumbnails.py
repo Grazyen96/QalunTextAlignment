@@ -14,6 +14,7 @@ from qurantext.jobs.project import Project, load_project, save_project
 _CARD = {
     "surah_num": 25, "surah_name": "الفرقان", "from_ayah": 7, "to_ayah": 7,
     "start_time": 1.0, "end_time": 4.0,
+    "full_text": "وَقَالُوا مَالِ هَٰذَا الرَّسُولِ يَأْكُلُ الطَّعَامَ",
     "word_timings": [{"word": "وَقَالُوا", "start": 1.0, "end": 2.0}],
 }  # fmt: skip
 
@@ -92,7 +93,7 @@ def test_a_missing_look_image_still_yields_a_thumbnail(tmp_path) -> None:
     assert png is not None
 
 
-def test_no_cache_dir_renders_in_memory_to_a_temp_file(tmp_path) -> None:
+def test_no_cache_dir_means_no_thumbnail(tmp_path) -> None:
     png = thumbnails.thumbnail_for(_project(tmp_path), None)
     assert png is None  # nothing to keep it in: the row draws the tile
 
@@ -102,3 +103,63 @@ def test_background_is_the_looks_frame_colour(tmp_path) -> None:
     from qurantext.core.looks import PRESETS
 
     assert thumbnails.background_for(project) == PRESETS["sand"].frame_bg[:3]
+
+
+def test_the_renderer_gets_the_card_as_the_video_draws_it(tmp_path, monkeypatch) -> None:
+    """The renderer reads the enriched fields only; a raw card drew an empty panel."""
+    seen = []
+    real = thumbnails.render_frame_pillow
+
+    def spying(at, card, *args, **kwargs):
+        seen.append((at, card))
+        return real(at, card, *args, **kwargs)
+
+    monkeypatch.setattr(thumbnails, "render_frame_pillow", spying)
+    thumbnails.thumbnail_for(_project(tmp_path), tmp_path / "cache")
+    ((at, card),) = seen
+    assert card["_display_text"] == _CARD["full_text"]
+    assert card["_word_timings"] and card["_start_time"] == 1.0
+    assert at == 2.5  # halfway into the first card, as the preview takes it
+
+
+def test_the_png_shows_more_than_one_colour(tmp_path) -> None:
+    png = thumbnails.thumbnail_for(_project(tmp_path), tmp_path / "cache")
+    with Image.open(png) as image:
+        colours = image.convert("RGB").getcolors(maxcolors=1 << 16)
+    assert colours is not None and len(colours) > 1
+
+
+def test_the_card_s_text_is_drawn(tmp_path) -> None:
+    """The same look with the ayah's text has more ink than with a blank body."""
+    from qurantext.core.video_common import validated_matches
+
+    with_text = thumbnails.thumbnail_for(_project(tmp_path), tmp_path / "cache")
+    blank_dir = tmp_path / "blank"
+    blank_dir.mkdir()
+    blank_card = dict(_CARD, full_text=" ", text="ـ")  # a tatweel: valid, draws next to nothing
+    assert validated_matches([blank_card], bridge_gaps=False)
+    blank = thumbnails.thumbnail_for(_project(blank_dir, cards=[blank_card]), tmp_path / "cache")
+
+    def colours(png) -> int:
+        with Image.open(png) as image:
+            return len(image.convert("RGB").getcolors(maxcolors=1 << 16))
+
+    assert colours(with_text) > colours(blank)
+
+
+def test_a_card_the_video_would_not_show_means_no_thumbnail(tmp_path) -> None:
+    broken = {k: v for k, v in _CARD.items() if k != "full_text"}  # no text: dropped
+    assert thumbnails.thumbnail_for(_project(tmp_path, cards=[broken]), tmp_path / "cache") is None
+
+
+def test_the_key_carries_its_version(tmp_path, monkeypatch) -> None:
+    """A PNG cached before the card's text was drawn is never served again."""
+    project = _project(tmp_path)
+    now = thumbnails.cache_key(project)
+    monkeypatch.setattr(thumbnails, "_KEY_VERSION", thumbnails._KEY_VERSION + 1)
+    assert thumbnails.cache_key(project) != now
+
+
+def test_the_png_is_written_whole_and_leaves_no_part_file(tmp_path) -> None:
+    png = thumbnails.thumbnail_for(_project(tmp_path), tmp_path / "cache")
+    assert [p.name for p in png.parent.iterdir()] == [png.name]

@@ -1493,6 +1493,19 @@ def test_the_spec_reads_the_machine_settings_from_prefs(qt_app, prefs, store, tm
         panel.deleteLater()
 
 
+def test_the_spec_takes_the_default_quran_when_the_override_s_file_is_gone(
+    qt_app, prefs, store, tmp_path
+) -> None:
+    panel = _panel(prefs, store)
+    try:
+        prefs.quran_override = tmp_path / "gone.txt"
+        panel.reload_settings()
+        assert panel.spec().quran == QURAN_FILE
+        assert prefs.quran_override == tmp_path / "gone.txt"  # kept for when the drive is back
+    finally:
+        panel.deleteLater()
+
+
 def test_reload_keeps_the_remembered_surah_when_the_store_still_has_it(
     qt_app, prefs, store
 ) -> None:
@@ -1566,14 +1579,18 @@ def test_rows_are_cards_with_a_chip_a_date_and_a_tile(
         (row,) = _listed_rows(panel)
         assert row.chip.text_label.text() == t("home.status.needs_review")
         assert row.chip.property("kind") == "attention"
-        # ayah_range writes a one-ayah card as a span too (catalog.ayah_range).
-        scope = "25:7–7"
+        # A one-ayah card reads as that ayah, not a span (catalog.ayah_range).
         assert row.detail_label.text() == t(
-            "home.detail", mode=t("home.mode.recitation"), scope=scope
+            "home.detail", mode=t("home.mode.recitation"), scope="25:7"
         )
-        assert row.date_label.text()  # the locale's short date
+        assert len(row.date_label.text()) == len("2026-10-13")  # the day, Latin digits
         assert not row.thumb_label.pixmap().isNull()
         assert row.thumb_label.size().width() == 48 and row.thumb_label.size().height() == 48
+        # The portrait picture covers the tile (centre kept), not a 27 px strip in it.
+        pixmap = row.thumb_label.pixmap()
+        assert (pixmap.width(), pixmap.height()) == (48, 48)
+        image = pixmap.toImage()
+        assert image.pixelColor(0, 24).alpha() == image.pixelColor(47, 24).alpha() == 255
     finally:
         panel.stop_reading()
         panel.deleteLater()
@@ -1615,6 +1632,147 @@ def test_the_empty_state_explains_the_modes_and_chooses_one(
         panel.mode_requested.connect(chosen.append)
         panel.empty_state.lecture_card.click()
         assert chosen == ["lecture"]
+    finally:
+        panel.stop_reading()
+        panel.deleteLater()
+
+
+def test_a_mode_card_chooses_on_release_and_describes_itself(qt_app) -> None:
+    from PySide6.QtTest import QTest
+
+    from qurantext.gui.home.job_list import EmptyState
+
+    state = EmptyState()
+    try:
+        state.resize(300, 500)
+        state.show()
+        card = state.lecture_card
+        assert card.accessibleDescription() == t("home.mode.lecture.desc")
+        chosen = []
+        state.mode_chosen.connect(chosen.append)
+        QTest.mousePress(card, Qt.MouseButton.LeftButton)
+        assert chosen == [], "a press alone chooses nothing, as on a button"
+        QTest.mouseRelease(card, Qt.MouseButton.LeftButton)
+        assert chosen == ["lecture"]
+    finally:
+        state.deleteLater()
+
+
+@pytest.mark.parametrize("mode", ["light", "dark"])
+@pytest.mark.parametrize("background", [(222, 222, 222), (20, 24, 30)])
+def test_the_fallback_tile_s_glyph_reads_on_the_tile_in_either_theme(
+    qt_app, mode, background
+) -> None:
+    """Review M6: the glyph is chosen for the tile, not the theme."""
+    from qurantext.gui import theme
+    from qurantext.gui.home.job_list import _thumbnail_pixmap
+    from qurantext.jobs.catalog import NEEDS_REVIEW, JobEntry
+
+    theme.apply_theme(qt_app, mode)
+    try:
+        entry = JobEntry(
+            Path("a.qalun.json"), "a", "recitation", NEEDS_REVIEW, 0.0, background=background
+        )
+        image = _thumbnail_pixmap(entry).toImage()
+        tile = image.pixelColor(0, 0).lightness()
+        inks = [image.pixelColor(x, y).lightness() for x in range(12, 36) for y in range(12, 36)]
+        # The glyph's strokes stand well apart from the tile they are drawn on.
+        assert max(abs(ink - tile) for ink in inks) > 128
+    finally:
+        theme.apply_theme(qt_app, "light")
+
+
+def test_the_row_buttons_hide_while_the_list_is_empty(
+    qt_app, prefs, tmp_path, no_default_job_dirs
+) -> None:
+    from qurantext.gui.home.job_list import JobListPanel
+    from tests.qt_helpers import wait_until_listed
+    from tests.test_thumbnails import _project
+
+    panel = JobListPanel(prefs)
+    try:
+        wait_until_listed(panel)
+        assert not panel.actions_row.isVisibleTo(panel)
+        _project(tmp_path)
+        prefs.job_dirs = [tmp_path]
+        panel.refresh()
+        wait_until_listed(panel)
+        assert panel.actions_row.isVisibleTo(panel)
+    finally:
+        panel.stop_reading()
+        panel.deleteLater()
+
+
+def test_a_long_name_is_elided_and_the_date_stays_in_view(
+    qt_app, prefs, tmp_path, no_default_job_dirs
+) -> None:
+    """Review I4: a recording's name of 120 characters in the 300 px list."""
+    from PySide6.QtCore import QPoint
+
+    from qurantext.gui.home.job_list import JobListPanel
+    from tests.qt_helpers import spin
+
+    name = ("Sheikh Example - Surah Al-Furqan - Ramadan night 3 (full) " * 3)[:120]
+    project = Project(
+        audio=tmp_path / f"{name}.mp3",
+        mode="recitation",
+        cards=[{**_card(), "full_text": "وَقَالُوا"}],
+    )
+    save_project(project, tmp_path / f"{name}_recitation.qalun.json")
+    prefs.job_dirs = [tmp_path]
+    panel = JobListPanel(prefs)
+    try:
+        panel.resize(300, 500)
+        panel.show()
+        (row,) = _listed_rows(panel)
+        spin(50)
+        assert len(row.name_label.toolTip()) >= 120
+        assert not panel.list.horizontalScrollBar().isVisible()
+        assert panel.list.horizontalScrollBar().maximum() == 0
+        shown = row.name_label.text()
+        assert "…" in shown and len(shown) < len(row.name_label.toolTip())
+        viewport = panel.list.viewport()
+        date = row.date_label
+        top_left = date.mapTo(viewport, QPoint(0, 0))
+        assert date.isVisible() and date.width() >= date.sizeHint().width()
+        assert 0 <= top_left.x() and top_left.x() + date.width() <= viewport.width()
+    finally:
+        panel.stop_reading()
+        panel.deleteLater()
+
+
+def test_the_read_names_the_folders_it_found_for_the_watcher(tmp_path, no_default_job_dirs) -> None:
+    """The watcher's folders come from the worker's read; the UI thread looks at no disk."""
+    from qurantext.gui.home.job_list import _read_jobs
+
+    listing = _read_jobs(1, [tmp_path, tmp_path / "unplugged"], frozenset())
+    assert listing.folders == (tmp_path,)
+
+
+def test_refresh_looks_at_no_folder_on_the_ui_thread(
+    qt_app, prefs, tmp_path, no_default_job_dirs, monkeypatch
+) -> None:
+    from qurantext.gui.home.job_list import JobListPanel
+    from tests.qt_helpers import wait_until_listed
+
+    prefs.job_dirs = [tmp_path]
+    panel = JobListPanel(prefs)
+    try:
+        wait_until_listed(panel)
+        ui = threading.get_ident()
+        looked = []
+        real = Path.is_dir
+
+        def is_dir(self):
+            if threading.get_ident() == ui:
+                looked.append(self)
+            return real(self)
+
+        monkeypatch.setattr(Path, "is_dir", is_dir)
+        panel.refresh()
+        wait_until_listed(panel)
+        assert looked == []
+        assert panel.watcher.directories() == [str(tmp_path)]
     finally:
         panel.stop_reading()
         panel.deleteLater()

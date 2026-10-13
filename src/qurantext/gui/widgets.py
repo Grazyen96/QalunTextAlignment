@@ -116,6 +116,10 @@ class StatusChip(QFrame):
         self.icon_label.setScaledContents(True)
         self.text_label = QLabel(text)
         self.text_label.setFont(theme.font("secondary"))
+        # A label inside a list's or table's viewport inherits its Base
+        # background and so paints with Text, not WindowText; pin the role, so
+        # the colour set on it (``_recolour``) is the one drawn wherever it sits.
+        self.text_label.setForegroundRole(QPalette.ColorRole.Text)
         self.text_label.installEventFilter(self)
         row.addWidget(self.icon_label)
         row.addWidget(self.text_label)

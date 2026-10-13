@@ -91,14 +91,16 @@ def _choices_changed_since_render(project: Project) -> bool:
 
 
 def ayah_range(cards: list[dict[str, Any]]) -> str | None:
-    """``25:7–11`` for the span the cards cover, or None when none names a surah."""
+    """``25:7–11`` for the span the cards cover (``25:7`` for one ayah), or None when none names a surah."""
     ayat = [c for c in cards if c.get("kind") != "preamble" and c.get("surah_num") is not None]
     if not ayat:
         return None
     first, last = ayat[0], ayat[-1]
     s1, a1 = int(first["surah_num"]), int(first["from_ayah"])
     s2, a2 = int(last["surah_num"]), int(last["to_ayah"])
-    return f"{s1}:{a1}–{a2}" if s1 == s2 else f"{s1}:{a1}–{s2}:{a2}"
+    if s1 != s2:
+        return f"{s1}:{a1}–{s2}:{a2}"
+    return f"{s1}:{a1}" if a1 == a2 else f"{s1}:{a1}–{a2}"
 
 
 def default_job_dirs() -> list[Path]:

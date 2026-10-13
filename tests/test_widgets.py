@@ -103,3 +103,19 @@ def test_a_chip_takes_the_new_colours_on_a_theme_switch(qt_app) -> None:
     theme.apply_theme(qt_app, "dark")
     shown = chip.text_label.palette().color(chip.text_label.foregroundRole())
     assert shown == QColor(theme.DARK.accent)
+
+
+def test_a_chip_in_a_list_paints_its_word_in_its_own_colour(qt_app) -> None:
+    """Inside a viewport a label paints with Text; the chip pins that role, so its colour shows."""
+    from PySide6.QtGui import QPalette
+    from PySide6.QtWidgets import QListWidget, QListWidgetItem
+
+    chip = widgets.StatusChip("Rendered", icon_name="film", kind="accent")
+    assert chip.text_label.foregroundRole() == QPalette.ColorRole.Text
+    host = QListWidget()
+    item = QListWidgetItem()
+    host.addItem(item)
+    host.setItemWidget(item, chip)
+    shown = chip.text_label.palette().color(chip.text_label.foregroundRole())
+    assert shown == QColor(theme.LIGHT.accent)
+    host.deleteLater()
