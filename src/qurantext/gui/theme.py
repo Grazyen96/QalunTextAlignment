@@ -191,6 +191,7 @@ QFrame[card="true"] {{
     border: 1px solid {t.border};
     border-radius: 10px;
 }}
+QFrame[card="true"][empty="true"] {{ border: none; background: {t.border}; border-radius: 2px; }}
 QFrame#dropZone {{
     background: {t.panel};
     border: 2px dashed {t.border};

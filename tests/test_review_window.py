@@ -301,8 +301,9 @@ def test_gaps_are_listed_with_a_jump_and_rechecked_from_the_cached_levels(qt_app
     window, player, _ = _window(qt_app, tmp_path)
     window.show()
     window._on_levels(_levels_with_speech_between(4.0, 6.0))
+    window.warnings.toggle_gaps()
     assert "2.0 s at 00:04.0–00:06.0" in window.warnings.text()
-    window.warnings.linkActivated.emit("4.000")
+    window.warnings.jump_to("4.000")
     assert player.position() == pytest.approx(4.0)
     assert window.time_label.text() == "00:04.00"
 
@@ -346,6 +347,7 @@ def test_a_card_with_no_word_timings_still_flags_its_loud_audio_as_uncovered(
     assert window.session.coverage_words() == []
 
     window._on_levels(_levels_with_speech_between(4.0, 6.0))
+    window.warnings.toggle_gaps()
     assert "2.0 s at 00:04.0–00:06.0" in window.warnings.text()
 
 
@@ -1132,6 +1134,7 @@ def test_the_strip_says_the_recording_is_being_checked_until_the_levels_arrive(
     assert t("review.checking") in window.warnings.text()
     window._on_levels(_levels_with_speech_between(4.0, 6.0))
     assert t("review.checking") not in window.warnings.text()
+    window.warnings.toggle_gaps()
     assert "2.0 s at 00:04.0–00:06.0" in window.warnings.text()
     assert _wait_for(lambda: window._jobs.active == 0, 10000)
 

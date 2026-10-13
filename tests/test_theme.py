@@ -87,6 +87,7 @@ def test_the_sheet_styles_what_fusion_cannot(tokens) -> None:
     assert "QFrame#dropZone" in sheet
     assert 'QFrame#dropZone[dragOver="true"]' in sheet
     assert 'QFrame[card="true"]' in sheet
+    assert 'QFrame[card="true"][empty="true"]' in sheet
     assert "QHeaderView::section" in sheet
     assert tokens.accent in sheet and tokens.on_accent in sheet
 

@@ -2,7 +2,7 @@
 
 This module is layout and wiring only. What an edit may do lives in
 :class:`ReviewSession` (and below it ``core.timing_edit``); how each widget
-draws lives in that widget (the small bars included: :class:`WarningsStrip`,
+draws lives in that widget (the small bars included: :class:`Banner`,
 :class:`SelectionBar`, :class:`ZoomSlider`, and the :class:`LookPanel`); the slow reads of the recording
 run through :class:`BackgroundJobs`. The window turns what the person does — a key, a
 click, a drag the strip reports — into session calls, and after every change
@@ -65,6 +65,7 @@ from qurantext.gui.jobs import JobOutcome
 from qurantext.gui.prefs import Prefs
 from qurantext.gui.review.ayah_picker import AyahPicker
 from qurantext.gui.review.background import BackgroundJobs
+from qurantext.gui.review.banner import Banner
 from qurantext.gui.review.episode_dialog import EpisodeDialog
 from qurantext.gui.review.export_dialog import ExportDialog
 from qurantext.gui.review.frame_view import FrameView
@@ -74,7 +75,6 @@ from qurantext.gui.review.segment_list import SegmentList
 from qurantext.gui.review.selection_bar import NUDGE_S, SelectionBar
 from qurantext.gui.review.session import ReviewSession, WordRef
 from qurantext.gui.review.viewport import Viewport
-from qurantext.gui.review.warnings_strip import WarningsStrip
 from qurantext.gui.review.waveform_view import WaveformView
 from qurantext.gui.review.word_strip import WordStrip
 from qurantext.gui.review.zoom_slider import ZoomSlider
@@ -357,7 +357,7 @@ class ReviewWindow(QMainWindow):
         toolbar.addWidget(self.render_cancel_button)
         column.addLayout(toolbar)
 
-        self.warnings = WarningsStrip()
+        self.warnings = Banner()
         column.addWidget(self.warnings)
 
         body = QWidget()
