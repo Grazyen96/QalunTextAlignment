@@ -656,18 +656,15 @@ def test_mirrored_chevrons_survive_a_theme_switch(qt_app, review_window) -> None
 
     toggle = review_window.look_panel.customise_toggle
     assert toggle.property("qalun.icon")[0] == "chevron-right"
-    theme.apply_theme(qt_app, "dark")
+    theme.apply_theme(qt_app, "dark")  # the shared fixture puts the theme back
+    rtl = toggle.icon().pixmap(QSize(16, 16)).toImage()
+    # The reference is drawn left to right, where "chevron-left" is itself.
+    qt_app.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
     try:
-        rtl = toggle.icon().pixmap(QSize(16, 16)).toImage()
-        # The reference is drawn left to right, where "chevron-left" is itself.
-        qt_app.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-        try:
-            ltr_left = icons.icon("chevron-left").pixmap(QSize(16, 16)).toImage()
-            ltr_right = icons.icon("chevron-right").pixmap(QSize(16, 16)).toImage()
-        finally:
-            qt_app.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        # Under RTL, "chevron-right" is drawn as chevron-left, in the dark theme's colour.
-        assert rtl == ltr_left
-        assert rtl != ltr_right
+        ltr_left = icons.icon("chevron-left").pixmap(QSize(16, 16)).toImage()
+        ltr_right = icons.icon("chevron-right").pixmap(QSize(16, 16)).toImage()
     finally:
-        theme.apply_theme(qt_app, "light")
+        qt_app.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+    # Under RTL, "chevron-right" is drawn as chevron-left, in the dark theme's colour.
+    assert rtl == ltr_left
+    assert rtl != ltr_right

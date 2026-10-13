@@ -42,6 +42,55 @@ def _english_left_to_right():
     _reset_to_english()
 
 
+#: The application properties ``gui.theme.apply_theme`` sets; restored after every test.
+_THEME_PROPERTIES = (
+    "qalun.tokens",
+    "qalun.theme_mode",
+    "qalun.fusion_set",
+    "qalun.scheme_connected",
+)
+
+
+@pytest.fixture(autouse=True)
+def _theme_does_not_leak():
+    """Every test leaves the application's palette, sheet, style and theme as it found them.
+
+    ``apply_theme`` sets all of them on the one ``QApplication`` the suite
+    shares; without this, a test that measures a layout passes or fails by
+    which theme test ran before it. A test that needs the theme applies it
+    itself, as the app does at start-up.
+    """
+    try:
+        from PySide6.QtWidgets import QApplication
+    except ModuleNotFoundError:
+        yield
+        return
+    app = QApplication.instance()
+    if app is None:
+        yield
+        return
+    from PySide6.QtGui import QPalette
+
+    palette = QPalette(app.palette())
+    sheet = app.styleSheet()
+    style_name = app.style().objectName()
+    properties = {name: app.property(name) for name in _THEME_PROPERTIES}
+    yield
+    if app.styleSheet() != sheet:
+        app.setStyleSheet(sheet)
+    if app.style().objectName() != style_name and style_name:
+        app.setStyle(style_name)
+    if app.palette() != palette:
+        app.setPalette(palette)
+    for name, value in properties.items():
+        app.setProperty(name, value)
+    try:
+        from qurantext.gui.icons import clear_cache
+    except ImportError:
+        return
+    clear_cache()
+
+
 @pytest.fixture()
 def no_basmala(monkeypatch):
     """Render without the basmala splice.
