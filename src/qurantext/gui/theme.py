@@ -305,8 +305,9 @@ def _on_scheme_changed(app) -> None:
 def _refresh_every_window(app) -> None:
     """Re-tint the icons on every top-level widget (a no-op until ``gui.icons`` exists)."""
     try:
-        from qurantext.gui.icons import refresh_icons
+        from qurantext.gui.icons import clear_cache, refresh_icons
     except ImportError:
         return
+    clear_cache()
     for widget in app.topLevelWidgets():
         refresh_icons(widget)

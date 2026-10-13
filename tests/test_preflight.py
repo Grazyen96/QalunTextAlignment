@@ -428,7 +428,12 @@ class TestWhatThePackagedAppMustDo:
 
     def test_release_checks_include_the_new_ones(self) -> None:
         names = {r.name for r in run_checks(release=True)}
-        assert {"Playback", "Window translation", "Arabic interface font"} <= names
+        assert {
+            "Playback",
+            "Window translation",
+            "Arabic interface font",
+            "Interface icons",
+        } <= names
 
     def test_a_headless_linux_doctor_draws_offscreen(self, monkeypatch) -> None:
         """With no platform chosen, Qt would try a display a CI machine lacks, and abort."""

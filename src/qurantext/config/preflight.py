@@ -1127,6 +1127,23 @@ def prepare_doctor_process(*, release: bool = False) -> None:
     os.environ["QT_LOGGING_RULES"] = rules
 
 
+def _interface_icons() -> CheckResult:
+    """Every icon the windows draw is on disk; a build without them would show blank buttons."""
+    try:
+        from qurantext.gui.icons import ICON_DIR, NAMES
+    except ImportError as error:
+        return CheckResult("Interface icons", Status.WARN, f"Qt is not installed ({error})")
+    missing = sorted(name for name in NAMES if not (ICON_DIR / f"{name}.svg").is_file())
+    if missing:
+        return CheckResult(
+            "Interface icons",
+            Status.FAIL,
+            f"{len(missing)} of {len(NAMES)} missing: {_joined(missing[:3])}",
+            "The icons ship inside the package under assets/icons; check that assets/ is included.",
+        )
+    return CheckResult("Interface icons", Status.OK, f"{len(NAMES)} icons in {ICON_DIR.name}/")
+
+
 def run_checks(*, release: bool = False) -> list[CheckResult]:
     """Every check, in the order a person would want to read them.
 
@@ -1143,6 +1160,7 @@ def run_checks(*, release: bool = False) -> list[CheckResult]:
         *_transcription(release),
         _bundled_font(),
         _title_parts(),
+        _interface_icons(),
         _bundled_quran(),
         _quran_store(),
         _writable_output(),
