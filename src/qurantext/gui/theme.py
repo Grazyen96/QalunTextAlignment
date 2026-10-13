@@ -4,7 +4,9 @@ Qt draws most of a Fusion window from the palette, so the palette carries
 the theme and the stylesheet names only what Fusion cannot express from a
 palette (a filled primary button, radii, the dashed drop zone). A rule on a
 combo, spin box, slider or scroll bar would replace Fusion's drawing of its
-parts — the arrows went missing in the first try — so none is written.
+parts — the arrows went missing in the first try — so none is written. The
+progress bar is left to Fusion too: under a rule its label is drawn in one
+colour and vanished over the chunk, where Fusion draws it in two.
 
 ``apply_theme`` (below, Task 2) is the one place the palette and the sheet
 are set; everything else asks ``current_tokens()``.
@@ -145,34 +147,44 @@ def stylesheet(tokens: Tokens) -> str:
 QPushButton, QToolButton {{
     border: 1px solid {t.border};
     border-radius: 6px;
-    padding: 5px 14px;
+    padding: 5px 10px;
     background: palette(button);
     color: palette(button-text);
 }}
-QToolButton[autoRaise="true"] {{ border-color: transparent; background: transparent; }}
+QToolButton[autoRaise="true"] {{
+    border-color: transparent;
+    background: transparent;
+    padding: 2px 4px;
+}}
 QPushButton:hover, QToolButton:hover {{ border-color: {t.accent}; }}
 QPushButton:pressed, QToolButton:pressed {{ background: {t.border}; }}
-QPushButton:checked, QToolButton:checked {{
+QPushButton[segment="true"]:checked, QToolButton[swatch="true"]:checked {{
     background: {t.accent};
     color: {t.on_accent};
     border-color: {t.accent};
 }}
 QPushButton:disabled, QToolButton:disabled {{ color: {t.secondary}; border-color: {t.border}; }}
-QPushButton:focus, QToolButton:focus {{ outline: none; border: 2px solid {t.accent}; padding: 4px 13px; }}
+QPushButton[segment="true"]:checked:disabled, QToolButton[swatch="true"]:checked:disabled {{
+    background: {t.panel};
+    color: {t.secondary};
+    border: 1px solid {t.accent};
+}}
+QPushButton:focus, QToolButton:focus {{ outline: none; border: 2px solid {t.accent}; padding: 4px 9px; }}
+QToolButton[autoRaise="true"]:focus {{ padding: 1px 3px; }}
 QPushButton[primary="true"] {{
     background: {t.accent};
     color: {t.on_accent};
     border: none;
     font-weight: 600;
-    padding: 7px 22px;
+    padding: 7px 18px;
 }}
 QPushButton[primary="true"]:hover {{ background: {hover_primary}; }}
-QPushButton[primary="true"]:focus {{ border: 2px solid {t.text}; padding: 5px 20px; }}
+QPushButton[primary="true"]:focus {{ border: 2px solid {t.text}; padding: 5px 16px; }}
 QPushButton[primary="true"]:disabled {{
     background: {t.panel};
     color: {t.secondary};
     border: 1px solid {t.border};
-    padding: 6px 21px;
+    padding: 6px 17px;
 }}
 QFrame[card="true"] {{
     background: {t.raised};
@@ -185,7 +197,7 @@ QFrame#dropZone {{
     border-radius: 10px;
 }}
 QFrame#dropZone[dragOver="true"] {{ border: 2px solid {t.accent}; background: {t.window}; }}
-QFrame[chip="true"] {{ background: {t.border}; border: none; border-radius: 11px; }}
+QFrame[chip="true"] {{ background: {t.window}; border: 1px solid {t.border}; border-radius: 11px; }}
 QListWidget, QTableWidget, QScrollArea {{
     border: 1px solid {t.border};
     border-radius: 8px;
@@ -200,8 +212,6 @@ QHeaderView::section {{
     padding: 6px;
     font-weight: 600;
 }}
-QProgressBar {{ border: none; border-radius: 3px; background: {t.border}; text-align: center; }}
-QProgressBar::chunk {{ background: {t.accent}; border-radius: 3px; }}
 QStatusBar {{ background: {t.window}; color: {t.text}; }}
 QToolTip {{ background: {t.panel}; color: {t.text}; border: 1px solid {t.border}; padding: 4px; }}
 """

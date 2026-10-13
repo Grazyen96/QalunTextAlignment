@@ -466,6 +466,10 @@ def _read_jobs(
     return _Listing(generation, tuple(entries))
 
 
+#: What a row hears when the theme, or a bare palette, changes under it.
+_PALETTE_EVENTS = (QEvent.Type.PaletteChange, QEvent.Type.ApplicationPaletteChange)
+
+
 class _JobRow(QWidget):
     """The two-line label shown for one job: bold name, then mode/scope/status."""
 
@@ -497,6 +501,7 @@ class _JobRow(QWidget):
         # on it is the one drawn, wherever the row ends up.
         for label in (self.name_label, self.detail_label):
             label.setForegroundRole(QPalette.ColorRole.Text)
+            label.installEventFilter(self)
         self._paint_labels()
 
     def set_selected(self, selected: bool) -> None:
@@ -505,13 +510,22 @@ class _JobRow(QWidget):
             self._selected = selected
             self._paint_labels()
 
-    def changeEvent(self, event: QEvent) -> None:  # noqa: N802 - Qt override
+    def event(self, event: QEvent) -> bool:  # noqa: A003 - Qt override
         # A theme switched while the app runs: the amber, or the highlighted
         # text, chosen for the old palette may not read on the new one. Setting
         # a label's palette sends PaletteChange to the label, not here.
-        super().changeEvent(event)
-        if event.type() == QEvent.Type.PaletteChange and (self._warning or self._selected):
+        handled = super().event(event)
+        if event.type() in _PALETTE_EVENTS and (self._warning or self._selected):
             self._paint_labels()
+        return handled
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802 - Qt override
+        # The switch sets the palette, then the sheet; re-polishing a label for
+        # the sheet puts back the palette it had before the switch (the old
+        # amber), after the row has painted. So paint again once it has.
+        if event.type() == QEvent.Type.StyleChange and (self._warning or self._selected):
+            self._paint_labels()
+        return False
 
     def _paint_labels(self) -> None:
         """Colour the two lines for the palette the row paints on, and its selection.

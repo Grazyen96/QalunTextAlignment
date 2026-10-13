@@ -58,7 +58,7 @@ ICON_PROPERTY = "qalun.icon"
 
 _SIZES = (16, 20, 24)
 _RATIOS = (1.0, 2.0)
-_cache: dict[tuple[str, str, str, bool], QIcon] = {}
+_cache: dict[tuple[str, str, str | None, str, bool], QIcon] = {}
 
 
 def clear_cache() -> None:
@@ -97,31 +97,53 @@ def _rtl() -> bool:
     return app is not None and app.isRightToLeft()
 
 
-def icon(name: str, role: str = "text") -> QIcon:
-    """*name* drawn in the theme's *role* colour (disabled in ``secondary``), mirrored under RTL."""
+def icon(name: str, role: str = "text", on_role: str | None = None) -> QIcon:
+    """*name* drawn in the theme's *role* colour (disabled in ``secondary``), mirrored under RTL.
+
+    *on_role* is for a checkable button the sheet fills when checked: its
+    ``On`` state is drawn in that colour, so the icon reads on the fill as
+    the label beside it does. Without it the ``On`` state is the ``Off`` one.
+    """
     tokens = current_tokens()
     rtl = _rtl()
-    key = (name, role, tokens.name, rtl)
+    key = (name, role, on_role, tokens.name, rtl)
     cached = _cache.get(key)
     if cached is not None:
         return cached
     drawn_name = MIRRORED.get(name, name) if rtl else name
     svg = _svg(drawn_name)
     normal, disabled = _colour(tokens, role), _colour(tokens, "secondary")
+    checked = _colour(tokens, on_role) if on_role is not None else None
     result = QIcon()
     for size in _SIZES:
         for ratio in _RATIOS:
             result.addPixmap(_pixmap(svg, normal, size, ratio), QIcon.Mode.Normal)
-            result.addPixmap(_pixmap(svg, disabled, size, ratio), QIcon.Mode.Disabled)
+            dimmed = _pixmap(svg, disabled, size, ratio)
+            result.addPixmap(dimmed, QIcon.Mode.Disabled)
+            if checked is not None:
+                on = QIcon.State.On
+                result.addPixmap(_pixmap(svg, checked, size, ratio), QIcon.Mode.Normal, on)
+                # A checked button that is disabled loses its fill (the sheet), so not its grey.
+                result.addPixmap(dimmed, QIcon.Mode.Disabled, on)
     _cache[key] = result
     return result
 
 
-def set_icon(button: QAbstractButton, name: str, role: str = "text", size: int = 20) -> None:
-    """Put *name* on *button* at *size* px, and remember it for the next theme switch."""
-    button.setIcon(icon(name, role))
+def set_icon(
+    button: QAbstractButton,
+    name: str,
+    role: str = "text",
+    size: int = 20,
+    on_role: str | None = None,
+) -> None:
+    """Put *name* on *button* at *size* px, and remember it for the next theme switch.
+
+    The record is ``(name, role, size)``, with *on_role* appended when given.
+    """
+    button.setIcon(icon(name, role, on_role))
     button.setIconSize(QSize(size, size))
-    button.setProperty(ICON_PROPERTY, (name, role, size))
+    record = (name, role, size) if on_role is None else (name, role, size, on_role)
+    button.setProperty(ICON_PROPERTY, record)
 
 
 def refresh_icons(root: QWidget) -> int:
@@ -129,8 +151,9 @@ def refresh_icons(root: QWidget) -> int:
     count = 0
     for button in root.findChildren(QAbstractButton):
         recorded = button.property(ICON_PROPERTY)
-        if isinstance(recorded, (tuple, list)) and len(recorded) == 3:
-            name, role, size = recorded
-            set_icon(button, str(name), str(role), int(size))
+        if isinstance(recorded, (tuple, list)) and len(recorded) in (3, 4):
+            name, role, size = recorded[:3]
+            on_role = str(recorded[3]) if len(recorded) == 4 else None
+            set_icon(button, str(name), str(role), int(size), on_role)
             count += 1
     return count

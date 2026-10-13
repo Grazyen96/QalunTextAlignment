@@ -128,13 +128,15 @@ in the brainstorm renders). The generated sheet therefore names only:
 
 | Selector | Rule |
 |---|---|
-| `QPushButton`, `QToolButton` | 1 px `border` border, 6 px radius, 5 px 14 px padding, `panel` background; `:hover` border `accent`; `:pressed` background `border`; `:disabled` text `secondary`; `:focus` 2 px `accent` outline. |
-| `QPushButton[primary="true"]` | `accent` background, `on_accent` text, no border, weight 600, 7 px 22 px padding; `:hover` 8 % darker (light) or lighter (dark); `:disabled` background `border`, text `secondary`. |
+| `QPushButton`, `QToolButton` | 1 px `border` border, 6 px radius, 5 px 10 px padding (auto-raise tool buttons 2 px 4 px), `panel` background; `:hover` border `accent`; `:pressed` background `border`; `:disabled` text `secondary`; `:focus` 2 px `accent` outline. `[segment="true"]` and `[swatch="true"]` only: `:checked` `accent` / `on_accent`, and `:checked:disabled` `secondary` text on `panel` with an `accent` outline. (Fix wave 2026-10-13: 14 px padding did not fit 1280 px; a generic `:checked` filled the disclosure toggles.) |
+| `QPushButton[primary="true"]` | `accent` background, `on_accent` text, no border, weight 600, 7 px 18 px padding; `:hover` 8 % darker (light) or lighter (dark); `:disabled` background `border`, text `secondary`. |
 | `QFrame#dropZone` | 2 px dashed `border`, 10 px radius, `panel` background; `[dragOver="true"]` solid `accent` border (keeps today's property). |
 | `QListWidget`, `QTableWidget`, `QScrollArea` | 1 px `border` border, 8 px radius, `panel` background. |
 | `QHeaderView::section` | `window` background, no border but a 1 px bottom `border`, 6 px padding, weight 600. |
-| `QProgressBar` | no border, 3 px radius, `border` background; `::chunk` `accent`, 3 px radius. |
 | `QStatusBar`, `QToolTip` | `window` / `panel` background, `text` colour, 1 px `border` border on the tip. |
+
+`QProgressBar` has no rule (fix wave 2026-10-13): Fusion draws it from the
+palette, with its label in two colours over and beside the chunk.
 
 The sheet is built by string formatting from one `Tokens`, so dark and RTL
 need no second sheet. The two stylesheets that exist today

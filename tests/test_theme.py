@@ -88,8 +88,61 @@ def test_the_sheet_styles_what_fusion_cannot(tokens) -> None:
     assert 'QFrame#dropZone[dragOver="true"]' in sheet
     assert 'QFrame[card="true"]' in sheet
     assert "QHeaderView::section" in sheet
-    assert "QProgressBar::chunk" in sheet
     assert tokens.accent in sheet and tokens.on_accent in sheet
+
+
+@pytest.mark.parametrize("tokens", THEMES, ids=IDS)
+def test_the_progress_bar_is_left_to_fusion(tokens) -> None:
+    """A sheet rule on the bar draws its label in one colour, unreadable over the chunk."""
+    assert "QProgressBar" not in theme.stylesheet(tokens)
+
+
+def _rule(sheet: str, selector: str) -> dict[str, str]:
+    """The declarations of the rule whose selector list is exactly *selector*."""
+    head = selector + " {"
+    assert head in sheet, selector
+    body = sheet.split(head, 1)[1].split("}", 1)[0]
+    declarations = {}
+    for part in body.split(";"):
+        if ":" in part:
+            name, value = part.split(":", 1)
+            declarations[name.strip()] = value.strip()
+    return declarations
+
+
+def _measured(declarations: dict[str, str]) -> float:
+    return contrast(_c(declarations["color"]), _c(declarations["background"]))
+
+
+@pytest.mark.parametrize("tokens", THEMES, ids=IDS)
+def test_a_disabled_primary_keeps_its_text_readable(tokens) -> None:
+    rule = _rule(theme.stylesheet(tokens), 'QPushButton[primary="true"]:disabled')
+    assert _measured(rule) >= 4.5
+
+
+@pytest.mark.parametrize("tokens", THEMES, ids=IDS)
+def test_a_checked_button_that_is_disabled_keeps_its_text_readable(tokens) -> None:
+    """While a job runs the chosen mode is checked and disabled: its word must still read."""
+    sheet = theme.stylesheet(tokens)
+    rule = _rule(
+        sheet,
+        'QPushButton[segment="true"]:checked:disabled, QToolButton[swatch="true"]:checked:disabled',
+    )
+    assert _measured(rule) >= 4.5
+    # Still marked as the chosen one: an accent outline, visible on its fill.
+    assert tokens.accent in rule["border"]
+    assert contrast(_c(tokens.accent), _c(rule["background"])) >= 3.0
+
+
+@pytest.mark.parametrize("tokens", THEMES, ids=IDS)
+def test_only_segments_and_swatches_are_filled_when_checked(tokens) -> None:
+    """A disclosure (More options, Customise) says open by its chevron, not by a fill."""
+    sheet = theme.stylesheet(tokens)
+    rule = _rule(sheet, 'QPushButton[segment="true"]:checked, QToolButton[swatch="true"]:checked')
+    assert rule["background"] == tokens.accent and rule["color"] == tokens.on_accent
+    assert _measured(rule) >= 4.5
+    for loose in ("QPushButton:checked", "QToolButton:checked"):
+        assert loose not in sheet, loose
 
 
 def test_tokens_are_found_by_name() -> None:
@@ -105,6 +158,10 @@ def test_fonts_follow_the_scale(qt_app) -> None:
     assert theme.font("secondary").pointSizeF() < body.pointSizeF()
     assert theme.font("section").weight() == QFont.Weight.DemiBold
     assert theme.font("clock").pointSizeF() == body.pointSizeF()
+    if hasattr(QFont, "setFeature") and hasattr(QFont, "Tag"):
+        # Tabular digits, so a running clock does not jitter (spec §6).
+        assert theme.font("clock").featureValue(QFont.Tag("tnum")) == 1
+        assert not theme.font("body").isFeatureSet(QFont.Tag("tnum"))
     with pytest.raises(KeyError):
         theme.font("huge")
 
@@ -156,9 +213,8 @@ def hints(qt_app, monkeypatch):
     monkeypatch.setattr(theme, "_style_hints", lambda app: stand_in)
     # An earlier apply may have connected the real hints; let this test connect the stand-in.
     qt_app.setProperty(theme._CONNECTED_PROPERTY, False)
-    yield stand_in
-    qt_app.setProperty(theme._CONNECTED_PROPERTY, False)
-    theme.apply_theme(qt_app, "light")
+    # conftest's fixture restores the theme and this property once the stand-in is gone.
+    return stand_in
 
 
 def test_light_and_dark_apply_their_palette_and_sheet(qt_app, hints) -> None:

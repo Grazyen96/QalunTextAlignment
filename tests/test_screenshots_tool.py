@@ -21,6 +21,8 @@ def test_the_tool_writes_one_image_per_screen_theme_and_language(
     names = {path.name for path in written}
     assert {
         "home-en-light.png",
+        "home-running-en-light.png",
+        "review-rendering-en-light.png",
         "review-recitation-en-light.png",
         "export-en-light.png",
         "ayah-picker-en-light.png",

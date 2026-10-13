@@ -7,7 +7,7 @@ were. The rest are small containers the stylesheet knows by a property.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QEvent, QObject, QSize, Qt
 from PySide6.QtGui import QColor, QPainter, QPalette
 from PySide6.QtWidgets import (
     QDialog,
@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -26,6 +27,16 @@ from qurantext.gui.icons import icon
 __all__ = ["CHIP_KINDS", "Card", "SectionHeader", "StatusChip", "make_primary"]
 
 CHIP_KINDS = ("attention", "accent", "neutral")
+
+
+def _keep_its_height(widget: QWidget) -> None:
+    """Take only the height the widget needs: a column's spare height is not its to share.
+
+    A plain ``QWidget`` is Preferred vertically, so beside a hidden list it
+    took half the column and floated its title down (the layout it replaced
+    never did).
+    """
+    widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
 
 def _repolish(widget: QWidget) -> None:
@@ -53,6 +64,7 @@ class SectionHeader(QWidget):
         self, text: str, trailing: QWidget | None = None, parent: QWidget | None = None
     ) -> None:
         super().__init__(parent)
+        _keep_its_height(self)
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(theme.SP_8)
@@ -75,6 +87,7 @@ class Card(QFrame):
         super().__init__(parent)
         self.setProperty("card", True)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        _keep_its_height(self)
         self.body = QVBoxLayout(self)
         self.body.setContentsMargins(theme.SP_16, theme.SP_16, theme.SP_16, theme.SP_16)
         self.body.setSpacing(theme.SP_8)
@@ -93,6 +106,7 @@ class StatusChip(QFrame):
         super().__init__(parent)
         self.setProperty("chip", True)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        _keep_its_height(self)
         self.setFixedHeight(22)
         row = QHBoxLayout(self)
         row.setContentsMargins(theme.SP_8, 0, theme.SP_8, 0)
@@ -102,11 +116,13 @@ class StatusChip(QFrame):
         self.icon_label.setScaledContents(True)
         self.text_label = QLabel(text)
         self.text_label.setFont(theme.font("secondary"))
+        self.text_label.installEventFilter(self)
         row.addWidget(self.icon_label)
         row.addWidget(self.text_label)
         self._icon_name = icon_name
         self._kind = kind
         self.set_kind(kind)
+        self._built = True
 
     def set_text(self, text: str) -> None:
         self.text_label.setText(text)
@@ -116,11 +132,27 @@ class StatusChip(QFrame):
             raise KeyError(kind)
         self._kind = kind
         self.setProperty("kind", kind)
+        self._recolour()
+        _repolish(self)
+
+    def event(self, event: QEvent) -> bool:  # noqa: A003 - Qt override
+        handled = super().event(event)
+        palette_events = (QEvent.Type.PaletteChange, QEvent.Type.ApplicationPaletteChange)
+        if event.type() in palette_events and getattr(self, "_built", False):
+            self._recolour()  # a theme switch: the old theme's colour may not read
+        return handled
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802 - Qt override
+        # Re-polishing the word for a new sheet puts back its palette from before the switch.
+        if event.type() == QEvent.Type.StyleChange and getattr(self, "_built", False):
+            self._recolour()
+        return False
+
+    def _recolour(self) -> None:
         palette = QPalette(self.text_label.palette())
         palette.setColor(self.text_label.foregroundRole(), self._colour())
         self.text_label.setPalette(palette)
         self._draw_icon()
-        _repolish(self)
 
     def _colour(self) -> QColor:
         tokens = theme.current_tokens()

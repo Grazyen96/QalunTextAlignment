@@ -1402,6 +1402,25 @@ def test_the_look_panel_sits_right_of_the_frame(qt_app, tmp_path) -> None:
     assert frame.x() <= panel.x() < waveform.x()
 
 
+@pytest.mark.parametrize("language", ["en", "ar"])
+def test_the_look_panel_fits_its_column_with_the_theme_on(qt_app, tmp_path, language) -> None:
+    """Nothing in the Look panel is cut at the column's edge (the horizontal bar is off)."""
+    from qurantext.gui import theme
+    from qurantext.gui.language import apply_language
+
+    apply_language(qt_app, language)
+    theme.apply_theme(qt_app, "light")
+    window, _, _ = _window(qt_app, tmp_path)
+    window.resize(1280, 800)
+    window.show()
+    _spin(20)
+    for customise_open in (False, True):  # Customise adds the colour buttons
+        window.look_panel.customise_toggle.setChecked(customise_open)
+        _spin(20)
+        needed = window.look_panel.minimumSizeHint().width()
+        assert needed <= window.look_scroll.viewport().width(), customise_open
+
+
 def test_discarding_puts_the_look_panel_back(qt_app, tmp_path, monkeypatch) -> None:
     window, _, _ = _window(qt_app, tmp_path)
     window.show()
@@ -1903,12 +1922,16 @@ def test_a_lecture_window_fits_a_1280_px_screen_while_rendering(
     """With the Episode button and "Episode: on" beside Render, idle and rendering.
 
     A generated intro and outro say "Episode: on" too, and their steps' words fit.
+    Measured with the theme on, as the app always runs: its padding is what
+    takes the room.
     """
+    from qurantext.gui import theme
     from qurantext.gui.i18n import t
     from qurantext.gui.language import apply_language
     from qurantext.jobs.episode_assets import EpisodeChoice, GeneratedIntro, GeneratedOutro
 
     apply_language(qt_app, language)
+    theme.apply_theme(qt_app, "light")
     window = _quoting_lecture_window(qt_app, tmp_path, db)
     if parts == "clips":
         choice = EpisodeChoice(tmp_path / "intro.mp4", None, tmp_path / "end.mp4")
@@ -2352,6 +2375,8 @@ def test_a_stopped_render_does_not_keep_the_last_episode_error(
 
 
 def test_the_review_window_wears_the_presentation_layer(qt_app, tmp_path) -> None:
+    from PySide6.QtCore import QSize
+
     from qurantext.gui import theme
 
     theme.apply_theme(qt_app, "light")
@@ -2371,6 +2396,16 @@ def test_the_review_window_wears_the_presentation_layer(qt_app, tmp_path) -> Non
         for button, name in expected.items():
             assert button.property("qalun.icon")[0] == name, name
         assert window.render_button.property("primary") is True
+        # The film on the accent fill is drawn in on_accent, as the word beside it is.
+        film = window.render_button.icon().pixmap(QSize(20, 20)).toImage()
+        film_colours = {
+            film.pixelColor(x, y).name().upper()
+            for x in range(film.width())
+            for y in range(film.height())
+            if film.pixelColor(x, y).alpha() > 200
+        }
+        assert theme.LIGHT.on_accent.upper() in film_colours
+        assert theme.LIGHT.text.upper() not in film_colours
         assert window.time_label.font().pointSizeF() == theme.font("clock").pointSizeF()
         player.play()
         assert window.play_button.property("qalun.icon")[0] == "pause"

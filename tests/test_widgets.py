@@ -6,10 +6,12 @@ import pytest
 
 pytest.importorskip("PySide6", reason="the window needs Qt: pip install 'qurantext[gui]'")
 
-from PySide6.QtWidgets import QDialog, QFrame, QLabel, QPushButton  # noqa: E402
+from PySide6.QtGui import QColor  # noqa: E402
+from PySide6.QtWidgets import QDialog, QFrame, QLabel, QPushButton, QSizePolicy  # noqa: E402
 
 from qurantext.gui import theme, widgets  # noqa: E402
 from qurantext.gui.colors import warning_color  # noqa: E402
+from tests.test_colors import contrast  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -72,3 +74,32 @@ def test_a_status_chip_shows_text_an_icon_and_its_kind(qt_app) -> None:
     plain = widgets.StatusChip("Reviewed")
     assert plain.icon_label.isHidden()
     assert chip.height() >= 22
+
+
+def test_the_composites_take_only_the_height_they_need(qt_app) -> None:
+    """Beside a hidden list, a header must not take half the column's spare height."""
+    for widget in (
+        widgets.SectionHeader("Your jobs"),
+        widgets.Card(),
+        widgets.StatusChip("Needs review"),
+    ):
+        assert widget.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Fixed, widget
+
+
+@pytest.mark.parametrize("mode", ["light", "dark"])
+@pytest.mark.parametrize("kind", widgets.CHIP_KINDS)
+def test_a_chips_word_reads_on_its_fill(qt_app, mode, kind) -> None:
+    """The chip sits on the window colour with a border outline, so each kind's word reads."""
+    tokens = theme.tokens_for(mode)
+    theme.apply_theme(qt_app, mode)
+    assert f"background: {tokens.window}" in qt_app.styleSheet().split('QFrame[chip="true"]')[1]
+    chip = widgets.StatusChip("Needs review", icon_name="circle-check", kind=kind)
+    shown = chip.text_label.palette().color(chip.text_label.foregroundRole())
+    assert contrast(shown, QColor(tokens.window)) >= 4.5
+
+
+def test_a_chip_takes_the_new_colours_on_a_theme_switch(qt_app) -> None:
+    chip = widgets.StatusChip("Needs review", icon_name="circle-check", kind="accent")
+    theme.apply_theme(qt_app, "dark")
+    shown = chip.text_label.palette().color(chip.text_label.foregroundRole())
+    assert shown == QColor(theme.DARK.accent)

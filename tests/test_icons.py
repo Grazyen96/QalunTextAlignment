@@ -21,10 +21,7 @@ from fetch_icons import ICON_NAMES  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def _light(qt_app):
-    theme.apply_theme(qt_app, "light")
-    icons.clear_cache()
-    yield
-    qt_app.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+    """Each test starts in Light with nothing cached; conftest puts the theme back after."""
     theme.apply_theme(qt_app, "light")
     icons.clear_cache()
 
@@ -105,4 +102,30 @@ def test_set_icon_records_the_choice_and_refresh_retints_it(qt_app) -> None:
     plain = QPushButton("No icon", root)
     assert icons.refresh_icons(root) == 1
     assert plain.icon().isNull()
+    root.deleteLater()
+
+
+def test_an_on_role_draws_the_checked_state_in_that_colour(qt_app) -> None:
+    """A checked button the sheet fills draws its icon in on_accent; disabled stays grey."""
+    drawn = icons.icon("mic", "text", on_role="on_accent")
+    on = drawn.pixmap(QSize(16, 16), QIcon.Mode.Normal, QIcon.State.On)
+    off = drawn.pixmap(QSize(16, 16), QIcon.Mode.Normal, QIcon.State.Off)
+    assert theme.LIGHT.on_accent.upper() in _colours(on)
+    assert theme.LIGHT.text.upper() in _colours(off)
+    disabled_on = drawn.pixmap(QSize(16, 16), QIcon.Mode.Disabled, QIcon.State.On)
+    assert theme.LIGHT.secondary.upper() in _colours(disabled_on)
+    # Without an on_role the checked state is the plain one (a disclosure chevron).
+    plain = icons.icon("chevron-down").pixmap(QSize(16, 16), QIcon.Mode.Normal, QIcon.State.On)
+    assert theme.LIGHT.text.upper() in _colours(plain)
+
+
+def test_a_refresh_keeps_the_on_role(qt_app) -> None:
+    root = QWidget()
+    button = QPushButton("Recitation", root)
+    button.setCheckable(True)
+    icons.set_icon(button, "mic", size=16, on_role="on_accent")
+    assert button.property("qalun.icon") == ("mic", "text", 16, "on_accent")
+    theme.apply_theme(qt_app, "dark")
+    on = button.icon().pixmap(QSize(16, 16), QIcon.Mode.Normal, QIcon.State.On)
+    assert theme.DARK.on_accent.upper() in _colours(on)
     root.deleteLater()

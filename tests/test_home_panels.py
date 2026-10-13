@@ -326,36 +326,54 @@ def test_a_row_built_on_a_dark_palette_gets_the_dark_amber(qt_app, prefs) -> Non
 
 
 def test_rows_on_screen_take_the_new_amber_when_the_theme_switches(qt_app, prefs) -> None:
-    from PySide6.QtGui import QColor, QPalette
+    """A real Light to Dark switch, sheet and all: the listed amber row is recoloured."""
+    from PySide6.QtGui import QColor
 
-    from qurantext.gui import colors
+    from qurantext.gui import colors, theme
 
     _two_jobs(prefs)
-    before = qt_app.palette()
-    light = QPalette()
-    light.setColor(QPalette.ColorRole.Window, QColor(239, 239, 239))
-    light.setColor(QPalette.ColorRole.Base, QColor(255, 255, 255))
-    dark = QPalette()
-    dark.setColor(QPalette.ColorRole.Window, QColor(53, 53, 53))
-    dark.setColor(QPalette.ColorRole.Base, QColor(35, 35, 35))
-    # A bare palette switch, as before the theme existed: a sheet an earlier test
-    # applied would keep the palette change from reaching the row.
-    sheet = qt_app.styleSheet()
-    qt_app.setStyleSheet("")
-    qt_app.setPalette(light)
+    theme.apply_theme(qt_app, "light")
+    panel = _listed(prefs)
     try:
-        panel = _listed(prefs)
         panel.show()
         row = panel.list.itemWidget(panel.list.item(0))
         label = row.detail_label
+        light = theme.palette(theme.LIGHT)
         assert label.palette().color(label.foregroundRole()) == colors.warning_color(light)
-        qt_app.setPalette(dark)
+        theme.apply_theme(qt_app, "dark")
         spin(0)
+        dark = theme.palette(theme.DARK)
         assert label.palette().color(label.foregroundRole()) == colors.warning_color(dark)
-        panel.close()
+        # A selected row takes the new theme's text on the highlight too.
+        panel.list.setCurrentRow(0)
+        theme.apply_theme(qt_app, "light")
+        spin(0)
+        on_highlight = QColor(theme.LIGHT.on_accent)
+        for line in (row.name_label, row.detail_label):
+            assert line.palette().color(line.foregroundRole()) == on_highlight
     finally:
-        qt_app.setPalette(before)
-        qt_app.setStyleSheet(sheet)
+        panel.close()
+
+
+@pytest.mark.parametrize("language", ["en", "ar"])
+def test_with_no_jobs_the_header_stays_at_the_top(qt_app, prefs, language) -> None:
+    """The title and Refresh head their column; the spare height goes below, not above."""
+    from qurantext.gui import theme
+    from qurantext.gui.language import apply_language
+
+    apply_language(qt_app, language)
+    theme.apply_theme(qt_app, "light")
+    panel = _listed(prefs)
+    try:
+        panel.resize(400, 680)
+        panel.show()
+        spin(0)
+        assert panel.list.count() == 0
+        assert panel.header.mapTo(panel, panel.header.rect().topLeft()).y() <= 40
+        assert panel.header.height() == panel.header.sizeHint().height()
+    finally:
+        panel.stop_reading()
+        panel.close()
 
 
 def test_a_selected_row_draws_its_lines_in_the_highlighted_text(qt_app, prefs) -> None:
@@ -963,7 +981,8 @@ def test_the_form_reads_top_down_with_choose_inside_the_drop_zone(qt_app, prefs,
 
     # The chosen mode is shown by the app's sheet, not a sheet of the button's own.
     assert panel.recitation_button.styleSheet() == ""
-    assert "QPushButton:checked" in theme.stylesheet(theme.LIGHT)
+    assert panel.recitation_button.property("segment") is True
+    assert 'QPushButton[segment="true"]:checked' in theme.stylesheet(theme.LIGHT)
     panel.close()
 
 
@@ -1424,7 +1443,6 @@ def test_the_footer_offers_the_theme_and_applies_it(qt_app, prefs, no_default_jo
         assert window.theme_combo.currentData() == "dark"
     finally:
         window.set_language("en")
-        theme.apply_theme(qt_app, "light")
         window.job_list.stop_reading()
         window.close()
         window.deleteLater()
@@ -1466,7 +1484,6 @@ def test_a_theme_switch_retints_an_open_review_window(qt_app, prefs, tmp_path) -
             == theme.DARK.window
         )
     finally:
-        theme.apply_theme(qt_app, "light")
         review.close()
         review.deleteLater()
 
@@ -1513,23 +1530,54 @@ def test_the_home_panels_wear_the_presentation_layer(
         panel.deleteLater()
 
 
+def test_the_chosen_mode_is_filled_and_its_icon_reads_on_the_fill(qt_app, prefs, store) -> None:
+    """The mode toggle is a segment: checked, its icon's On pixmap is drawn in on_accent."""
+    from PySide6.QtCore import QSize
+    from PySide6.QtGui import QIcon
+
+    from qurantext.gui import theme
+
+    theme.apply_theme(qt_app, "light")
+    panel = _panel(prefs, store)
+    try:
+        panel.lecture_button.setChecked(True)
+        for button in (panel.recitation_button, panel.lecture_button):
+            assert button.property("segment") is True
+        assert panel.more_button.property("segment") is None  # a disclosure, never filled
+        on = panel.lecture_button.icon().pixmap(QSize(16, 16), QIcon.Mode.Normal, QIcon.State.On)
+        image = on.toImage()
+        colours = {
+            image.pixelColor(x, y).name().upper()
+            for x in range(image.width())
+            for y in range(image.height())
+            if image.pixelColor(x, y).alpha() > 200
+        }
+        assert theme.LIGHT.on_accent.upper() in colours
+        sheet = qt_app.styleSheet()
+        assert 'QPushButton[segment="true"]:checked' in sheet
+        assert "QPushButton:checked" not in sheet and "QToolButton:checked" not in sheet
+    finally:
+        panel.deleteLater()
+
+
 def test_a_disabled_start_still_shows_its_text(qt_app, prefs, store) -> None:
-    """Review Focus 5: Start before a file is chosen is disabled, primary, and readable."""
-    from PySide6.QtWidgets import QStyleOptionButton
+    """Review Focus 5: Start before a file is chosen is disabled, primary, and readable.
+
+    Measured from what the sheet draws it with (its disabled-primary rule),
+    not from the palette, which the sheet overrides.
+    """
+    from PySide6.QtGui import QColor
 
     from qurantext.gui import theme
     from tests.test_colors import contrast
+    from tests.test_theme import _rule
 
     theme.apply_theme(qt_app, "light")
     panel = _panel(prefs, store)
     try:
         assert not panel.start_button.isEnabled()
-        option = QStyleOptionButton()
-        panel.start_button.initStyleOption(option)
-        text = option.palette.color(
-            option.palette.ColorGroup.Disabled, option.palette.ColorRole.ButtonText
-        )
-        assert contrast(text, option.palette.color(option.palette.ColorRole.Window)) >= 4.5
-        assert 'QPushButton[primary="true"]:disabled' in qt_app.styleSheet()
+        assert panel.start_button.property("primary") is True
+        rule = _rule(qt_app.styleSheet(), 'QPushButton[primary="true"]:disabled')
+        assert contrast(QColor(rule["color"]), QColor(rule["background"])) >= 4.5
     finally:
         panel.deleteLater()

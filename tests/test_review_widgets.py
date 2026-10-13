@@ -1112,6 +1112,26 @@ def test_the_opening_text_picker_clears_its_warning(qt_app, session, prefs, monk
     assert not panel.contrast_label.isVisible()
 
 
+def test_the_contrast_warning_takes_the_new_amber_on_a_theme_switch(qt_app, session, prefs) -> None:
+    from dataclasses import replace
+
+    from qurantext.core.looks import NIGHT_GOLD
+    from qurantext.gui import theme
+    from qurantext.gui.colors import warning_color
+
+    dark = (20, 20, 20, 255)
+    session.set_look(replace(NIGHT_GOLD, card=(240, 240, 235, 255), body_text=dark))
+    theme.apply_theme(qt_app, "light")
+    panel = _panel(session, prefs)
+    panel.show()
+    assert panel.contrast_label.isVisible()
+    light_amber = warning_color(theme.palette(theme.LIGHT)).name()
+    assert light_amber in panel.contrast_label.styleSheet()
+    theme.apply_theme(qt_app, "dark")
+    assert warning_color(theme.palette(theme.DARK)).name() in panel.contrast_label.styleSheet()
+    panel.close()
+
+
 def test_the_background_colour_sets_a_solid_background_and_the_frame(
     qt_app, session, prefs, monkeypatch
 ) -> None:

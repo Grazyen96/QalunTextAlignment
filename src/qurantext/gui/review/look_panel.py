@@ -160,7 +160,11 @@ def _swatch_icon(look: Look) -> QIcon:
     painter.setBrush(_qcolor(look.highlight_word))
     painter.drawRoundedRect(QRectF(23, 16, 17, 3), 1.5, 1.5)
     painter.end()
-    return QIcon(pixmap)
+    result = QIcon()
+    # The sample is the preset's own colours, chosen or not; say so for both states.
+    for state in (QIcon.State.Off, QIcon.State.On):
+        result.addPixmap(pixmap, QIcon.Mode.Normal, state)
+    return result
 
 
 def _chip_icon(colour: RGBA) -> QIcon:
@@ -333,6 +337,8 @@ class LookPanel(QWidget):
             button = QToolButton()
             button.setCheckable(True)
             button.setAutoRaise(True)
+            # The sheet fills the chosen swatch with the accent (``swatch`` marks it).
+            button.setProperty("swatch", True)
             button.setIcon(_swatch_icon(look))
             button.setIconSize(_SWATCH)
             button.setText(_preset_name(name))
@@ -508,10 +514,20 @@ class LookPanel(QWidget):
             separator = "، " if is_rtl() else ", "
             parts = separator.join(_colour_name(name) for name in names)
             self.contrast_label.setText(t("look.low_contrast", parts=parts))
-            colour = warning_color(self.palette()).name()
-            self.contrast_label.setStyleSheet(f"color: {colour};")
+            self._colour_contrast_label()
         self.contrast_label.setVisible(bool(names))
         self.look_notices.emit([look_warning_text(code) for code in layer.warnings])
+
+    def _colour_contrast_label(self) -> None:
+        """The warning in the amber that reads on the palette the panel paints on now."""
+        colour = warning_color(self.palette()).name()
+        self.contrast_label.setStyleSheet(f"color: {colour};")
+
+    def changeEvent(self, event: QEvent) -> None:  # noqa: N802 - Qt override
+        # A theme switch: the amber picked for the old palette may not read on the new one.
+        super().changeEvent(event)
+        if event.type() in (QEvent.Type.PaletteChange, QEvent.Type.ApplicationPaletteChange):
+            self._colour_contrast_label()
 
     # -- changes ----------------------------------------------------------------
 

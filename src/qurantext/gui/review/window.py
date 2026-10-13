@@ -319,9 +319,10 @@ class ReviewWindow(QMainWindow):
             (self.remove_button, "trash"),
             (self.export_button, "download"),
             (self.episode_button, "sparkles"),
-            (self.render_button, "film"),
         ):
             set_icon(button, name)
+        # On the accent fill, in the colour the label beside it is drawn in.
+        set_icon(self.render_button, "film", role="on_accent")
         make_primary(self.render_button)
         buttons = (
             self.save_button,

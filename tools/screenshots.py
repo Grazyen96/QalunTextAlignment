@@ -66,6 +66,7 @@ def shoot(out_dir: Path, *, themes=("light", "dark"), languages=("en", "ar")) ->
     from qurantext.config.paths import DEFAULT_QURAN_PATH, QURAN_DB_PATH
     from qurantext.data.quran_db import ensure_quran_db
     from qurantext.gui import theme
+    from qurantext.gui.i18n import t
     from qurantext.gui.language import apply_language
     from qurantext.gui.main_window import MainWindow
     from qurantext.gui.prefs import Prefs
@@ -90,10 +91,16 @@ def shoot(out_dir: Path, *, themes=("light", "dark"), languages=("en", "ar")) ->
                 tag = f"{language}-{name}"
                 # Fresh settings per pass, never the person's own.
                 prefs = Prefs(QSettings(str(tmp / f"prefs-{tag}.ini"), QSettings.Format.IniFormat))
+                prefs.theme = name  # so the footer's combo names the theme shown
                 home = MainWindow(prefs=prefs)
                 home.resize(1024, 680)
                 _spin(300)
                 written.append(_grab(home, out_dir / f"home-{tag}.png"))
+                # A job running with More options open: checked and disabled at once.
+                home.new_job.more_button.setChecked(True)
+                home.new_job.set_running(True)
+                written.append(_grab(home, out_dir / f"home-running-{tag}.png"))
+                home.new_job.set_running(False)
                 home.job_list.stop_reading()
                 home.close()
                 home.deleteLater()
@@ -102,6 +109,13 @@ def shoot(out_dir: Path, *, themes=("light", "dark"), languages=("en", "ar")) ->
                     review.resize(1280, 800)
                     review.seek(1.2)
                     written.append(_grab(review, out_dir / f"review-{mode}-{tag}.png"))
+                    if mode == "lecture":
+                        # A render most of the way: the label sits over the chunk.
+                        review._set_render_running(True)
+                        review.render_progress.setValue(70)
+                        review.render_progress.setFormat(t(review._render_progress_key, percent=70))
+                        written.append(_grab(review, out_dir / f"review-rendering-{tag}.png"))
+                        review._set_render_running(False)
                     if mode == "recitation":
                         export = ExportDialog(review.session, review)
                         written.append(_grab(export, out_dir / f"export-{tag}.png"))

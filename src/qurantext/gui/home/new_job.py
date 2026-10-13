@@ -151,8 +151,10 @@ class NewJobPanel(QWidget):
         self.recitation_button.setCheckable(True)
         self.lecture_button = QPushButton(t("home.mode.lecture"))
         self.lecture_button.setCheckable(True)
-        set_icon(self.recitation_button, "mic", size=16)
-        set_icon(self.lecture_button, "book-open", size=16)
+        # A segmented choice: the sheet fills the chosen one, and its icon turns on_accent.
+        for button, name in ((self.recitation_button, "mic"), (self.lecture_button, "book-open")):
+            button.setProperty("segment", True)
+            set_icon(button, name, size=16, on_role="on_accent")
         self._mode_group = QButtonGroup(self)
         self._mode_group.setExclusive(True)
         self._mode_group.addButton(self.recitation_button)
