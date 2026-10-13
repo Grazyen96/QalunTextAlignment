@@ -442,7 +442,7 @@ def test_engine_and_stage_strings_exist_in_both_languages() -> None:
         "home.engine.local",
         "home.engine.whisperx",
         "home.engine.no_token",
-        "home.engine.folded",
+        "home.engine.note",
     )
     for language in ("en", "ar"):
         for key in keys:

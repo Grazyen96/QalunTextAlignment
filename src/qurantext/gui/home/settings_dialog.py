@@ -3,7 +3,8 @@
 The form keeps only a job's own choices. Each control here writes ``Prefs``
 as it changes, as the form always has; the window applies a language or
 theme (which touch every window) and, after the dialog closes, tells the
-form and the list what to reload when ``changed_files`` is set.
+form and the list what to reload when ``changed_files`` is set: by a file or
+folder, or by the engine, whose upload note the form shows before Start.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import html
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QShowEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidget,
+    QListWidgetItem,
     QPushButton,
     QRadioButton,
     QTabWidget,
@@ -31,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 import qurantext
+from qurantext.config.links import GITHUB_URL
 from qurantext.config.paths import QURAN_INPUT_DIR, notices_path, user_log_dir, user_log_file
 from qurantext.config.settings import ENGINES, env_dir, get_settings
 from qurantext.core.looks import NIGHT_GOLD
@@ -44,7 +47,6 @@ from qurantext.gui.widgets import SectionHeader
 __all__ = ["GITHUB_URL", "TABS", "SettingsDialog"]
 
 TABS = ("general", "transcription", "files", "videos", "about")
-GITHUB_URL = "https://github.com/Grazyen96/QalunTextAlignment"
 
 
 def _token_missing() -> bool:
@@ -77,7 +79,8 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self._prefs = prefs
         self._quran_default = quran_default
-        #: Set once the Quran text, the output folder or the job folders changed.
+        #: Set once the Quran text, the output folder, the job folders or the
+        #: engine changed: what the form shows or the list reads.
         self.changed_files = False
         self.setWindowTitle(plain_title(t("settings.title")))
         self.setMinimumWidth(560)
@@ -168,6 +171,8 @@ class SettingsDialog(QDialog):
 
     def _engine_changed(self) -> None:
         self._prefs.engine = self._current_engine()
+        # The form says before Start that WhisperX uploads the recording.
+        self.changed_files = True
         self._show_token_note()
 
     def _show_token_note(self) -> None:
@@ -204,8 +209,6 @@ class SettingsDialog(QDialog):
         )
         self.job_dirs_list = QListWidget()
         self.job_dirs_list.setMaximumHeight(120)
-        for folder in self._prefs.job_dirs:
-            self.job_dirs_list.addItem(path_text(folder))
         dirs = QWidget()
         dirs_column = QVBoxLayout(dirs)
         dirs_column.setContentsMargins(0, 0, 0, 0)
@@ -223,7 +226,7 @@ class SettingsDialog(QDialog):
         dirs_column.addLayout(dir_buttons)
         form.addRow(t("settings.job_dirs"), dirs)
         self.job_dirs_list.currentRowChanged.connect(lambda *_: self._update_dir_buttons())
-        self._update_dir_buttons()
+        self._fill_dirs()
         self._update_quran_label()
         self._update_output_label()
         return page
@@ -274,9 +277,10 @@ class SettingsDialog(QDialog):
             self.set_output_dir(Path(name))
 
     def set_output_dir(self, path: Path | None) -> None:
-        self._prefs.output_dir = path
+        self._prefs.output_dir = path  # which also adds it to the job folders
         self.changed_files = True
         self._update_output_label()
+        self._fill_dirs()
 
     def _update_output_label(self) -> None:
         folder = self._prefs.output_dir
@@ -298,21 +302,49 @@ class SettingsDialog(QDialog):
         if folder not in dirs:
             dirs.append(folder)
             self._prefs.job_dirs = dirs
-            self.job_dirs_list.addItem(path_text(folder))
             self.changed_files = True
-        self._update_dir_buttons()
+        self._fill_dirs(select=folder)
 
     def _remove_dir(self) -> None:
-        row = self.job_dirs_list.currentRow()
-        if row < 0:
+        """Remove the chosen folder, found by the folder it names, never by its row.
+
+        ``Prefs.job_dirs`` changes behind the dialog (an output folder chosen,
+        a job finishing elsewhere); a row number would then name another folder.
+        """
+        self._fill_dirs()
+        item = self.job_dirs_list.currentItem()
+        folder = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+        if folder is None:
             return
         dirs = list(self._prefs.job_dirs)
-        if row < len(dirs):
-            del dirs[row]
+        if folder in dirs:
+            dirs.remove(folder)
             self._prefs.job_dirs = dirs
             self.changed_files = True
-        self.job_dirs_list.takeItem(row)
+        self._fill_dirs()
+
+    def _fill_dirs(self, select: Path | None = None) -> None:
+        """List ``Prefs.job_dirs`` as they are now, each row holding its folder.
+
+        The row that was chosen stays chosen while its folder is listed; *select*
+        chooses another.
+        """
+        current = self.job_dirs_list.currentItem()
+        if select is None and current is not None:
+            select = current.data(Qt.ItemDataRole.UserRole)
+        self.job_dirs_list.clear()
+        for folder in self._prefs.job_dirs:
+            item = QListWidgetItem(path_text(folder))
+            item.setData(Qt.ItemDataRole.UserRole, folder)
+            item.setToolTip(path_text(folder))
+            self.job_dirs_list.addItem(item)
+            if folder == select:
+                self.job_dirs_list.setCurrentItem(item)
         self._update_dir_buttons()
+
+    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 - Qt override
+        self._fill_dirs()  # a job may have added its folder since the dialog was built
+        super().showEvent(event)
 
     def _update_dir_buttons(self) -> None:
         self.remove_dir_button.setEnabled(self.job_dirs_list.currentRow() >= 0)
@@ -399,8 +431,12 @@ class SettingsDialog(QDialog):
             | Qt.TextInteractionFlag.LinksAccessibleByKeyboard
         )
         self.log_link.setToolTip(t("home.open_log_folder.tip", path=path_text(user_log_file())))
-        self.log_link.linkActivated.connect(lambda _link: open_folder(user_log_dir()))
+        self.log_link.linkActivated.connect(lambda _link: self._open_log_folder())
         column.addWidget(self.log_link)
+        self.log_failed_label = QLabel()
+        self.log_failed_label.setWordWrap(True)
+        self.log_failed_label.setVisible(False)
+        column.addWidget(self.log_failed_label)
         notices = notices_path()
         self.notices_link = QLabel(f'<a href="notices">{html.escape(t("settings.notices"))}</a>')
         self.notices_link.setTextInteractionFlags(self.log_link.textInteractionFlags())
@@ -412,9 +448,22 @@ class SettingsDialog(QDialog):
             self.notices_link.setEnabled(False)
             self.notices_link.setToolTip(t("settings.notices.missing"))
         column.addWidget(self.notices_link)
-        self.github_link = QLabel(f'<a href="{GITHUB_URL}">{html.escape(t("settings.github"))}</a>')
+        # Escaped: the tracked address carries "&" between its parameters.
+        self.github_link = QLabel(
+            f'<a href="{html.escape(GITHUB_URL)}">{html.escape(t("settings.github"))}</a>'
+        )
+        self.github_link.setToolTip(GITHUB_URL)
         self.github_link.setTextInteractionFlags(self.log_link.textInteractionFlags())
         self.github_link.setOpenExternalLinks(True)
         column.addWidget(self.github_link)
         column.addStretch(1)
         return page
+
+    def _open_log_folder(self) -> None:
+        """Open the logs' folder, or say under the link that it could not be opened."""
+        folder = user_log_dir()
+        opened = open_folder(folder)
+        self.log_failed_label.setText(
+            "" if opened else t("home.open_log_failed", path=path_text(folder))
+        )
+        self.log_failed_label.setVisible(not opened)

@@ -744,24 +744,28 @@ class NewJobPanel(QWidget):
         # The status line is shown again by ``show_status``, with the outcome.
         self._refresh()
 
-    def set_progress(self, fraction: float | None, text: str | None) -> None:
+    def set_progress(
+        self, fraction: float | None, text: str | None, *, keep_status: bool = False
+    ) -> None:
         """Show how far the job is: on the bar when it knows a fraction, on the line when it does not.
 
         A busy bar draws no text, so a stage without a fraction says its
         sentence on the status line; a stage with one says it on the bar and
-        the line goes quiet. *text* None leaves whatever is said as it is: the
-        window keeps an answer to the person up there while the bar moves on.
+        the line goes quiet. *text* None leaves whatever is said as it is.
+        *keep_status* leaves the line alone while the bar still says how far:
+        the window keeps an answer to the person up there while the bar moves on.
         """
         if fraction is None:
             self.progress_bar.setRange(0, 0)
-            if text is not None:
+            if text is not None and not keep_status:
                 self.show_status(text)
             return
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(int(max(0.0, min(1.0, fraction)) * 100))
         if text is not None:
             self.progress_bar.setFormat(text)
-            self.show_status("")
+            if not keep_status:
+                self.show_status("")
 
     def show_status(self, text: str) -> None:
         """Show *text* on the status line (hidden when empty), running or not.

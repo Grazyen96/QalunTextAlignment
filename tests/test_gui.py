@@ -2231,6 +2231,71 @@ def test_closing_settings_after_a_file_change_reloads_the_form_and_the_list(
     dialog.deleteLater()
 
 
+def test_choosing_whisperx_in_settings_shows_the_form_s_engine_note(
+    qt_app, home, prefs, monkeypatch
+) -> None:
+    """Review I2: the note that the recording is uploaded is on the form before Start."""
+    from PySide6.QtWidgets import QDialog
+
+    assert prefs.engine == "local" and home.new_job.engine_note.isHidden()
+
+    def choose_whisperx_and_close(dialog) -> int:
+        dialog.engine_buttons["whisperx"].setChecked(True)
+        dialog.close_button.click()
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(
+        "qurantext.gui.home.settings_dialog.SettingsDialog.exec", choose_whisperx_and_close
+    )
+    home.open_settings("transcription")
+    assert prefs.engine == "whisperx"
+    assert not home.new_job.engine_note.isHidden()
+
+    def choose_local_and_close(dialog) -> int:
+        dialog.engine_buttons["local"].setChecked(True)
+        dialog.close_button.click()
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(
+        "qurantext.gui.home.settings_dialog.SettingsDialog.exec", choose_local_and_close
+    )
+    home.open_settings("transcription")
+    assert home.new_job.engine_note.isHidden(), "back to local: nothing is uploaded"
+
+
+def test_choosing_the_language_already_in_use_leaves_settings_open(qt_app, home, prefs) -> None:
+    """Review M9: nothing switched, so nothing to close for."""
+    dialog = home.make_settings_dialog("general")
+    closed = []
+    dialog.accepted.connect(lambda: closed.append(1))
+    index = dialog.language_combo.findData("en")
+    dialog.language_combo.activated.emit(index)
+    assert closed == []
+    assert prefs.language == "en"  # still remembered as a choice
+    dialog.deleteLater()
+
+
+def test_while_an_answer_is_held_the_bar_still_says_how_far(qt_app, home) -> None:
+    """Review M5: the bar's words move on with its fill; the answer stays on the line."""
+    from qurantext.gui import main_window as module
+
+    bar = home.new_job.progress_bar
+    status = home.new_job.status_label
+    home.new_job.set_running(True)
+    home._cancel = object()  # a job is running, so an answer is held
+    try:
+        home._on_progress(ProgressEvent("render", "  Segments 4/10", fraction=0.4))
+        home._answer(module._Said("home.progress.stopping"))
+        held = status.text()
+        home._on_progress(ProgressEvent("render", "  Segments 6/10", fraction=0.6))
+        assert bar.value() == 60
+        assert bar.format() == module.t("home.progress.rendering", percent=60)
+        assert status.text() == held
+    finally:
+        home._cancel = None
+        home.new_job.set_running(False)
+
+
 # --- the window's language -----------------------------------------------------
 
 

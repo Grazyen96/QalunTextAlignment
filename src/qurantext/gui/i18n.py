@@ -114,7 +114,6 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
             "No Replicate token is set. Put REPLICATE_API_TOKEN=… in a file named .env "
             "in {folder}, then restart Qalun."
         ),
-        "home.engine.folded": "Transcription: WhisperX online, which uploads the recording.",
         "home.formats": "Files",
         "home.quran_override.default": "The certified text that ships with Qalun",
         "home.quran_override.custom": "{path}",
@@ -614,7 +613,6 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
             "لم يُضبط رمز Replicate. ضع السطر \u2066REPLICATE_API_TOKEN=…\u2069 في ملف "
             "باسم \u2066.env\u2069 داخل {folder}، ثم أعد تشغيل Qalun."
         ),
-        "home.engine.folded": "التفريغ: \u2066WhisperX\u2069 عبر الإنترنت، ويُرفَع التسجيل إليه.",
         "home.formats": "الملفات",
         "home.quran_override.default": "النص الموثَّق المرفق مع Qalun",
         "home.quran_override.custom": "\u200f{path}",
@@ -712,7 +710,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "home.help_failed": "تعذّر فتح صفحة المساعدة في المتصفح.",
         "home.mode.recitation.desc": "يوقّت آيات التلاوة كلمةً كلمة.",
         "home.mode.lecture.desc": "يجد الآيات المذكورة في المحاضرة ويعرضها في بطاقات.",
-        "home.engine.note": "ينسخ الصوت عبر الإنترنت بواسطة WhisperX، وهذا يرفع التسجيل.",
+        "home.engine.note": "ينسخ الصوت عبر الإنترنت بواسطة \u2068WhisperX\u2069، وهذا يرفع التسجيل.",
         "home.engine.change": "غيِّر ذلك في الإعدادات",
         "home.empty.title": "لا مهام بعد",
         "home.empty.hint": "أفلت تسجيلًا على اليسار لتبدأ مهمة.",

@@ -604,12 +604,13 @@ def test_the_no_token_note_keeps_the_setting_and_the_file_name_whole(qt_app) -> 
     assert left_to_right(line, parts) == parts, line
 
 
-def test_the_folded_engine_hint_keeps_whisperx_in_its_place(qt_app) -> None:
-    """Read from the right: the label, then WhisperX, then that the recording goes online."""
+def test_the_engine_note_keeps_whisperx_in_its_place(qt_app) -> None:
+    """Read from the right: it transcribes online, by WhisperX, which uploads the recording."""
     from tests.bidi_helpers import left_to_right
 
-    line = i18n.t("home.engine.folded")
-    parts = ["إليه", "عبر", "WhisperX", "التفريغ"]
+    line = i18n.t("home.engine.note")
+    assert "\u2068WhisperX\u2069" in line  # isolated, like every Latin run in Arabic
+    parts = ["التسجيل", "وهذا", "WhisperX", "بواسطة", "ينسخ"]
     assert left_to_right(line, parts) == parts, line
 
 
@@ -681,3 +682,25 @@ def test_the_header_and_the_form_column_mirror(qt_app, tmp_path, no_default_job_
     main.job_list.stop_reading()
     main.close()
     main.deleteLater()
+
+
+def test_the_empty_state_cards_mirror(qt_app, tmp_path, no_default_job_dirs) -> None:
+    """The kind's icon at the right of each card, its words to its left."""
+    from tests.qt_helpers import spin
+
+    panel = JobListPanel(_prefs(tmp_path))
+    try:
+        panel.resize(300, 600)
+        panel.show()
+        wait_until_listed(panel)
+        spin(50)
+        assert panel.empty_state.isVisible()
+        for card in (panel.empty_state.recitation_card, panel.empty_state.lecture_card):
+            assert card.layoutDirection() == RTL
+            assert (
+                card.icon_label.x()
+                > card.title_label.mapTo(card, card.title_label.rect().topLeft()).x()
+            )
+    finally:
+        panel.stop_reading()
+        panel.deleteLater()

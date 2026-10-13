@@ -110,6 +110,90 @@ def test_job_folders_list_add_and_remove(dialog, prefs, tmp_path, monkeypatch) -
     again.deleteLater()
 
 
+def test_a_folder_added_behind_the_dialog_s_back_is_removed_by_its_own_name(
+    qt_app, prefs, tmp_path, monkeypatch
+) -> None:
+    """Review I3: an output folder joins the job folders; Remove must still remove the one chosen."""
+    from qurantext.gui.home import settings_dialog as module
+
+    first, out, added = (tmp_path / name for name in ("a", "out", "b"))
+    for folder in (first, out, added):
+        folder.mkdir()
+    prefs.job_dirs = [first]
+    dialog = SettingsDialog(prefs, quran_default=QURAN_FILE)
+    try:
+        prefs.job_dirs = [first, out]  # a job finished into *out* while Settings was open
+        monkeypatch.setattr(module.QFileDialog, "getExistingDirectory", lambda *a, **k: str(added))
+        dialog.add_dir_button.click()
+        assert prefs.job_dirs == [first, out, added]
+        shown = [dialog.job_dirs_list.item(i).text() for i in range(dialog.job_dirs_list.count())]
+        assert shown == [path_text(first), path_text(out), path_text(added)]
+        assert dialog.job_dirs_list.currentItem().text() == path_text(added)
+        dialog.remove_dir_button.click()
+        assert prefs.job_dirs == [first, out], "the folder chosen goes, not the one at its row"
+    finally:
+        dialog.deleteLater()
+
+
+def test_remove_takes_the_folder_on_the_row_even_when_prefs_moved_under_it(
+    qt_app, prefs, tmp_path
+) -> None:
+    first, other = tmp_path / "a", tmp_path / "x"
+    prefs.job_dirs = [first]
+    dialog = SettingsDialog(prefs, quran_default=QURAN_FILE)
+    try:
+        dialog.job_dirs_list.setCurrentRow(0)
+        prefs.job_dirs = [other, first]  # the row number 0 now names another folder
+        dialog.remove_dir_button.click()
+        assert prefs.job_dirs == [other]
+        assert dialog.job_dirs_list.count() == 1
+        assert dialog.job_dirs_list.item(0).text() == path_text(other)
+    finally:
+        dialog.deleteLater()
+
+
+def test_choosing_an_output_folder_lists_it_among_the_job_folders(dialog, prefs, tmp_path) -> None:
+    dialog.set_output_dir(tmp_path)
+    shown = [dialog.job_dirs_list.item(i).text() for i in range(dialog.job_dirs_list.count())]
+    assert path_text(tmp_path.resolve()) in shown
+
+
+def test_changing_the_engine_flags_the_form_to_reload(dialog) -> None:
+    """Review I2: the form's upload note follows the engine chosen here."""
+    assert dialog.changed_files is False
+    dialog.engine_buttons["whisperx"].setChecked(True)
+    assert dialog.changed_files
+
+
+def test_a_log_folder_that_will_not_open_says_so_under_the_link(
+    dialog, monkeypatch, tmp_path
+) -> None:
+    from qurantext.gui.home import settings_dialog as module
+
+    monkeypatch.setattr(module, "user_log_dir", lambda: tmp_path / "logs")
+    monkeypatch.setattr(module, "open_folder", lambda folder: False)
+    assert dialog.log_failed_label.isHidden()
+    dialog.log_link.linkActivated.emit("logs")
+    assert not dialog.log_failed_label.isHidden()
+    assert dialog.log_failed_label.text() == t(
+        "home.open_log_failed", path=path_text(tmp_path / "logs")
+    )
+    monkeypatch.setattr(module, "open_folder", lambda folder: True)
+    dialog.log_link.linkActivated.emit("logs")
+    assert dialog.log_failed_label.isHidden()
+
+
+def test_the_github_link_is_the_tracked_one(dialog) -> None:
+    from PySide6.QtGui import QTextDocument
+
+    from qurantext.config.links import GITHUB_URL
+
+    document = QTextDocument()
+    document.setHtml(dialog.github_link.text())
+    href = document.begin().begin().fragment().charFormat().anchorHref()
+    assert href == GITHUB_URL and "utm_campaign=about" in href
+
+
 def test_videos_shows_and_resets_the_default_look_and_clears_the_episode(dialog, prefs) -> None:
     from qurantext.core.looks import NIGHT_GOLD, PRESETS
 

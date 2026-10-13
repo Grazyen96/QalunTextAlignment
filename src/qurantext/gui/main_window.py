@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from qurantext.config.links import README_URL
 from qurantext.config.paths import DEFAULT_QURAN_PATH, QURAN_INPUT_DIR
 from qurantext.gui import i18n
 from qurantext.gui.files import show_in_folder
@@ -47,10 +48,8 @@ from qurantext.gui.theme import apply_theme, current_tokens
 from qurantext.jobs.project import Project, load_project, project_path_for
 from qurantext.utils.progress import CancelToken, ProgressCallback, ProgressEvent
 
+#: README_URL (where Help goes, tracked) is re-exported from ``config.links``.
 __all__ = ["README_URL", "MainWindow"]
-
-#: Where Help goes: the project's README, which says how to use the app.
-README_URL = "https://github.com/Grazyen96/QalunTextAlignment#readme"
 
 #: The job list's share of the window; the form takes the rest.
 _JOB_LIST_WIDTH = 300
@@ -315,7 +314,7 @@ class MainWindow(QMainWindow):
             dialog.deleteLater()
 
     def _after_settings(self, dialog: SettingsDialog) -> None:
-        """What the dialog changed that the form shows or the list reads."""
+        """What the dialog changed that the form shows (the engine's note too) or the list reads."""
         if dialog.changed_files:
             self.new_job.reload_settings()
             self.job_list.refresh()
@@ -323,8 +322,13 @@ class MainWindow(QMainWindow):
     def _language_from_dialog(self, dialog: SettingsDialog, code: str) -> None:
         """Switch, or tell the dialog why not.
 
-        A switch rebuilds this window under a dialog still in the old words, so it closes.
+        A switch rebuilds this window under a dialog still in the old words, so it
+        closes. Choosing the language already in use switches nothing, so the
+        dialog stays open (the choice is still remembered).
         """
+        if code == i18n.current_language():
+            self.set_language(code)
+            return
         if self.set_language(code):
             dialog.accept()
         else:
@@ -439,7 +443,8 @@ class MainWindow(QMainWindow):
         text = _progress_text(event)
         self._show_running_row(text, event.fraction)
         if self._holding:
-            self.new_job.set_progress(event.fraction, None)  # the bar moves; the answer stays
+            # The bar moves on and says how far; the answer stays on the line.
+            self.new_job.set_progress(event.fraction, text, keep_status=True)
             return
         self._status = None
         self.new_job.set_progress(event.fraction, text)
