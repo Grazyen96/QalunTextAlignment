@@ -1392,3 +1392,73 @@ def test_a_lecture_spec_carries_the_default_generated_parts(
     assert panel.spec().episode_defaults == (None, None)
     panel.recitation_button.setChecked(True)
     assert panel.spec().episode_generated == (None, None)
+
+
+def test_the_footer_offers_the_theme_and_applies_it(qt_app, prefs, no_default_job_dirs) -> None:
+    from PySide6.QtGui import QPalette
+
+    from qurantext.gui import theme
+    from qurantext.gui.main_window import MainWindow
+
+    theme.apply_theme(qt_app, "light")
+    window = MainWindow(prefs=prefs)
+    try:
+        codes = [window.theme_combo.itemData(i) for i in range(window.theme_combo.count())]
+        assert codes == ["system", "light", "dark"]
+        assert window.theme_combo.currentData() == "system"
+        window.theme_combo.setCurrentIndex(codes.index("dark"))
+        window.theme_combo.activated.emit(codes.index("dark"))
+        assert prefs.theme == "dark"
+        assert qt_app.palette().color(QPalette.ColorRole.Window).name().upper() == theme.DARK.window
+        assert window.palette().color(QPalette.ColorRole.Window).name().upper() == theme.DARK.window
+        # A language switch rebuilds the footer; the choice survives it.
+        assert window.set_language("ar")
+        assert window.theme_combo.currentData() == "dark"
+    finally:
+        window.set_language("en")
+        theme.apply_theme(qt_app, "light")
+        window.job_list.stop_reading()
+        window.close()
+        window.deleteLater()
+
+
+@pytest.mark.xfail(strict=True, reason="icons land in Task 9")
+def test_a_theme_switch_retints_an_open_review_window(qt_app, prefs, tmp_path) -> None:
+    """Review Focus 1: the strip, the rows and every icon follow the switch."""
+    from PySide6.QtGui import QPalette
+
+    from qurantext.gui import theme
+    from qurantext.gui.review.player import FakePlayer
+    from qurantext.gui.review.window import ReviewWindow
+
+    theme.apply_theme(qt_app, "light")
+    cards = [
+        {
+            "surah_num": 25,
+            "from_ayah": 7,
+            "to_ayah": 7,
+            "full_text": "a b",
+            "confidence": 1.0,
+            "start_time": 0.0,
+            "end_time": 10.0,
+            "word_timings": [
+                {"word": "a", "start": 1.0, "end": 2.0},
+                {"word": "b", "start": 2.0, "end": 3.0},
+            ],
+        }
+    ]
+    project = Project(audio=tmp_path / "missing.mp3", cards=cards)
+    review = ReviewWindow(project, player=FakePlayer(duration=10.0), prefs=prefs)
+    try:
+        review.show()
+        before = review.save_button.icon().cacheKey()
+        theme.apply_theme(qt_app, "dark")
+        assert review.save_button.icon().cacheKey() != before
+        assert (
+            review.strip.palette().color(QPalette.ColorRole.Window).name().upper()
+            == theme.DARK.window
+        )
+    finally:
+        theme.apply_theme(qt_app, "light")
+        review.close()
+        review.deleteLater()

@@ -50,6 +50,8 @@ from qurantext.gui.review import ReviewWindow
 from qurantext.gui.review.background import BackgroundJobs
 from qurantext.gui.review.look_panel import look_warning_key
 from qurantext.gui.surahs import stored_surah_names, surah_label
+from qurantext.gui.theme import MODES as THEME_MODES
+from qurantext.gui.theme import apply_theme
 from qurantext.jobs.project import Project, load_project, project_path_for
 from qurantext.utils.progress import CancelToken, ProgressCallback, ProgressEvent
 
@@ -231,6 +233,16 @@ class MainWindow(QMainWindow):
         footer = QHBoxLayout()
         footer.addWidget(self.log_link)
         footer.addStretch(1)
+        # Beside the language: the other footer-level choice until Settings exists.
+        # Never disabled: a theme switch loses nothing, unlike a language switch.
+        self.theme_combo = QComboBox()
+        for code in THEME_MODES:
+            self.theme_combo.addItem(t(f"home.theme.{code}"), code)
+        self.theme_combo.setCurrentIndex(self.theme_combo.findData(self._prefs.theme))
+        self.theme_combo.activated.connect(self._theme_chosen)
+        footer.addWidget(QLabel(t("home.theme")))
+        footer.addWidget(self.theme_combo)
+        footer.addSpacing(12)
         footer.addWidget(QLabel(t("home.language")))
         footer.addWidget(self.language_combo)
 
@@ -248,6 +260,14 @@ class MainWindow(QMainWindow):
 
     def _language_chosen(self, index: int) -> None:
         self.set_language(self.language_combo.itemData(index))
+
+    def _theme_chosen(self, index: int) -> None:
+        self.set_theme(self.theme_combo.itemData(index))
+
+    def set_theme(self, code: str) -> None:
+        """Switch every window to *code* and remember it."""
+        self._prefs.theme = code
+        apply_theme(QApplication.instance(), code)
 
     def _select_language_in_combo(self, code: str) -> None:
         self.language_combo.setCurrentIndex(self.language_combo.findData(code))

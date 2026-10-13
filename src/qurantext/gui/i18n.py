@@ -197,6 +197,10 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "home.busy_matching": "This job is running again; open its review once it finishes.",
         "home.review_failed": "Could not open {name} for review: {details}",
         "home.language": "Language",
+        "home.theme": "Theme",
+        "home.theme.system": "System",
+        "home.theme.light": "Light",
+        "home.theme.dark": "Dark",
         "home.language_busy": (
             "Close the open reviews and wait for the job to finish before changing the language."
         ),
@@ -660,6 +664,10 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "home.busy_matching": "هذه المهمة قيد التشغيل مرة أخرى؛ افتح مراجعتها بعد أن تنتهي.",
         "home.review_failed": "تعذّر فتح {name} للمراجعة: {details}",
         "home.language": "اللغة",
+        "home.theme": "المظهر",
+        "home.theme.system": "حسب النظام",
+        "home.theme.light": "فاتح",
+        "home.theme.dark": "داكن",
         "home.language_busy": "أغلق المراجعات المفتوحة وانتظر انتهاء المهمة قبل تغيير اللغة.",
         "home.open_log_folder": "افتح مجلد السجلات",
         "home.open_log_folder.tip": "حيث يدوّن قالون ما حدث من أخطاء: {path}",

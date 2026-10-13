@@ -144,6 +144,9 @@ def main(argv: list[str] | None = None) -> int:
     # Before the window: every widget reads its words and direction as it is built.
     prefs = Prefs()
     apply_language(app, initial_language(prefs))
+    from qurantext.gui.theme import apply_theme
+
+    apply_theme(app, prefs.theme)
     window = MainWindow(prefs=prefs)
     window.show()
     code = app.exec()
