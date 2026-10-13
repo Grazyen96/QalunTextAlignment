@@ -662,3 +662,22 @@ def test_mirrored_chevrons_survive_a_theme_switch(qt_app, review_window) -> None
     # Under RTL, "chevron-right" is drawn as chevron-left, in the dark theme's colour.
     assert rtl == ltr_left
     assert rtl != ltr_right
+
+
+def test_the_header_and_the_form_column_mirror(qt_app, tmp_path, no_default_job_dirs) -> None:
+    from qurantext.gui.main_window import MainWindow
+    from tests.qt_helpers import spin
+
+    main = MainWindow(prefs=_prefs(tmp_path))
+    main.resize(1024, 680)
+    main.show()
+    wait_until_listed(main.job_list)
+    spin(100)
+    # The app's name at the right, Help (the trailing end) at the left.
+    assert main.header.help_button.x() < main.header.title_label.x()
+    column_right = main.new_job.column.mapTo(main, main.new_job.column.rect().topRight()).x()
+    panel_right = main.new_job.mapTo(main, main.new_job.rect().topRight()).x()
+    assert panel_right - column_right <= 2  # the column hugs the right edge
+    main.job_list.stop_reading()
+    main.close()
+    main.deleteLater()

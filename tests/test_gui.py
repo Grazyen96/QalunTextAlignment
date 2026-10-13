@@ -1154,25 +1154,41 @@ def _running_rows(window) -> list[str]:
     ]
 
 
-def test_the_home_window_is_the_job_list_beside_the_new_job_form(qt_app, home) -> None:
+@pytest.mark.parametrize("language", ["en", "ar"])
+def test_the_home_window_is_the_job_list_beside_the_new_job_form(qt_app, prefs, language) -> None:
+    from PySide6.QtCore import QEvent
     from PySide6.QtWidgets import QSplitter
 
     from qurantext.gui.home.job_list import JobListPanel
     from qurantext.gui.home.new_job import NewJobPanel
+    from qurantext.gui.language import apply_language
+    from qurantext.gui.main_window import MainWindow
 
-    assert home.windowTitle() == "Qalun"
-    splitter = home.centralWidget().findChild(QSplitter)
-    assert isinstance(splitter.widget(0), JobListPanel)
-    assert isinstance(splitter.widget(1), NewJobPanel)
-    assert splitter.widget(0) is home.job_list and splitter.widget(1) is home.new_job
+    # Built in the language, as a launch in it builds it (a widget takes the
+    # application's direction when it is made).
+    apply_language(qt_app, language)
+    home = MainWindow(prefs=prefs)
+    try:
+        wait_until_listed(home.job_list)
+        assert home.windowTitle() == "Qalun"
+        assert home.header.height() == 48
+        splitter = home.centralWidget().findChild(QSplitter)
+        assert isinstance(splitter.widget(0), JobListPanel)
+        assert isinstance(splitter.widget(1), NewJobPanel)
+        assert splitter.widget(0) is home.job_list and splitter.widget(1) is home.new_job
 
-    # The fullest the form gets: every option open, and a job running.
-    home.new_job.more_button.setChecked(True)
-    home.new_job.subtitle_buttons["both"].setChecked(True)
-    home.new_job.set_running(True)
-    for size in (home.minimumSize(), home.minimumSizeHint()):
-        assert size.width() <= 1024 and size.height() <= 680
-    home.new_job.set_running(False)
+        # The fullest the form gets: every option open, and a job running.
+        home.new_job.more_button.setChecked(True)
+        home.new_job.subtitle_buttons["both"].setChecked(True)
+        home.new_job.set_running(True)
+        for size in (home.minimumSize(), home.minimumSizeHint()):
+            assert size.width() <= 1024 and size.height() <= 680, (language, size)
+        home.new_job.set_running(False)
+    finally:
+        home.job_list.stop_reading()
+        home.deleteLater()
+        qt_app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        apply_language(qt_app, "en")
 
 
 def test_start_runs_matching_and_opens_its_review(
@@ -1327,6 +1343,23 @@ def test_the_status_line_says_each_stage_in_the_window_s_words(qt_app, home) -> 
     home._on_progress(ProgressEvent("render", "  Segments 4/10", fraction=0.4))
     assert home.new_job.progress_bar.format() == module.t("home.progress.rendering", percent=40)
     assert status.text() == ""
+
+
+def test_a_stage_without_a_fraction_takes_the_last_stage_s_percentage_off_the_bar(
+    qt_app, home
+) -> None:
+    """The bar said "Rendering — 40%"; the next stage has no fraction, so it must not keep that."""
+    from qurantext.gui import main_window as module
+
+    bar = home.new_job.progress_bar
+    status = home.new_job.status_label
+    home.new_job.set_running(True)
+    home._on_progress(ProgressEvent("render", "  Segments 4/10", fraction=0.4))
+    assert bar.format() == module.t("home.progress.rendering", percent=40)
+    home._on_progress(ProgressEvent("export", "Writing subtitle files..."))
+    assert bar.maximum() == 0, "a busy bar, which draws no text"
+    assert status.text() == module.t("job.stage.export")
+    home.new_job.set_running(False)
 
 
 @pytest.mark.parametrize("language", ["en", "ar"])
@@ -2116,7 +2149,10 @@ def desktop(monkeypatch):
     class Fake(_FakeDesktop):
         opened: list = []
 
+    from qurantext.gui import main_window
+
     monkeypatch.setattr(files, "QDesktopServices", Fake)
+    monkeypatch.setattr(main_window, "QDesktopServices", Fake, raising=False)
     return Fake
 
 
@@ -2128,52 +2164,71 @@ def test_open_log_folder_opens_the_logs_folder(
     from qurantext.gui.i18n import t
 
     monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
-    assert home.log_link.text() == f'<a href="logs">{t("home.open_log_folder")}</a>'
-    flags = home.log_link.textInteractionFlags()
+    dialog = home.make_settings_dialog("about")
+    assert dialog.log_link.text() == f'<a href="logs">{t("home.open_log_folder")}</a>'
+    flags = dialog.log_link.textInteractionFlags()
     assert flags & Qt.TextInteractionFlag.LinksAccessibleByKeyboard, "reachable without a mouse"
 
-    home.log_link.linkActivated.emit("logs")
+    dialog.log_link.linkActivated.emit("logs")
 
     folder = tmp_path / "data" / "logs"
     assert [url.toLocalFile() for url in desktop.opened] == [str(folder)]
     assert folder.is_dir(), "made first, so the file manager has something to open"
-    assert home._status is None, "nothing to say when it opened"
+    dialog.deleteLater()
 
 
-def test_open_log_folder_says_when_it_could_not(
-    qt_app, home, desktop, tmp_path, monkeypatch
-) -> None:
-    monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+def test_open_log_folder_is_said_in_the_new_language(qt_app, home) -> None:
+    from qurantext.gui import i18n
+
+    assert home.set_language("ar")
+    dialog = home.make_settings_dialog("about")
+    assert i18n.STRINGS["ar"]["home.open_log_folder"] in dialog.log_link.text()
+    dialog.deleteLater()
+
+
+def test_help_opens_the_readme(qt_app, home, desktop) -> None:
+    from qurantext.gui.main_window import README_URL
+
+    home.header.help_requested.emit()
+    assert [url.toString() for url in desktop.opened] == [README_URL]
+
+
+def test_help_says_when_the_browser_would_not_open(qt_app, home, desktop) -> None:
     desktop.answer = False
-
-    home.log_link.linkActivated.emit("logs")
-
-    assert home._status is not None and home._status.key == "home.open_log_failed"
-    from qurantext.gui.i18n import path_text
-
-    assert path_text(tmp_path / "data" / "logs") in home._status.text()
+    home.header.help_requested.emit()
+    assert home._status is not None and home._status.key == "home.help_failed"
 
 
-def test_open_log_folder_is_rebuilt_in_the_new_language(qt_app, home) -> None:
-    from qurantext.gui import i18n
+def test_the_gear_and_the_engine_note_open_settings(qt_app, home, monkeypatch) -> None:
+    from qurantext.gui.main_window import MainWindow
 
-    assert home.set_language("ar")
-    assert i18n.STRINGS["ar"]["home.open_log_folder"] in home.log_link.text()
+    asked: list = []
+    monkeypatch.setattr(MainWindow, "open_settings", lambda self, tab=None: asked.append(tab))
+    home.new_job.settings_requested.emit()
+    home.header.settings_requested.emit()
+    assert asked == ["transcription", None]
 
 
-def test_open_log_folder_leaves_the_arabic_footer_its_height(qt_app, home) -> None:
-    """No taller than the language's own label and combo: a button's frame around
-    Arabic letters made the footer, and so the window's minimum, 8 px taller."""
-    from PySide6.QtWidgets import QLabel
+def test_a_job_card_s_mode_reaches_the_form(qt_app, home) -> None:
+    home.job_list.mode_requested.emit("lecture")
+    assert home.new_job.lecture_button.isChecked()
+    home.job_list.mode_requested.emit("recitation")
+    assert home.new_job.recitation_button.isChecked()
 
-    from qurantext.gui import i18n
 
-    assert home.set_language("ar")
-    (label,) = [
-        w for w in home.findChildren(QLabel) if w.text() == i18n.STRINGS["ar"]["home.language"]
-    ]
-    language = max(label.sizeHint().height(), home.language_combo.sizeHint().height())
-    assert home.log_link.sizeHint().height() <= language
+def test_closing_settings_after_a_file_change_reloads_the_form_and_the_list(
+    qt_app, home, tmp_path, monkeypatch
+) -> None:
+    dialog = home.make_settings_dialog("files")
+    reloaded, refreshed = [], []
+    monkeypatch.setattr(home.new_job, "reload_settings", lambda: reloaded.append(1))
+    monkeypatch.setattr(home.job_list, "refresh", lambda: refreshed.append(1))
+    home._after_settings(dialog)
+    assert reloaded == [] and refreshed == [], "nothing changed, nothing to reload"
+    dialog.set_output_dir(tmp_path)
+    home._after_settings(dialog)
+    assert reloaded == [1] and refreshed == [1]
+    dialog.deleteLater()
 
 
 # --- the window's language -----------------------------------------------------
@@ -2207,7 +2262,9 @@ def test_switching_to_arabic_rebuilds_the_home_window(
     assert home.new_job.audio_path == audio  # the half-filled form survives
     assert home.new_job.surah_box.currentData() == surah
     assert (home.new_job.from_spin.value(), home.new_job.to_spin.value()) == (7, 11)
-    assert home.language_combo.currentData() == "ar"
+    dialog = home.make_settings_dialog()
+    assert dialog.language_combo.currentData() == "ar"
+    dialog.deleteLater()
     assert len(home.findChildren(NewJobPanel)) == 1, "the old panel is gone"
     spec = _spec(tmp_path)
     home.new_job.start_requested.emit(spec)
@@ -2216,18 +2273,25 @@ def test_switching_to_arabic_rebuilds_the_home_window(
     assert home.set_language("en")
     assert prefs.language == "en"
     assert home.job_list.title_label.text() == i18n.STRINGS["en"]["home.jobs"]
-    assert home.language_combo.currentData() == "en"
 
 
-def test_choosing_a_language_in_the_combo_switches_to_it(qt_app, home, prefs) -> None:
+def test_choosing_a_language_in_settings_switches_to_it_and_closes_settings(
+    qt_app, home, prefs
+) -> None:
+    from PySide6.QtWidgets import QDialog
+
     from qurantext.gui import i18n
 
-    index = home.language_combo.findData("ar")
-    home.language_combo.setCurrentIndex(index)
-    home.language_combo.activated.emit(index)
+    dialog = home.make_settings_dialog()
+    index = dialog.language_combo.findData("ar")
+    dialog.language_combo.setCurrentIndex(index)
+    dialog.language_combo.activated.emit(index)
 
     assert i18n.current_language() == "ar"
     assert prefs.language == "ar"
+    # Its words are the old language's; the window under it was rebuilt in the new one.
+    assert dialog.result() == QDialog.DialogCode.Accepted
+    dialog.deleteLater()
 
 
 def test_choosing_the_language_already_shown_is_remembered(qt_app, home, prefs) -> None:
@@ -2251,14 +2315,11 @@ def test_the_language_does_not_change_while_a_review_is_open(
     home._open_review(_saved_job(tmp_path / "jobs"))
     assert reviews, "the review should have opened"
 
-    index = home.language_combo.findData("ar")
-    home.language_combo.setCurrentIndex(index)  # what the person picked
     assert not home.set_language("ar")
 
     assert i18n.current_language() == "en"
     assert prefs.language is None
-    assert home.new_job.status_label.text() == module.t("home.language_busy")
-    assert home.language_combo.currentData() == "en"  # the combo snaps back
+    assert home.windowTitle() == module.t("app.title")
 
 
 def test_the_language_does_not_change_while_a_job_runs(
@@ -2278,53 +2339,44 @@ def test_the_language_does_not_change_while_a_job_runs(
     home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
     _spin_until(qt_app, lambda: home._cancel is not None)
     try:
-        home.language_combo.setCurrentIndex(home.language_combo.findData("ar"))
-        assert not home.set_language("ar")
+        dialog = home.make_settings_dialog()
+        dialog.language_combo.setCurrentIndex(dialog.language_combo.findData("ar"))
+        home._language_from_dialog(dialog, "ar")
 
         assert i18n.current_language() == "en"
-        assert home.new_job.status_label.text() == module.t("home.language_busy")
-        assert home.language_combo.currentData() == "en"
+        assert dialog.language_combo.currentData() == "en"  # the combo snaps back
+        assert dialog.language_note.text() == module.t("home.language_busy")
+        dialog.deleteLater()
     finally:
         release.set()
         _spin_until(qt_app, lambda: home._cancel is None)
         _spin_until(qt_app, lambda: home._jobs.active == 0)
 
 
-def test_the_language_combo_is_off_while_a_review_is_open(qt_app, home, reviews, tmp_path) -> None:
-    """Offered only when a switch would be allowed; the tooltip says why not."""
-    from qurantext.gui import main_window as module
-
-    assert home.language_combo.isEnabled() and home.language_combo.toolTip() == ""
-    home._open_review(_saved_job(tmp_path / "jobs"))
-    assert not home.language_combo.isEnabled()
-    assert home.language_combo.toolTip() == module.t("home.language_busy")
-
-    reviews[0].close()
-    assert home.language_combo.isEnabled() and home.language_combo.toolTip() == ""
-
-
-def test_the_language_combo_is_off_while_a_job_runs(
-    qt_app, home, reviews, tmp_path, monkeypatch
+def test_a_language_refused_while_a_review_is_open_snaps_the_dialog_back(
+    qt_app, home, reviews, tmp_path
 ) -> None:
-    import threading
+    """Review Focus 3."""
+    from PySide6.QtWidgets import QDialog
 
-    release = threading.Event()
+    from qurantext.gui.i18n import t
 
-    def wait_for_release(progress, cancel):
-        assert release.wait(timeout=10), "the test forgot to release the job"
-
-    _fake_matching(monkeypatch, before=wait_for_release)
-    home.new_job.start_requested.emit(_spec(tmp_path, output_dir=tmp_path / "jobs"))
-    _spin_until(qt_app, lambda: home._cancel is not None)
-    try:
-        assert not home.language_combo.isEnabled()
-    finally:
-        release.set()
-        _spin_until(qt_app, lambda: home._cancel is None)
-        _spin_until(qt_app, lambda: home._jobs.active == 0)
-    for review in list(reviews):  # the finished job opened its review
-        review.close()
-    assert home.language_combo.isEnabled()
+    home._open_review(_saved_job(tmp_path / "jobs"))
+    assert reviews, "the review should have opened"
+    dialog = home.make_settings_dialog()
+    dialog.language_combo.setCurrentIndex(dialog.language_combo.findData("ar"))
+    home._language_from_dialog(dialog, "ar")
+    assert dialog.language_combo.currentData() == "en"
+    assert dialog.language_note.text() == t("home.language_busy")
+    assert dialog.result() != QDialog.DialogCode.Accepted, "it stays open to say why"
+    assert home.windowTitle() == "Qalun"
+    dialog.deleteLater()
+    reviews[0].close()
+    # Once the review has closed, the same choice goes through.
+    dialog = home.make_settings_dialog()
+    home._language_from_dialog(dialog, "ar")
+    assert dialog.result() == QDialog.DialogCode.Accepted
+    dialog.deleteLater()
 
 
 def test_a_refusal_stays_up_until_the_job_s_stage_changes(
@@ -2374,14 +2426,13 @@ def test_a_language_switch_says_the_last_status_again_and_keeps_the_focus(
 
     saved = tmp_path / "jobs" / "a_recitation.qalun.json"
     home._review_saved(saved)
-    home.language_combo.setFocus()
 
     assert home.set_language("ar")
 
     status = home.new_job.status_label
     assert status.text() == i18n.t("main.saved", path=i18n.path_text(saved))  # in Arabic
     assert not status.isHidden()
-    assert home.focusWidget() is home.language_combo
+    assert home.focusWidget() is home.header.settings_button
 
 
 def test_a_status_said_from_raw_text_is_cleared_by_a_language_switch(qt_app, home) -> None:

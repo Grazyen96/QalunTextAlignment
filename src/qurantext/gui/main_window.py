@@ -12,19 +12,15 @@ review windows it opens — one per project.
 
 from __future__ import annotations
 
-import html
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtCore import QEvent, Qt, QUrl
+from PySide6.QtGui import QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
-    QComboBox,
-    QHBoxLayout,
-    QLabel,
     QMainWindow,
     QMessageBox,
     QSplitter,
@@ -32,16 +28,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from qurantext.config.paths import (
-    DEFAULT_QURAN_PATH,
-    QURAN_INPUT_DIR,
-    user_log_dir,
-    user_log_file,
-)
+from qurantext.config.paths import DEFAULT_QURAN_PATH, QURAN_INPUT_DIR
 from qurantext.gui import i18n
-from qurantext.gui.files import open_folder, show_in_folder
+from qurantext.gui.files import show_in_folder
+from qurantext.gui.home.header import HeaderBar
 from qurantext.gui.home.job_list import JobListPanel
 from qurantext.gui.home.new_job import NewJobPanel
+from qurantext.gui.home.settings_dialog import SettingsDialog
 from qurantext.gui.i18n import path_text, plain_title, t, tn
 from qurantext.gui.jobs import JobOutcome, JobSpec, match_path_for, run_matching, run_render
 from qurantext.gui.language import apply_language
@@ -50,12 +43,14 @@ from qurantext.gui.review import ReviewWindow
 from qurantext.gui.review.background import BackgroundJobs
 from qurantext.gui.review.look_panel import look_warning_key
 from qurantext.gui.surahs import stored_surah_names, surah_label
-from qurantext.gui.theme import MODES as THEME_MODES
-from qurantext.gui.theme import apply_theme
+from qurantext.gui.theme import apply_theme, current_tokens
 from qurantext.jobs.project import Project, load_project, project_path_for
 from qurantext.utils.progress import CancelToken, ProgressCallback, ProgressEvent
 
-__all__ = ["MainWindow"]
+__all__ = ["README_URL", "MainWindow"]
+
+#: Where Help goes: the project's README, which says how to use the app.
+README_URL = "https://github.com/Grazyen96/QalunTextAlignment#readme"
 
 #: The job list's share of the window; the form takes the rest.
 _JOB_LIST_WIDTH = 300
@@ -212,74 +207,33 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
 
-        # Built here, not once in __init__, so a language switch gets a fresh one in its words.
-        self.language_combo = QComboBox()
-        for code in i18n.LANGUAGES:
-            self.language_combo.addItem(i18n.LANGUAGE_NAMES[code], code)
-        self._select_language_in_combo(i18n.current_language())
-        self.language_combo.activated.connect(self._language_chosen)
-        # In the footer with the language, at its other end: the window's one other
-        # setting-like control, where the error log is, for whoever is asked to
-        # send it after something broke. A link, not a button: as tall as the
-        # language's own label, where a button's frame around Arabic letters
-        # made the footer, and so the whole window, 8 px taller.
-        self.log_link = QLabel(f'<a href="logs">{html.escape(t("home.open_log_folder"))}</a>')
-        self.log_link.setTextInteractionFlags(
-            Qt.TextInteractionFlag.LinksAccessibleByMouse
-            | Qt.TextInteractionFlag.LinksAccessibleByKeyboard
-        )
-        self.log_link.setToolTip(t("home.open_log_folder.tip", path=path_text(user_log_file())))
-        self.log_link.linkActivated.connect(self._open_log_folder)
-        footer = QHBoxLayout()
-        footer.addWidget(self.log_link)
-        footer.addStretch(1)
-        # Beside the language: the other footer-level choice until Settings exists.
-        # Never disabled: a theme switch loses nothing, unlike a language switch.
-        self.theme_combo = QComboBox()
-        for code in THEME_MODES:
-            self.theme_combo.addItem(t(f"home.theme.{code}"), code)
-        self.theme_combo.setCurrentIndex(self.theme_combo.findData(self._prefs.theme))
-        self.theme_combo.activated.connect(self._theme_chosen)
-        footer.addWidget(QLabel(t("home.theme")))
-        footer.addWidget(self.theme_combo)
-        footer.addSpacing(12)
-        footer.addWidget(QLabel(t("home.language")))
-        footer.addWidget(self.language_combo)
+        # Built here with the panels, so a language switch gets one in its words.
+        self.header = HeaderBar()
+        self.header.show_theme(current_tokens().name)
+        self.header.theme_toggle_requested.connect(self.toggle_theme)
+        self.header.settings_requested.connect(lambda: self.open_settings())
+        self.header.help_requested.connect(self._open_help)
+        self.new_job.settings_requested.connect(lambda: self.open_settings("transcription"))
+        self.job_list.mode_requested.connect(self.new_job.select_mode)
 
         root = QWidget()
         layout = QVBoxLayout(root)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.addWidget(splitter, 1)
-        layout.addLayout(footer)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self.header)
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(12, 12, 12, 12)
+        body_layout.addWidget(splitter, 1)
+        layout.addWidget(body, 1)
         self.setCentralWidget(root)
 
         splitter.setSizes([_JOB_LIST_WIDTH, max(0, self.width() - _JOB_LIST_WIDTH)])
-        self._update_language_combo()
 
     # -- language ---------------------------------------------------------------
 
-    def _language_chosen(self, index: int) -> None:
-        self.set_language(self.language_combo.itemData(index))
-
-    def _theme_chosen(self, index: int) -> None:
-        self.set_theme(self.theme_combo.itemData(index))
-
-    def set_theme(self, code: str) -> None:
-        """Switch every window to *code* and remember it."""
-        self._prefs.theme = code
-        apply_theme(QApplication.instance(), code)
-
-    def _select_language_in_combo(self, code: str) -> None:
-        self.language_combo.setCurrentIndex(self.language_combo.findData(code))
-
     def _language_busy(self) -> bool:
         return bool(self._reviews) or self._cancel is not None
-
-    def _update_language_combo(self) -> None:
-        """Offer a switch only when ``set_language`` would allow it; the tooltip says why not."""
-        busy = self._language_busy()
-        self.language_combo.setEnabled(not busy)
-        self.language_combo.setToolTip(t("home.language_busy") if busy else "")
 
     def set_language(self, code: str) -> bool:
         """Switch the window's language; refuse while anything could lose its place.
@@ -287,15 +241,13 @@ class MainWindow(QMainWindow):
         A review window holds unsaved corrections and a job its progress rows;
         rebuilding under them is where things would go missing, and switching a
         language is rare enough to ask for a quiet moment. Returns whether the
-        window is now in *code*.
+        window is now in *code*; Settings says why not when it is refused.
         """
         if code == i18n.current_language():
             # Picking the language the system already gave is still a choice to keep.
             self._prefs.language = code
             return True
         if self._language_busy():
-            self._select_language_in_combo(i18n.current_language())
-            self._answer(_Said("home.language_busy"))
             return False
         audio = self.new_job.audio_path
         sizes = self._splitter.sizes()
@@ -316,17 +268,67 @@ class MainWindow(QMainWindow):
             # the review or the box that showed it said it whole.
             self._status = self._status.without_raw()
             self.new_job.show_status(self._status.text() if self._status else "")
-        # The combo just went with the old panels; a keyboard user stays where they were.
-        self.language_combo.setFocus()
+        # The gear went with the old header; a keyboard user is put back on the new one,
+        # where Settings (which asked for the switch, and closes on it) was opened.
+        self.header.settings_button.setFocus()
         return True
 
-    # -- the error log ----------------------------------------------------------
+    # -- the header ---------------------------------------------------------------
 
-    def _open_log_folder(self, _link: str = "") -> None:
-        """Show the folder the error log is written to, or say why it cannot be shown."""
-        folder = user_log_dir()
-        if not open_folder(folder):
-            self._answer(_Said("home.open_log_failed", {"path": path_text(folder)}))
+    def toggle_theme(self) -> None:
+        """Pin the opposite of the theme in force (System becomes an explicit choice)."""
+        self.set_theme("light" if current_tokens().name == "dark" else "dark")
+
+    def set_theme(self, code: str) -> None:
+        """Switch every window to *code* and remember it."""
+        self._prefs.theme = code
+        apply_theme(QApplication.instance(), code)
+        self.header.show_theme(current_tokens().name)
+
+    def changeEvent(self, event: QEvent) -> None:  # noqa: N802 - Qt override
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.ApplicationPaletteChange:
+            self.header.show_theme(current_tokens().name)  # System followed the desktop
+
+    def _open_help(self) -> None:
+        if not QDesktopServices.openUrl(QUrl(README_URL)):
+            self._answer(_Said("home.help_failed"))
+
+    # -- settings -----------------------------------------------------------------
+
+    def make_settings_dialog(self, tab: str | None = None) -> SettingsDialog:
+        """The Settings dialog over this window, on *tab*, wired to what the window applies."""
+        dialog = SettingsDialog(
+            self._prefs, parent=self, quran_default=_default_quran_file(), tab=tab
+        )
+        dialog.language_requested.connect(partial(self._language_from_dialog, dialog))
+        dialog.theme_requested.connect(self.set_theme)
+        return dialog
+
+    def open_settings(self, tab: str | None = None) -> None:
+        """Show Settings until the person closes it, then pass on what changed."""
+        dialog = self.make_settings_dialog(tab)
+        try:
+            dialog.exec()
+            self._after_settings(dialog)
+        finally:
+            dialog.deleteLater()
+
+    def _after_settings(self, dialog: SettingsDialog) -> None:
+        """What the dialog changed that the form shows or the list reads."""
+        if dialog.changed_files:
+            self.new_job.reload_settings()
+            self.job_list.refresh()
+
+    def _language_from_dialog(self, dialog: SettingsDialog, code: str) -> None:
+        """Switch, or tell the dialog why not.
+
+        A switch rebuilds this window under a dialog still in the old words, so it closes.
+        """
+        if self.set_language(code):
+            dialog.accept()
+        else:
+            dialog.language_refused(t("home.language_busy"))
 
     # -- the status line ------------------------------------------------------
 
@@ -393,7 +395,6 @@ class MainWindow(QMainWindow):
             on_cancelled=self._on_cancelled,
             on_done=self._on_done,
         )
-        self._update_language_combo()
 
     def _request_cancel(self) -> None:
         if self._cancel is not None:
@@ -428,10 +429,12 @@ class MainWindow(QMainWindow):
             self._show_running_row(text, None)
             if self._holding:
                 return
-            if said is None:
-                self._show_raw(text)
-            else:
-                self._say(said)
+            if not new_stage:
+                self._show_raw(text)  # a translated sentence within the stage already said
+                return
+            self._status = said  # None for raw text: a language switch clears it
+            # A busy bar: the last stage's percentage is not this one's.
+            self.new_job.set_progress(None, text)
             return
         text = _progress_text(event)
         self._show_running_row(text, event.fraction)
@@ -558,7 +561,6 @@ class MainWindow(QMainWindow):
         self.job_list.set_running("", None)
         self.new_job.set_running(False)
         self._say(self._ending)
-        self._update_language_combo()
 
     # -- the job list -----------------------------------------------------------
 
@@ -619,7 +621,6 @@ class MainWindow(QMainWindow):
         window.show()
         # Keep a reference: a window without one is collected and vanishes.
         self._reviews[project_path] = window
-        self._update_language_combo()
         return None
 
     def _review_of(self, project_path: Path) -> ReviewWindow | None:
@@ -641,7 +642,6 @@ class MainWindow(QMainWindow):
             del self._reviews[project_path]
         window.deleteLater()
         self.job_list.refresh()
-        self._update_language_combo()
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt override
         """Close every open review window first; a refusal keeps this window open too.

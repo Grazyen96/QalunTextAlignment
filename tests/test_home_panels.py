@@ -1265,28 +1265,29 @@ def test_a_lecture_spec_carries_the_default_generated_parts(
     assert panel.spec().episode_generated == (None, None)
 
 
-def test_the_footer_offers_the_theme_and_applies_it(qt_app, prefs, no_default_job_dirs) -> None:
+def test_the_header_toggles_the_theme_and_opens_settings(
+    qt_app, prefs, no_default_job_dirs
+) -> None:
     from PySide6.QtGui import QPalette
 
     from qurantext.gui import theme
     from qurantext.gui.main_window import MainWindow
 
     theme.apply_theme(qt_app, "light")
+    prefs.theme = "system"
     window = MainWindow(prefs=prefs)
     try:
-        codes = [window.theme_combo.itemData(i) for i in range(window.theme_combo.count())]
-        assert codes == ["system", "light", "dark"]
-        assert window.theme_combo.currentData() == "system"
-        window.theme_combo.setCurrentIndex(codes.index("dark"))
-        window.theme_combo.activated.emit(codes.index("dark"))
+        assert not hasattr(window, "theme_combo") and not hasattr(window, "log_link")
+        assert window.header.theme_button.property("qalun.icon")[0] == "moon"
+        window.header.theme_toggle_requested.emit()
         assert prefs.theme == "dark"
         assert qt_app.palette().color(QPalette.ColorRole.Window).name().upper() == theme.DARK.window
-        assert window.palette().color(QPalette.ColorRole.Window).name().upper() == theme.DARK.window
-        # A language switch rebuilds the footer; the choice survives it.
-        assert window.set_language("ar")
-        assert window.theme_combo.currentData() == "dark"
+        assert window.header.theme_button.property("qalun.icon")[0] == "sun"
+        dialog = window.make_settings_dialog("files")
+        assert dialog.current_tab() == "files"
+        dialog.deleteLater()
     finally:
-        window.set_language("en")
+        theme.apply_theme(qt_app, "light")
         window.job_list.stop_reading()
         window.close()
         window.deleteLater()
