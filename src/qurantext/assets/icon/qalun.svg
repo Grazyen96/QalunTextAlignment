@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Ink square with a 22 % corner radius; the gold ayah-end roundel centred on it. -->
+  <rect x="0" y="0" width="1024" height="1024" rx="225" ry="225" fill="#1C1B1A"/>
+  <circle cx="512" cy="512" r="300" fill="none" stroke="#D9B45B" stroke-width="36"/>
+  <circle cx="512" cy="512" r="200" fill="none" stroke="#D9B45B" stroke-width="20"/>
+  <circle cx="512" cy="512" r="80" fill="#D9B45B"/>
+  <!-- Eight small ticks between the rings, as the Mushaf's ayah-end mark has. -->
+  <g stroke="#D9B45B" stroke-width="20" stroke-linecap="round">
+    <line x1="512" y1="232" x2="512" y2="292"/>
+    <line x1="512" y1="732" x2="512" y2="792"/>
+    <line x1="232" y1="512" x2="292" y2="512"/>
+    <line x1="732" y1="512" x2="792" y2="512"/>
+    <line x1="314" y1="314" x2="356" y2="356"/>
+    <line x1="710" y1="710" x2="668" y2="668"/>
+    <line x1="710" y1="314" x2="668" y2="356"/>
+    <line x1="314" y1="710" x2="356" y2="668"/>
+  </g>
+</svg>

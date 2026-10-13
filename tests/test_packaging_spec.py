@@ -415,3 +415,9 @@ def test_the_third_party_notice_credits_lucide() -> None:
     assert "## Lucide icons" in text
     assert "1.56.0" in text and "ISC" in text
     assert "qurantext/assets/icons/LICENSE" in text
+
+
+def test_the_spec_names_the_app_icon_for_windows_and_mac() -> None:
+    text = SPEC.read_text(encoding="utf-8")
+    assert "assets/icon/qalun.ico" in text or 'assets" / "icon" / "qalun.ico"' in text
+    assert "assets/icon/qalun.icns" in text or 'assets" / "icon" / "qalun.icns"' in text

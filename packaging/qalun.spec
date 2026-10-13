@@ -34,6 +34,7 @@ What this has to get right, beyond the obvious:
   directory on PATH, or accept the system install. `doctor` reports which.
 """
 
+import sys
 from importlib.metadata import distribution
 from pathlib import Path
 
@@ -45,6 +46,11 @@ from PyInstaller.utils.hooks import (
 )
 
 ROOT = Path(SPECPATH).parent
+ICON_DIR = ROOT / "src" / "qurantext" / "assets" / "icon"
+# PyInstaller takes an .ico on Windows (assets/icon/qalun.ico) and an .icns on
+# macOS (assets/icon/qalun.icns); Linux has no executable icon, so none is
+# given there (a stray one only warns).
+EXE_ICON = str(ICON_DIR / "qalun.ico") if sys.platform == "win32" else None
 
 datas = [
     # The bundled font, kept at the path qurantext.config.paths expects.
@@ -148,6 +154,7 @@ exe = EXE(
     name="qalun",
     console=False,
     disable_windowed_traceback=False,
+    icon=EXE_ICON,
 )
 coll = COLLECT(
     exe,
@@ -159,12 +166,11 @@ coll = COLLECT(
 )
 
 # macOS wants an app bundle; the others take the COLLECT directory as-is.
-import sys  # noqa: E402
-
 if sys.platform == "darwin":
     app = BUNDLE(
         coll,
         name="Qalun.app",
+        icon=str(ICON_DIR / "qalun.icns"),
         bundle_identifier="de.project-bay.qalun",
         info_plist={
             "CFBundleName": "Qalun",

@@ -7,7 +7,12 @@ import os
 import sys
 from typing import Any, NoReturn
 
-__all__ = ["main"]
+from qurantext.config.paths import bundled_asset
+
+__all__ = ["APP_ICON_PNG", "main", "set_app_icon"]
+
+#: The window and task-bar icon; one PNG, Qt scales it for the sizes it needs.
+APP_ICON_PNG = bundled_asset("icon/qalun-256.png")
 
 #: Qt's own criticals and fatals (``QThread: Destroyed while thread is still
 #: running``) come through its message handler, not Python's, so a windowed
@@ -25,6 +30,14 @@ _EXIT_WAIT_MS = 30_000
 
 #: The name settings are filed under; see :func:`_name_the_app`.
 _APP_NAME = "Qalun"
+
+
+def set_app_icon(app) -> None:
+    """Give every window the app icon; a build that lost the file keeps Qt's blank one."""
+    from PySide6.QtGui import QIcon
+
+    if APP_ICON_PNG.is_file():
+        app.setWindowIcon(QIcon(str(APP_ICON_PNG)))
 
 
 def _name_the_app() -> None:
@@ -123,6 +136,7 @@ def main(argv: list[str] | None = None) -> int:
     _name_the_app()
     app = QApplication(list(argv) if argv is not None else sys.argv)
     app.setApplicationDisplayName(_APP_NAME)
+    set_app_icon(app)
 
     from qurantext.gui.language import apply_language, initial_language
     from qurantext.gui.prefs import Prefs
