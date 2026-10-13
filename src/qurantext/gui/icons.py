@@ -40,7 +40,8 @@ NAMES = frozenset(
         "palette", "image", "sun", "moon", "monitor", "refresh-cw",
         "folder-open", "folder", "x", "chevron-right", "chevron-down",
         "chevron-left", "mic", "book-open", "pencil", "link", "qr-code",
-        "settings", "circle-question-mark",
+        "settings", "circle-question-mark", "upload", "file-music", "circle-alert",
+        "triangle-alert",
     }
 )  # fmt: skip
 

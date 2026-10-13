@@ -248,3 +248,11 @@ def ensure_required_directories() -> None:
     """Create the standard input/output directory tree when requested."""
     for directory in REQUIRED_DIRECTORIES:
         directory.mkdir(parents=True, exist_ok=True)
+
+
+def notices_path() -> Path:
+    """The third-party notices file: beside the bundle's data in a build, at the repo root in a checkout."""
+    frozen_root = getattr(sys, "_MEIPASS", None)
+    if frozen_root:
+        return Path(frozen_root) / "THIRD_PARTY_NOTICES.md"
+    return Path(__file__).resolve().parents[3] / "THIRD_PARTY_NOTICES.md"

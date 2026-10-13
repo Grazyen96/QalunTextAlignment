@@ -400,7 +400,7 @@ def test_every_interface_icon_ships_with_lucides_licence() -> None:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
     from fetch_icons import ICON_NAMES
 
-    assert len(ICON_NAMES) == 31
+    assert len(ICON_NAMES) == 35
     for name in ICON_NAMES:
         svg = ICON_DIR / f"{name}.svg"
         assert svg.is_file(), name

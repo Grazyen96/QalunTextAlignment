@@ -137,3 +137,14 @@ def test_a_saved_path_to_the_retired_ver05_text_reads_as_the_bundled_one(tmp_pat
     assert paths.redirect_retired_quran(own) == own
     with pytest.raises(FileNotFoundError, match="Quran text file not found"):
         paths.resolve_quran_path(own)
+
+
+def test_the_notices_file_is_found_in_a_checkout_and_in_a_bundle(monkeypatch, tmp_path) -> None:
+    import sys
+
+    from qurantext.config.paths import notices_path
+
+    assert notices_path().name == "THIRD_PARTY_NOTICES.md"
+    assert notices_path().is_file()  # the checkout's own copy
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+    assert notices_path() == tmp_path / "THIRD_PARTY_NOTICES.md"

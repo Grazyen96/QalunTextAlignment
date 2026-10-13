@@ -52,6 +52,10 @@ ICON_NAMES: tuple[str, ...] = (
     "qr-code",
     "settings",
     "circle-question-mark",
+    "upload",
+    "file-music",
+    "circle-alert",
+    "triangle-alert",
 )
 
 
