@@ -129,3 +129,22 @@ def test_a_refresh_keeps_the_on_role(qt_app) -> None:
     on = button.icon().pixmap(QSize(16, 16), QIcon.Mode.Normal, QIcon.State.On)
     assert theme.DARK.on_accent.upper() in _colours(on)
     root.deleteLater()
+
+
+def test_mirror_false_keeps_a_directional_icon_as_drawn_under_rtl(qt_app) -> None:
+    ltr = icons.icon("chevron-right").pixmap(QSize(16, 16)).toImage()
+    qt_app.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+    try:
+        icons.clear_cache()
+        kept = icons.icon("chevron-right", mirror=False).pixmap(QSize(16, 16)).toImage()
+        flipped = icons.icon("chevron-right").pixmap(QSize(16, 16)).toImage()
+        assert kept == ltr and flipped != ltr
+        root = QWidget()
+        button = QPushButton(root)
+        icons.set_icon(button, "chevron-right", size=16, mirror=False)
+        assert button.property("qalun.icon") == ("chevron-right", "text", 16, None, False)
+        assert icons.refresh_icons(root) == 1
+        assert button.icon().pixmap(QSize(16, 16)).toImage() == ltr
+    finally:
+        qt_app.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        icons.clear_cache()

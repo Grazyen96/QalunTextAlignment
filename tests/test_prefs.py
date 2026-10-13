@@ -14,6 +14,7 @@ from qurantext.gui.prefs import Prefs
 def test_defaults_on_an_empty_ini(settings) -> None:
     prefs = Prefs(settings)
     assert prefs.mode == "recitation"
+    assert prefs.preview_fit is True
     assert prefs.preset == "social"
     assert prefs.subtitles == "burn"
     assert prefs.formats == ("srt",)
@@ -595,3 +596,12 @@ def test_theme_round_trips_and_an_unknown_value_reads_as_system(tmp_path) -> Non
         prefs.theme = "amoled"
     ini.write_text("[General]\ntheme=amoled\n", encoding="utf-8")
     assert Prefs(QSettings(str(ini), QSettings.Format.IniFormat)).theme == "system"
+
+
+def test_preview_fit_round_trips(tmp_path) -> None:
+    from PySide6.QtCore import QSettings
+
+    ini = tmp_path / "prefs.ini"
+    prefs = Prefs(QSettings(str(ini), QSettings.Format.IniFormat))
+    prefs.preview_fit = False
+    assert Prefs(QSettings(str(ini), QSettings.Format.IniFormat)).preview_fit is False

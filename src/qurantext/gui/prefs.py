@@ -142,6 +142,19 @@ class Prefs:
         self._settings.setValue("theme", value)
         self._settings.sync()
 
+    # -- the review preview ------------------------------------------------------
+
+    @property
+    def preview_fit(self) -> bool:
+        """Whether the review's preview fits its column (True) or shows the preset's size."""
+        value = self._settings.value("preview_fit", True)
+        return value not in (False, "false", "0", 0)
+
+    @preview_fit.setter
+    def preview_fit(self, value: bool) -> None:
+        self._settings.setValue("preview_fit", bool(value))
+        self._settings.sync()
+
     # -- mode -----------------------------------------------------------------
 
     @property

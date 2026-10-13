@@ -56,6 +56,12 @@ ICON_NAMES: tuple[str, ...] = (
     "file-music",
     "circle-alert",
     "triangle-alert",
+    "zoom-in",
+    "zoom-out",
+    "crosshair",
+    "maximize-2",
+    "keyboard",
+    "info",
 )
 
 

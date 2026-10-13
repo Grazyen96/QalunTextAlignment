@@ -41,7 +41,8 @@ NAMES = frozenset(
         "folder-open", "folder", "x", "chevron-right", "chevron-down",
         "chevron-left", "mic", "book-open", "pencil", "link", "qr-code",
         "settings", "circle-question-mark", "upload", "file-music", "circle-alert",
-        "triangle-alert",
+        "triangle-alert", "zoom-in", "zoom-out", "crosshair", "maximize-2",
+        "keyboard", "info",
     }
 )  # fmt: skip
 
@@ -54,7 +55,7 @@ MIRRORED = {
 }
 
 ROLES = ("text", "accent", "on_accent", "secondary")
-#: The property a button carries after ``set_icon``: ``(name, role, size)``.
+#: The property a button carries after ``set_icon``: ``(name, role, size)``, longer when it has an ``on_role`` or ``mirror=False``.
 ICON_PROPERTY = "qalun.icon"
 
 _SIZES = (16, 20, 24)
@@ -98,15 +99,18 @@ def _rtl() -> bool:
     return app is not None and app.isRightToLeft()
 
 
-def icon(name: str, role: str = "text", on_role: str | None = None) -> QIcon:
+def icon(
+    name: str, role: str = "text", on_role: str | None = None, *, mirror: bool = True
+) -> QIcon:
     """*name* drawn in the theme's *role* colour (disabled in ``secondary``), mirrored under RTL.
 
     *on_role* is for a checkable button the sheet fills when checked: its
     ``On`` state is drawn in that colour, so the icon reads on the fill as
     the label beside it does. Without it the ``On`` state is the ``Off`` one.
+    *mirror* False keeps a directional icon as drawn under RTL (a timeline's arrows).
     """
     tokens = current_tokens()
-    rtl = _rtl()
+    rtl = _rtl() and mirror
     key = (name, role, on_role, tokens.name, rtl)
     cached = _cache.get(key)
     if cached is not None:
@@ -136,14 +140,20 @@ def set_icon(
     role: str = "text",
     size: int = 20,
     on_role: str | None = None,
+    *,
+    mirror: bool = True,
 ) -> None:
     """Put *name* on *button* at *size* px, and remember it for the next theme switch.
 
-    The record is ``(name, role, size)``, with *on_role* appended when given.
+    The record is ``(name, role, size)``, with *on_role* appended when given;
+    when *mirror* is False it is the full ``(name, role, size, on_role, mirror)``.
     """
-    button.setIcon(icon(name, role, on_role))
+    button.setIcon(icon(name, role, on_role, mirror=mirror))
     button.setIconSize(QSize(size, size))
-    record = (name, role, size) if on_role is None else (name, role, size, on_role)
+    if not mirror:
+        record: tuple = (name, role, size, on_role, False)
+    else:
+        record = (name, role, size) if on_role is None else (name, role, size, on_role)
     button.setProperty(ICON_PROPERTY, record)
 
 
@@ -152,9 +162,10 @@ def refresh_icons(root: QWidget) -> int:
     count = 0
     for button in root.findChildren(QAbstractButton):
         recorded = button.property(ICON_PROPERTY)
-        if isinstance(recorded, (tuple, list)) and len(recorded) in (3, 4):
+        if isinstance(recorded, (tuple, list)) and len(recorded) in (3, 4, 5):
             name, role, size = recorded[:3]
-            on_role = str(recorded[3]) if len(recorded) == 4 else None
-            set_icon(button, str(name), str(role), int(size), on_role)
+            on_role = str(recorded[3]) if len(recorded) >= 4 and recorded[3] else None
+            mirror = bool(recorded[4]) if len(recorded) == 5 else True
+            set_icon(button, str(name), str(role), int(size), on_role, mirror=mirror)
             count += 1
     return count
