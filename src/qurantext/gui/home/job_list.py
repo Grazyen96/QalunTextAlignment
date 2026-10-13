@@ -126,6 +126,9 @@ class JobListPanel(QWidget):
         #: the row back after rebuilding the list.
         self._running_label: str | None = None
         self._running_fraction: float | None = None
+        #: The running job's file name and progress words, the parts of
+        #: ``_running_label``; the row shortens the name, never the words.
+        self._running_parts: tuple[str, str] | None = None
         #: The transient "matching…" row set_running adds, or None.
         self._running_item: QListWidgetItem | None = None
         #: The running job has ended (:meth:`end_running`): its row goes when
@@ -347,6 +350,7 @@ class JobListPanel(QWidget):
         self._running_label = (
             None if text is None else t("home.running_row", name=name, progress=text)
         )
+        self._running_parts = None if text is None else (name, text)
         self._running_fraction = fraction
         self._show_running_row()
 
@@ -378,7 +382,7 @@ class JobListPanel(QWidget):
                 row = _RunningRow()
                 self.list.setItemWidget(self._running_item, row)
             row = self.list.itemWidget(self._running_item)
-            row.show_state(self._running_label, self._running_fraction)
+            row.show_state(self._running_label, self._running_fraction, self._running_parts)
             self._running_item.setData(Qt.ItemDataRole.AccessibleTextRole, self._running_label)
             self._running_item.setSizeHint(row.sizeHint())
         self._update_empty_state()
@@ -532,6 +536,7 @@ def _read_jobs(
     the read is short enough not to report. *cancel* (set by
     :meth:`JobListPanel.stop_reading`) stops it between files.
     """
+    folders: tuple[Path, ...] | None = None
     try:
         dirs = job_dirs_for(extra)
         folders = tuple(folder for folder in dirs if folder.is_dir())
@@ -540,7 +545,9 @@ def _read_jobs(
         raise  # no one waits for this read any more; the worker reports it cancelled
     except Exception as error:  # noqa: BLE001 - a folder that cannot be read must not empty the list
         _log.warning("Could not read the job folders: %s", error, exc_info=True)
-        return _Listing(generation, None)
+        # The folders found before it failed are still worth watching: a fix to
+        # one of them is a change, and the next read may then succeed.
+        return _Listing(generation, None, folders)
     return _Listing(generation, tuple(entries), folders)
 
 
@@ -681,19 +688,58 @@ class _RunningRow(QWidget):
         layout.setSpacing(3)
         self.label = QLabel()
         self.label.setAlignment(_leading_edge(self))
+        # Asks for no width of its own, as a job's name does: the list has no
+        # horizontal scrollbar, so a long recording's name must fit the row.
+        self.label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.label.setMinimumWidth(0)
+        self.label.installEventFilter(self)
         layout.addWidget(self.label)
         self.progress_bar = QProgressBar()
         self.progress_bar.setTextVisible(False)
         self.progress_bar.setFixedHeight(6)
         layout.addWidget(self.progress_bar)
+        self._text = ""
+        self._parts: tuple[str, str] | None = None
 
-    def show_state(self, text: str, fraction: float | None) -> None:
-        self.label.setText(text)
+    def show_state(
+        self, text: str, fraction: float | None, parts: tuple[str, str] | None = None
+    ) -> None:
+        """Show *text* (the whole line, also the tooltip) and *fraction* (None: busy).
+
+        *parts* are the file name and the progress words *text* was made of;
+        given, the name is shortened in the middle when the line is too wide.
+        """
+        self._text = text
+        self._parts = parts
+        self.label.setToolTip(text)
+        self._fit()
         if fraction is None:
             self.progress_bar.setRange(0, 0)  # busy: a stage that does not say how far
         else:
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(int(max(0.0, min(1.0, fraction)) * 100))
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802 - Qt override
+        if watched is self.label and event.type() in (QEvent.Type.Resize, QEvent.Type.Show):
+            self._fit()
+        return False
+
+    def _fit(self) -> None:
+        """The whole line when it fits, else the same line with the name elided in the middle.
+
+        Only the name is shortened, and before it goes into the template: an
+        ellipsis cut through the line would cut its direction marks too. A
+        label with no width yet (not shown) keeps the whole line.
+        """
+        width = self.label.contentsRect().width()
+        metrics = self.label.fontMetrics()
+        if self._parts is None or width <= 0 or metrics.horizontalAdvance(self._text) <= width:
+            self.label.setText(self._text)
+            return
+        name, progress = self._parts
+        room = width - metrics.horizontalAdvance(t("home.running_row", name="", progress=progress))
+        short = metrics.elidedText(name, Qt.TextElideMode.ElideMiddle, max(0, room))
+        self.label.setText(t("home.running_row", name=short, progress=progress))
 
 
 class EmptyState(QWidget):

@@ -609,7 +609,7 @@ def test_the_engine_note_keeps_whisperx_in_its_place(qt_app) -> None:
     from tests.bidi_helpers import left_to_right
 
     line = i18n.t("home.engine.note")
-    assert "\u2068WhisperX\u2069" in line  # isolated, like every Latin run in Arabic
+    assert "\u2066WhisperX\u2069" in line  # isolated, like every Latin run in Arabic
     parts = ["التسجيل", "وهذا", "WhisperX", "بواسطة", "ينسخ"]
     assert left_to_right(line, parts) == parts, line
 

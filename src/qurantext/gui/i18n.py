@@ -710,7 +710,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "home.help_failed": "تعذّر فتح صفحة المساعدة في المتصفح.",
         "home.mode.recitation.desc": "يوقّت آيات التلاوة كلمةً كلمة.",
         "home.mode.lecture.desc": "يجد الآيات المذكورة في المحاضرة ويعرضها في بطاقات.",
-        "home.engine.note": "ينسخ الصوت عبر الإنترنت بواسطة \u2068WhisperX\u2069، وهذا يرفع التسجيل.",
+        "home.engine.note": "ينسخ الصوت عبر الإنترنت بواسطة \u2066WhisperX\u2069، وهذا يرفع التسجيل.",
         "home.engine.change": "غيِّر ذلك في الإعدادات",
         "home.empty.title": "لا مهام بعد",
         "home.empty.hint": "أفلت تسجيلًا على اليسار لتبدأ مهمة.",

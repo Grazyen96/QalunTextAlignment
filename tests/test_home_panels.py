@@ -1741,6 +1741,57 @@ def test_a_long_name_is_elided_and_the_date_stays_in_view(
         panel.deleteLater()
 
 
+def test_a_long_running_name_is_elided_and_the_row_fits_the_list(
+    qt_app, prefs, tmp_path, no_default_job_dirs
+) -> None:
+    """Re-review N1: with no horizontal scrollbar, the running row must fit the list too."""
+    from qurantext.gui.home.job_list import JobListPanel
+    from tests.qt_helpers import spin, wait_until_listed
+
+    name = ("Sheikh Example - Surah Al-Furqan - Ramadan night 3 (full) " * 3)[:120] + ".m4a"
+    panel = JobListPanel(prefs)
+    try:
+        panel.resize(300, 500)
+        panel.show()
+        wait_until_listed(panel)
+        panel.set_running(name, "Matching — 42%", 0.42)
+        spin(50)
+        row = panel.list.itemWidget(panel.list.item(0))
+        assert panel.list.horizontalScrollBar().maximum() == 0
+        assert row.width() <= panel.list.viewport().width()
+        assert row.label.toolTip() == t("home.running_row", name=name, progress="Matching — 42%")
+        shown = row.label.text()
+        assert "…" in shown and "Matching — 42%" in shown
+        assert shown.count("\u2068") == shown.count("\u2069")  # the isolates stay whole
+        assert row.label.fontMetrics().horizontalAdvance(shown) <= row.label.contentsRect().width()
+    finally:
+        panel.stop_reading()
+        panel.deleteLater()
+
+
+def test_a_failed_read_still_watches_the_folders_it_found(
+    qt_app, prefs, tmp_path, no_default_job_dirs, monkeypatch
+) -> None:
+    """Re-review N2: a read that fails after finding its folders still arms the watcher."""
+    from qurantext.gui.home.job_list import JobListPanel, _read_jobs
+    from tests.qt_helpers import wait_until_listed
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("unreadable")
+
+    monkeypatch.setattr(job_list_module, "list_jobs", broken)
+    listing = _read_jobs(1, [tmp_path], frozenset())
+    assert listing.entries is None and listing.folders == (tmp_path,)
+    prefs.job_dirs = [tmp_path]
+    panel = JobListPanel(prefs)
+    try:
+        wait_until_listed(panel)
+        assert panel.watcher.directories() == [str(tmp_path)]
+    finally:
+        panel.stop_reading()
+        panel.deleteLater()
+
+
 def test_the_read_names_the_folders_it_found_for_the_watcher(tmp_path, no_default_job_dirs) -> None:
     """The watcher's folders come from the worker's read; the UI thread looks at no disk."""
     from qurantext.gui.home.job_list import _read_jobs
