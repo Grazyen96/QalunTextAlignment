@@ -27,6 +27,9 @@ def test_the_tool_writes_one_image_per_screen_theme_and_language(
         "export-en-light.png",
         "ayah-picker-en-light.png",
         "episode-en-light.png",
+        "home-empty-en-light.png",
+        "settings-general-en-light.png",
+        "settings-about-en-light.png",
     } <= names
     for path in written:
         assert path.stat().st_size > 1000, path.name

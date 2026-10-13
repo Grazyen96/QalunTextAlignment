@@ -273,8 +273,10 @@ is running). Arabic lays the window out right to left; the review timeline runs
 right to left in both languages (see above). The Arabic text is a draft awaiting
 review by a native speaker.
 
-The window follows the desktop's light or dark scheme; **Theme** in the footer
-pins it to Light or Dark.
+The window follows the desktop's light or dark scheme. **Settings** (the gear in the
+header) holds the language, theme, transcription engine, Quran text, output and job
+folders, default look and episode defaults; the sun/moon button beside it switches
+the theme.
 
 **Where settings live.** The window's settings (the language, the theme, the
 last choices on the form, hidden jobs and job output folders) are kept where Qt keeps

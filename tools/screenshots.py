@@ -63,9 +63,13 @@ def _project(tmp: Path, mode: str):
 
 def shoot(out_dir: Path, *, themes=("light", "dark"), languages=("en", "ar")) -> list[Path]:
     """Write one PNG per screen, theme and language into *out_dir*; return their paths."""
+    out_dir = Path(out_dir)
+    # Thumbnails are cached on disk; keep them under the output folder, never the person's own cache.
+    os.environ["QURANTEXT_CACHE_DIR"] = str(out_dir / "cache")
     from qurantext.config.paths import DEFAULT_QURAN_PATH, QURAN_DB_PATH
     from qurantext.data.quran_db import ensure_quran_db
     from qurantext.gui import theme
+    from qurantext.gui.home.settings_dialog import TABS
     from qurantext.gui.i18n import t
     from qurantext.gui.language import apply_language
     from qurantext.gui.main_window import MainWindow
@@ -75,15 +79,21 @@ def shoot(out_dir: Path, *, themes=("light", "dark"), languages=("en", "ar")) ->
     from qurantext.gui.review.export_dialog import ExportDialog
     from qurantext.gui.review.player import FakePlayer
     from qurantext.gui.review.window import ReviewWindow
+    from qurantext.jobs import catalog
+    from qurantext.jobs.project import save_project
 
     # The ayah picker reads the real store; build it if this checkout has none yet.
     ensure_quran_db(DEFAULT_QURAN_PATH, QURAN_DB_PATH).close()
     app = QApplication.instance() or QApplication(sys.argv)
-    out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     with tempfile.TemporaryDirectory(prefix="qalun-shots-") as scratch:
         tmp = Path(scratch)
+        # The home window lists this one job and nothing from the checkout's own folders.
+        jobs = tmp / "jobs"
+        save_project(_project(tmp, "recitation"), jobs / "al-furqan.qalun.json")
+        real_dirs = catalog.default_job_dirs
+        catalog.default_job_dirs = lambda: []
         for language in languages:
             for name in themes:
                 apply_language(app, language)
@@ -91,7 +101,8 @@ def shoot(out_dir: Path, *, themes=("light", "dark"), languages=("en", "ar")) ->
                 tag = f"{language}-{name}"
                 # Fresh settings per pass, never the person's own.
                 prefs = Prefs(QSettings(str(tmp / f"prefs-{tag}.ini"), QSettings.Format.IniFormat))
-                prefs.theme = name  # so the footer's combo names the theme shown
+                prefs.theme = name  # so the header's theme button shows the theme in use
+                prefs.job_dirs = [jobs]
                 home = MainWindow(prefs=prefs)
                 home.resize(1024, 680)
                 _spin(300)
@@ -101,9 +112,26 @@ def shoot(out_dir: Path, *, themes=("light", "dark"), languages=("en", "ar")) ->
                 home.new_job.set_running(True)
                 written.append(_grab(home, out_dir / f"home-running-{tag}.png"))
                 home.new_job.set_running(False)
+                for tab in TABS:
+                    dialog = home.make_settings_dialog(tab)
+                    written.append(_grab(dialog, out_dir / f"settings-{tab}-{tag}.png"))
+                    dialog.close()
+                    dialog.deleteLater()
                 home.job_list.stop_reading()
                 home.close()
                 home.deleteLater()
+                # The first launch: no jobs anywhere.
+                empty_prefs = Prefs(
+                    QSettings(str(tmp / f"prefs-empty-{tag}.ini"), QSettings.Format.IniFormat)
+                )
+                empty_prefs.theme = name
+                empty = MainWindow(prefs=empty_prefs)
+                empty.resize(1024, 680)
+                _spin(600)
+                written.append(_grab(empty, out_dir / f"home-empty-{tag}.png"))
+                empty.job_list.stop_reading()
+                empty.close()
+                empty.deleteLater()
                 for mode in ("recitation", "lecture"):
                     review = ReviewWindow(_project(tmp, mode), player=FakePlayer(60.0), prefs=prefs)
                     review.resize(1280, 800)
@@ -133,6 +161,7 @@ def shoot(out_dir: Path, *, themes=("light", "dark"), languages=("en", "ar")) ->
                     review.close()
                     review.deleteLater()
                 _spin(100)
+        catalog.default_job_dirs = real_dirs
     apply_language(app, "en")
     theme.apply_theme(app, "light")
     return written
