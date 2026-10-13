@@ -40,8 +40,10 @@ from PySide6.QtWidgets import (
 
 from qurantext.gui.colors import warning_color
 from qurantext.gui.i18n import t, tn
+from qurantext.gui.icons import set_icon
 from qurantext.gui.prefs import Prefs
 from qurantext.gui.review.background import BackgroundJobs
+from qurantext.gui.widgets import SectionHeader
 from qurantext.jobs.catalog import (
     CHANGED_SINCE_RENDER,
     DAMAGED,
@@ -110,17 +112,12 @@ class JobListPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        header = QHBoxLayout()
-        self.title_label = QLabel(t("home.jobs"))
-        bold = self.title_label.font()
-        bold.setBold(True)
-        self.title_label.setFont(bold)
-        header.addWidget(self.title_label)
-        header.addStretch(1)
         self.refresh_button = QPushButton(t("home.refresh"))
         self.refresh_button.clicked.connect(self.refresh)
-        header.addWidget(self.refresh_button)
-        layout.addLayout(header)
+        set_icon(self.refresh_button, "refresh-cw", size=16)
+        self.header = SectionHeader(t("home.jobs"), trailing=self.refresh_button)
+        self.title_label = self.header.label
+        layout.addWidget(self.header)
 
         self.list = QListWidget()
         self.list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -143,6 +140,9 @@ class JobListPanel(QWidget):
         self.open_button = QPushButton(t("home.open"))
         self.reveal_button = QPushButton(t("home.show_in_folder"))
         self.remove_button = QPushButton(t("home.remove_from_list"))
+        set_icon(self.open_button, "folder-open", size=16)
+        set_icon(self.reveal_button, "folder", size=16)
+        set_icon(self.remove_button, "x", size=16)
         for button in (self.open_button, self.reveal_button, self.remove_button):
             actions.addWidget(button)
         actions.addStretch(1)

@@ -2180,7 +2180,6 @@ def test_switching_to_arabic_rebuilds_the_home_window(
     qt_app, home, prefs, tmp_path, monkeypatch
 ) -> None:
     from PySide6.QtCore import QEvent
-    from PySide6.QtWidgets import QLabel
 
     from qurantext.gui import i18n
     from qurantext.gui.home.new_job import NewJobPanel
@@ -2201,7 +2200,7 @@ def test_switching_to_arabic_rebuilds_the_home_window(
     qt_app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
     assert prefs.language == "ar"
-    assert home.job_list.findChild(QLabel).text() == i18n.STRINGS["ar"]["home.jobs"]  # rebuilt
+    assert home.job_list.title_label.text() == i18n.STRINGS["ar"]["home.jobs"]  # rebuilt
     assert home.new_job.audio_path == audio  # the half-filled form survives
     assert home.new_job.surah_box.currentData() == surah
     assert (home.new_job.from_spin.value(), home.new_job.to_spin.value()) == (7, 11)
@@ -2213,7 +2212,7 @@ def test_switching_to_arabic_rebuilds_the_home_window(
 
     assert home.set_language("en")
     assert prefs.language == "en"
-    assert home.job_list.findChild(QLabel).text() == i18n.STRINGS["en"]["home.jobs"]
+    assert home.job_list.title_label.text() == i18n.STRINGS["en"]["home.jobs"]
     assert home.language_combo.currentData() == "en"
 
 

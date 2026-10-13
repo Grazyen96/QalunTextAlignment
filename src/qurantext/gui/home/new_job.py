@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFormLayout,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QProgressBar,
@@ -38,9 +37,11 @@ from qurantext.config.settings import ENGINES, VIDEO_PRESETS, env_dir, get_setti
 from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.data.quran_db import ensure_quran_db, list_surahs
 from qurantext.gui.i18n import path_text, plain_title, t, tn
+from qurantext.gui.icons import set_icon
 from qurantext.gui.jobs import JobSpec
 from qurantext.gui.prefs import Prefs
 from qurantext.gui.surahs import fill_studied_surah_box, select_studied_surah
+from qurantext.gui.widgets import Card, SectionHeader, make_primary
 from qurantext.jobs.project import SUBTITLE_CHOICES
 
 __all__ = ["AUDIO_SUFFIXES", "NewJobPanel"]
@@ -62,17 +63,6 @@ _SUBTITLE_KEYS = {
 }
 #: The drop zone's height: room for the file's name, its folder and "Choose…".
 _DROP_ZONE_HEIGHT = 96
-
-#: The Recitation | Lecture toggle. Native checkable buttons barely show which
-#: one is down in some styles; the palette's highlight reads as "chosen" in a
-#: light and a dark theme alike.
-_TOGGLE_STYLE = (
-    "QPushButton { border: 1px solid palette(mid); border-radius: 4px; padding: 4px 14px;"
-    " background: palette(button); color: palette(button-text); }"
-    " QPushButton:checked { background: palette(highlight); color: palette(highlighted-text);"
-    " border-color: palette(highlight); }"
-    " QPushButton:disabled { color: palette(mid); }"
-)
 
 _FORMAT_KEYS = {
     "srt": "format.srt",
@@ -126,25 +116,19 @@ class NewJobPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
 
-        self.heading_label = QLabel(t("home.new_job"))
-        heading_font = self.heading_label.font()
-        heading_font.setBold(True)
-        self.heading_label.setFont(heading_font)
-        layout.addWidget(self.heading_label)
+        self.heading = SectionHeader(t("home.new_job"))
+        self.heading_label = self.heading.label
+        layout.addWidget(self.heading)
 
         # The drop zone holds its own "Choose…": dropping and choosing are one
         # control, not a box and a stray button under it.
-        self.drop_zone = QFrame()
+        # A card with a dashed rule: the sheet knows it by its object name, and
+        # lights it while an accepted drag is over it (the ``dragOver`` property).
+        self.drop_zone = Card()
         self.drop_zone.setObjectName("dropZone")
         self.drop_zone.setFixedHeight(_DROP_ZONE_HEIGHT)
-        # While an accepted drag is over it, the zone says "let go here".
-        self.drop_zone.setStyleSheet(
-            "QFrame#dropZone { border: 2px dashed palette(mid); border-radius: 6px; }"
-            ' QFrame#dropZone[dragOver="true"] { border: 2px solid palette(highlight);'
-            " background: palette(alternate-base); }"
-        )
         self.drop_zone.setProperty("dragOver", False)
-        drop_layout = QVBoxLayout(self.drop_zone)
+        drop_layout = self.drop_zone.body
         drop_layout.setContentsMargins(12, 8, 12, 8)
         drop_layout.setSpacing(4)
         self.drop_label = QLabel(t("home.drop"))
@@ -157,12 +141,7 @@ class NewJobPanel(QWidget):
         self.drop_label.installEventFilter(self)
         drop_layout.addWidget(self.drop_label)
         self.choose_button = QPushButton(t("home.choose"))
-        self.choose_button.setFlat(True)
-        self.choose_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.choose_button.setStyleSheet(
-            "QPushButton { border: none; color: palette(link); text-decoration: underline; }"
-            " QPushButton:disabled { color: palette(mid); }"
-        )
+        set_icon(self.choose_button, "folder-open", size=16)
         self.choose_button.clicked.connect(self._choose_audio)
         drop_layout.addWidget(self.choose_button, 0, Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(self.drop_zone)
@@ -172,8 +151,8 @@ class NewJobPanel(QWidget):
         self.recitation_button.setCheckable(True)
         self.lecture_button = QPushButton(t("home.mode.lecture"))
         self.lecture_button.setCheckable(True)
-        for button in (self.recitation_button, self.lecture_button):
-            button.setStyleSheet(_TOGGLE_STYLE)
+        set_icon(self.recitation_button, "mic", size=16)
+        set_icon(self.lecture_button, "book-open", size=16)
         self._mode_group = QButtonGroup(self)
         self._mode_group.setExclusive(True)
         self._mode_group.addButton(self.recitation_button)
@@ -233,7 +212,7 @@ class NewJobPanel(QWidget):
         self.more_button.setText(t("home.more"))
         self.more_button.setCheckable(True)
         self.more_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.more_button.setArrowType(self._more_arrow(open_=False))
+        set_icon(self.more_button, "chevron-right", size=16)
         self.more_button.toggled.connect(self._toggle_more_options)
         layout.addWidget(self.more_button)
 
@@ -333,6 +312,7 @@ class NewJobPanel(QWidget):
         buttons_row = QHBoxLayout()
         self.start_button = QPushButton(t("home.start"))
         self.start_button.setDefault(True)
+        make_primary(self.start_button)
         self.start_button.clicked.connect(lambda: self.start_requested.emit(self.spec()))
         self.cancel_button = QPushButton(t("home.cancel"))
         self.cancel_button.clicked.connect(self.cancel_requested.emit)
@@ -668,20 +648,10 @@ class NewJobPanel(QWidget):
 
     def _set_more_options_visibility(self, open_: bool) -> None:
         self.more_group.setVisible(open_)
-        self.more_button.setArrowType(self._more_arrow(open_=open_))
+        # Down when the options show; else along the reading direction (the
+        # icon module mirrors it in Arabic).
+        set_icon(self.more_button, "chevron-down" if open_ else "chevron-right", size=16)
         self._show_engine_notes()
-
-    def _more_arrow(self, *, open_: bool) -> Qt.ArrowType:
-        """Down when the options show; else toward where the line reads on, as a disclosure does.
-
-        In Arabic a line reads on to the left, so a right arrow there would
-        point back at the label instead of past it.
-        """
-        if open_:
-            return Qt.ArrowType.DownArrow
-        if self.layoutDirection() == Qt.LayoutDirection.RightToLeft:
-            return Qt.ArrowType.LeftArrow
-        return Qt.ArrowType.RightArrow
 
     def _current_subtitles(self) -> str:
         for value, button in self.subtitle_buttons.items():

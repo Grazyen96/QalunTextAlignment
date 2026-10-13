@@ -256,11 +256,13 @@ def test_more_options_points_the_way_arabic_reads(
 ) -> None:
     panel = NewJobPanel(_prefs(tmp_path), quran_default=QURAN_FILE, db_path=store)
     panel.more_button.setChecked(False)
-    assert panel.more_button.arrowType() == Qt.ArrowType.LeftArrow
+    # Asked for as "chevron-right" in both languages; the icon module draws
+    # its mirror, the left chevron, in Arabic.
+    assert panel.more_button.property("qalun.icon")[0] == "chevron-right"
     panel.more_button.setChecked(True)
-    assert panel.more_button.arrowType() == Qt.ArrowType.DownArrow
+    assert panel.more_button.property("qalun.icon")[0] == "chevron-down"
     panel.more_button.setChecked(False)
-    assert panel.more_button.arrowType() == Qt.ArrowType.LeftArrow
+    assert panel.more_button.property("qalun.icon")[0] == "chevron-right"
 
 
 #: The Latin words the Arabic table itself keeps: the app's name, subtitle

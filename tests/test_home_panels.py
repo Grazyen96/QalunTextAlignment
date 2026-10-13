@@ -929,6 +929,8 @@ def test_a_quran_override_that_exists_wins_over_the_default(qt_app, prefs, store
 def test_the_form_reads_top_down_with_choose_inside_the_drop_zone(qt_app, prefs, store) -> None:
     from PySide6.QtWidgets import QHBoxLayout
 
+    from qurantext.gui import theme
+
     panel = _panel(prefs, store)
     panel.resize(700, 640)
     panel.show()
@@ -954,8 +956,9 @@ def test_the_form_reads_top_down_with_choose_inside_the_drop_zone(qt_app, prefs,
     margins = panel.range_widget.layout().contentsMargins()
     assert (margins.left(), margins.top(), margins.right(), margins.bottom()) == (0, 0, 0, 0)
 
-    assert ":checked" in panel.recitation_button.styleSheet()
-    assert "palette(highlight)" in panel.recitation_button.styleSheet()
+    # The chosen mode is shown by the app's sheet, not a sheet of the button's own.
+    assert panel.recitation_button.styleSheet() == ""
+    assert "QPushButton:checked" in theme.stylesheet(theme.LIGHT)
     panel.close()
 
 
@@ -1462,3 +1465,67 @@ def test_a_theme_switch_retints_an_open_review_window(qt_app, prefs, tmp_path) -
         theme.apply_theme(qt_app, "light")
         review.close()
         review.deleteLater()
+
+
+def test_the_home_panels_wear_the_presentation_layer(
+    qt_app, prefs, store, no_default_job_dirs
+) -> None:
+    from PySide6.QtWidgets import QFrame
+
+    from qurantext.gui import theme
+    from qurantext.gui.home.job_list import JobListPanel
+    from qurantext.gui.widgets import Card, SectionHeader
+
+    theme.apply_theme(qt_app, "light")
+    jobs = JobListPanel(prefs)
+    panel = _panel(prefs, store)
+    try:
+        assert isinstance(jobs.header, SectionHeader) and jobs.title_label is jobs.header.label
+        assert jobs.title_label.font().pointSizeF() == theme.font("section").pointSizeF()
+        for button, name in (
+            (jobs.refresh_button, "refresh-cw"),
+            (jobs.open_button, "folder-open"),
+            (jobs.reveal_button, "folder"),
+            (jobs.remove_button, "x"),
+        ):
+            assert button.property("qalun.icon")[0] == name, name
+        assert (
+            isinstance(panel.heading, SectionHeader) and panel.heading_label is panel.heading.label
+        )
+        assert isinstance(panel.drop_zone, Card) and isinstance(panel.drop_zone, QFrame)
+        assert panel.drop_zone.objectName() == "dropZone"
+        assert panel.choose_button.property("qalun.icon")[0] == "folder-open"
+        assert not panel.choose_button.isFlat()
+        assert panel.recitation_button.property("qalun.icon")[0] == "mic"
+        assert panel.lecture_button.property("qalun.icon")[0] == "book-open"
+        assert panel.start_button.property("primary") is True
+        assert panel.more_button.property("qalun.icon")[0] == "chevron-right"
+        panel.more_button.setChecked(True)
+        assert panel.more_button.property("qalun.icon")[0] == "chevron-down"
+        assert panel.recitation_button.styleSheet() == "" and panel.drop_zone.styleSheet() == ""
+    finally:
+        jobs.stop_reading()
+        jobs.deleteLater()
+        panel.deleteLater()
+
+
+def test_a_disabled_start_still_shows_its_text(qt_app, prefs, store) -> None:
+    """Review Focus 5: Start before a file is chosen is disabled, primary, and readable."""
+    from PySide6.QtWidgets import QStyleOptionButton
+
+    from qurantext.gui import theme
+    from tests.test_colors import contrast
+
+    theme.apply_theme(qt_app, "light")
+    panel = _panel(prefs, store)
+    try:
+        assert not panel.start_button.isEnabled()
+        option = QStyleOptionButton()
+        panel.start_button.initStyleOption(option)
+        text = option.palette.color(
+            option.palette.ColorGroup.Disabled, option.palette.ColorRole.ButtonText
+        )
+        assert contrast(text, option.palette.color(option.palette.ColorRole.Window)) >= 4.5
+        assert 'QPushButton[primary="true"]:disabled' in qt_app.styleSheet()
+    finally:
+        panel.deleteLater()

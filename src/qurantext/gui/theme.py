@@ -168,7 +168,12 @@ QPushButton[primary="true"] {{
 }}
 QPushButton[primary="true"]:hover {{ background: {hover_primary}; }}
 QPushButton[primary="true"]:focus {{ border: 2px solid {t.text}; padding: 5px 20px; }}
-QPushButton[primary="true"]:disabled {{ background: {t.border}; color: {t.secondary}; }}
+QPushButton[primary="true"]:disabled {{
+    background: {t.panel};
+    color: {t.secondary};
+    border: 1px solid {t.border};
+    padding: 6px 21px;
+}}
 QFrame[card="true"] {{
     background: {t.raised};
     border: 1px solid {t.border};
