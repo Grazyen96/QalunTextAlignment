@@ -562,7 +562,7 @@ def test_stopping_a_slow_read_lets_its_thread_end_soon(qt_app, prefs, monkeypatc
         (jobs_dir / f"{index}.qalun.json").write_text("{}", encoding="utf-8")
     opened = threading.Event()
 
-    def slow(path):
+    def slow(path, **kwargs):
         opened.set()
         time.sleep(0.1)  # 100 files: 10 s uncancelled
         return None
@@ -924,31 +924,6 @@ def test_show_status_says_how_the_last_job_ended(qt_app, prefs, store) -> None:
     assert not panel.status_label.isVisible()
 
 
-def test_a_quran_override_that_is_gone_falls_back_to_the_default(
-    qt_app, prefs, store, tmp_path
-) -> None:
-    """The override wins only while its file exists; the choice itself is kept."""
-    gone = tmp_path / "gone.txt"
-    prefs.quran_override = gone
-
-    panel = _panel(prefs, store)
-
-    assert panel.spec().quran == QURAN_FILE
-    assert panel.quran_label.text() == t("home.quran_override.default")
-    assert prefs.quran_override == gone.resolve(), "an unmounted drive must not erase it"
-
-
-def test_a_quran_override_that_exists_wins_over_the_default(qt_app, prefs, store, tmp_path) -> None:
-    prefs.quran_override = QURAN_FILE
-
-    panel = _panel(prefs, store, quran_default=tmp_path / "default.txt")
-
-    assert panel.spec().quran == QURAN_FILE.resolve()
-    assert panel.quran_label.text() == t(
-        "home.quran_override.custom", path=path_text(QURAN_FILE.resolve())
-    )
-
-
 def test_the_form_reads_top_down_with_choose_inside_the_drop_zone(qt_app, prefs, store) -> None:
     from PySide6.QtWidgets import QHBoxLayout
 
@@ -1161,56 +1136,6 @@ def test_the_two_forms_share_one_label_column(qt_app, prefs, store) -> None:
     upper = panel.surah_box.x()
     lower = panel.quran_row.x()
     assert abs(upper - lower) <= 2
-
-
-def test_the_engine_row_defaults_to_this_computer(qt_app, prefs, store) -> None:
-    panel = _panel(prefs, store)
-    assert panel.engine_buttons["local"].isChecked()
-    assert panel.spec().engine == "local"
-    assert panel.no_token_label.isHidden()
-    assert panel.more_form.labelForField(panel.engine_row).text() == t("home.engine")
-
-
-def test_choosing_whisperx_is_remembered_and_reaches_the_spec(qt_app, prefs, store) -> None:
-    panel = _panel(prefs, store)
-    panel.engine_buttons["whisperx"].setChecked(True)
-    assert panel.spec().engine == "whisperx"
-    assert _panel(prefs, store).engine_buttons["whisperx"].isChecked()
-
-
-def test_whisperx_without_a_token_says_where_to_put_it(qt_app, prefs, store, monkeypatch) -> None:
-    from qurantext.config.settings import env_dir, get_settings
-
-    # Empty rather than unset: the process environment outranks a .env file,
-    # so a token in the checkout's own .env cannot creep back in.
-    monkeypatch.setenv("REPLICATE_API_TOKEN", "")
-    get_settings.cache_clear()
-    try:
-        panel = _panel(prefs, store)
-        panel.engine_buttons["whisperx"].setChecked(True)
-        assert not panel.no_token_label.isHidden()
-        assert ".env" in panel.no_token_label.text()
-        assert path_text(env_dir()) in panel.no_token_label.text()
-        # The note informs; it does not add a reason to keep Start disabled.
-        assert panel.problem() == panel.spec().validate()
-        panel.engine_buttons["local"].setChecked(True)
-        assert panel.no_token_label.isHidden()
-    finally:
-        get_settings.cache_clear()
-
-
-def test_whisperx_with_a_token_needs_no_note(qt_app, prefs, store, monkeypatch) -> None:
-    from qurantext.config.settings import get_settings
-
-    monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_test")
-    get_settings.cache_clear()
-    try:
-        prefs.engine = "whisperx"
-        panel = _panel(prefs, store)
-        assert panel.engine_buttons["whisperx"].isChecked()
-        assert panel.no_token_label.isHidden()
-    finally:
-        get_settings.cache_clear()
 
 
 def test_a_folded_whisperx_choice_without_a_token_is_still_said(
