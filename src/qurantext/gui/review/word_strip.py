@@ -27,6 +27,7 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QEvent, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
+    QColor,
     QFocusEvent,
     QFontMetrics,
     QHideEvent,
@@ -37,7 +38,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QWidget
 
-from qurantext.gui.colors import playhead_color, warning_color
+from qurantext.gui import theme
+from qurantext.gui.colors import warning_color
 from qurantext.gui.review.session import ReviewSession, TimelineWord, WordRef
 from qurantext.gui.review.viewport import Viewport
 
@@ -78,6 +80,8 @@ class WordStrip(QWidget):
 
     #: How close (in pixels) a press or the pointer must be to count as "on an edge".
     EDGE_PX = 8
+    #: How wide the grab handle is drawn; narrower than :attr:`EDGE_PX`, which is felt, not seen.
+    HANDLE_PX = 6
 
     selection_changed = Signal(object)
     seek_requested = Signal(float)
@@ -106,6 +110,9 @@ class WordStrip(QWidget):
 
     def sizeHint(self) -> QSize:  # noqa: D102 - Qt override, documented by the class
         return QSize(600, 44)
+
+    def minimumSizeHint(self) -> QSize:  # noqa: D102 - Qt override, documented by the class
+        return QSize(200, 40)
 
     @property
     def selected(self) -> WordRef | None:
@@ -330,15 +337,21 @@ class WordStrip(QWidget):
             painter.end()
 
     def _paint_word(self, painter, metrics, rect, tw, is_under_playhead, palette) -> None:
+        tokens = theme.current_tokens()
         selected = tw.ref == self._selected
-        if selected:
-            painter.fillRect(rect, palette.highlight())
-
-        border_pen = QPen(playhead_color(palette) if is_under_playhead else palette.mid().color())
-        border_pen.setWidth(2 if is_under_playhead else 1)
+        # The word under the playhead is outlined in the accent: the red playhead
+        # itself is the ruler's and the waveform's, one mark per time.
+        if is_under_playhead:
+            border_pen = QPen(QColor(tokens.accent), 2)
+        else:
+            border_pen = QPen(QColor(tokens.border), 1)
         painter.setPen(border_pen)
+        if selected:
+            painter.setBrush(QColor(tokens.accent))
+        else:
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(rect, 4, 4)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRect(rect)
 
         if rect.width() < _MIN_TEXT_WIDTH_PX:
             # Too narrow to read at this zoom (thousands of boxes fit in view
@@ -347,7 +360,7 @@ class WordStrip(QWidget):
             # lecture cheap.
             return
 
-        text_color = palette.highlightedText().color() if selected else palette.windowText().color()
+        text_color = QColor(tokens.on_accent) if selected else palette.windowText().color()
         painter.setPen(text_color)
         elided = metrics.elidedText(
             tw.text, Qt.TextElideMode.ElideRight, max(0, int(rect.width()) - 4)
@@ -359,14 +372,15 @@ class WordStrip(QWidget):
             painter.fillRect(bar, warning_color(palette))
 
     def _paint_handle(self, painter, handle, width, height, palette) -> None:
-        """A 3 px bar on the edge the pointer can grab, so the target is seen before it is felt."""
+        """A :attr:`HANDLE_PX` bar on the edge the pointer can grab, seen before it is felt."""
         edge, ref = handle
         try:
             tw = self._session.word(ref)
         except IndexError:
             return
         x = self._viewport.x_for(tw.start if edge == "start" else tw.end, width)
-        bar = QRectF(x - 1.5, 0.0, 3.0, float(height))
+        half = self.HANDLE_PX / 2.0
+        bar = QRectF(x - half, 0.0, float(self.HANDLE_PX), float(height))
         if not self._on_selected_box(x, width):
             painter.fillRect(bar, palette.highlight())
             return
@@ -388,4 +402,5 @@ class WordStrip(QWidget):
             return False
         left = self._viewport.x_for(selected.end, width)
         right = self._viewport.x_for(selected.start, width)
-        return left - 1.5 <= x <= right + 1.5
+        half = self.HANDLE_PX / 2.0
+        return left - half <= x <= right + half

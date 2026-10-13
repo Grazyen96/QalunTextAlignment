@@ -23,19 +23,22 @@ from __future__ import annotations
 import unicodedata
 from typing import Any
 
-from PySide6.QtCore import QPoint, QSignalBlocker, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QContextMenuEvent
+from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtGui import QColor, QContextMenuEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
     QMenu,
+    QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
     QWidget,
 )
 
 from qurantext.core.subtitles import card_ref
+from qurantext.gui import theme
 from qurantext.gui.i18n import is_rtl, ltr, t, time_span
+from qurantext.gui.icons import icon
 from qurantext.gui.review.session import CAPTION, CARD, ReviewSession
 
 __all__ = ["MANUAL_MARK", "SegmentList"]
@@ -53,6 +56,9 @@ _RLM = "\u200f"
 class SegmentList(QTableWidget):
     """Lists ``session.project``'s cards (and, in a lecture, its captions)."""
 
+    #: Every row's height, in pixels: room for the icon and one line of text.
+    ROW_HEIGHT = 32
+
     seek_requested = Signal(float)
     #: The person asked to change which ayat a lecture card shows; carries the card's index.
     card_ayah_requested = Signal(int)
@@ -64,6 +70,9 @@ class SegmentList(QTableWidget):
         )
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.verticalHeader().setVisible(False)
+        self.verticalHeader().setDefaultSectionSize(self.ROW_HEIGHT)
+        self.setAlternatingRowColors(True)
+        self.setItemDelegateForColumn(_COLUMN_REF, _PlayheadRuleDelegate(self))
         # The text is what a person reads; the reference, time and count fit their contents.
         header = self.horizontalHeader()
         header.setStretchLastSection(False)
@@ -77,7 +86,7 @@ class SegmentList(QTableWidget):
         self._row_by_segment: dict[tuple[str, int], int] = {}
         #: The row :meth:`highlight_at` last marked as under the playhead.
         self._playhead_row: int | None = None
-        #: True while a click on a row seeks there: the playhead's row is then tinted but
+        #: True while a click on a row seeks there: the playhead's row is then marked but
         #: not scrolled to, so the clicked row stays under the pointer (a double-click's
         #: second press must land on the same cell to count as a double-click).
         self._seeking_from_click = False
@@ -126,9 +135,7 @@ class SegmentList(QTableWidget):
             start = _as_float(card.get("start_time"))
             end = _as_float(card.get("end_time"), default=start)
             text = _card_text(card)
-            retimed = (
-                str(self._session.retimed_count(CARD, index)) if card.get("word_timings") else ""
-            )
+            count = self._session.retimed_count(CARD, index) if card.get("word_timings") else 0
             text_editable = False
         else:
             cue = project.captions[index]
@@ -136,7 +143,7 @@ class SegmentList(QTableWidget):
             start = float(cue.start)
             end = float(cue.end)
             text = cue.text
-            retimed = str(self._session.retimed_count(CAPTION, index)) if cue.words else ""
+            count = self._session.retimed_count(CAPTION, index) if cue.words else 0
             text_editable = True
 
         self._rows.append((kind, index, start))
@@ -148,6 +155,7 @@ class SegmentList(QTableWidget):
             # reference alone has no letter to set the cell's direction by.
             ref_text = f"{_RLM if is_rtl() else ''}{MANUAL_MARK} {ref_text}"
         ref_item = self._set_item(row, _COLUMN_REF, ref_text, kind, index, editable=False)
+        ref_item.setIcon(icon("book-open" if kind == CARD else "mic", "secondary"))
         if manual:
             ref_item.setToolTip(t("segments.manual"))
         span = ltr(time_span(start, end))
@@ -156,6 +164,8 @@ class SegmentList(QTableWidget):
         text_item.setTextAlignment(_text_alignment(text))
         if not text_editable:
             text_item.setToolTip(t("segments.locked"))
+        # Nothing retimed is an empty cell, so the rows that were stand out.
+        retimed = str(count) if count else ""
         self._set_item(row, _COLUMN_RETIMED, retimed, kind, index, editable=False)
 
     def _set_item(
@@ -175,7 +185,8 @@ class SegmentList(QTableWidget):
     def highlight_at(self, t_seconds: float) -> None:
         """Mark the row under *t_seconds* as the playhead's, and scroll it into view.
 
-        A tinted background, never the selection or the current cell: the
+        An accent rule on the row's leading edge (drawn by the reference
+        column's delegate), never the selection or the current cell: the
         selection is what the person chose (and what "Remove selected"
         removes), so playback moving across rows must not change it.
         """
@@ -183,27 +194,14 @@ class SegmentList(QTableWidget):
         row = self._row_by_segment.get(segment) if segment is not None else None
         if row == self._playhead_row:
             return
-        if self._playhead_row is not None:
-            self._paint_row(self._playhead_row, QBrush())
         self._playhead_row = row
-        if row is None:
-            return
-        tint = QColor(self.palette().highlight().color())
-        tint.setAlpha(60)
-        self._paint_row(row, QBrush(tint))
-        if not self._seeking_from_click:
+        self.viewport().update()
+        if row is not None and not self._seeking_from_click:
             self.scrollToItem(self.item(row, _COLUMN_REF))
 
-    def _paint_row(self, row: int, brush: QBrush) -> None:
-        # A background change is an itemChanged too; it is not a text edit.
-        blocker = QSignalBlocker(self)
-        try:
-            for column in range(self.columnCount()):
-                item = self.item(row, column)
-                if item is not None:
-                    item.setBackground(brush)
-        finally:
-            blocker.unblock()
+    def playhead_row(self) -> int | None:
+        """The row :meth:`highlight_at` last marked as under the playhead, or None."""
+        return self._playhead_row
 
     def segment_at(self, t_seconds: float) -> tuple[str, int] | None:
         """The ``(kind, index)`` of the row :meth:`highlight_at` would mark at *t_seconds*.
@@ -314,6 +312,19 @@ class SegmentList(QTableWidget):
         if kind != CAPTION:
             return
         self._session.set_caption_text(index, item.text())
+
+
+class _PlayheadRuleDelegate(QStyledItemDelegate):
+    """A 3 px accent rule on the leading edge of the playhead row's first cell."""
+
+    def paint(self, painter, option, index) -> None:  # noqa: D102 - Qt override
+        super().paint(painter, option, index)
+        table = self.parent()
+        if not isinstance(table, SegmentList) or index.row() != table.playhead_row():
+            return
+        rect = option.rect
+        x = rect.right() - 2 if table.isRightToLeft() else rect.left()
+        painter.fillRect(x, rect.top(), 3, rect.height(), QColor(theme.current_tokens().accent))
 
 
 def _starts_right_to_left(text: str) -> bool:

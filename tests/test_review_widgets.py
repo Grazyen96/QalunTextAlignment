@@ -132,7 +132,7 @@ def test_the_waveform_draws_the_windows_start_at_the_right(qt_app) -> None:
     view.set_peaks(Peaks(mins=-maxs, maxs=maxs, rate=10.0, duration=10.0))
     view.set_playhead(9.95)  # out of the way, at the far left
     image = view.grab().toImage()
-    background = view.palette().color(QPalette.ColorRole.Window)
+    background = view.palette().color(QPalette.ColorRole.Base)  # the panel
     near_top = 10  # only a loud column reaches this high
     assert image.pixelColor(150, near_top) != background, "the first 5 s are drawn on the right"
     assert image.pixelColor(50, near_top) == background, "the silent last 5 s on the left"
@@ -151,7 +151,7 @@ def test_a_gap_band_is_drawn_from_its_end_on_the_left_to_its_start_on_the_right(
     view.set_gaps([(2.0, 4.0)])
     view.set_playhead(9.95)  # out of the way, at the far left
     image = view.grab().toImage()
-    background = view.palette().color(QPalette.ColorRole.Window)
+    background = view.palette().color(QPalette.ColorRole.Base)  # the panel
     row = 5  # above the "reading" placeholder text
     # 2-4 s is x 120-160 right to left; left to right it would be x 40-80.
     for x in (122, 125, 140, 155, 158):
@@ -181,7 +181,8 @@ def test_a_playhead_outside_the_window_is_not_drawn(qt_app) -> None:
     view.set_playhead(70.0)  # after it: not pinned to its left edge
     assert _playhead_columns(view) == []
     view.set_playhead(55.0)
-    assert _playhead_columns(view) == [99]  # halfway: column 99 holds [55, 55.05)
+    # Halfway: column 99 holds [55, 55.05); the 2 px line spans it and its left neighbour.
+    assert _playhead_columns(view) == [98, 99]
 
 
 @pytest.mark.parametrize(("duration", "span"), [(100.0, 10.0), (7.3, 2.1), (3.7, 1.3)])
@@ -278,12 +279,14 @@ def test_the_first_word_is_drawn_at_the_right(qt_app) -> None:
     # A box's right edge is its start, its left edge its end.
     assert strip._hit_test(900) == ("start", a.ref)
     assert strip._hit_test(600) == ("end", c.ref)
-    # The selected word's fill covers its own box and not the earlier word's.
-    from PySide6.QtGui import QPalette
+    # The selected word's fill (the accent) covers its own box and not the earlier word's.
+    from PySide6.QtGui import QColor
+
+    from qurantext.gui import theme
 
     strip.select(b.ref)
     image = strip.grab().toImage()
-    highlight = strip.palette().color(QPalette.ColorRole.Highlight)
+    highlight = QColor(theme.current_tokens().accent)
     assert image.pixelColor(720, 6) == highlight
     assert image.pixelColor(880, 6) != highlight
 
@@ -685,8 +688,7 @@ def test_the_playhead_row_is_marked_without_being_selected(qt_app) -> None:
     table.highlight_at(2.5)
     assert not table.selectedIndexes()
     assert table.currentRow() == -1
-    assert table.item(1, 2).background().style() != Qt.BrushStyle.NoBrush
-    assert table.item(0, 2).background().style() == Qt.BrushStyle.NoBrush
+    assert table.playhead_row() == 1
 
 
 def test_an_edge_dragged_past_its_neighbour_and_back_leaves_the_neighbour(qt_app) -> None:
@@ -2969,3 +2971,123 @@ def test_no_label_in_the_episode_dialog_is_clipped(
         ]
         assert not clipped, (language, clipped)
         dialog.reject()
+
+
+def test_the_strip_fills_the_selected_word_with_the_accent(qt_app) -> None:
+    from qurantext.gui import theme
+
+    theme.apply_theme(qt_app, "light")
+    session, strip = _strip(qt_app)
+    strip.resize(600, 44)
+    words = session.words()
+    strip.select(words[0].ref)
+    image = strip.grab().toImage()
+    x = int(
+        (strip._viewport.x_for(words[0].start, 600) + strip._viewport.x_for(words[0].end, 600)) / 2
+    )
+    # Above the centred label, so the sample lands on the fill rather than a glyph.
+    assert image.pixelColor(x, 8).name().upper() == theme.LIGHT.accent.upper()
+    assert strip.minimumSizeHint().height() >= 40 and strip.HANDLE_PX == 6
+    assert strip.EDGE_PX == 8
+
+
+def test_the_waveform_draws_the_current_word_stronger(qt_app) -> None:
+    from qurantext.gui import theme
+    from qurantext.gui.review.waveform_view import WaveformView
+
+    theme.apply_theme(qt_app, "light")
+    viewport = Viewport()
+    viewport.set_duration(10.0)
+    viewport.set_window(0.0, 10.0)
+    view = WaveformView(viewport)
+    view.resize(100, 50)
+    view.set_peaks(Peaks(mins=np.full(100, -0.9), maxs=np.full(100, 0.9), rate=10.0, duration=10.0))
+    view.set_current_word(2.0, 3.0)
+    image = view.grab().toImage()
+    inside = image.pixelColor(int(viewport.x_for(2.5, 100)), 25)
+    outside = image.pixelColor(int(viewport.x_for(7.5, 100)), 25)
+    assert inside.alpha() == 255 and inside != outside
+    assert inside.name().upper() == theme.LIGHT.accent.upper()
+    assert outside.name().upper() != theme.LIGHT.panel.upper()  # bars are drawn there too, fainter
+    view.set_current_word(None, None)
+    image = view.grab().toImage()
+    assert image.pixelColor(int(viewport.x_for(2.5, 100)), 25) == outside
+
+
+def test_the_table_marks_the_playhead_row_with_a_rule_and_shows_icons(qt_app) -> None:
+    from qurantext.gui.review.segment_list import SegmentList
+
+    table = SegmentList(_three_cue_session())
+    assert table.ROW_HEIGHT == 32 and table.alternatingRowColors()
+    assert table.verticalHeader().defaultSectionSize() == 32
+    assert not table.item(0, 0).icon().isNull()
+    assert not table.item(table.rowCount() - 1, 0).icon().isNull()
+    table.highlight_at(2.5)
+    assert table.playhead_row() == 1
+    assert table.item(1, 2).background().style() == Qt.BrushStyle.NoBrush  # a rule, not a tint
+    retimed = [table.item(r, 3).text() for r in range(table.rowCount())]
+    assert "0" not in retimed
+
+
+def test_a_cards_row_shows_the_book_and_a_captions_the_microphone(qt_app) -> None:
+    from qurantext.gui.review.segment_list import SegmentList
+    from qurantext.gui.review.session import ReviewSession
+    from qurantext.jobs.project import CaptionCue, Project
+
+    cards = [
+        {
+            "surah_num": 25,
+            "from_ayah": 7,
+            "to_ayah": 7,
+            "full_text": "a b c",
+            "start_time": 0.0,
+            "end_time": 1.0,
+        }
+    ]
+    project = Project(
+        audio=__import__("pathlib").Path("d.mp3"),
+        mode="lecture",
+        cards=cards,
+        captions=[CaptionCue(1.0, 2.0, "spoken", words=[])],
+    )
+    table = SegmentList(ReviewSession(project))
+    card_icon = table.item(0, 0).icon().pixmap(16, 16).toImage()
+    caption_icon = table.item(1, 0).icon().pixmap(16, 16).toImage()
+    assert not card_icon.isNull() and not caption_icon.isNull()
+    assert card_icon != caption_icon
+
+
+def test_the_playhead_rule_is_painted_on_the_rows_leading_edge(qt_app) -> None:
+    from qurantext.gui import theme
+    from qurantext.gui.review.segment_list import SegmentList
+
+    theme.apply_theme(qt_app, "light")
+    table = SegmentList(_three_cue_session())
+    table.resize(500, 200)
+    table.highlight_at(2.5)
+    rect = table.visualRect(table.model().index(1, 0))
+    image = table.viewport().grab().toImage()
+    accent = theme.LIGHT.accent.upper()
+    assert image.pixelColor(rect.left() + 1, rect.center().y()).name().upper() == accent
+    other = table.visualRect(table.model().index(0, 0))
+    assert image.pixelColor(other.left() + 1, other.center().y()).name().upper() != accent
+
+
+def test_the_playhead_rule_leads_from_the_right_under_arabic(qt_app) -> None:
+    from qurantext.gui import theme
+    from qurantext.gui.review.segment_list import SegmentList
+
+    theme.apply_theme(qt_app, "light")
+    table = SegmentList(_three_cue_session())
+    table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+    table.resize(500, 200)
+    # Shown, so the header lays its sections out mirrored before a cell's rect is asked for.
+    table.show()
+    qt_app.processEvents()
+    table.highlight_at(2.5)
+    rect = table.visualRect(table.model().index(1, 0))
+    image = table.viewport().grab().toImage()
+    accent = theme.LIGHT.accent.upper()
+    assert image.pixelColor(rect.right() - 1, rect.center().y()).name().upper() == accent
+    assert image.pixelColor(rect.left() + 1, rect.center().y()).name().upper() != accent
+    table.close()

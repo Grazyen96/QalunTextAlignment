@@ -18,17 +18,21 @@ import math
 
 import numpy as np
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPaintEvent
+from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPaintEvent, QPen
 from PySide6.QtWidgets import QWidget
 
 from qurantext.core.waveform import Peaks
-from qurantext.gui.colors import playhead_color
+from qurantext.gui import theme
+from qurantext.gui.colors import playhead_color, warning_color
 from qurantext.gui.i18n import t
 from qurantext.gui.review.viewport import Viewport
 
 __all__ = ["WaveformView", "column_extremes"]
 
-_GAP_COLOR = QColor(239, 159, 39, 70)
+#: The bars outside the word under the playhead; the word itself is drawn opaque.
+_FAINT_ALPHA = 140
+#: A gap band's fill; its outline is the same amber, opaque.
+_GAP_FILL_ALPHA = 64
 #: How far past a window edge, in pixels, float rounding may put a time on it.
 _EDGE_SLACK_PX = 1e-6
 
@@ -47,6 +51,8 @@ class WaveformView(QWidget):
         self._missing = False
         self._gaps: list[tuple[float, float]] = []
         self._playhead = 0.0
+        #: The word under the playhead, ``(start, end)`` seconds, drawn at full strength.
+        self._current: tuple[float, float] | None = None
         self._dragging = False
         viewport.changed.connect(self.update)
 
@@ -84,6 +90,14 @@ class WaveformView(QWidget):
         self._playhead = float(t)
         self.update()
 
+    def set_current_word(self, start: float | None, end: float | None) -> None:
+        """The word under the playhead, drawn at full strength; None for none."""
+        if start is not None and end is not None:
+            self._current = (float(start), float(end))
+        else:
+            self._current = None
+        self.update()
+
     def _seek_to(self, x: float) -> None:
         self.seek_requested.emit(self._viewport.t_for(x, self.width()))
 
@@ -110,26 +124,37 @@ class WaveformView(QWidget):
         painter = QPainter(self)
         try:
             palette = self.palette()
-            painter.fillRect(self.rect(), palette.window())
+            tokens = theme.current_tokens()
+            # The panel (Base), as the table and the fields beside it are.
+            painter.fillRect(self.rect(), palette.base())
 
             width = self.width()
             height = self.height()
             peaks = self._peaks
             if peaks is None or len(peaks.mins) == 0:
-                painter.setPen(palette.windowText().color())
+                painter.setPen(QColor(tokens.secondary))
                 painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.placeholder())
             else:
-                self._paint_bars(painter, peaks, width, height, palette.windowText().color())
+                self._paint_bars(painter, peaks, width, height)
 
+            attention = warning_color(palette)
+            gap_fill = QColor(attention)
+            gap_fill.setAlpha(_GAP_FILL_ALPHA)
+            painter.setPen(QPen(attention, 1))
+            painter.setBrush(gap_fill)
             for gap_start, gap_end in self._gaps:
                 # The end is the left pixel: later time lies further left.
                 left = self._viewport.x_for(gap_end, width)
                 right = self._viewport.x_for(gap_start, width)
-                painter.fillRect(int(left), 0, max(1, int(right - left)), height, _GAP_COLOR)
+                # A rect's outline is drawn one pixel past its width, so one less keeps
+                # the band on the pixels it covered when it was only filled.
+                band_width = max(1, int(right - left))
+                painter.drawRect(int(left), 0, band_width - 1, height - 1)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
 
             playhead_x = self._playhead_column(width)
             if playhead_x is not None:
-                painter.setPen(playhead_color(palette))
+                painter.setPen(QPen(playhead_color(palette), 2))
                 painter.drawLine(playhead_x, 0, playhead_x, height)
         finally:
             painter.end()
@@ -154,20 +179,27 @@ class WaveformView(QWidget):
             return None
         return min(max(math.ceil(x) - 1, 0), width - 1)
 
-    def _paint_bars(
-        self, painter: QPainter, peaks: Peaks, width: int, height: int, color: QColor
-    ) -> None:
+    def _paint_bars(self, painter: QPainter, peaks: Peaks, width: int, height: int) -> None:
+        """One accent bar per pixel column: faint, and opaque over the current word."""
         if width <= 0 or len(peaks.mins) == 0:
             return
         col_min, col_max = column_extremes(peaks, self._viewport.start, self._viewport.span, width)
 
+        strong = QColor(theme.current_tokens().accent)
+        faint = QColor(strong)
+        faint.setAlpha(_FAINT_ALPHA)
+        current = self._current
         mid = height / 2.0
         half = height / 2.0
-        painter.setPen(color)
         # Column i of the reduction is the i-th slice of time from the window's
         # start, which right to left is the i-th pixel column from the right.
         for i in range(width):
             x = width - 1 - i
+            inside = False
+            if current is not None:
+                t = self._viewport.t_for(x + 0.5, width)
+                inside = current[0] <= t < current[1]
+            painter.setPen(strong if inside else faint)
             y_top = mid - float(col_max[i]) * half
             y_bottom = mid - float(col_min[i]) * half
             painter.drawLine(x, int(y_top), x, int(y_bottom))
