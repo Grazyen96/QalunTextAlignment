@@ -389,3 +389,29 @@ def test_idna_is_pinned_credited_and_its_licence_shipped() -> None:
     assert f"version {pin}" in section and "BSD 3-Clause" in section
     assert f"_internal/idna-{pin}.dist-info/licenses/LICENSE.md" in section
     assert any(f.name == "LICENSE.md" for f in distribution("idna").files or ())
+
+
+ICON_DIR = Path(__file__).resolve().parents[1] / "src" / "qurantext" / "assets" / "icons"
+
+
+def test_every_interface_icon_ships_with_lucides_licence() -> None:
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+    from fetch_icons import ICON_NAMES
+
+    assert len(ICON_NAMES) == 31
+    for name in ICON_NAMES:
+        svg = ICON_DIR / f"{name}.svg"
+        assert svg.is_file(), name
+        assert 'stroke="currentColor"' in svg.read_text(encoding="utf-8"), name
+    assert "ISC License" in (ICON_DIR / "LICENSE").read_text(encoding="utf-8")
+
+
+def test_the_third_party_notice_credits_lucide() -> None:
+    text = (Path(__file__).resolve().parents[1] / "THIRD_PARTY_NOTICES.md").read_text(
+        encoding="utf-8"
+    )
+    assert "## Lucide icons" in text
+    assert "1.56.0" in text and "ISC" in text
+    assert "qurantext/assets/icons/LICENSE" in text

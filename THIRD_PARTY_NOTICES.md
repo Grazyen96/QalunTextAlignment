@@ -77,6 +77,18 @@ The licence text is beside them, at `qurantext/assets/fonts/Amiri-OFL.txt`
 the source at `packaging/licenses/Amiri-OFL.txt`. The OFL is not the GPL; it lets
 the font be bundled with any software, and it stays under the OFL.
 
+## Lucide icons
+
+The window's icons are from **Lucide**, release 1.56.0,
+https://github.com/lucide-icons/lucide/releases/tag/1.56.0, Copyright (c)
+Lucide Icons and Contributors, licensed under the ISC License. Thirty-one SVG
+files ship unmodified inside the app, the Python package and
+`qalun-source.zip`, under `qurantext/assets/icons/` (in the app's folder,
+`_internal/qurantext/assets/icons/`); the app recolours them when it draws
+them. The licence text is beside them at `qurantext/assets/icons/LICENSE`
+and in the source at `packaging/licenses/Lucide-LICENSE.txt`. The ISC
+licence is compatible with the GPL-3.0-only licence of Qalun.
+
 ## Speech recognition model
 
 Qalun transcribes on your computer with **NVIDIA FastConformer Hybrid Large
