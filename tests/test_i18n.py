@@ -60,7 +60,7 @@ def test_every_key_the_code_uses_exists_in_every_language() -> None:
     used = set()
     for path in GUI_SOURCE.rglob("*.py"):
         used |= set(_CALL.findall(path.read_text(encoding="utf-8")))
-    assert "review.gaps" in used, "tn( calls must count too"
+    assert "review.gaps_toggle" in used, "tn( calls must count too"
     for language in i18n.LANGUAGES:
         missing = sorted(used - set(i18n.STRINGS[language]))
         assert not missing, f"{language} is missing: {missing}"
@@ -200,8 +200,8 @@ def test_every_language_has_the_same_keys_and_placeholders() -> None:
 def test_the_counted_strings_read_naturally_in_english() -> None:
     assert tn("home.cards", 1) == "1 card"
     assert tn("home.cards", 2) == "2 cards"
-    assert tn("review.gaps", 1) == "1 stretch of speech has no word:"
-    assert tn("review.gaps", 4) == "4 stretches of speech have no word:"
+    assert tn("review.gaps_toggle", 1) == "1 stretch of speech has no word"
+    assert tn("review.gaps_toggle", 4) == "4 stretches of speech have no word"
     assert tn("review.more_gaps", 3) == "…and 3 more"
     assert tn("export.done", 1, names="a.srt") == "Wrote 1 file: a.srt"
     assert tn("export.done", 2, names="a.srt, a.vtt") == "Wrote 2 files: a.srt, a.vtt"

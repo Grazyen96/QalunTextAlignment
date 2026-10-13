@@ -292,10 +292,6 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         # The word is isolated here too: a Quran word leading the line would
         # otherwise lay it out right to left and reverse the two times.
         "review.selected": "\u2068{word}\u2069  {span}",
-        "review.gaps": {
-            "one": "{count} stretch of speech has no word:",
-            "other": "{count} stretches of speech have no word:",
-        },
         "review.gap": "{duration:.1f} s at {span}",
         "review.jump": "Jump",
         "review.covered": "Every stretch of speech is covered by a word.",
@@ -831,14 +827,6 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.no_selection": "اختر كلمة لتعديل توقيتها",
         # Only values: the RLM lays the line out right to left, word first.
         "review.selected": "\u200f{word}  {span}",
-        "review.gaps": {
-            "zero": "لا مقاطع كلام لا تغطيها أي كلمة:",
-            "one": "مقطع كلام واحد لا تغطيه أي كلمة:",
-            "two": "مقطعا كلام لا تغطيهما أي كلمة:",
-            "few": "{count} مقاطع كلام لا تغطيها أي كلمة:",
-            "many": "{count} مقطع كلام لا تغطيه أي كلمة:",
-            "other": "{count} مقطع كلام لا تغطيه أي كلمة:",
-        },
         "review.gap": "{duration:.1f} ث عند {span}",
         "review.jump": "انتقل",
         "review.covered": "كل مقاطع الكلام تغطيها كلمات.",

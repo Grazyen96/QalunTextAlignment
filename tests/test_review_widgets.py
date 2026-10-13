@@ -750,10 +750,12 @@ def test_the_last_waveform_column_ends_at_the_window(qt_app) -> None:
 
 
 def test_the_selection_bar_shows_the_span_as_one_value(qt_app) -> None:
+    from qurantext.gui.review.player import RATES
     from qurantext.gui.review.selection_bar import SelectionBar
     from qurantext.gui.review.session import CARD, TimelineWord, WordRef
+    from qurantext.gui.review.transport import Transport
 
-    bar = SelectionBar()
+    bar = SelectionBar(Transport(RATES))
     bar.show_word(
         TimelineWord(ref=WordRef(CARD, 0, 0), text="ٱلۡحَمۡدُ", start=1.5, end=2.25, edited=False)
     )
