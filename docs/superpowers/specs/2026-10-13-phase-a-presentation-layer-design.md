@@ -129,7 +129,7 @@ in the brainstorm renders). The generated sheet therefore names only:
 | Selector | Rule |
 |---|---|
 | `QPushButton`, `QToolButton` | 1 px `border` border, 6 px radius, 5 px 10 px padding (auto-raise tool buttons 2 px 4 px), `panel` background; `:hover` border `accent`; `:pressed` background `border`; `:disabled` text `secondary`; `:focus` 2 px `accent` outline. `[segment="true"]` and `[swatch="true"]` only: `:checked` `accent` / `on_accent`, and `:checked:disabled` `secondary` text on `panel` with an `accent` outline. (Fix wave 2026-10-13: 14 px padding did not fit 1280 px; a generic `:checked` filled the disclosure toggles.) |
-| `QPushButton[primary="true"]` | `accent` background, `on_accent` text, no border, weight 600, 7 px 18 px padding; `:hover` 8 % darker (light) or lighter (dark); `:disabled` background `border`, text `secondary`. |
+| `QPushButton[primary="true"]` | `accent` background, `on_accent` text, no border, weight 600, 7 px 18 px padding; `:hover` 8 % darker (light) or lighter (dark); `:disabled` background `panel` with a 1 px `border` outline, text `secondary` (the `border` fill measured under 4.5:1). |
 | `QFrame#dropZone` | 2 px dashed `border`, 10 px radius, `panel` background; `[dragOver="true"]` solid `accent` border (keeps today's property). |
 | `QListWidget`, `QTableWidget`, `QScrollArea` | 1 px `border` border, 8 px radius, `panel` background. |
 | `QHeaderView::section` | `window` background, no border but a 1 px bottom `border`, 6 px padding, weight 600. |
@@ -164,6 +164,10 @@ and their effect expressed by the sheet above: the mode toggle becomes two
 - `mirrored(name)`: the names that flip under RTL (`chevron-right`,
   `chevron-left`, `skip-back`, `skip-forward`); `icon()` swaps them when
   `QGuiApplication.isRightToLeft()`.
+- `set_icon(button, name, role="text", size=20, on_role=None)`: *on_role*
+  (``on_accent`` for the mode toggle, the swatches and Render) adds
+  `QIcon.State.On` pixmaps in that colour, so an icon on an accent fill stays
+  readable.
 - `refresh_icons(window)`: every window that sets icons registers its
   `(widget, name, role)` triples through `set_icon(widget, name, role)`,
   which also stores them on the window; `apply_theme` calls
