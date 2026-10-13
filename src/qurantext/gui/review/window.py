@@ -33,12 +33,21 @@ from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QKeyCombination, QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QCloseEvent, QKeyEvent, QKeySequence, QShortcut, QShowEvent
+from PySide6.QtCore import QKeyCombination, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import (
+    QCloseEvent,
+    QDesktopServices,
+    QKeyEvent,
+    QKeySequence,
+    QShortcut,
+    QShowEvent,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QButtonGroup,
     QComboBox,
     QDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -46,8 +55,9 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QSplitter,
+    QStyle,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -59,7 +69,7 @@ from qurantext.core.waveform import Peaks, load_or_compute_peaks, peaks_path_for
 from qurantext.gui import jobs as jobs_module
 from qurantext.gui import theme
 from qurantext.gui.files import show_in_folder
-from qurantext.gui.i18n import clock, path_text, plain_title, t
+from qurantext.gui.i18n import path_text, plain_title, t, tn
 from qurantext.gui.icons import set_icon
 from qurantext.gui.jobs import JobOutcome
 from qurantext.gui.prefs import Prefs
@@ -68,12 +78,15 @@ from qurantext.gui.review.background import BackgroundJobs
 from qurantext.gui.review.banner import Banner
 from qurantext.gui.review.episode_dialog import EpisodeDialog
 from qurantext.gui.review.export_dialog import ExportDialog
-from qurantext.gui.review.frame_view import FrameView
+from qurantext.gui.review.frame_view import FrameView, FullFrameView
 from qurantext.gui.review.look_panel import LookPanel, look_warning_text
 from qurantext.gui.review.player import RATES, Player, create_player
 from qurantext.gui.review.segment_list import SegmentList
 from qurantext.gui.review.selection_bar import NUDGE_S, SelectionBar
 from qurantext.gui.review.session import ReviewSession, WordRef
+from qurantext.gui.review.shortcut_sheet import ShortcutSheet, hint_html
+from qurantext.gui.review.time_ruler import TimeRuler
+from qurantext.gui.review.transport import Transport
 from qurantext.gui.review.viewport import Viewport
 from qurantext.gui.review.waveform_view import WaveformView
 from qurantext.gui.review.word_strip import WordStrip
@@ -133,11 +146,10 @@ _COVERAGE_DEBOUNCE_MS = 1000
 _FINE_NUDGE_S = 0.01
 #: The timeline window shown on open, before the person zooms.
 _DEFAULT_SPAN_S = 20.0
-#: The least height the segment list keeps, in pixels: its header and a few rows,
-#: so a small window shrinks the frame above it instead of the rows away.
-_LIST_MIN_HEIGHT = 150
-#: The Look panel's width, in pixels: three palette swatches with their names.
-_LOOK_PANEL_WIDTH = 260
+#: The room either side of a toolbar separator, in pixels (the buttons keep the style's).
+_SEPARATOR_GAP = 4
+#: How far one press of a zoom button moves the zoom slider (of its 0–100).
+_ZOOM_STEP = 10
 #: What the render's progress bar says during each of the episode's steps.
 _EPISODE_PROGRESS_KEYS = {
     "episode_lecture": "render.running_lecture",
@@ -165,6 +177,17 @@ def _physical_key(event: QKeyEvent) -> Qt.Key | None:
     platform = _platform_family()
     code = event.nativeVirtualKey() if platform == "macos" else event.nativeScanCode()
     return SCANCODE_KEYS[platform].get(code)
+
+
+def _separator() -> QFrame:
+    """A 1 px upright rule between two groups of toolbar buttons (the sheet colours it)."""
+    line = QFrame()
+    line.setFrameShape(QFrame.Shape.VLine)
+    line.setFrameShadow(QFrame.Shadow.Plain)
+    line.setLineWidth(1)
+    line.setFixedSize(1, 20)
+    line.setProperty("separator", True)
+    return line
 
 
 def _is_portrait(project: Project) -> bool:
@@ -254,11 +277,16 @@ class ReviewWindow(QMainWindow):
         self._segment_list_edit_triggers: QAbstractItemView.EditTrigger | None = None
         #: The progress bar's sentence for the running render's current step.
         self._render_progress_key = "render.running"
+        #: The sheet of every shortcut, made the first time it is asked for.
+        self.shortcut_sheet: ShortcutSheet | None = None
+        #: The frame shown full size after a double-click on the preview, while it is open.
+        self._full_frame: FullFrameView | None = None
 
         self._build()
         self._wire()
         self._bind_keys()
         self._set_tips()
+        self._show_span()
 
         self._timer = QTimer(self)
         self._timer.setInterval(_TICK_MS)
@@ -324,15 +352,25 @@ class ReviewWindow(QMainWindow):
         # On the accent fill, in the colour the label beside it is drawn in.
         set_icon(self.render_button, "film", role="on_accent")
         make_primary(self.render_button)
-        buttons = (
-            self.save_button,
-            self.undo_button,
-            self.redo_button,
-            self.reviewed_button,
-            self.remove_button,
-        )
-        for button in buttons:
-            toolbar.addWidget(button)
+        # Grouped by what the buttons act on: the file's history, the selected
+        # rows, then (after the stretch) the lecture's surah and what leaves the
+        # window. Each group keeps the style's spacing; a separator sits only
+        # _SEPARATOR_GAP from its neighbours, which is what keeps the toolbar
+        # within a 1280 px screen.
+        gap = self.style().pixelMetric(QStyle.PixelMetric.PM_LayoutHorizontalSpacing)
+        toolbar.setSpacing(_SEPARATOR_GAP)
+        history, rows, outward = QHBoxLayout(), QHBoxLayout(), QHBoxLayout()
+        for group in (history, rows, outward):
+            group.setSpacing(gap)
+        for button in (self.save_button, self.undo_button, self.redo_button):
+            history.addWidget(button)
+        for button in (self.reviewed_button, self.remove_button):
+            rows.addWidget(button)
+        toolbar.addLayout(history)
+        toolbar.addWidget(_separator())
+        toolbar.addLayout(rows)
+        toolbar.addWidget(_separator())
+        toolbar.addStretch(1)
         # A lecture's cards keep to one surah; which one is the person's to say.
         self.studied_surah_label = QLabel(t("review.studied_surah"))
         self.studied_surah_box = QComboBox()
@@ -341,55 +379,100 @@ class ReviewWindow(QMainWindow):
         fill_studied_surah_box(self.studied_surah_box, self._surah_names)
         select_studied_surah(self.studied_surah_box, self.session.studied_surah)
         self.studied_surah_label.setBuddy(self.studied_surah_box)
-        lecture = str(self.session.project.mode).lower() == "lecture"
+        lecture = self._is_lecture()
         self.studied_surah_label.setVisible(lecture)
         self.studied_surah_box.setVisible(lecture)
         self.episode_button.setVisible(lecture)
-        toolbar.addSpacing(12)
-        toolbar.addWidget(self.studied_surah_label)
-        toolbar.addWidget(self.studied_surah_box)
-        toolbar.addStretch(1)
-        toolbar.addWidget(self.export_button)
-        toolbar.addWidget(self.episode_label)
-        toolbar.addWidget(self.episode_button)
-        toolbar.addWidget(self.render_button)
-        toolbar.addWidget(self.render_progress)
-        toolbar.addWidget(self.render_cancel_button)
+        self.help_button = QToolButton()
+        self.help_button.setAutoRaise(True)
+        self.help_button.setToolTip(t("review.help"))
+        self.help_button.setAccessibleName(t("review.help"))
+        set_icon(self.help_button, "keyboard")
+        for widget in (
+            self.studied_surah_label,
+            self.studied_surah_box,
+            self.episode_label,
+            self.episode_button,
+            self.export_button,
+            self.render_button,
+            self.render_progress,
+            self.render_cancel_button,
+        ):
+            outward.addWidget(widget)
+        toolbar.addLayout(outward)
+        toolbar.addWidget(_separator())
+        toolbar.addWidget(self.help_button)
         column.addLayout(toolbar)
 
         self.warnings = Banner()
         column.addWidget(self.warnings)
 
-        body = QWidget()
-        body_row = QHBoxLayout(body)
-        body_row.setContentsMargins(0, 0, 0, 0)
+        # Left: the frame and the Look that changes it, at the preset's width.
         self.frame_view = FrameView(self.session, portrait=_is_portrait(self.session.project))
-        body_row.addWidget(self.frame_view, 0, Qt.AlignmentFlag.AlignTop)
-        body_row.addWidget(self._build_look_panel())
-        body_row.addLayout(self._build_timeline(), 1)
+        self.frame_scroll = QScrollArea()
+        self.frame_scroll.setWidget(self.frame_view)
+        self.frame_scroll.setWidgetResizable(True)
+        self.frame_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.frame_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.fit_button = QToolButton()
+        self.actual_button = QToolButton()
+        for button, name, key in (
+            (self.fit_button, "zoom-out", "review.fit"),
+            (self.actual_button, "zoom-in", "review.actual_size"),
+        ):
+            button.setCheckable(True)
+            button.setAutoRaise(True)
+            button.setToolTip(t(key))
+            button.setAccessibleName(t(key))
+            set_icon(button, name, size=16)
+        fit_group = QButtonGroup(self)
+        fit_group.setExclusive(True)
+        fit_group.addButton(self.fit_button)
+        fit_group.addButton(self.actual_button)
+        fit_row = QHBoxLayout()
+        fit_row.addStretch(1)
+        fit_row.addWidget(self.fit_button)
+        fit_row.addWidget(self.actual_button)
+        self.left_column = QWidget()
+        left = QVBoxLayout(self.left_column)
+        left.setContentsMargins(0, 0, 0, 0)
+        left.addWidget(self.frame_scroll, 1)
+        left.addLayout(fit_row)
+        left.addWidget(self._build_look_panel(), 2)
+        self.left_column.setFixedWidth(self.frame_view.preset_size.width() + 2 * theme.SP_12)
 
+        # Right: the timeline and its transport, then the table down to the status bar.
+        self.right_column = QWidget()
+        right = QVBoxLayout(self.right_column)
+        right.setContentsMargins(0, 0, 0, 0)
+        right.addLayout(self._build_timeline())
         self.segment_list = SegmentList(self.session)
-        self.segment_list.setMinimumHeight(_LIST_MIN_HEIGHT)
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.addWidget(body)
-        splitter.addWidget(self.segment_list)
-        # Neither pane can be dragged away, and extra height goes to the list's rows.
+        right.addWidget(self.segment_list, 1)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.addWidget(self.left_column)
+        splitter.addWidget(self.right_column)
+        # Neither column can be dragged away, and extra width goes to the timeline.
         splitter.setChildrenCollapsible(False)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         self._splitter = splitter
         column.addWidget(splitter, 1)
 
-        self.hint_label = QLabel()
-        self.hint_label.setToolTip(t("review.shortcuts"))
-        # Takes whatever width the bar has, and elides to it (see _elide_hint).
-        self.hint_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self.hint_label.installEventFilter(self)
+        # A short line with a link to the sheet that lists every key.
+        self.hint_label = QLabel(hint_html())
+        self.hint_label.setTextFormat(Qt.TextFormat.RichText)
+        self.hint_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.LinksAccessibleByMouse
+            | Qt.TextInteractionFlag.LinksAccessibleByKeyboard
+        )
+        self.hint_label.linkActivated.connect(lambda _link: self.show_shortcuts())
         self.statusBar().addWidget(self.hint_label, 1)
         self.setCentralWidget(central)
+        self._set_preview_fit(self._prefs.preview_fit, remember=False)
 
     def _build_look_panel(self) -> QScrollArea:
-        """The Look panel beside the frame it changes, scrolling when the window is short."""
+        """The Look panel under the frame it changes, scrolling when the window is short."""
         self.look_panel = LookPanel(
             self.session,
             prefs=self._prefs,
@@ -399,7 +482,6 @@ class ReviewWindow(QMainWindow):
         scroll = QScrollArea()
         scroll.setWidget(self.look_panel)
         scroll.setWidgetResizable(True)
-        scroll.setFixedWidth(_LOOK_PANEL_WIDTH)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         self.look_scroll = scroll
@@ -412,43 +494,49 @@ class ReviewWindow(QMainWindow):
         self.zoom_label = QLabel(t("review.zoom"))
         self.zoom_slider = ZoomSlider(self.viewport, self.player.position)
         self.zoom_label.setBuddy(self.zoom_slider)
-        zoom_row.addWidget(self.zoom_label)
-        zoom_row.addWidget(self.zoom_slider, 1)
+        self.zoom_out_button = QToolButton()
+        self.zoom_in_button = QToolButton()
+        for button, name, key, step in (
+            (self.zoom_out_button, "zoom-out", "review.zoom_out", -_ZOOM_STEP),
+            (self.zoom_in_button, "zoom-in", "review.zoom_in", _ZOOM_STEP),
+        ):
+            button.setAutoRaise(True)
+            button.setToolTip(t(key))
+            button.setAccessibleName(t(key))
+            set_icon(button, name, size=16)
+            button.clicked.connect(partial(self._zoom_step, step))
+        # How much of the recording the timeline shows, in words.
+        self.zoom_readout = QLabel()
+        self.zoom_readout.setFont(theme.font("secondary"))
+        for widget in (
+            self.zoom_label,
+            self.zoom_out_button,
+            self.zoom_slider,
+            self.zoom_in_button,
+            self.zoom_readout,
+        ):
+            zoom_row.addWidget(widget, 1 if widget is self.zoom_slider else 0)
         right.addLayout(zoom_row)
 
+        self.ruler = TimeRuler(self.viewport)
         self.waveform = WaveformView(self.viewport)
         self.strip = WordStrip(self.viewport, self.session)
+        right.addWidget(self.ruler)
         right.addWidget(self.waveform)
         right.addWidget(self.strip)
 
-        transport = QHBoxLayout()
-        self.play_button = QPushButton(t("review.play"))
-        set_icon(self.play_button, "play")
-        # The transport row mirrors (Play leads on the right in Arabic); the
-        # clock is a number and reads left to right, as numbers do here.
-        self.time_label = QLabel(clock(0.0))
-        self.time_label.setFont(theme.font("clock"))
-        self.time_label.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-        self.rate_combo = QComboBox()
-        for rate in RATES:
-            self.rate_combo.addItem(t("review.rate", rate=rate), rate)
-        # Detection misses the ayah a teacher talks about without reciting it; the
-        # person shows it by hand from the playhead on, so the button sits by the
-        # playhead's own controls (and off the toolbar, which a render fills).
-        self.show_ayah_button = QPushButton(t("review.show_ayah"))
-        self.show_ayah_button.setToolTip(t("review.show_ayah.tip"))
-        self.show_ayah_button.setVisible(str(self.session.project.mode).lower() == "lecture")
-        transport.addWidget(self.play_button)
-        transport.addWidget(self.time_label)
-        transport.addWidget(self.rate_combo)
-        transport.addSpacing(12)
-        transport.addWidget(self.show_ayah_button)
-        transport.addStretch(1)
-        right.addLayout(transport)
+        # Play, the steps, the clock, the rate, the nudges and (in a lecture)
+        # "Show ayah… from here": the playhead's own controls, off the toolbar
+        # a render fills.
+        self.transport = Transport(RATES)
+        self.transport.set_lecture(self._is_lecture())
+        self.play_button = self.transport.play_button
+        self.time_label = self.transport.time_label
+        self.show_ayah_button = self.transport.show_ayah_button
+        right.addWidget(self.transport)
 
-        self.selection_bar = SelectionBar()
+        self.selection_bar = SelectionBar(self.transport)
         right.addWidget(self.selection_bar)
-        right.addStretch(1)
         return right
 
     def _wire(self) -> None:
@@ -464,23 +552,32 @@ class ReviewWindow(QMainWindow):
         self.export_requested.connect(self._open_export_dialog)
         self.render_requested.connect(self._start_render)
         self.warnings.jump_requested.connect(self.seek)
+        self.warnings.play_requested.connect(self._play_video)
+        self.warnings.reveal_requested.connect(show_in_folder)
+        self.viewport.changed.connect(self._show_span)
+        self.ruler.seek_requested.connect(self.seek)
         self.waveform.seek_requested.connect(self.seek)
         self.strip.seek_requested.connect(self.seek)
         self.strip.selection_changed.connect(self._show_selection)
         self.strip.edited.connect(self._after_edit)
         self.segment_list.seek_requested.connect(self.seek)
         self.segment_list.card_ayah_requested.connect(self._change_card_ayah)
-        self.show_ayah_button.clicked.connect(self._show_ayah_from_here)
+        self.transport.show_ayah_requested.connect(self._show_ayah_from_here)
         # Remove is offered only while a row is selected. Only the button: a full _sync_state
         # here would mark a removal as seen before _drop_stale_selection could act on it.
         self.segment_list.itemSelectionChanged.connect(self._update_remove_button)
         # Connected after the list's own handler, so the caption text is already in the session.
         self.segment_list.itemChanged.connect(self._after_caption_edit)
-        self.play_button.clicked.connect(self.toggle_play)
-        self.rate_combo.currentIndexChanged.connect(self._on_rate)
+        self.transport.play_toggled.connect(self.toggle_play)
+        self.transport.step_requested.connect(self._step)
+        self.transport.rate_changed.connect(self.player.set_rate)
+        self.transport.nudge_requested.connect(self._nudge)
+        self.transport.snap_requested.connect(self._snap_to_playhead)
         self.studied_surah_box.currentIndexChanged.connect(self._on_studied_surah)
-        self.selection_bar.nudge_requested.connect(self._nudge)
-        self.selection_bar.snap_requested.connect(self._snap_to_playhead)
+        self.help_button.clicked.connect(self.show_shortcuts)
+        self.fit_button.clicked.connect(lambda: self._set_preview_fit(True))
+        self.actual_button.clicked.connect(lambda: self._set_preview_fit(False))
+        self.frame_view.full_frame_requested.connect(self._show_full_frame)
         self.player.playing_changed.connect(self._on_playing_changed)
         self.player.duration_changed.connect(self._set_duration)
         self.player.error.connect(self.warnings.add_notice)
@@ -508,6 +605,9 @@ class ReviewWindow(QMainWindow):
             ("Ctrl+Z", self.undo),
             ("Ctrl+Shift+Z", self.redo),
             ("Ctrl+S", self.save),
+            # "?" where a layout types it unshifted, Shift+/ where it is US-shifted.
+            ("?", self.show_shortcuts),
+            ("Shift+/", self.show_shortcuts),
         ]
         self._keys: dict[str, Callable[[], None]] = {}
         for text, action in bindings:
@@ -522,6 +622,8 @@ class ReviewWindow(QMainWindow):
         # ambiguous. Other layouts put these characters elsewhere and may differ.
         self._keys["Shift+>"] = self._keys["Shift+."]
         self._keys["Shift+<"] = self._keys["Shift+,"]
+        # Likewise a real Shift+/ arrives as Shift+? (and a German Shift+ß too).
+        self._keys["Shift+?"] = self.show_shortcuts
 
     def _set_tips(self) -> None:
         """Say each button's shortcut on the button itself, where a person hovers to learn it."""
@@ -534,31 +636,22 @@ class ReviewWindow(QMainWindow):
         for button, keys in tips:
             shown = QKeySequence(keys).toString(native)
             button.setToolTip(t("review.tip", action=button.text(), keys=shown))
-        self.play_button.setToolTip(self._play_tip())
-        bar = self.selection_bar
-        bar.minus_button.setToolTip(t("review.tip_fine", action=bar.minus_button.text(), keys="."))
-        bar.plus_button.setToolTip(t("review.tip_fine", action=bar.plus_button.text(), keys=","))
-
-    def _play_tip(self) -> str:
-        """The play button's tip for its current action.
-
-        Space is named from the table, not by Qt: Qt's own Arabic translation
-        leaves that key's name in English.
-        """
-        return t("review.tip", action=self.play_button.text(), keys=t("review.key_space"))
-
-    def _elide_hint(self) -> None:
-        """Fit the shortcut line to the status bar; the tooltip keeps the whole of it."""
-        full = t("review.shortcuts")
-        metrics = self.hint_label.fontMetrics()
-        self.hint_label.setText(
-            metrics.elidedText(full, Qt.TextElideMode.ElideRight, self.hint_label.width())
+        # The play button's tip, naming Space, is the transport's: it follows the button.
+        transport = self.transport
+        transport.minus_button.setToolTip(
+            t("review.tip_fine", action=transport.minus_button.text(), keys=".")
+        )
+        transport.plus_button.setToolTip(
+            t("review.tip_fine", action=transport.plus_button.text(), keys=",")
         )
 
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802 - Qt override
-        if watched is self.hint_label and event.type() in (QEvent.Type.Resize, QEvent.Type.Show):
-            self._elide_hint()
-        return super().eventFilter(watched, event)
+    def show_shortcuts(self) -> None:
+        """Open the sheet of every shortcut (one sheet, raised again when already open)."""
+        if self.shortcut_sheet is None:
+            self.shortcut_sheet = ShortcutSheet(self)
+        self.shortcut_sheet.show()
+        self.shortcut_sheet.raise_()
+        self.shortcut_sheet.activateWindow()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 - Qt override
         combination = event.keyCombination()
@@ -609,10 +702,16 @@ class ReviewWindow(QMainWindow):
         self._show_time(self.player.position())
 
     def _show_time(self, seconds: float, *, force: bool = False) -> None:
+        self.ruler.set_playhead(seconds)
         self.waveform.set_playhead(seconds)
         self.strip.set_playhead(seconds)
         self.viewport.follow(seconds)
-        self.time_label.setText(clock(seconds))
+        self.transport.set_time(seconds)
+        ref = self.session.word_at(seconds)
+        word = self.session.word(ref) if ref is not None else None
+        self.waveform.set_current_word(
+            word.start if word is not None else None, word.end if word is not None else None
+        )
         self._highlight_segment(seconds, force=force)
         self.frame_view.show_at(seconds, force=force)
 
@@ -632,22 +731,77 @@ class ReviewWindow(QMainWindow):
         self.segment_list.highlight_at(seconds)
 
     def _on_playing_changed(self, playing: bool) -> None:
-        self.play_button.setText(t("review.pause") if playing else t("review.play"))
-        set_icon(self.play_button, "pause" if playing else "play")
-        if self.player.available:
-            # The tip names the button's action, which just changed; without a
-            # player the tip is the reason instead, and stays so.
-            self.play_button.setToolTip(self._play_tip())
+        self.transport.set_playing(playing)
+        if not self.player.available:
+            # The transport's tip names the button's action; without a player
+            # the tip is the reason instead, and stays so.
+            self.play_button.setToolTip(self.player.reason)
         if playing:
             self._timer.start()
         else:
             self._timer.stop()
             self._show_time(self.player.position(), force=True)
 
-    def _on_rate(self, index: int) -> None:
-        self.player.set_rate(float(self.rate_combo.itemData(index)))
+    def _play_video(self, path: Path) -> None:
+        """Open the rendered video in the person's own player; say so when none opens it."""
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
+            self.warnings.add_notice(t("render.play_failed"))
+
+    # -- the preview ------------------------------------------------------------
+
+    def _set_preview_fit(self, fit: bool, *, remember: bool = True) -> None:
+        """Fit the frame to its column, or show it at the preset's size (scrolling if need be)."""
+        self.frame_view.set_fit(fit)
+        self.frame_scroll.setWidgetResizable(fit)
+        # Fitted, the frame never scrolls: its area keeps the least height the
+        # frame shrinks to, and the Look panel under it gives way instead.
+        policy = (
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff if fit else Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.frame_scroll.setVerticalScrollBarPolicy(policy)
+        self.frame_scroll.setHorizontalScrollBarPolicy(policy)
+        self.frame_scroll.setMinimumHeight(self.frame_view.minimumSizeHint().height() if fit else 0)
+        (self.fit_button if fit else self.actual_button).setChecked(True)
+        if remember:
+            self._prefs.preview_fit = fit
+
+    def _show_full_frame(self, seconds: float) -> None:
+        """Show the frame at *seconds* full size; playback goes on underneath."""
+        if self._full_frame is not None:
+            self._full_frame.deleteLater()
+        full = FullFrameView(
+            self.session, seconds, portrait=_is_portrait(self.session.project), parent=self
+        )
+        full.close_requested.connect(partial(self._on_full_frame_closed, full))
+        self._full_frame = full
+        full.show()
+        full.setFocus()
+
+    def _on_full_frame_closed(self, full: FullFrameView) -> None:
+        """Let a closed full-size view go, so hidden ones do not pile up, and come back here."""
+        if self._full_frame is full:
+            self._full_frame = None
+        full.deleteLater()
+        self.activateWindow()
 
     # -- timeline -------------------------------------------------------------
+
+    def _zoom_step(self, delta: int) -> None:
+        self.zoom_slider.setValue(max(0, min(100, self.zoom_slider.value() + delta)))
+
+    def _show_span(self) -> None:
+        """Say how much of the recording the timeline shows: seconds, or minutes and seconds."""
+        span = self.viewport.span
+        if span >= 60:
+            self.zoom_readout.setText(
+                t(
+                    "review.span_minutes",
+                    minutes=int(span // 60),
+                    seconds=f"{int(span % 60):02d}",
+                )
+            )
+        else:
+            self.zoom_readout.setText(tn("review.span", int(round(span))))
 
     def _set_duration(self, duration: float, *, measured: bool = True) -> None:
         """Size the timeline to *duration* seconds, keeping the view near the default span.
@@ -1087,7 +1241,8 @@ class ReviewWindow(QMainWindow):
         self.episode_button.setVisible(not running and self._is_lecture())
         self.export_button.setEnabled(not running)
         self.strip.setEnabled(not running)
-        self.selection_bar.setEnabled(not running)
+        # The nudges are edits and wait; play, the steps and the rate go on working.
+        self.transport.nudge_row.setEnabled(not running)
         self.segment_list.set_cards_editable(not running)
         if running:
             self._segment_list_edit_triggers = self.segment_list.editTriggers()
@@ -1098,6 +1253,8 @@ class ReviewWindow(QMainWindow):
         self.render_cancel_button.setVisible(running)
         self.render_cancel_button.setEnabled(running)
         if running:
+            # The last render's line is about that render, not this one.
+            self.warnings.clear_render()
             self.render_progress.setValue(0)
             self.render_progress.setFormat(t(self._render_progress_key, percent=0))
         else:
@@ -1121,18 +1278,14 @@ class ReviewWindow(QMainWindow):
         self.render_progress.setFormat(t(self._render_progress_key, percent=percent))
 
     def _announce_render(self, outcome: JobOutcome) -> None:
-        """Say the render is ready, with a button to reveal it (the tests replace this)."""
-        box = QMessageBox(self)
-        # An episode that was not made is a warning, though the lecture is ready.
-        failed = bool(outcome.episode_error)
-        box.setIcon(QMessageBox.Icon.Warning if failed else QMessageBox.Icon.Information)
-        box.setWindowTitle(plain_title(t("review.render")))
-        box.setText(render_finished_text(outcome))
-        show_button = box.addButton(t("render.show"), QMessageBox.ButtonRole.ActionRole)
-        box.addButton(QMessageBox.StandardButton.Ok)
-        box.exec()
-        if box.clickedButton() is show_button and outcome.video is not None:
-            show_in_folder(outcome.video)
+        """Say the render is ready on the banner; an episode that failed still asks for a look.
+
+        The tests replace this to keep a finished render quiet.
+        """
+        duration = self.session.duration if self._measured else None
+        self.warnings.set_render_done(outcome, duration)
+        if outcome.episode_error:
+            self._say_render("failed", outcome.episode_error)
 
     def _say_render(self, kind: str, text: str) -> None:
         """Say something about a render that did not simply finish (tests replace this)."""

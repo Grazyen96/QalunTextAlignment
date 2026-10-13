@@ -198,6 +198,7 @@ QFrame#dropZone {{
     border-radius: 10px;
 }}
 QFrame#dropZone[dragOver="true"] {{ border: 2px solid {t.accent}; background: {t.window}; }}
+QFrame[separator="true"] {{ color: {t.border}; }}
 QFrame[chip="true"] {{ background: {t.window}; border: 1px solid {t.border}; border-radius: 11px; }}
 QListWidget, QTableWidget, QScrollArea {{
     border: 1px solid {t.border};

@@ -266,7 +266,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.episode.tip": "Add an intro, a recitation and an outro around this lecture.",
         "review.episode_on": "Episode: on",
         "review.episode_written": "The episode was written too: \u2068{name}\u2069",
-        "review.remove": "Remove selected",
+        "review.remove": "Remove",
         "review.remove_none": "Select a row to remove.",
         "review.play": "Play",
         "review.pause": "Pause",
@@ -301,12 +301,6 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.save_failed": "The corrections were not saved: {details}",
         "review.discard_title": "Save your corrections?",
         "review.discard_text": "This review has changes that are not saved.",
-        "review.shortcuts": (
-            "Space plays · ← next word, → previous · [ ] set start/end at the playhead · "
-            ", . nudge the edge left/right 50 ms (Shift: 10 ms) · "
-            "Shift-drag ripples the later words · "
-            "Ctrl-drag an edge to part two words · Ctrl+Z undoes"
-        ),
         "review.tip": "{action} ({keys})",
         "review.tip_fine": "{action} ({keys}; with Shift: 10 ms)",
         "review.key_space": "Space",
@@ -843,13 +837,6 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.save_failed": "لم تُحفظ التصحيحات: {details}",
         "review.discard_title": "هل تحفظ تصحيحاتك؟",
         "review.discard_text": "في هذه المراجعة تغييرات غير محفوظة.",
-        "review.shortcuts": (
-            "المسافة للتشغيل · \u2066←\u2069 للكلمة التالية و \u2066→\u2069 للسابقة · "
-            "\u2066[ ]\u2069 للبداية/النهاية عند مؤشر التشغيل · "
-            "\u2066,\u2069 لإزاحة الحافة يسارًا و \u2066.\u2069 يمينًا 50 م.ث (مع Shift: 10 م.ث) · "
-            "اسحب مع Shift لإزاحة الكلمات التالية · "
-            "اسحب حافة مع Ctrl لفصل كلمتين · Ctrl+Z للتراجع"
-        ),
         "review.tip": "\u200f{action} ({keys})",
         "review.tip_fine": "{action} ({keys}؛ مع Shift: 10 م.ث)",
         "review.key_space": "المسافة",

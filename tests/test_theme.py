@@ -256,3 +256,9 @@ def test_an_unknown_mode_is_refused(qt_app, hints) -> None:
 
 def test_current_tokens_before_any_apply_is_light() -> None:
     assert theme.current_tokens(None) is theme.LIGHT
+
+
+@pytest.mark.parametrize("tokens", THEMES, ids=IDS)
+def test_a_toolbar_separator_is_drawn_in_the_border_colour(tokens) -> None:
+    rule = _rule(theme.stylesheet(tokens), 'QFrame[separator="true"]')
+    assert rule["color"] == tokens.border

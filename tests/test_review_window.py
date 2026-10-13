@@ -183,14 +183,15 @@ def test_the_nudge_row_puts_earlier_on_the_right_in_english_too(qt_app, tmp_path
     window.show()
     _spin(20)
     bar = window.selection_bar
-    assert bar.snap_button.x() < bar.plus_button.x() < bar.minus_button.x()
+    # +50 (later, leftwards on the timeline) · snap · −50 (earlier, rightwards).
+    assert bar.plus_button.x() < bar.snap_button.x() < bar.minus_button.x()
 
 
 def test_the_nudge_row_tabs_from_the_left_in_english(qt_app, tmp_path) -> None:
     window, _, _ = _window(qt_app, tmp_path)
     bar = window.selection_bar
-    assert bar.snap_button.nextInFocusChain() is bar.plus_button
-    assert bar.plus_button.nextInFocusChain() is bar.minus_button
+    assert bar.plus_button.nextInFocusChain() is bar.snap_button
+    assert bar.snap_button.nextInFocusChain() is bar.minus_button
 
 
 def test_comma_moves_the_edge_left_and_period_moves_it_right(qt_app, tmp_path) -> None:
@@ -1331,18 +1332,19 @@ def test_the_toolbar_and_transport_say_their_shortcuts(qt_app, tmp_path) -> None
     )
 
 
-def test_the_shortcut_hint_elides_to_the_window_and_keeps_its_full_text(qt_app, tmp_path) -> None:
+def test_the_shortcut_hint_is_short_and_links_to_the_sheet(qt_app, tmp_path) -> None:
+    from qurantext.gui.review.shortcut_sheet import hint_html
+
     window, _, _ = _window(qt_app, tmp_path)
     window.resize(window.minimumSizeHint())
     window.show()
     _spin(50)
     label = window.hint_label
-    assert label.toolTip() == t("review.shortcuts")
-    assert label.fontMetrics().horizontalAdvance(label.text()) <= label.width()
-    assert label.text().endswith("…")
-    window.resize(2400, 800)
-    _spin(50)
-    assert window.hint_label.text() == t("review.shortcuts")
+    assert label.text() == hint_html()
+    assert label.textFormat() == Qt.TextFormat.RichText
+    assert '<a href="shortcuts">' in label.text()
+    # Short enough for the narrowest window: nothing to elide, so no tooltip to repeat it.
+    assert label.width() >= label.sizeHint().width()
 
 
 def test_zoom_is_the_sliders_buddy(qt_app, tmp_path) -> None:
@@ -1395,14 +1397,15 @@ def test_the_look_panel_drives_the_preview_and_undo(qt_app, tmp_path) -> None:
     assert window.look_panel.status_label.text() == "Ink on paper"
 
 
-def test_the_look_panel_sits_right_of_the_frame(qt_app, tmp_path) -> None:
+def test_the_look_panel_sits_under_the_frame_left_of_the_timeline(qt_app, tmp_path) -> None:
     window, _, _ = _window(qt_app, tmp_path)
     window.show()
     _spin(50)
-    frame = window.frame_view.mapTo(window, window.frame_view.rect().topRight())
-    panel = window.look_scroll.mapTo(window, window.look_scroll.rect().topLeft())
+    frame = window.frame_view.mapTo(window, window.frame_view.rect().bottomLeft())
+    panel = window.look_scroll.mapTo(window, window.look_scroll.rect().topRight())
     waveform = window.waveform.mapTo(window, window.waveform.rect().topLeft())
-    assert frame.x() <= panel.x() < waveform.x()
+    assert frame.y() <= panel.y()
+    assert panel.x() < waveform.x()
 
 
 @pytest.mark.parametrize("language", ["en", "ar"])
@@ -2421,7 +2424,11 @@ def test_the_review_window_wears_the_presentation_layer(qt_app, tmp_path) -> Non
         assert window.look_panel.image_button.property("qalun.icon")[0] == "image"
         assert window.look_panel.default_button.property("qalun.icon")[0] == "circle-check"
         assert window.look_panel.reset_button.property("qalun.icon")[0] == "refresh-cw"
-        assert window.selection_bar.snap_button.icon().isNull()  # no icons on the nudge row
+        # The nudges' chevrons point the way time moves on the timeline, in either language.
+        assert window.transport.plus_button.property("qalun.icon")[0] == "chevron-left"
+        assert window.transport.minus_button.property("qalun.icon")[0] == "chevron-right"
+        assert window.transport.plus_button.property("qalun.icon")[-1] is False
+        assert window.transport.minus_button.property("qalun.icon")[-1] is False
     finally:
         window.close()
         window.deleteLater()
@@ -2443,3 +2450,252 @@ def test_the_dialogs_confirming_buttons_are_primary(qt_app, tmp_path) -> None:
     finally:
         window.close()
         window.deleteLater()
+
+
+# -- the two-column layout, the transport, the banner, the sheet, the preview -----
+
+
+def test_two_columns_preview_and_look_left_timeline_and_table_right(qt_app, tmp_path) -> None:
+    from PySide6.QtWidgets import QSplitter
+
+    window, _, _ = _window(qt_app, tmp_path)
+    try:
+        window.resize(1280, 800)
+        window.show()
+        _spin(100)
+        assert isinstance(window._splitter, QSplitter)
+        assert window._splitter.orientation() == Qt.Orientation.Horizontal
+        assert window.frame_scroll.isAncestorOf(window.frame_view)
+        assert window.left_column.isAncestorOf(window.look_scroll)
+        assert window.right_column.isAncestorOf(window.ruler)
+        assert window.right_column.isAncestorOf(window.segment_list)
+        look_top = window.look_scroll.mapTo(window, window.look_scroll.rect().topLeft()).y()
+        frame_bottom = window.frame_scroll.mapTo(
+            window, window.frame_scroll.rect().bottomLeft()
+        ).y()
+        assert look_top >= frame_bottom
+        table_bottom = window.segment_list.mapTo(
+            window, window.segment_list.rect().bottomLeft()
+        ).y()
+        assert window.height() - table_bottom < 60  # the table reaches the status bar
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_a_lecture_at_1280_by_800_shows_eight_rows(qt_app, tmp_path) -> None:
+    window = _lecture_window(qt_app, tmp_path)
+    window.resize(1280, 800)
+    window.show()
+    _spin(100)
+    visible = window.segment_list.viewport().height() // window.segment_list.ROW_HEIGHT
+    assert visible >= 8
+
+
+def test_the_transport_drives_steps_rate_and_nudges(qt_app, tmp_path) -> None:
+    # Not closed at the end: the nudge leaves a change, and close would ask about it.
+    window, _, _ = _window(qt_app, tmp_path)
+    words = window.session.words()
+    window.strip.select(words[0].ref)
+    window.transport.next_word_button.click()
+    assert window.strip.selected == words[1].ref
+    window.transport.rate_buttons[0.5].click()
+    assert window.player.rate() == 0.5
+    end_before = window.session.word(window.strip.selected).end
+    window.selection_bar.plus_button.click()  # the old name still reaches the transport's button
+    assert window.session.word(window.strip.selected).end == pytest.approx(end_before + 0.05)
+    window.player.play()
+    assert window.transport.play_button.property("qalun.icon")[0] == "pause"
+    assert window.play_button is window.transport.play_button
+    assert window.time_label is window.transport.time_label
+
+
+def test_a_finished_render_goes_on_the_banner_not_a_dialog(qt_app, tmp_path, monkeypatch) -> None:
+    from qurantext.gui.jobs import JobOutcome
+
+    window, _, _ = _window(qt_app, tmp_path)
+    try:
+        boxes = []
+        monkeypatch.setattr(
+            "qurantext.gui.review.window.QMessageBox.exec", lambda self: boxes.append(1) or 0
+        )
+        outcome = JobOutcome(matches=tmp_path / "m.json", video=tmp_path / "a.mp4", cards=1)
+        window._announce_render(outcome)
+        assert boxes == [] and "a.mp4" in window.warnings.text()
+        assert window.warnings.play_button.isVisibleTo(window)
+        window._say_render("failed", "boom")
+        assert boxes == [1]
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_a_render_s_play_button_opens_the_video_and_says_when_it_cannot(
+    qt_app, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui.jobs import JobOutcome
+    from qurantext.gui.review import window as window_module
+
+    window, _, _ = _window(qt_app, tmp_path)
+    opened = []
+    monkeypatch.setattr(
+        window_module.QDesktopServices, "openUrl", lambda url: opened.append(url) or False
+    )
+    outcome = JobOutcome(matches=tmp_path / "m.json", video=tmp_path / "a.mp4", cards=1)
+    window._announce_render(outcome)
+    window.warnings.play_button.click()
+    assert opened[0].toLocalFile() == str(tmp_path / "a.mp4")
+    assert t("render.play_failed") in window.warnings.lines()
+
+
+def test_question_mark_opens_the_sheet_once_and_leaves_an_editor_alone(qt_app, tmp_path) -> None:
+    """Review Focus 3: ? inside a caption editor types a ?."""
+    from PySide6.QtWidgets import QAbstractItemView, QLineEdit
+
+    window = _lecture_window(qt_app, tmp_path)
+    window.show()
+    window.activateWindow()
+    _spin(20)
+    window.show_shortcuts()
+    sheet = window.shortcut_sheet
+    assert sheet is not None and sheet.isVisible()
+    window.show_shortcuts()
+    assert window.shortcut_sheet is sheet
+    sheet.hide()
+    table = window.segment_list
+    row = table.rowCount() - 1
+    table.setCurrentCell(row, 2)
+    table.edit(table.model().index(row, 2))
+    assert table.state() == QAbstractItemView.State.EditingState
+    editor = table.findChild(QLineEdit)
+    assert editor is not None
+    editor.setFocus()
+    QTest.keyClick(editor, "?")
+    assert not sheet.isVisible() and "?" in editor.text()
+    table.closePersistentEditor(table.item(row, 2))
+
+
+def test_question_mark_and_the_help_button_open_the_sheet(qt_app, tmp_path) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    QTest.keyClick(window, Qt.Key.Key_Question)
+    assert window.shortcut_sheet is not None and window.shortcut_sheet.isVisible()
+    window.shortcut_sheet.hide()
+    window.help_button.click()
+    assert window.shortcut_sheet.isVisible()
+    window.shortcut_sheet.hide()
+    window.hint_label.linkActivated.emit("shortcuts")
+    assert window.shortcut_sheet.isVisible()
+
+
+def test_the_fit_toggle_round_trips_through_prefs(qt_app, tmp_path, prefs) -> None:
+    from qurantext.gui.review.window import ReviewWindow
+
+    window = ReviewWindow(_project(tmp_path), player=FakePlayer(10.0), prefs=prefs)
+    try:
+        assert window.fit_button.isChecked() and window.frame_view.fit
+        window.actual_button.click()
+        assert prefs.preview_fit is False and not window.frame_view.fit
+        assert not window.frame_scroll.widgetResizable()
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_a_double_click_opens_the_full_frame_and_escape_closes_it(qt_app, tmp_path) -> None:
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QKeyEvent
+
+    window, _, _ = _window(qt_app, tmp_path)
+    try:
+        window.show()
+        window.player.play()
+        window.frame_view.full_frame_requested.emit(1.0)
+        full = window._full_frame
+        assert full is not None and full.isVisible() and window.player.is_playing()
+        full.keyPressEvent(
+            QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
+        )
+        assert not full.isVisible()
+        assert window._full_frame is None  # closed, it is let go rather than kept hidden
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_the_zoom_readout_says_the_span_and_the_buttons_step(qt_app, tmp_path) -> None:
+    from qurantext.gui.i18n import tn
+
+    window, _, _ = _window(qt_app, tmp_path)
+    try:
+        window._set_duration(120.0)
+        window.viewport.set_window(0.0, 20.0)
+        assert window.zoom_readout.text() == tn("review.span", 20)
+        window.viewport.set_window(0.0, 95.0)
+        assert window.zoom_readout.text() == t("review.span_minutes", minutes=1, seconds="35")
+        window.viewport.set_window(0.0, 20.0)
+        before = window.zoom_slider.value()
+        window.zoom_in_button.click()
+        assert window.zoom_slider.value() == min(100, before + 10)
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_the_ruler_and_the_clock_follow_the_playhead(qt_app, tmp_path) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    window.seek(2.5)
+    assert window.transport.time_label.text() == "00:02.50"
+    assert window.ruler._playhead == pytest.approx(2.5)
+    assert window.waveform._current == (2.0, 3.0)
+
+
+def test_the_toolbar_is_grouped_by_separators(qt_app, tmp_path) -> None:
+    from PySide6.QtWidgets import QFrame
+
+    from qurantext.gui import theme
+
+    theme.apply_theme(qt_app, "light")
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    _spin(20)
+    separators = [
+        frame for frame in window.findChildren(QFrame) if frame.property("separator") is True
+    ]
+    assert len(separators) == 3
+    for separator in separators:  # 1 px, 20 px tall, in the border colour
+        assert (separator.width(), separator.height()) == (1, 20)
+        image = separator.grab().toImage()
+        assert image.pixelColor(0, 10).name().upper() == theme.LIGHT.border.upper()
+    assert window.help_button.property("qalun.icon")[0] == "keyboard"
+    assert window.help_button.toolTip() == t("review.help")
+
+
+def test_a_render_stops_the_nudges_but_not_playback(qt_app, tmp_path) -> None:
+    """The edits wait for the render; listening, stepping and the rate do not."""
+    window, _, _ = _window(qt_app, tmp_path)
+    window.strip.select(window.session.words()[0].ref)
+    window._set_render_running(True)
+    try:
+        transport = window.transport
+        assert not transport.plus_button.isEnabled() and not transport.snap_button.isEnabled()
+        assert transport.play_button.isEnabled() and transport.rate_buttons[0.5].isEnabled()
+        assert transport.next_word_button.isEnabled()
+    finally:
+        window._set_render_running(False)
+    assert window.transport.plus_button.isEnabled()
+
+
+def test_a_fitted_preview_never_scrolls(qt_app, tmp_path) -> None:
+    window = _lecture_window(qt_app, tmp_path)
+    window.resize(1280, 800)
+    window.show()
+    _spin(50)
+    scroll = window.frame_scroll
+    assert not scroll.verticalScrollBar().isVisible()
+    assert not scroll.horizontalScrollBar().isVisible()
+    assert window.frame_view.height() <= scroll.viewport().height()
+    pixmap = window.frame_view.pixmap()
+    assert pixmap.height() <= scroll.viewport().height()
+    window.actual_button.click()
+    _spin(20)
+    assert window.frame_view.size() == window.frame_view.preset_size

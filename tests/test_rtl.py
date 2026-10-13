@@ -158,7 +158,7 @@ def test_time_widgets_keep_left_to_right_and_the_rest_mirrors(qt_app, review_win
         w.zoom_slider,
         w.frame_view,
         w.time_label,
-        w.selection_bar.nudge_row,
+        w.transport.nudge_row,
     )
     for widget in pinned:
         assert widget.layoutDirection() == LTR, widget
@@ -187,7 +187,9 @@ def test_the_timeline_runs_right_to_left_in_arabic(qt_app, review_window) -> Non
 
 def test_the_arabic_word_strip_puts_the_first_word_at_the_right(qt_app, review_window) -> None:
     from PySide6.QtCore import QPoint
-    from PySide6.QtGui import QPalette
+    from PySide6.QtGui import QColor
+
+    from qurantext.gui import theme
 
     w = review_window
     w.show()
@@ -206,26 +208,27 @@ def test_the_arabic_word_strip_puts_the_first_word_at_the_right(qt_app, review_w
     assert strip.selected == first.ref
     assert w.player.position() == pytest.approx(first.start)
     image = strip.grab().toImage()
-    highlight = strip.palette().color(QPalette.ColorRole.Highlight)
+    highlight = QColor(theme.current_tokens().accent)  # the selected word's fill
     assert image.pixelColor(middle(first), 6) == highlight
     assert image.pixelColor(middle(second), 6) != highlight
 
 
 def test_the_nudge_row_tabs_from_the_right_in_arabic(qt_app, review_window) -> None:
-    bar = review_window.selection_bar
-    assert bar.minus_button.nextInFocusChain() is bar.plus_button
-    assert bar.plus_button.nextInFocusChain() is bar.snap_button
+    bar = review_window.transport
+    assert bar.minus_button.nextInFocusChain() is bar.snap_button
+    assert bar.snap_button.nextInFocusChain() is bar.plus_button
 
 
 def test_the_plus_button_sits_left_of_minus(qt_app, review_window) -> None:
-    bar = review_window.selection_bar
+    bar = review_window.transport
     # The whole window, not the bar alone: a child of a hidden window stays
     # hidden, and the buttons' own row is only laid out once it shows.
     review_window.show()
     qt_app.processEvents()
-    # Earlier (−) on the right, the side of the past on the timeline.
-    assert bar.snap_button.x() < bar.plus_button.x()
-    assert bar.plus_button.x() < bar.minus_button.x()
+    # Left to right in either language: + (later) · snap · − (earlier, on the
+    # right, the side of the past on the timeline).
+    assert bar.plus_button.x() < bar.snap_button.x()
+    assert bar.snap_button.x() < bar.minus_button.x()
 
 
 def test_segment_times_are_isolated_and_text_aligns_to_its_script(qt_app, review_window) -> None:
@@ -277,7 +280,6 @@ _LATIN_THE_TABLE_KEEPS = {
     "ASS",
     "Ctrl",
     "Shift",
-    "Z",
     "PySide6",
     "Addons",
     "English",
@@ -294,9 +296,9 @@ _LATIN_THE_TABLE_KEEPS = {
     "org",
     "GitHub",
 }
-#: The letters of the key caps Qt itself writes into a tip (Save's Ctrl+S): a
-#: key's letter is what is printed on it, in either language.
-_KEY_CAPS = {"S"}
+#: The letters of the key caps Qt itself writes into a tip (Save's Ctrl+S, Undo's
+#: Ctrl+Z): a key's letter is what is printed on it, in either language.
+_KEY_CAPS = {"S", "Z"}
 _LATIN_WORD = re.compile(r"[A-Za-z][A-Za-z0-9]*")
 
 
@@ -304,7 +306,9 @@ def _latin_words_of_the_arabic_table() -> set[str]:
     words: set[str] = set()
     for value in i18n.STRINGS["ar"].values():
         for variant in value.values() if isinstance(value, dict) else [value]:
-            words |= set(_LATIN_WORD.findall(re.sub(r"\{[^}]*\}", "", variant)))
+            # Neither a placeholder nor a link's markup (``<a href="shortcuts">``) is read.
+            readable = re.sub(r"<[^>]*>", "", re.sub(r"\{[^}]*\}", "", variant))
+            words |= set(_LATIN_WORD.findall(readable))
     return words
 
 
@@ -704,3 +708,15 @@ def test_the_empty_state_cards_mirror(qt_app, tmp_path, no_default_job_dirs) -> 
     finally:
         panel.stop_reading()
         panel.deleteLater()
+
+
+def test_the_ruler_runs_right_to_left_and_the_transport_mirrors(qt_app, review_window) -> None:
+    review_window.show()
+    qt_app.processEvents()
+    labels = review_window.ruler.labels()
+    assert labels[0][1] == "00:00" and labels[0][0] > labels[-1][0]
+    t = review_window.transport
+    assert t.play_button.x() > t.rate_buttons[1.0].x()  # Play leads on the right in Arabic
+    review_window.warnings.add_notice("x")
+    qt_app.processEvents()
+    assert review_window.warnings.icon_label.x() > review_window.warnings.text_label.x()
