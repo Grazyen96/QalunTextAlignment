@@ -148,10 +148,11 @@ and their effect expressed by the sheet above: the mode toggle becomes two
 
 - Files: `src/qurantext/assets/icons/<name>.svg`, Lucide's SVGs unchanged
   except that each keeps `stroke="currentColor"`; `LICENSE` (ISC) beside
-  them. The set (31): `play pause skip-back skip-forward undo-2 redo-2 save
-  check-circle trash-2 download film sparkles palette image sun moon
-  monitor refresh-cw folder-open folder x chevron-right chevron-down
-  chevron-left mic book-open pencil link qr-code settings circle-help`.
+  them. The set (31, Lucide's names at tag 1.56.0): `play pause skip-back
+  skip-forward undo-2 redo-2 save circle-check trash download film sparkles
+  palette image sun moon monitor refresh-cw folder-open folder x
+  chevron-right chevron-down chevron-left mic book-open pencil link qr-code
+  settings circle-question-mark`.
 - `icon(name, role="text") -> QIcon`, `role in ("text", "accent",
   "on_accent", "secondary")`: renders through `QSvgRenderer` at 16, 20 and
   24 px, at device pixel ratio 1 and 2, with `currentColor` replaced by the
@@ -212,9 +213,9 @@ theme switch loses nothing, unlike a language switch.
 | `main_window` | Theme combo; `refresh_icons` wiring. |
 | `home/job_list` | `SectionHeader("Your jobs")` with Refresh (icon `refresh-cw`) as its trailing widget; icons on Open (`folder-open`), Show in folder (`folder`), Remove from list (`x`). Row text and `_detail_text` unchanged. |
 | `home/new_job` | `SectionHeader("New job")`; the drop zone becomes a `Card` with the dashed rule via its object name; "Choose…" an outlined button with `folder-open`; mode toggle icons `mic` / `book-open`; `make_primary(start_button)`; More options toggle icon `chevron-right` / `chevron-down`. |
-| `review/window` | Toolbar icons (`save`, `undo-2`, `redo-2`, `check-circle`, `trash-2`, `download`, `sparkles`, `film`); `make_primary(render_button)`; `play` / `pause` swapped in `_on_playing_changed`; clock font on `time_label`. |
+| `review/window` | Toolbar icons (`save`, `undo-2`, `redo-2`, `circle-check`, `trash`, `download`, `sparkles`, `film`); `make_primary(render_button)`; `play` / `pause` swapped in `_on_playing_changed`; clock font on `time_label`. |
 | `review/selection_bar` | No icons: the nudge buttons' labels already say the direction, and a chevron there would have to follow the always-right-to-left timeline rather than the reading direction. |
-| `review/look_panel` | `SectionHeader("Look")`; icons `image`, `check-circle`, `refresh-cw`; Customise toggle chevrons. |
+| `review/look_panel` | `SectionHeader("Look")`; icons `image`, `circle-check`, `refresh-cw`; Customise toggle chevrons. |
 | `review/export_dialog`, `ayah_picker`, `episode_dialog` | `make_primary` on Export and the two OK buttons. |
 | `tools/screenshots.py` | The offscreen screenshot script from the audit, made a repo tool: every window and dialog, light and dark, English and Arabic, into a folder given on the command line. |
 
