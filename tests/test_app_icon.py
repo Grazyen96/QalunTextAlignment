@@ -37,8 +37,11 @@ def test_the_windows_and_mac_icons_hold_the_sizes_they_need() -> None:
 
 def test_the_application_carries_the_icon(qt_app) -> None:
     pytest.importorskip("PySide6", reason="the window needs Qt: pip install 'qurantext[gui]'")
-    from qurantext.gui.app import APP_ICON_PNG, set_app_icon
+    from qurantext.gui.app import APP_ICON_PNG, APP_ICON_SIZES, set_app_icon
 
     set_app_icon(qt_app)
     assert not qt_app.windowIcon().isNull()
     assert APP_ICON_PNG.is_file()
+    # Each drawn size is in the icon, so a title bar takes the 16 px one as drawn.
+    sizes = {(size.width(), size.height()) for size in qt_app.windowIcon().availableSizes()}
+    assert {(n, n) for n in APP_ICON_SIZES} <= sizes

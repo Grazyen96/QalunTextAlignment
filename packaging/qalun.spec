@@ -47,9 +47,8 @@ from PyInstaller.utils.hooks import (
 
 ROOT = Path(SPECPATH).parent
 ICON_DIR = ROOT / "src" / "qurantext" / "assets" / "icon"
-# PyInstaller takes an .ico on Windows (assets/icon/qalun.ico) and an .icns on
-# macOS (assets/icon/qalun.icns); Linux has no executable icon, so none is
-# given there (a stray one only warns).
+# Windows takes an .ico on the executable, macOS an .icns on the bundle (below);
+# Linux has no executable icon, so none is given there (a stray one only warns).
 EXE_ICON = str(ICON_DIR / "qalun.ico") if sys.platform == "win32" else None
 
 datas = [

@@ -497,6 +497,23 @@ class TestMissingSystemLibrary:
         assert "libegl1" in result.remedy
         assert "Qt is not installed" not in result.detail
 
+    def test_the_icon_check_names_the_module_that_failed(self, monkeypatch) -> None:
+        """A Qt without QtSvg is not "Qt is not installed"; the line says what is missing."""
+        import builtins
+
+        real_import = builtins.__import__
+
+        def no_svg(name, *args, **kwargs):
+            if name == "qurantext.gui.icons":
+                raise ImportError("No module named 'PySide6.QtSvg'", name="PySide6.QtSvg")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", no_svg)
+        result = preflight._interface_icons()
+        assert result.status == Status.WARN
+        assert "PySide6.QtSvg" in result.detail
+        assert "Qt is not installed" not in result.detail
+
     def test_an_unknown_library_still_says_what_to_look_for(self) -> None:
         remedy = preflight._system_library_remedy("libfoo.so.3")
         assert "libfoo.so.3" in remedy

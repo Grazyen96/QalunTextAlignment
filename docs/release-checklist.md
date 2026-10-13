@@ -164,7 +164,8 @@ this is the only place anyone hears each platform's build recognise speech.
       `~/Library/Preferences/com.qalun.Qalun.plist`, as `README.md` says.
 - [ ] Run `QT_QPA_PLATFORM=offscreen venv/bin/python tools/screenshots.py output/shots` and
       look at every image in both themes and both languages: primary buttons filled,
-      icons on every button, nothing unreadable.
+      icons on the buttons the phase A spec lists (Start, Cancel, Close and the nudge
+      buttons have none by design), nothing unreadable or cut off.
 
 ## Words
 

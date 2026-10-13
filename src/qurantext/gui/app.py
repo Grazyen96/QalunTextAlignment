@@ -9,10 +9,13 @@ from typing import Any, NoReturn
 
 from qurantext.config.paths import bundled_asset
 
-__all__ = ["APP_ICON_PNG", "main", "set_app_icon"]
+__all__ = ["APP_ICON_PNG", "APP_ICON_SIZES", "main", "set_app_icon"]
 
-#: The window and task-bar icon; one PNG, Qt scales it for the sizes it needs.
+#: The window and task-bar icon at its largest everyday size.
 APP_ICON_PNG = bundled_asset("icon/qalun-256.png")
+#: Every size drawn for the icon: the small ones are drawn for their size, so a
+#: title bar shows them rather than the 256 px one scaled down.
+APP_ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 
 #: Qt's own criticals and fatals (``QThread: Destroyed while thread is still
 #: running``) come through its message handler, not Python's, so a windowed
@@ -36,8 +39,13 @@ def set_app_icon(app) -> None:
     """Give every window the app icon; a build that lost the file keeps Qt's blank one."""
     from PySide6.QtGui import QIcon
 
-    if APP_ICON_PNG.is_file():
-        app.setWindowIcon(QIcon(str(APP_ICON_PNG)))
+    icon = QIcon()
+    for size in APP_ICON_SIZES:
+        path = APP_ICON_PNG.with_name(f"qalun-{size}.png")
+        if path.is_file():
+            icon.addFile(str(path))
+    if not icon.isNull():
+        app.setWindowIcon(icon)
 
 
 def _name_the_app() -> None:

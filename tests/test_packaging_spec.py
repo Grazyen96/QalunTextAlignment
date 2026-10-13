@@ -414,10 +414,34 @@ def test_the_third_party_notice_credits_lucide() -> None:
     )
     assert "## Lucide icons" in text
     assert "1.56.0" in text and "ISC" in text
+    # Lucide's LICENSE also carries Feather's MIT licence, for the icons derived from it.
+    section = text.split("## Lucide icons", 1)[1].split("\n## ", 1)[0]
+    assert "MIT" in section and "Feather" in section and "Cole Bemis" in section
     assert "qurantext/assets/icons/LICENSE" in text
 
 
+def _call(text: str, name: str) -> str:
+    """The source of the first ``name(...)`` call in *text*, up to its closing bracket."""
+    start = text.index(f"{name}(")
+    depth = 0
+    for index in range(start + len(name), len(text)):
+        if text[index] == "(":
+            depth += 1
+        elif text[index] == ")":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    raise AssertionError(f"{name}( is never closed")
+
+
 def test_the_spec_names_the_app_icon_for_windows_and_mac() -> None:
+    """The executable carries the .ico, the macOS bundle the .icns, and both files exist."""
     text = SPEC.read_text(encoding="utf-8")
-    assert "assets/icon/qalun.ico" in text or 'assets" / "icon" / "qalun.ico"' in text
-    assert "assets/icon/qalun.icns" in text or 'assets" / "icon" / "qalun.icns"' in text
+    icon_dir = Path(__file__).resolve().parents[1] / "src" / "qurantext" / "assets" / "icon"
+    assert 'ICON_DIR = ROOT / "src" / "qurantext" / "assets" / "icon"' in text
+    exe_icon_line = next(line for line in text.splitlines() if line.startswith("EXE_ICON ="))
+    assert '"qalun.ico"' in exe_icon_line
+    assert "icon=EXE_ICON" in _call(text, "EXE")
+    assert '"qalun.icns"' in _call(text, "BUNDLE")
+    assert (icon_dir / "qalun.ico").is_file()
+    assert (icon_dir / "qalun.icns").is_file()

@@ -86,8 +86,12 @@ files ship unmodified inside the app, the Python package and
 `qalun-source.zip`, under `qurantext/assets/icons/` (in the app's folder,
 `_internal/qurantext/assets/icons/`); the app recolours them when it draws
 them. The licence text is beside them at `qurantext/assets/icons/LICENSE`
-and in the source at `packaging/licenses/Lucide-LICENSE.txt`. The ISC
-licence is compatible with the GPL-3.0-only licence of Qalun.
+and in the source at `packaging/licenses/Lucide-LICENSE.txt`. Nine of the
+icons (chevron-down, chevron-left, chevron-right, download, link, monitor, moon,
+trash and x) are derived from the Feather project, Copyright (c) 2013-present
+Cole Bemis, and are also under the MIT License; that licence's text is in the
+same LICENSE file, after the ISC one. Both the ISC and the MIT licence are
+compatible with the GPL-3.0-only licence of Qalun.
 
 ## Speech recognition model
 

@@ -15,6 +15,13 @@ resolves its default font into the Python installation directory.
   Arabic ones; the Quran font has no Latin. `fonts/Amiri-OFL.txt` is its licence.
 - `quran/UthmanicQaloon1-v10.txt` — the certified Qalun text everything is
   built from: the store, the citation index, the ayah text on screen.
+- `icons/*.svg` — the window's interface icons, 31 Lucide icons at release
+  1.56.0, drawn in the theme's colours by `qurantext.gui.icons`. `icons/LICENSE`
+  is their licence: ISC, and MIT for the nine derived from Feather (see
+  `THIRD_PARTY_NOTICES.md`).
+- `icon/` — the app's own icon (`qalun.svg` and the sizes drawn from it, the
+  `.ico` for Windows and the `.icns` for macOS); the project's own work, under
+  Qalun's licence.
 
 The Quran text ships for more than convenience. The parser expects this file's
 exact conventions, and the ayah numbering has to be the Madani counting the rest

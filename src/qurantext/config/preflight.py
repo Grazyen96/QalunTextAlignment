@@ -1132,7 +1132,9 @@ def _interface_icons() -> CheckResult:
     try:
         from qurantext.gui.icons import ICON_DIR, NAMES
     except ImportError as error:
-        return CheckResult("Interface icons", Status.WARN, f"Qt is not installed ({error})")
+        # Name what failed: a Qt without QtSvg is not "Qt is not installed".
+        module = getattr(error, "name", None) or "a module"
+        return CheckResult("Interface icons", Status.WARN, f"Cannot load {module} ({error})")
     missing = sorted(name for name in NAMES if not (ICON_DIR / f"{name}.svg").is_file())
     if missing:
         return CheckResult(

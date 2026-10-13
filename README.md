@@ -276,8 +276,8 @@ review by a native speaker.
 The window follows the desktop's light or dark scheme; **Theme** in the footer
 pins it to Light or Dark.
 
-**Where settings live.** The window's settings (the language, the last choices
-on the form, hidden jobs and job output folders) are kept where Qt keeps
+**Where settings live.** The window's settings (the language, the theme, the
+last choices on the form, hidden jobs and job output folders) are kept where Qt keeps
 settings for an app named Qalun:
 
 | System | Where |
