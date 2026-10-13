@@ -108,17 +108,22 @@ def no_basmala(monkeypatch):
 
 
 @pytest.fixture()
-def no_default_job_dirs(monkeypatch):
+def no_default_job_dirs(monkeypatch, tmp_path_factory):
     """Keep the job list away from the checkout's real ``output/`` folders.
 
     ``JobListPanel`` (and so ``MainWindow``) scans ``catalog.default_job_dirs()``
     on top of ``Prefs.job_dirs``; left live, a test counting rows fails as soon
     as the person running it has a job of their own in ``output/``. Opt in from
     every fixture or test that builds either.
+
+    The list's reads also make each job's thumbnail under the user's cache
+    directory; they go to a throwaway folder here, not the person's own cache.
     """
     from qurantext.jobs import catalog
 
     monkeypatch.setattr(catalog, "default_job_dirs", lambda: [])
+    cache = tmp_path_factory.getbasetemp() / "user-cache"
+    monkeypatch.setattr("qurantext.gui.home.job_list.user_cache_dir", lambda: cache)
 
 
 @pytest.fixture(scope="module")

@@ -465,7 +465,7 @@ def test_the_windows_show_every_path_through_path_text(
 def test_a_job_row_isolates_each_part_of_its_detail_line(
     qt_app, tmp_path, no_default_job_dirs
 ) -> None:
-    """Mode, scope and status are each their own run, so "25:7–8" is not reordered."""
+    """Mode and scope are each their own run, so "25:7–8" is not reordered."""
     prefs = _prefs(tmp_path)
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir()
@@ -477,13 +477,8 @@ def test_a_job_row_isolates_each_part_of_its_detail_line(
     panel = JobListPanel(prefs)
     wait_until_listed(panel)
     detail = panel.list.itemWidget(panel.list.item(0)).detail_label.text()
-    assert detail == i18n.t(
-        "home.row_detail",
-        mode=i18n.t("home.mode.recitation"),
-        scope="25:7\u20138",
-        status=i18n.t("home.status.needs_review"),
-    )
-    assert detail.count("\u2068") == 3
+    assert detail == i18n.t("home.detail", mode=i18n.t("home.mode.recitation"), scope="25:7\u20138")
+    assert detail.count("\u2068") == 2
 
 
 def test_a_job_row_starts_from_the_right_whatever_its_name_is_written_in(
@@ -522,7 +517,7 @@ def test_the_running_row_isolates_the_file_name(qt_app, tmp_path, no_default_job
 # table edit that drops an isolate or the leading RLM changes the order and fails.
 
 
-def test_a_job_detail_line_reads_mode_scope_status_from_the_right(
+def test_a_job_detail_line_reads_mode_then_scope_from_the_right(
     qt_app, tmp_path, no_default_job_dirs
 ) -> None:
     from tests.bidi_helpers import left_to_right
@@ -538,9 +533,9 @@ def test_a_job_detail_line_reads_mode_scope_status_from_the_right(
     panel = JobListPanel(prefs)
     wait_until_listed(panel)
     line = panel.list.itemWidget(panel.list.item(0)).detail_label.text()
-    mode, status = i18n.t("home.mode.recitation"), i18n.t("home.status.needs_review")
-    # From the left: the status, then 25:7–11 left to right, then the mode at the right edge.
-    assert left_to_right(line, [mode, "25", "11", status]) == [status, "25", "11", mode]
+    mode = i18n.t("home.mode.recitation")
+    # From the left: 25:7–11 left to right, then the mode at the right edge.
+    assert left_to_right(line, [mode, "25", "11"]) == ["25", "11", mode]
 
 
 def test_the_selection_line_reads_word_then_times_in_order(qt_app) -> None:

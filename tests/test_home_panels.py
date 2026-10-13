@@ -81,13 +81,13 @@ def test_rows_appear_newest_first_with_status(qt_app, prefs) -> None:
     names = [panel.list.itemWidget(panel.list.item(i)).name_label.text() for i in range(2)]
     assert names == ["reviewed", "older"]
 
-    older_detail = panel.list.itemWidget(panel.list.item(1)).detail_label.text()
-    assert t("home.status.needs_review") in older_detail
-    assert t("home.mode.recitation") in older_detail
-    assert "25:7" in older_detail
+    older = panel.list.itemWidget(panel.list.item(1))
+    assert older.chip.text_label.text() == t("home.status.needs_review")
+    assert t("home.mode.recitation") in older.detail_label.text()
+    assert "25:7" in older.detail_label.text()
 
-    reviewed_detail = panel.list.itemWidget(panel.list.item(0)).detail_label.text()
-    assert t("home.status.reviewed") in reviewed_detail
+    reviewed = panel.list.itemWidget(panel.list.item(0))
+    assert reviewed.chip.text_label.text() == t("home.status.reviewed")
 
 
 def test_double_click_emits_open_requested(qt_app, prefs) -> None:
@@ -212,8 +212,8 @@ def test_double_clicking_a_damaged_row_emits_its_error(qt_app, prefs) -> None:
     assert errors == [entry.error] and entry.error
 
 
-def test_a_row_that_needs_attention_is_amber_and_bold(qt_app, prefs) -> None:
-    """Colour alone is not enough (and was never shown): the status is bold too."""
+def test_a_row_that_needs_attention_gets_an_amber_chip_with_an_icon(qt_app, prefs) -> None:
+    """Colour alone is not enough: the status chip carries an icon too."""
     jobs_dir = prefs.job_dirs[0]
     _save(jobs_dir, "pending")
     reviewed = Project(audio=jobs_dir / "calm.m4a", mode="recitation", cards=[_card()])
@@ -227,16 +227,19 @@ def test_a_row_that_needs_attention_is_amber_and_bold(qt_app, prefs) -> None:
     rows = {}
     for i in range(panel.list.count()):
         row = panel.list.itemWidget(panel.list.item(i))
-        rows[row.name_label.text()] = row.detail_label
+        rows[row.name_label.text()] = row.chip
 
     pending = rows["pending"]
-    assert pending.palette().color(pending.foregroundRole()) == warning_color(pending.palette())
-    assert pending.font().bold()
-    assert rows["broken"].font().bold()
+    word = pending.text_label
+    assert word.palette().color(word.foregroundRole()) == warning_color(pending.palette())
+    assert pending.property("kind") == "attention" and not pending.icon_label.isHidden()
+    assert rows["broken"].property("kind") == "attention"
+    assert not rows["broken"].icon_label.isHidden()
 
     calm = rows["calm"]
-    assert calm.palette().color(calm.foregroundRole()) != warning_color(calm.palette())
-    assert not calm.font().bold()
+    word = calm.text_label
+    assert word.palette().color(word.foregroundRole()) != warning_color(calm.palette())
+    assert calm.property("kind") == "neutral"
     panel.close()
 
 
@@ -317,8 +320,8 @@ def test_a_row_built_on_a_dark_palette_gets_the_dark_amber(qt_app, prefs) -> Non
     qt_app.setPalette(dark)
     try:
         panel = _listed(prefs)
-        row = panel.list.itemWidget(panel.list.item(0))
-        shown = row.detail_label.palette().color(row.detail_label.foregroundRole())
+        word = panel.list.itemWidget(panel.list.item(0)).chip.text_label
+        shown = word.palette().color(word.foregroundRole())
         assert shown == colors.warning_color(dark)
         assert shown != colors.warning_color(before)
     finally:
@@ -337,7 +340,7 @@ def test_rows_on_screen_take_the_new_amber_when_the_theme_switches(qt_app, prefs
     try:
         panel.show()
         row = panel.list.itemWidget(panel.list.item(0))
-        label = row.detail_label
+        label = row.chip.text_label
         light = theme.palette(theme.LIGHT)
         assert label.palette().color(label.foregroundRole()) == colors.warning_color(light)
         theme.apply_theme(qt_app, "dark")
@@ -349,8 +352,10 @@ def test_rows_on_screen_take_the_new_amber_when_the_theme_switches(qt_app, prefs
         theme.apply_theme(qt_app, "light")
         spin(0)
         on_highlight = QColor(theme.LIGHT.on_accent)
-        for line in (row.name_label, row.detail_label):
+        for line in (row.name_label, row.detail_label, row.date_label):
             assert line.palette().color(line.foregroundRole()) == on_highlight
+        # The chip keeps its pill, and the amber reads on it.
+        assert label.palette().color(label.foregroundRole()) == colors.warning_color(light)
     finally:
         panel.close()
 
@@ -385,12 +390,15 @@ def test_a_selected_row_draws_its_lines_in_the_highlighted_text(qt_app, prefs) -
     row = panel.list.itemWidget(panel.list.item(0))
     on_highlight = row.palette().color(QPalette.ColorRole.HighlightedText)
     panel.list.setCurrentRow(0)
-    for label in (row.name_label, row.detail_label):
+    for label in (row.name_label, row.detail_label, row.date_label):
         assert label.palette().color(label.foregroundRole()) == on_highlight
-    assert row.detail_label.font().bold()  # the cue that is not a colour stays
+    word = row.chip.text_label
+    # The chip keeps its own pill: its amber stays, on the pill's background.
+    assert word.palette().color(word.foregroundRole()) == warning_color(row.chip.palette())
     panel.list.setCurrentRow(1)
-    shown = row.detail_label.palette().color(row.detail_label.foregroundRole())
-    assert shown == warning_color(row.palette())
+    assert row.name_label.palette().color(row.name_label.foregroundRole()) != on_highlight
+    shown = row.date_label.palette().color(row.date_label.foregroundRole())
+    assert shown == row.palette().color(QPalette.ColorRole.PlaceholderText)
     panel.close()
 
 
@@ -470,7 +478,10 @@ def test_the_first_read_does_not_claim_there_are_no_jobs(qt_app, prefs, monkeypa
 
     panel = JobListPanel(prefs)
     assert panel.empty_label.text() == t("home.reading")
-    assert panel.empty_label.text() != t("home.empty")
+    assert panel.empty_label.text() != t("home.empty.hint")
+    # Nor do the cards inviting a first job show until the read has landed.
+    assert panel.empty_state.lecture_card.isHidden()
+    assert panel.empty_state.title_label.isHidden()
 
     release.set()
     wait_until_listed(panel)
@@ -478,14 +489,14 @@ def test_the_first_read_does_not_claim_there_are_no_jobs(qt_app, prefs, monkeypa
 
     panel.remove_from_list(prefs.job_dirs[0] / "one_recitation.qalun.json")
     wait_until_listed(panel)
-    assert panel.empty_label.text() == t("home.empty")
-    assert not panel.empty_label.isHidden() and panel.list.isHidden()
+    assert panel.empty_label.text() == t("home.empty.hint")
+    assert not panel.empty_state.isHidden() and panel.list.isHidden()
 
 
 def test_a_refresh_of_an_empty_list_says_it_is_reading(qt_app, prefs, monkeypatch) -> None:
     """Not only the first read: "your jobs appear here" is wrong while any read is out."""
     panel = _listed(prefs)
-    assert panel.empty_label.text() == t("home.empty")
+    assert panel.empty_label.text() == t("home.empty.hint")
     release, _calls = blocking_list_jobs(monkeypatch)
 
     panel.refresh()
@@ -493,7 +504,7 @@ def test_a_refresh_of_an_empty_list_says_it_is_reading(qt_app, prefs, monkeypatc
 
     release.set()
     wait_until_listed(panel)
-    assert panel.empty_label.text() == t("home.empty")
+    assert panel.empty_label.text() == t("home.empty.hint")
 
 
 def test_an_ended_job_keeps_its_row_until_the_read_that_lists_it_lands(
@@ -510,7 +521,7 @@ def test_an_ended_job_keeps_its_row_until_the_read_that_lists_it_lands(
     panel.set_running("", None)  # the window clears the row as the job's thread ends
     assert panel.reading
     assert panel.list.count() == 1 and "90%" in _running_text(panel)
-    assert panel.empty_label.isHidden()
+    assert panel.empty_state.isHidden()
 
     release.set()
     wait_until_listed(panel)
@@ -1530,4 +1541,105 @@ def test_select_mode_checks_the_button_and_focuses_choose(qt_app, prefs, store) 
         assert panel.lecture_button.isChecked()
         assert panel.choose_button.hasFocus() or panel.focusWidget() is panel.choose_button
     finally:
+        panel.deleteLater()
+
+
+def _listed_rows(panel):
+    from tests.qt_helpers import wait_until_listed
+
+    wait_until_listed(panel)
+    return [panel.list.itemWidget(panel.list.item(i)) for i in range(panel.list.count())]
+
+
+def test_rows_are_cards_with_a_chip_a_date_and_a_tile(
+    qt_app, prefs, tmp_path, no_default_job_dirs
+) -> None:
+    from qurantext.gui.home.job_list import JobListPanel
+    from qurantext.gui.i18n import t
+    from tests.test_thumbnails import _project
+
+    _project(tmp_path)
+    prefs.job_dirs = [tmp_path]
+    panel = JobListPanel(prefs)
+    try:
+        (row,) = _listed_rows(panel)
+        assert row.chip.text_label.text() == t("home.status.needs_review")
+        assert row.chip.property("kind") == "attention"
+        # ayah_range writes a one-ayah card as a span too (catalog.ayah_range).
+        scope = "25:7–7"
+        assert row.detail_label.text() == t(
+            "home.detail", mode=t("home.mode.recitation"), scope=scope
+        )
+        assert row.date_label.text()  # the locale's short date
+        assert not row.thumb_label.pixmap().isNull()
+        assert row.thumb_label.size().width() == 48 and row.thumb_label.size().height() == 48
+    finally:
+        panel.stop_reading()
+        panel.deleteLater()
+
+
+def test_a_damaged_row_gets_an_alert_chip_and_the_fallback_tile(
+    qt_app, prefs, tmp_path, no_default_job_dirs
+) -> None:
+    from qurantext.gui.home.job_list import JobListPanel
+    from qurantext.gui.i18n import t
+
+    (tmp_path / "bad.qalun.json").write_text("{not json", encoding="utf-8")
+    prefs.job_dirs = [tmp_path]
+    panel = JobListPanel(prefs)
+    try:
+        (row,) = _listed_rows(panel)
+        assert row.chip.text_label.text() == t("home.status.damaged")
+        assert row.chip.property("kind") == "attention"
+        assert not row.thumb_label.pixmap().isNull()  # the tile, drawn in code
+    finally:
+        panel.stop_reading()
+        panel.deleteLater()
+
+
+def test_the_empty_state_explains_the_modes_and_chooses_one(
+    qt_app, prefs, no_default_job_dirs
+) -> None:
+    from qurantext.gui.home.job_list import JobListPanel
+    from qurantext.gui.i18n import t
+    from tests.qt_helpers import wait_until_listed
+
+    panel = JobListPanel(prefs)
+    try:
+        wait_until_listed(panel)
+        assert panel.empty_state.isVisibleTo(panel) and not panel.list.isVisibleTo(panel)
+        assert panel.empty_state.title_label.text() == t("home.empty.title")
+        assert panel.empty_label.text() == t("home.empty.hint")
+        chosen = []
+        panel.mode_requested.connect(chosen.append)
+        panel.empty_state.lecture_card.click()
+        assert chosen == ["lecture"]
+    finally:
+        panel.stop_reading()
+        panel.deleteLater()
+
+
+def test_the_watcher_refreshes_once_for_a_burst_of_changes(
+    qt_app, prefs, tmp_path, no_default_job_dirs, monkeypatch
+) -> None:
+    """Review Focus 5: twenty files landing in a second mean one read, not twenty."""
+    from qurantext.gui.home.job_list import JobListPanel
+    from tests.qt_helpers import spin, wait_until_listed
+
+    prefs.job_dirs = [
+        tmp_path,
+        tmp_path / "unplugged",
+    ]  # Review Focus 1: the missing one is skipped
+    panel = JobListPanel(prefs)
+    try:
+        wait_until_listed(panel)
+        assert panel.watcher.directories() == [str(tmp_path)]
+        reads = []
+        monkeypatch.setattr(panel, "refresh", lambda: reads.append(1))
+        for _ in range(20):
+            panel.watcher.directoryChanged.emit(str(tmp_path))
+        spin(700)
+        assert reads == [1]
+    finally:
+        panel.stop_reading()
         panel.deleteLater()

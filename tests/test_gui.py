@@ -1209,7 +1209,7 @@ def test_a_finished_job_keeps_its_row_until_the_list_is_read(
     panel = home.job_list
     assert panel.reading
     assert len(_running_rows(home)) == 1 and panel.list.count() == 1
-    assert panel.empty_label.isHidden() and panel.empty_label.text() != t("home.empty")
+    assert panel.empty_state.isHidden() and panel.empty_label.text() != t("home.empty.hint")
 
     release.set()
     wait_until_listed(panel)

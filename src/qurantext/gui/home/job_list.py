@@ -13,7 +13,13 @@ failed to load.
 
 The folders are read on a worker thread (:meth:`JobListPanel.refresh`): a
 folder of hundreds of projects, or one on a slow network drive, would
-otherwise freeze the whole window while every file is opened and parsed.
+otherwise freeze the whole window while every file is opened and parsed. The
+same read makes each job's small picture (``jobs/thumbnails.py``). The folders
+are watched, so a job that appears, goes or is renamed shows without Refresh.
+
+With no job yet, the list gives way to :class:`EmptyState`: who the app is
+for, and a card for each kind of job that asks the form for it
+(``mode_requested``).
 """
 
 from __future__ import annotations
@@ -23,8 +29,20 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QItemSelectionModel, QObject, QPoint, Qt, Signal
-from PySide6.QtGui import QPalette
+from PySide6.QtCore import (
+    QDateTime,
+    QEvent,
+    QFileSystemWatcher,
+    QItemSelectionModel,
+    QLocale,
+    QObject,
+    QPoint,
+    QSize,
+    Qt,
+    QTimer,
+    Signal,
+)
+from PySide6.QtGui import QColor, QPainter, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
@@ -38,12 +56,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from qurantext.gui.colors import warning_color
+from qurantext.config.paths import bundled_asset, user_cache_dir
+from qurantext.gui import theme
 from qurantext.gui.i18n import t, tn
-from qurantext.gui.icons import set_icon
+from qurantext.gui.icons import icon, set_icon
 from qurantext.gui.prefs import Prefs
 from qurantext.gui.review.background import BackgroundJobs
-from qurantext.gui.widgets import SectionHeader
+from qurantext.gui.widgets import Card, SectionHeader, StatusChip
 from qurantext.jobs.catalog import (
     CHANGED_SINCE_RENDER,
     DAMAGED,
@@ -56,7 +75,7 @@ from qurantext.jobs.catalog import (
 )
 from qurantext.utils.progress import CancelToken, JobCancelled
 
-__all__ = ["JobListPanel"]
+__all__ = ["EmptyState", "JobListPanel"]
 
 _log = logging.getLogger(__name__)
 
@@ -67,10 +86,19 @@ _STATUS_KEYS = {
     CHANGED_SINCE_RENDER: "home.status.changed_since_render",
     DAMAGED: "home.status.damaged",
 }
-_WARNING_STATUSES = frozenset({NEEDS_REVIEW, CHANGED_SINCE_RENDER})
-#: Statuses that ask the person to do something, drawn bold: a cue that does
-#: not depend on telling amber from the text colour.
-_ATTENTION_STATUSES = frozenset({NEEDS_REVIEW, CHANGED_SINCE_RENDER, DAMAGED})
+#: Each status's chip: its kind (the colour) and its icon (the cue that does
+#: not depend on telling amber from the text colour).
+_CHIP_FOR_STATUS = {
+    NEEDS_REVIEW: ("attention", "circle-alert"),
+    CHANGED_SINCE_RENDER: ("attention", "circle-alert"),
+    RENDERED: ("accent", "film"),
+    REVIEWED: ("neutral", "circle-check"),
+    DAMAGED: ("attention", "triangle-alert"),
+}
+#: The side of a row's picture, in pixels.
+_THUMB_PX = 48
+#: How long the folders must stay quiet before a change to them is read.
+_WATCH_DEBOUNCE_MS = 500
 
 
 class JobListPanel(QWidget):
@@ -85,6 +113,9 @@ class JobListPanel(QWidget):
     damaged_activated = Signal(str)
     #: The rows were rebuilt from the latest read of the folders.
     refreshed = Signal()
+    #: A card of the empty state was chosen; carries "recitation" or "lecture",
+    #: for the window to select in the form.
+    mode_requested = Signal(str)
 
     def __init__(self, prefs: Prefs, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -126,10 +157,10 @@ class JobListPanel(QWidget):
         self.list.customContextMenuRequested.connect(self._on_context_menu)
         layout.addWidget(self.list)
 
-        self.empty_label = QLabel()  # its words are set by _update_empty_state
-        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_label.setWordWrap(True)
-        layout.addWidget(self.empty_label)
+        self.empty_state = EmptyState()
+        self.empty_label = self.empty_state.hint_label  # its words are set by _update_empty_state
+        self.empty_state.mode_chosen.connect(self.mode_requested)
+        layout.addWidget(self.empty_state, 1)
 
         # The actions a row offers, where a person can see them: the context
         # menu and double-click stay, but nothing told anyone they were there,
@@ -154,6 +185,16 @@ class JobListPanel(QWidget):
         self.list.itemSelectionChanged.connect(self._show_selected_rows)
         self._update_actions()
 
+        # The folders tell the list when a job appears, goes or is renamed; a
+        # burst of files (a render writing several) is read once, half a second
+        # after the last of them.
+        self.watcher = QFileSystemWatcher(self)
+        self._watch_timer = QTimer(self)
+        self._watch_timer.setSingleShot(True)
+        self._watch_timer.setInterval(_WATCH_DEBOUNCE_MS)
+        self._watch_timer.timeout.connect(self.refresh)
+        self.watcher.directoryChanged.connect(lambda _path: self._watch_timer.start())
+
         self.refresh()
 
     # -- filling ----------------------------------------------------------------
@@ -167,6 +208,7 @@ class JobListPanel(QWidget):
         on the worker.
         """
         self._generation += 1
+        self._arm_watcher()
         read = self._pending[self._generation] = _Read(self, self._generation)
         self._reads.start(
             partial(
@@ -180,6 +222,19 @@ class JobListPanel(QWidget):
         )
         self._update_empty_state()
 
+    def _arm_watcher(self) -> None:
+        """Watch every job folder that is there; one on an unplugged drive is simply not watched."""
+        wanted = [
+            str(folder) for folder in job_dirs_for(list(self._prefs.job_dirs)) if folder.is_dir()
+        ]
+        current = self.watcher.directories()
+        gone = [path for path in current if path not in wanted]
+        new = [path for path in wanted if path not in current]
+        if gone:
+            self.watcher.removePaths(gone)
+        if new:
+            self.watcher.addPaths(new)  # a path it cannot watch is returned, and left unwatched
+
     @property
     def reading(self) -> bool:
         """Whether the latest refresh's read has yet to land in the rows."""
@@ -192,6 +247,7 @@ class JobListPanel(QWidget):
         for it: it is cancelled, which it notices between files, and its thread
         is parked until it ends (see ``review/background.py``).
         """
+        self._watch_timer.stop()
         self._reads.stop(wait_ms=0)
 
     def _on_listed(self, listing: _Listing) -> None:
@@ -313,11 +369,11 @@ class JobListPanel(QWidget):
         self._update_empty_state()
 
     def _update_empty_state(self) -> None:
-        # While a read is out, "your jobs appear here" would be a guess.
-        self.empty_label.setText(t("home.reading") if self.reading else t("home.empty"))
         has_rows = self.list.count() > 0
+        # While a read is out, the cards inviting a first job would be a guess.
+        self.empty_state.set_reading(self.reading)
         self.list.setVisible(has_rows)
-        self.empty_label.setVisible(not has_rows)
+        self.empty_state.setVisible(not has_rows)
 
     # -- actions ------------------------------------------------------------------
 
@@ -457,7 +513,9 @@ def _read_jobs(
     :meth:`JobListPanel.stop_reading`) stops it between files.
     """
     try:
-        entries = list_jobs(job_dirs_for(extra), hidden=hidden, cancel=cancel)
+        entries = list_jobs(
+            job_dirs_for(extra), hidden=hidden, cancel=cancel, thumbnail_cache=user_cache_dir()
+        )
     except JobCancelled:
         raise  # no one waits for this read any more; the worker reports it cancelled
     except Exception as error:  # noqa: BLE001 - a folder that cannot be read must not empty the list
@@ -471,37 +529,59 @@ _PALETTE_EVENTS = (QEvent.Type.PaletteChange, QEvent.Type.ApplicationPaletteChan
 
 
 class _JobRow(QWidget):
-    """The two-line label shown for one job: bold name, then mode/scope/status."""
+    """One job as a card: its picture, its name, a status chip, the detail line and the date."""
 
     def __init__(self, entry: JobEntry, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 4, 6, 4)
-        layout.setSpacing(2)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(theme.SP_8, theme.SP_8, theme.SP_8, theme.SP_8)
+        row.setSpacing(theme.SP_12)
 
+        self.thumb_label = QLabel()
+        self.thumb_label.setFixedSize(_THUMB_PX, _THUMB_PX)
+        self.thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.thumb_label.setPixmap(_thumbnail_pixmap(entry))
+        row.addWidget(self.thumb_label, 0, Qt.AlignmentFlag.AlignTop)
+
+        text = QVBoxLayout()
+        text.setSpacing(theme.SP_4)
         self.name_label = QLabel(entry.name)
         self.name_label.setAlignment(_leading_edge(self))
         bold_font = self.name_label.font()
         bold_font.setBold(True)
         self.name_label.setFont(bold_font)
-        layout.addWidget(self.name_label)
-
+        text.addWidget(self.name_label)
+        kind, icon_name = _CHIP_FOR_STATUS.get(entry.status, ("neutral", None))
+        self.chip = StatusChip(t(_STATUS_KEYS[entry.status]), icon_name=icon_name, kind=kind)
+        # Built outside the list, the chip coloured its word's WindowText; in
+        # the viewport the word paints with Text (see below). Pin it, and colour again.
+        self.chip.text_label.setForegroundRole(QPalette.ColorRole.Text)
+        self.chip.set_kind(kind)
+        chip_row = QHBoxLayout()
+        chip_row.addWidget(self.chip)
+        chip_row.addStretch(1)
+        text.addLayout(chip_row)
         self.detail_label = QLabel(_detail_text(entry))
         self.detail_label.setAlignment(_leading_edge(self))
-        if entry.status in _ATTENTION_STATUSES:
-            attention_font = self.detail_label.font()
-            attention_font.setBold(True)
-            self.detail_label.setFont(attention_font)
-        layout.addWidget(self.detail_label)
+        self.detail_label.setFont(theme.font("secondary"))
+        self.detail_label.setVisible(entry.status != DAMAGED)
+        text.addWidget(self.detail_label)
+        row.addLayout(text, 1)
 
-        self._warning = entry.status in _WARNING_STATUSES
+        self.date_label = QLabel(_date_text(entry.modified))
+        self.date_label.setFont(theme.font("secondary"))
+        row.addWidget(self.date_label, 0, Qt.AlignmentFlag.AlignTop)
+
+        self._warning = kind == "attention"
         self._selected = False
         # Inside the list's viewport a label inherits its Base background and
         # so paints with Text, not WindowText; pin the role so the colour set
-        # on it is the one drawn, wherever the row ends up.
-        for label in (self.name_label, self.detail_label):
+        # on it is the one drawn, wherever the row ends up. The date is
+        # quieter: the secondary colour, which follows a theme switch by itself.
+        for label in (self.name_label, self.detail_label, self.date_label):
             label.setForegroundRole(QPalette.ColorRole.Text)
             label.installEventFilter(self)
+        self.date_label.setForegroundRole(QPalette.ColorRole.PlaceholderText)
         self._paint_labels()
 
     def set_selected(self, selected: bool) -> None:
@@ -528,14 +608,14 @@ class _JobRow(QWidget):
         return False
 
     def _paint_labels(self) -> None:
-        """Colour the two lines for the palette the row paints on, and its selection.
+        """Colour the lines for the palette the row paints on, and its selection.
 
-        The amber has no palette role of its own, so its shade is picked for
-        the palette the row paints on: one amber was unreadable on a light
-        list (see ``gui/colors.py``). On the selection highlight it fell to
-        1.5:1, so a selected row draws both lines in HighlightedText; the bold
-        status stays as the cue that does not depend on colour. Every other
-        role is left to inherit, so it follows a theme switch by itself.
+        A selected row draws its name, detail and date in HighlightedText; the
+        chip keeps its own pill, on whose background its colour reads. The
+        amber has no palette role of its own, so the chip picks its shade for
+        the palette it paints on (see ``gui/colors.py``), and is asked to pick
+        again here after a theme switch. Every other role is left to inherit,
+        so it follows a theme switch by itself.
         """
         source = self.palette()
         if self._selected:
@@ -547,14 +627,14 @@ class _JobRow(QWidget):
             ):
                 text = source.color(group, QPalette.ColorRole.HighlightedText)
                 palette.setColor(group, QPalette.ColorRole.Text, text)
-            self.name_label.setPalette(palette)
-            self.detail_label.setPalette(palette)
-            return
-        self.name_label.setPalette(QPalette())
-        detail = QPalette()
+                palette.setColor(group, QPalette.ColorRole.PlaceholderText, text)
+            for label in (self.name_label, self.detail_label, self.date_label):
+                label.setPalette(palette)
+        else:
+            for label in (self.name_label, self.detail_label, self.date_label):
+                label.setPalette(QPalette())
         if self._warning:
-            detail.setColor(QPalette.ColorRole.Text, warning_color(source))
-        self.detail_label.setPalette(detail)
+            self.chip.set_kind(self.chip.property("kind"))  # re-reads the amber
 
 
 class _RunningRow(QWidget):
@@ -582,6 +662,103 @@ class _RunningRow(QWidget):
             self.progress_bar.setValue(int(max(0.0, min(1.0, fraction)) * 100))
 
 
+class EmptyState(QWidget):
+    """What the list shows before there is a job: who this is for, and the two ways in."""
+
+    #: A card was chosen; carries "recitation" or "lecture".
+    mode_chosen = Signal(str)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        column = QVBoxLayout(self)
+        column.setContentsMargins(theme.SP_16, theme.SP_24, theme.SP_16, theme.SP_24)
+        column.setSpacing(theme.SP_12)
+        column.addStretch(1)
+        self.icon_label = QLabel()
+        pixmap = QPixmap(str(bundled_asset("icon/qalun-256.png")))
+        self.icon_label.setPixmap(
+            pixmap.scaled(
+                96,
+                96,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+        self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        column.addWidget(self.icon_label)
+        self.title_label = QLabel(t("home.empty.title"))
+        self.title_label.setFont(theme.font("section"))
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        column.addWidget(self.title_label)
+        self.hint_label = QLabel(t("home.empty.hint"))
+        self.hint_label.setWordWrap(True)
+        self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        column.addWidget(self.hint_label)
+        self.recitation_card = _ModeCard(
+            "mic", t("home.mode.recitation"), t("home.mode.recitation.desc")
+        )
+        self.lecture_card = _ModeCard(
+            "book-open", t("home.mode.lecture"), t("home.mode.lecture.desc")
+        )
+        self.recitation_card.clicked.connect(lambda: self.mode_chosen.emit("recitation"))
+        self.lecture_card.clicked.connect(lambda: self.mode_chosen.emit("lecture"))
+        column.addWidget(self.recitation_card)
+        column.addWidget(self.lecture_card)
+        column.addStretch(2)
+
+    def set_reading(self, reading: bool) -> None:
+        """While the folders are read, say so and hold the cards back: the emptiness is a guess."""
+        self.hint_label.setText(t("home.reading") if reading else t("home.empty.hint"))
+        for widget in (self.icon_label, self.title_label, self.recitation_card, self.lecture_card):
+            widget.setVisible(not reading)
+
+
+class _ModeCard(Card):
+    """A clickable card naming one kind of job; Enter or Space works too."""
+
+    clicked = Signal()
+
+    def __init__(
+        self, icon_name: str, title: str, description: str, parent: QWidget | None = None
+    ) -> None:
+        super().__init__(parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAccessibleName(title)
+        self.body.setContentsMargins(theme.SP_12, theme.SP_8, theme.SP_12, theme.SP_8)
+        row = QHBoxLayout()
+        self.icon_label = QLabel()
+        self.icon_label.setPixmap(icon(icon_name, "accent").pixmap(QSize(20, 20)))
+        row.addWidget(self.icon_label, 0, Qt.AlignmentFlag.AlignTop)
+        text = QVBoxLayout()
+        self.title_label = QLabel(title)
+        bold = self.title_label.font()
+        bold.setBold(True)
+        self.title_label.setFont(bold)
+        self.description_label = QLabel(description)
+        self.description_label.setWordWrap(True)
+        self.description_label.setFont(theme.font("secondary"))
+        text.addWidget(self.title_label)
+        text.addWidget(self.description_label)
+        row.addLayout(text, 1)
+        self.body.addLayout(row)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt override
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt override
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+            self.clicked.emit()
+            return
+        super().keyPressEvent(event)
+
+    def click(self) -> None:
+        """Choose this card, as a press or a key would."""
+        self.clicked.emit()
+
+
 def _leading_edge(widget: QWidget) -> Qt.AlignmentFlag:
     """The edge a row's lines start from: the layout's, not each line's own script.
 
@@ -594,12 +771,49 @@ def _leading_edge(widget: QWidget) -> Qt.AlignmentFlag:
     return edge | Qt.AlignmentFlag.AlignAbsolute | Qt.AlignmentFlag.AlignVCenter
 
 
-def _detail_text(entry: JobEntry) -> str:
+def _date_text(modified: float) -> str:
+    """When the job was last saved, in the locale's short form; nothing when that is not known."""
+    if modified <= 0:
+        return ""
+    stamp = QDateTime.fromSecsSinceEpoch(int(modified))
+    return QLocale().toString(stamp, QLocale.FormatType.ShortFormat)
+
+
+def _thumbnail_pixmap(entry: JobEntry) -> QPixmap:
+    """The cached picture, scaled into the tile; else a tile in the look's colour with the mode's icon."""
+    if entry.thumbnail is not None:
+        pixmap = QPixmap(str(entry.thumbnail))
+        if not pixmap.isNull():
+            return pixmap.scaled(
+                _THUMB_PX,
+                _THUMB_PX,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+    tokens = theme.current_tokens()
+    tile = QPixmap(_THUMB_PX, _THUMB_PX)
+    background = QColor(*entry.background) if entry.background else QColor(tokens.border)
+    tile.fill(background)
     if entry.status == DAMAGED:
-        return t(_STATUS_KEYS[DAMAGED])
+        name = "triangle-alert"
+    else:
+        name = "book-open" if entry.mode == "lecture" else "mic"
+    # The dark theme's text is light, so it reads on a dark look; in the light
+    # theme a dark look takes the white drawn on the accent.
+    role = "on_accent" if background.lightness() < 128 and tokens.name == "light" else "text"
+    glyph = icon(name, role).pixmap(QSize(24, 24))
+    painter = QPainter(tile)
+    painter.drawPixmap((_THUMB_PX - 24) // 2, (_THUMB_PX - 24) // 2, glyph)
+    painter.end()
+    return tile
+
+
+def _detail_text(entry: JobEntry) -> str:
+    """Mode and scope (the status is the chip's); nothing for a damaged job, whose file says neither."""
+    if entry.status == DAMAGED:
+        return ""
     mode_text = t("home.mode.recitation") if entry.mode == "recitation" else t("home.mode.lecture")
     scope = entry.ayah_range or tn("home.cards", entry.card_count)
-    status_text = t(_STATUS_KEYS[entry.status])
     # One template, not a join: in Arabic each part is isolated, so a range
     # such as "25:7–11" keeps its order between the words around it.
-    return t("home.row_detail", mode=mode_text, scope=scope, status=status_text)
+    return t("home.detail", mode=mode_text, scope=scope)
