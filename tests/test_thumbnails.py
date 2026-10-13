@@ -1,0 +1,104 @@
+# tests/test_thumbnails.py
+"""A job's thumbnail: the first card at the job's look, cached by path, time and style."""
+
+from __future__ import annotations
+
+import time
+from pathlib import Path
+
+from PIL import Image
+
+from qurantext.jobs import thumbnails
+from qurantext.jobs.project import Project, load_project, save_project
+
+_CARD = {
+    "surah_num": 25, "surah_name": "الفرقان", "from_ayah": 7, "to_ayah": 7,
+    "start_time": 1.0, "end_time": 4.0,
+    "word_timings": [{"word": "وَقَالُوا", "start": 1.0, "end": 2.0}],
+}  # fmt: skip
+
+
+def _project(tmp_path: Path, *, cards=None, style=None, preset="social") -> Project:
+    project = Project(
+        audio=tmp_path / "a.mp3",
+        mode="recitation",
+        cards=cards if cards is not None else [dict(_CARD)],
+        style=style or {},
+        export={"preset": preset, "subtitles": "burn"},
+    )
+    path = tmp_path / "a_recitation.qalun.json"
+    save_project(project, path)
+    return load_project(path)
+
+
+def test_a_portrait_job_gets_a_portrait_png_96_tall(tmp_path) -> None:
+    png = thumbnails.thumbnail_for(_project(tmp_path), tmp_path / "cache")
+    assert png is not None and png.is_file()
+    with Image.open(png) as image:
+        assert image.size == (54, 96)
+
+
+def test_a_landscape_job_gets_a_landscape_png_96_wide(tmp_path) -> None:
+    png = thumbnails.thumbnail_for(_project(tmp_path, preset="high"), tmp_path / "cache")
+    with Image.open(png) as image:
+        assert image.size == (96, 54)
+
+
+def test_the_key_follows_the_file_time_and_the_style_only(tmp_path, monkeypatch) -> None:
+    project = _project(tmp_path)
+    first = thumbnails.cache_key(project)
+    assert thumbnails.cache_key(project) == first  # time passing changes nothing
+    project.style = {"preset": "emerald"}
+    assert thumbnails.cache_key(project) != first
+    project.style = {}
+    later = time.time() + 100
+    import os
+
+    os.utime(project.path, (later, later))
+    assert thumbnails.cache_key(project) != first
+
+
+def test_a_hit_does_not_render_again(tmp_path, monkeypatch) -> None:
+    project = _project(tmp_path)
+    calls = []
+    real = thumbnails.render_frame_pillow
+
+    def counting(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(thumbnails, "render_frame_pillow", counting)
+    thumbnails.thumbnail_for(project, tmp_path / "cache")
+    thumbnails.thumbnail_for(project, tmp_path / "cache")
+    assert len(calls) == 1
+
+
+def test_no_cards_means_no_thumbnail(tmp_path) -> None:
+    assert thumbnails.thumbnail_for(_project(tmp_path, cards=[]), tmp_path / "cache") is None
+
+
+def test_a_renderer_failure_means_no_thumbnail_and_no_exception(tmp_path, monkeypatch) -> None:
+    def boom(*args, **kwargs):
+        raise RuntimeError("no font")
+
+    monkeypatch.setattr(thumbnails, "render_frame_pillow", boom)
+    assert thumbnails.thumbnail_for(_project(tmp_path), tmp_path / "cache") is None
+
+
+def test_a_missing_look_image_still_yields_a_thumbnail(tmp_path) -> None:
+    """Review Focus 2: the base layer falls back when the image is gone."""
+    style = {"preset": "night_gold", "background": {"kind": "image", "image": "gone.jpg"}}
+    png = thumbnails.thumbnail_for(_project(tmp_path, style=style), tmp_path / "cache")
+    assert png is not None
+
+
+def test_no_cache_dir_renders_in_memory_to_a_temp_file(tmp_path) -> None:
+    png = thumbnails.thumbnail_for(_project(tmp_path), None)
+    assert png is None  # nothing to keep it in: the row draws the tile
+
+
+def test_background_is_the_looks_frame_colour(tmp_path) -> None:
+    project = _project(tmp_path, style={"preset": "sand"})
+    from qurantext.core.looks import PRESETS
+
+    assert thumbnails.background_for(project) == PRESETS["sand"].frame_bg[:3]

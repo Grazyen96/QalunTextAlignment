@@ -14,6 +14,7 @@ from typing import Any
 
 from qurantext.config.paths import LECTURE_MATCHING_OUTPUT_DIR, RECITATION_MATCHING_OUTPUT_DIR
 from qurantext.jobs.project import Project, job_settings, load_project
+from qurantext.jobs.thumbnails import background_for, thumbnail_for
 from qurantext.utils.progress import CancelToken
 
 __all__ = [
@@ -53,6 +54,17 @@ class JobEntry:
     card_count: int = 0
     ayah_range: str | None = None
     error: str | None = None
+    #: The cached picture of the first card, when one could be made.
+    thumbnail: Path | None = None
+    #: The look's frame colour, for the tile drawn without a picture.
+    background: tuple[int, int, int] | None = None
+
+
+def _background(project: Project) -> tuple[int, int, int] | None:
+    try:
+        return background_for(project)
+    except Exception:  # noqa: BLE001 - a look that cannot be read is not a damaged job
+        return None
 
 
 def job_status(project: Project) -> str:
@@ -111,7 +123,7 @@ def job_dirs_for(extra: Iterable[Path]) -> list[Path]:
     return dirs
 
 
-def _entry_for(path: Path) -> JobEntry | None:
+def _entry_for(path: Path, *, thumbnail_cache: Path | None = None) -> JobEntry | None:
     """Build an entry for *path*, or None if the file vanished."""
     try:
         modified = path.stat().st_mtime
@@ -160,6 +172,8 @@ def _entry_for(path: Path) -> JobEntry | None:
         modified=modified,
         card_count=len(project.cards),
         ayah_range=range_str,
+        thumbnail=thumbnail_for(project, thumbnail_cache),
+        background=_background(project),
     )
 
 
@@ -168,6 +182,7 @@ def list_jobs(
     *,
     hidden: frozenset[Path] = frozenset(),
     cancel: CancelToken | None = None,
+    thumbnail_cache: Path | None = None,
 ) -> list[JobEntry]:
     """Projects under *dirs*, newest first.
 
@@ -196,7 +211,7 @@ def list_jobs(
                 cancel.raise_if_cancelled("listing jobs")
             if path.resolve() in hidden:
                 continue
-            entry = _entry_for(path)
+            entry = _entry_for(path, thumbnail_cache=thumbnail_cache)
             if entry is not None:
                 entries.append(entry)
     entries.sort(key=lambda entry: entry.modified, reverse=True)

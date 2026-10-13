@@ -228,10 +228,10 @@ def test_a_cancelled_listing_stops_between_files(tmp_path, monkeypatch) -> None:
     opened: list[PathlibPath] = []
     real = catalog._entry_for
 
-    def entry_then_cancel(path):
+    def entry_then_cancel(path, **kwargs):
         opened.append(path)
         cancel.cancel()
-        return real(path)
+        return real(path, **kwargs)
 
     monkeypatch.setattr(catalog, "_entry_for", entry_then_cancel)
     with pytest.raises(JobCancelled):
@@ -246,3 +246,16 @@ def test_a_cancelled_listing_does_not_start(tmp_path) -> None:
     cancel.cancel()
     with pytest.raises(JobCancelled):
         list_jobs([tmp_path], cancel=cancel)
+
+
+def test_entries_carry_a_thumbnail_when_a_cache_is_given(tmp_path) -> None:
+    from qurantext.jobs.catalog import list_jobs
+    from tests.test_thumbnails import _project
+
+    _project(tmp_path)
+    entries = list_jobs([tmp_path], thumbnail_cache=tmp_path / "cache")
+    assert len(entries) == 1
+    assert entries[0].thumbnail is not None and entries[0].thumbnail.is_file()
+    assert entries[0].background is not None
+    plain = list_jobs([tmp_path])
+    assert plain[0].thumbnail is None and plain[0].background is not None
