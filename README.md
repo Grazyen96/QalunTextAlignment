@@ -122,15 +122,22 @@ qalun
 ```
 
 The window opens on every job it already knows about, listed on the left, with
-a form for starting a new one on the right.
+a form for starting a new one on the right. A header runs across the top: the
+app's icon and name, then a sun/moon button that switches the theme, the
+**Settings** gear and **Help**, which opens this README.
 
-**The job list.** Each row is one project: its name, whether it is a
-recitation or a lecture, how much of the Quran it covers, and where it stands
-— needs review, reviewed, rendered, changed since the last render, or damaged
-(with the error on the row, shown on double-click). Double-clicking a row
-opens it for review; right-click for "Show in folder" or "Remove from list",
-which only hides a job (nothing on disk is touched, so it costs nothing to
-undo).
+**The job list.** Each job is a card: a small picture of its first card at the
+job's own look, its name (shortened in the middle when it is long; the whole
+name shows on hover), a chip saying where it stands — needs review, reviewed,
+rendered, changed since the last render, or damaged (with the error shown on
+double-click) — whether it is a recitation or a lecture with how much of the
+Quran it covers, and the day it was last saved. Double-clicking a card opens it
+for review; Open, Show in folder and Remove from list sit under the list (and
+in the right-click menu). Remove from list only hides a job: nothing on disk is
+touched, so it costs nothing to undo. The list follows its folders, so a job
+that appears, goes or is renamed shows without pressing Refresh. Before there
+is any job, the list says who the app is for and offers a card for each kind
+of job, recitation or lecture; choosing one sets the form to it.
 
 **Starting a job.** Drop an audio file, say whether it is a recitation or a
 lecture, pick the surah and the ayat if you know them, choose a video size,
@@ -251,32 +258,42 @@ for another platform changes the default platform, not the default link. A part
 you set to None or My clip keeps its generated settings for the next time it is
 Generated.
 
-**More options**, folded away since most jobs don't need them: a Quran text
-other than the certified one that ships with the app, subtitles burned into
-the picture, written as files beside it, or both (and in which formats), an
-output folder other than the default, where transcription runs (on this
-computer, the default, or WhisperX online, which uploads the recording and needs
-a Replicate token), and rendering right away instead of stopping for review —
-for jobs you already trust. While More options is folded, a WhisperX choice is
-still named under it, with a note when no token is set.
+**More options**, folded away under the form since most jobs don't need them,
+holds only the job's own extras: subtitles burned into the picture, written as
+files beside it, or both (and, for files, in which formats), and rendering
+right away instead of stopping for review — for jobs you already trust.
+
+**Settings** (the gear in the header) holds everything that is about this
+computer or every job, in five tabs:
+
+- *General:* the window's language and theme.
+- *Transcription:* where transcription runs — on this computer (the default) or
+  WhisperX online, which uploads the recording and needs a Replicate token (the
+  tab says when none is set). While WhisperX is chosen, the form says so above
+  Start, with a link back to this tab.
+- *Files:* a Quran text other than the certified one that ships with the app,
+  an output folder other than the default, and the extra folders the job list
+  reads.
+- *Videos:* the look new jobs start with, and the intro and outro new lectures
+  start with.
+- *About:* the version, "Open log folder", the third-party notices and the
+  project's page on GitHub.
 
 **Where files go.** Matching results land in `output/recitation_matching/` or
 `output/lecture_matching/`, and a rendered video in `output/videos/`, unless
-More options points the job at a folder of its own — then its match, project
-and video files all go there together, and that folder is remembered so the
-job list keeps finding it.
+Settings → Files names an output folder of its own — then each job's match,
+project and video files all go there together, and that folder is remembered
+so the job list keeps finding it.
 
 **Language.** The window is in English or Arabic. It follows the system's
-language until you choose one at the bottom of the home window, and remembers
-that choice from then on (switching waits until no review is open and no job
-is running). Arabic lays the window out right to left; the review timeline runs
-right to left in both languages (see above). The Arabic text is a draft awaiting
-review by a native speaker.
+language until you choose one in Settings → General, and remembers that choice
+from then on (switching waits until no review is open and no job is running).
+Arabic lays the window out right to left; the review timeline runs right to
+left in both languages (see above). The Arabic text is a draft awaiting review
+by a native speaker.
 
-The window follows the desktop's light or dark scheme. **Settings** (the gear in the
-header) holds the language, theme, transcription engine, Quran text, output and job
-folders, default look and episode defaults; the sun/moon button beside it switches
-the theme.
+The window follows the desktop's light or dark scheme until you choose one in
+Settings → General; the sun/moon button in the header switches between the two.
 
 **Where settings live.** The window's settings (the language, the theme, the
 last choices on the form, hidden jobs and job output folders) are kept where Qt keeps
@@ -296,9 +313,9 @@ their own drop out of it until a new job uses that folder again.
 `qalun.log` in the `logs` folder of the app's data folder (on Linux
 `~/.local/share/qalun/logs/`; `%LOCALAPPDATA%\Qalun\logs` on Windows,
 `~/Library/Application Support/Qalun/logs` on macOS). It keeps 1 MB and three
-older copies, and only warnings and worse. "Open log folder" at the bottom of
-the home window opens it, and `qurantext doctor` (or `qalun --doctor`) prints
-the log's path. It is the file to send when something goes wrong.
+older copies, and only warnings and worse. "Open log folder" in Settings →
+About opens it (and says so there when it cannot), and `qurantext doctor` (or
+`qalun --doctor`) prints the log's path. It is the file to send when something goes wrong.
 
 Qt is an optional dependency, so the command line installs without it. Running
 `qalun` without it prints one line telling you what to install.

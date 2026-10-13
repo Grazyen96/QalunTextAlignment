@@ -62,10 +62,37 @@ def _project(tmp: Path, mode: str):
 
 
 def shoot(out_dir: Path, *, themes=("light", "dark"), languages=("en", "ar")) -> list[Path]:
-    """Write one PNG per screen, theme and language into *out_dir*; return their paths."""
+    """Write one PNG per screen, theme and language into *out_dir*; return their paths.
+
+    The job folders and the thumbnail cache are pointed elsewhere while it
+    runs, and put back however it ends: a test calling it must not leave
+    them changed for the tests after it.
+    """
+    from qurantext.gui import theme
+    from qurantext.gui.language import apply_language
+    from qurantext.jobs import catalog
+
     out_dir = Path(out_dir)
+    app = QApplication.instance() or QApplication(sys.argv)
+    real_dirs = catalog.default_job_dirs
+    real_cache = os.environ.get("QURANTEXT_CACHE_DIR")
     # Thumbnails are cached on disk; keep them under the output folder, never the person's own cache.
     os.environ["QURANTEXT_CACHE_DIR"] = str(out_dir / "cache")
+    # The home window lists the one job made here, nothing from the checkout's own folders.
+    catalog.default_job_dirs = lambda: []
+    try:
+        return _shoot(app, out_dir, themes, languages)
+    finally:
+        catalog.default_job_dirs = real_dirs
+        if real_cache is None:
+            os.environ.pop("QURANTEXT_CACHE_DIR", None)
+        else:
+            os.environ["QURANTEXT_CACHE_DIR"] = real_cache
+        apply_language(app, "en")
+        theme.apply_theme(app, "light")
+
+
+def _shoot(app: QApplication, out_dir: Path, themes, languages) -> list[Path]:
     from qurantext.config.paths import DEFAULT_QURAN_PATH, QURAN_DB_PATH
     from qurantext.data.quran_db import ensure_quran_db
     from qurantext.gui import theme
@@ -79,12 +106,10 @@ def shoot(out_dir: Path, *, themes=("light", "dark"), languages=("en", "ar")) ->
     from qurantext.gui.review.export_dialog import ExportDialog
     from qurantext.gui.review.player import FakePlayer
     from qurantext.gui.review.window import ReviewWindow
-    from qurantext.jobs import catalog
     from qurantext.jobs.project import save_project
 
     # The ayah picker reads the real store; build it if this checkout has none yet.
     ensure_quran_db(DEFAULT_QURAN_PATH, QURAN_DB_PATH).close()
-    app = QApplication.instance() or QApplication(sys.argv)
     out_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     with tempfile.TemporaryDirectory(prefix="qalun-shots-") as scratch:
@@ -92,8 +117,6 @@ def shoot(out_dir: Path, *, themes=("light", "dark"), languages=("en", "ar")) ->
         # The home window lists this one job and nothing from the checkout's own folders.
         jobs = tmp / "jobs"
         save_project(_project(tmp, "recitation"), jobs / "al-furqan.qalun.json")
-        real_dirs = catalog.default_job_dirs
-        catalog.default_job_dirs = lambda: []
         for language in languages:
             for name in themes:
                 apply_language(app, language)
@@ -107,9 +130,11 @@ def shoot(out_dir: Path, *, themes=("light", "dark"), languages=("en", "ar")) ->
                 home.resize(1024, 680)
                 _spin(300)
                 written.append(_grab(home, out_dir / f"home-{tag}.png"))
-                # A job running with More options open: checked and disabled at once.
+                # A job running with More options open: checked and disabled at once,
+                # and the bar part way, saying its stage and how far.
                 home.new_job.more_button.setChecked(True)
                 home.new_job.set_running(True)
+                home.new_job.set_progress(0.42, t("home.progress.matching", percent=42))
                 written.append(_grab(home, out_dir / f"home-running-{tag}.png"))
                 home.new_job.set_running(False)
                 for tab in TABS:
@@ -161,9 +186,6 @@ def shoot(out_dir: Path, *, themes=("light", "dark"), languages=("en", "ar")) ->
                     review.close()
                     review.deleteLater()
                 _spin(100)
-        catalog.default_job_dirs = real_dirs
-    apply_language(app, "en")
-    theme.apply_theme(app, "light")
     return written
 
 

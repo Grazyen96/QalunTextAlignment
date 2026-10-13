@@ -136,12 +136,17 @@ this is the only place anyone hears each platform's build recognise speech.
       (`collect-linux.sh` installs them there), so the doctor's playback check on CI,
       which has no sound device, does not prove this.
 - [ ] On Linux, start the window in an X11 session as well as a Wayland one.
-- [ ] In the packaged app, click the **Open log folder** link at the foot of the home
-      window, at the other end of the footer from the language. The file manager must
+- [ ] In the packaged app, open **Settings** (the gear in the header), go to the
+      **About** tab and click the **Open log folder** link. The file manager must
       open the `logs` folder that `qalun --doctor` names on its "error log in" line,
       with `qalun.log` in it (and, on Linux and macOS, `faults.log`). The gate never
       opens the window, so it never makes this folder; only a real start does. The
       log can name the person's own files and folders: say so when asking for it.
+- [ ] Press **Help** in the header, then the GitHub link in Settings → About. The
+      browser must open the README and the project's page, each address carrying
+      `utm_source=qalun-app&utm_medium=app` and `utm_campaign=help` or `about`
+      (`config/links.py`). GitHub itself does not report these parameters: decide
+      before release whether the links go through a redirect your analytics sees.
 - [ ] On Windows, open two windows of the packaged app at once and make the log pass
       1 MB (for example, copy a 1 MB text file over `qalun.log` and fail a job in each
       window). Nothing may be lost: `qalun.log` keeps growing while both are open,
@@ -182,9 +187,11 @@ this is the only place anyone hears each platform's build recognise speech.
     and `episode_join` («تجميع الحلقة…»): the other stage lines open with «جارٍ»; should
     these two as well?
   - the transcription choice and its progress: `home.engine`, `home.engine.local`,
-    `home.engine.whisperx`, `home.engine.no_token`, `home.engine.folded`,
+    `home.engine.whisperx`, `home.engine.no_token`, the form's upload note
+    `home.engine.note` and its link `home.engine.change`,
     `home.progress.downloading`, `home.progress.downloading_eta`,
-    `home.progress.transcribing` and `home.progress.transcribing_eta`
+    `home.progress.transcribing` and `home.progress.transcribing_eta`. The note says
+    «ينسخ» where older lines say «التفريغ» for transcription: which should every line use?
   - the video header: «الآيات 7 - 11» or «الآيات من 7 إلى 11»
   - the Look panel, every `look.*` line, read beside the panel and its swatches: the
     palette names (`look.preset.*`: «ذهبي ليلي»، «زمردي»، «رملي»، «حبر على ورق»، «محيطي»،
@@ -298,8 +305,8 @@ this is the only place anyone hears each platform's build recognise speech.
 
     Is «الحلقة» the right word for the episode, and «الدرس» or «المحاضرة» for the lecture
     (both are used now)?
-  - the error log, on the link at the foot of the home window, at the other end of the
-    footer from the language: `home.open_log_folder` («افتح مجلد السجلات»), its tooltip
+  - the error log, on the link in Settings → About (the gear in the header):
+    `home.open_log_folder` («افتح مجلد السجلات»), its tooltip
     `home.open_log_folder.tip` («حيث يدوّن قالون ما حدث من أخطاء») and
     `home.open_log_failed` («تعذّر فتح مجلد السجلات»). Is «السجلات» what a person would
     look for, or «سجل الأخطاء»?

@@ -15,9 +15,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 def test_the_tool_writes_one_image_per_screen_theme_and_language(
     qt_app, tmp_path, no_default_job_dirs
 ) -> None:
+    import os
+
     from screenshots import shoot
 
+    from qurantext.jobs import catalog
+
+    dirs_before = catalog.default_job_dirs
+    cache_before = os.environ.get("QURANTEXT_CACHE_DIR")
     written = shoot(tmp_path, themes=("light",), languages=("en",))
+    # Put back for the tests after this one, however the run ended.
+    assert catalog.default_job_dirs is dirs_before
+    assert os.environ.get("QURANTEXT_CACHE_DIR") == cache_before
     names = {path.name for path in written}
     assert {
         "home-en-light.png",
