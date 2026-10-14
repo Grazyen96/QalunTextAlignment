@@ -167,6 +167,11 @@ def test_rows_quiet_buttons_placeholders_and_selected_cards_have_rules(tokens) -
     assert contrast(_c(tokens.accent), _c(tokens.window)) >= 4.5
     assert tokens.border in _rule(sheet, 'QLabel[placeholder="true"]')["border"]
     assert tokens.accent in _rule(sheet, 'QFrame[card="true"][selected="true"]')["border"]
+    # A part card keeps a 2 px border always, so selecting it (the accent) moves nothing.
+    assert _rule(sheet, 'QFrame[card="true"][part="true"]')["border"] == "2px solid transparent"
+    assert sheet.index('QFrame[card="true"][part="true"]') < sheet.index(
+        'QFrame[card="true"][selected="true"]'
+    )
 
 
 def test_tokens_are_found_by_name() -> None:

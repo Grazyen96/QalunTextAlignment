@@ -5,7 +5,8 @@ Outro) and fills each card's ``controls`` with the widgets it already has
 (the kind box, the clip line, the recitation list). The card only shows:
 a thumbnail fitted into :data:`THUMB_BOX`, a length line, a
 :class:`StatusChip` when there is something to say, and whether it is the
-selected one (a 2 px accent border, from the sheet's ``selected`` rule).
+selected one (a 2 px accent border, from the sheet's ``selected`` rule; the
+``part`` rule keeps the same 2 px transparent otherwise).
 A click, Enter or Space on the card, or focus landing on one of its
 controls, asks the dialog to select it (``select_requested``); the dialog
 decides, as the Lecture card is never selectable.
@@ -25,8 +26,9 @@ __all__ = ["CARD_WIDTH", "THUMB_BOX", "PartCard", "fitted_size"]
 
 #: The box a part's picture is fitted into, in pixels.
 THUMB_BOX = (176, 99)
-#: Each card's width: the box plus the card's own margins.
-CARD_WIDTH = 200
+#: Each card's width: the box, the card's own margins and its 2 px border (transparent
+#: until the card is selected, so selecting one moves nothing).
+CARD_WIDTH = 204
 #: An icon tile's glyph.
 _GLYPH = 28
 
@@ -46,6 +48,7 @@ class PartCard(Card):
 
     def __init__(self, title: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setProperty("part", True)
         self.setFixedWidth(CARD_WIDTH)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAccessibleName(title)

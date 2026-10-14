@@ -414,6 +414,12 @@ class EpisodeDialog(QDialog):
         )
         self.intro_kind = self._kind_box(_kind_of(current, "intro"), "intro")
         self.cards["intro"].add_control(self.intro_kind)
+        # The Lecture card has no controls: room the height of a kind box keeps its
+        # picture level with the others when no part has a clip line showing. A layout
+        # of spacing alone counts as empty, so the card's gap before it is not given:
+        # the room includes it.
+        lecture = self.cards["lecture"]
+        lecture.controls.addSpacing(self.intro_kind.sizeHint().height() + lecture.body.spacing())
         self.cards["intro"].add_control_layout(self._intro.layout())
         self._intro_original = current.intro_generated
         self.intro_fields = self._intro_fields(

@@ -217,6 +217,7 @@ QFrame[card="true"] {{
     border-radius: 10px;
 }}
 QFrame[card="true"][empty="true"] {{ border: none; background: {t.border}; border-radius: 2px; }}
+QFrame[card="true"][part="true"] {{ border: 2px solid transparent; }}
 QFrame[card="true"][selected="true"] {{ border: 2px solid {t.accent}; }}
 QFrame#dropZone {{
     background: {t.panel};

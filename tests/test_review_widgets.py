@@ -2570,7 +2570,11 @@ def test_the_strip_has_four_cards_in_render_order_and_the_lecture_is_fixed(
     dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
     assert list(dialog.cards) == ["intro", "recitation", "lecture", "outro"]
     assert dialog.cards["lecture"].title_label.text() == t("episode.lecture")
-    assert dialog.cards["lecture"].controls.count() == 0
+    lecture_controls = dialog.cards["lecture"].controls
+    # No control on the Lecture card: only room that keeps its picture level with the others.
+    assert all(
+        lecture_controls.itemAt(i).spacerItem() is not None for i in range(lecture_controls.count())
+    )
     assert dialog.cards["lecture"].focusPolicy() == Qt.FocusPolicy.NoFocus
     assert dialog.cards["intro"].controls.count() >= 1  # the kind box
     assert dialog.intro_kind.parent() is dialog.cards["intro"]
@@ -3512,3 +3516,24 @@ def test_the_retimed_count_is_drawn_in_the_secondary_colour_and_follows_the_them
         assert table.item(0, 0).icon().pixmap(16, 16).toImage() != icon_before
     finally:
         theme.apply_theme(qt_app, "light")
+
+
+def test_the_four_pictures_line_up_when_no_part_is_chosen(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui import theme
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+
+    theme.apply_theme(qt_app, "light")
+    _recitation_jobs(monkeypatch, tmp_path, episode_lecture.project.path)
+    _fake_probe(monkeypatch, {})
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    assert (dialog._kind("intro"), dialog._kind("outro")) == ("none", "none")
+    dialog.show()
+    _spin_briefly(qt_app)
+    ys = {
+        part: card.thumb_label.mapTo(dialog, QPoint(0, 0)).y()
+        for part, card in dialog.cards.items()
+    }
+    assert len(set(ys.values())) == 1, ys
+    dialog.reject()

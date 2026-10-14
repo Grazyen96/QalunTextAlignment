@@ -90,3 +90,24 @@ def test_a_nested_control_layout_is_added_once_and_its_widgets_are_watched(qt_ap
     card.select_requested.connect(lambda: asked.append(True))
     qt_app.sendEvent(choose, QFocusEvent(QEvent.Type.FocusIn, Qt.FocusReason.TabFocusReason))
     assert asked == [True]
+
+
+def test_the_card_holds_its_picture_centred_and_selection_moves_nothing(qt_app) -> None:
+    from PySide6.QtWidgets import QApplication
+
+    from qurantext.gui import theme
+
+    theme.apply_theme(qt_app, "light")
+    card = PartCard("Intro")
+    card.show()
+    QApplication.processEvents()
+    assert card.minimumSizeHint().width() == CARD_WIDTH
+    before = card.thumb_label.geometry()
+    # Centred: as much room on the left as on the right.
+    assert before.x() == CARD_WIDTH - before.right() - 1
+    card.set_selected(True)
+    card.layout().activate()
+    QApplication.processEvents()
+    assert card.minimumSizeHint().width() == CARD_WIDTH
+    assert card.thumb_label.geometry() == before
+    card.close()
