@@ -408,26 +408,34 @@ def test_focus_is_a_property_not_a_pseudo_class(tokens) -> None:
 @pytest.mark.parametrize("tokens", THEMES, ids=IDS)
 def test_cards_hover_and_focus_like_buttons(tokens) -> None:
     sheet = theme.stylesheet(tokens)
+    part_hover = 'QFrame[card="true"][part="true"][clickable="true"]:hover'
+    part_focus = 'QFrame[card="true"][part="true"][kbdfocus="true"]'
+    selected_part = 'QFrame[card="true"][part="true"][selected="true"]:hover'
     assert _rule(sheet, 'QFrame[card="true"][clickable="true"]:hover')["border-color"] == (
         tokens.accent
     )
-    assert _rule(sheet, 'QFrame[card="true"][part="true"]:hover')["border-color"] == tokens.border
+    assert _rule(sheet, part_hover)["border-color"] == tokens.border
     assert _rule(sheet, 'QFrame[card="true"][kbdfocus="true"]')["border"] == (
         f"2px solid {tokens.accent}"
     )
+    # A focused part card is the text colour, hovered or not, like the primary button.
+    assert _rule(sheet, f"{part_focus}, {part_focus}:hover")["border"] == (
+        f"2px solid {tokens.text}"
+    )
     # The selected Episode card's border wins over hover: its rule comes later.
-    for hover in (
-        'QFrame[card="true"][clickable="true"]:hover',
-        'QFrame[card="true"][part="true"]:hover',
-    ):
+    for hover in ('QFrame[card="true"][clickable="true"]:hover', part_hover):
         assert sheet.index('QFrame[card="true"][selected="true"]') > sheet.index(hover), hover
     # The hover rules outrank [selected] by one term, so selection repeats itself with :hover.
     assert _rule(sheet, 'QFrame[card="true"][selected="true"]:hover')["border-color"] == (
         tokens.accent
     )
-    assert sheet.index('QFrame[card="true"][selected="true"]:hover') > sheet.index(
-        'QFrame[card="true"][part="true"]:hover'
-    )
+    # The part hover and focus rules outrank that too, so a selected part card repeats
+    # itself with [part], hovered and focused, after them.
+    focused = 'QFrame[card="true"][part="true"][selected="true"][kbdfocus="true"]'
+    selected_rule = _rule(sheet, f"{selected_part}, {focused}, {focused}:hover")
+    assert selected_rule["border"] == f"2px solid {tokens.accent}"
+    assert sheet.index(selected_part) > sheet.index(part_hover)
+    assert sheet.index(selected_part) > sheet.index(part_focus)
 
 
 @pytest.mark.parametrize("tokens", THEMES, ids=IDS)
@@ -478,6 +486,86 @@ def test_a_selected_card_keeps_its_border_when_hovered(qt_app) -> None:
     assert _near(image.pixelColor(0, y), border, slack=8)
     assert not _near(image.pixelColor(0, y), accent)
     other.close()
+
+
+def _hover(qt_app, widget) -> None:
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QEnterEvent
+
+    centre = QPointF(widget.rect().center())
+    qt_app.sendEvent(widget, QEnterEvent(centre, centre, widget.mapToGlobal(centre.toPoint())))
+    qt_app.processEvents()
+
+
+def _left_edge(widget) -> QColor:
+    image = widget.grab().toImage()
+    return image.pixelColor(0, image.height() // 2)
+
+
+@pytest.mark.parametrize("mode", IDS)
+def test_a_keyboard_focused_part_card_is_marked_apart_from_the_selected_one(qt_app, mode) -> None:
+    """Focus on an Episode card is the text colour, hovered or not; selection stays the accent.
+
+    Tabbing onto a card does not select it, so its mark must not read as selection,
+    and the pointer over it must not take the mark away.
+    """
+    from PySide6.QtWidgets import QHBoxLayout, QWidget
+
+    from qurantext.gui.review.episode_cards import PartCard
+
+    tokens = theme.apply_theme(qt_app, mode)
+    text, accent = QColor(tokens.text), QColor(tokens.accent)
+    window = QWidget()
+    row = QHBoxLayout(window)
+    chosen, focused = PartCard("Intro"), PartCard("Outro")
+    row.addWidget(chosen)
+    row.addWidget(focused)
+    chosen.set_selected(True)
+    window.show()
+    window.activateWindow()  # an inactive window gets no FocusIn events
+    qt_app.processEvents()
+    focused.setFocus(Qt.FocusReason.TabFocusReason)
+    qt_app.processEvents()
+    assert focused.property("kbdfocus") is True and not focused.selected
+    assert _near(_left_edge(focused), text, slack=8), mode
+    assert _near(_left_edge(chosen), accent, slack=8), mode
+    _hover(qt_app, focused)
+    assert _near(_left_edge(focused), text, slack=8), (mode, "hovered")
+    # A selected card that has keyboard focus keeps the accent, hovered or not.
+    chosen.setFocus(Qt.FocusReason.TabFocusReason)
+    qt_app.processEvents()
+    assert chosen.property("kbdfocus") is True
+    assert _near(_left_edge(chosen), accent, slack=8), (mode, "selected and focused")
+    _hover(qt_app, chosen)
+    assert _near(_left_edge(chosen), accent, slack=8), (mode, "selected, focused, hovered")
+    window.close()
+
+
+def test_a_card_that_cannot_be_selected_does_not_hover(qt_app) -> None:
+    """The Lecture and Recitation cards do nothing on a click, so the pointer changes nothing."""
+    import re
+
+    from qurantext.gui.review.episode_cards import PartCard
+
+    tokens = theme.apply_theme(qt_app, "light")
+    card = PartCard("Lecture")
+    card.set_selectable(False)
+    assert card.property("clickable") is False
+    # Every card hover rule asks for a clickable, a selected or a focused card, and an
+    # unselectable card is none of these (it takes no focus).
+    asks = ('[clickable="true"]', '[selected="true"]', '[kbdfocus="true"]')
+    for selector in re.findall(r"^([^{]*:hover[^{]*)\{", theme.stylesheet(tokens), re.MULTILINE):
+        for part in selector.split(","):
+            if 'QFrame[card="true"]' in part and ":hover" in part:
+                assert any(ask in part for ask in asks), part
+    assert card.focusPolicy() == Qt.FocusPolicy.NoFocus
+    card.show()
+    qt_app.processEvents()
+    before = _left_edge(card)
+    _hover(qt_app, card)
+    assert _left_edge(card) == before
+    assert not _near(_left_edge(card), QColor(tokens.border), slack=8)
+    card.close()
 
 
 @pytest.mark.parametrize("tokens", THEMES, ids=IDS)

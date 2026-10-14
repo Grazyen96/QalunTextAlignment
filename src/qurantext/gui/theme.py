@@ -219,10 +219,12 @@ QFrame[card="true"] {{
 QFrame[card="true"][empty="true"] {{ border: none; background: {t.border}; border-radius: 2px; }}
 QFrame[card="true"][part="true"] {{ border: 2px solid transparent; }}
 QFrame[card="true"][clickable="true"]:hover {{ border-color: {t.accent}; }}
-QFrame[card="true"][part="true"]:hover {{ border-color: {t.border}; }}
+QFrame[card="true"][part="true"][clickable="true"]:hover {{ border-color: {t.border}; }}
+QFrame[card="true"][part="true"][kbdfocus="true"], QFrame[card="true"][part="true"][kbdfocus="true"]:hover {{ border: 2px solid {t.text}; }}
 QFrame[card="true"][kbdfocus="true"] {{ border: 2px solid {t.accent}; }}
 QFrame[card="true"][selected="true"] {{ border: 2px solid {t.accent}; }}
 QFrame[card="true"][selected="true"]:hover {{ border-color: {t.accent}; }}
+QFrame[card="true"][part="true"][selected="true"]:hover, QFrame[card="true"][part="true"][selected="true"][kbdfocus="true"], QFrame[card="true"][part="true"][selected="true"][kbdfocus="true"]:hover {{ border: 2px solid {t.accent}; }}
 QFrame#dropZone {{
     background: {t.panel};
     border: 2px dashed {t.border};

@@ -150,11 +150,14 @@ class PartCard(Card):
     # -- selection -------------------------------------------------------------------
 
     def set_selectable(self, selectable: bool) -> None:
+        """A card that cannot be selected takes no focus, no hand cursor and no hover border."""
         self._selectable = selectable
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus if selectable else Qt.FocusPolicy.NoFocus)
         self.setCursor(
             Qt.CursorShape.PointingHandCursor if selectable else Qt.CursorShape.ArrowCursor
         )
+        self.setProperty("clickable", selectable)
+        repolish(self)
 
     @property
     def selected(self) -> bool:
