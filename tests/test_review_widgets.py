@@ -1129,8 +1129,7 @@ def test_the_background_colour_of_a_gradient_or_pattern_keeps_a_second_colour(
     from qurantext.core.looks import NIGHT_GOLD
 
     panel = _panel(session, prefs)
-    combo = panel.background_combo
-    combo.setCurrentIndex(combo.findData(kind))
+    panel.background_tiles[kind].click()
     _answer_colours(monkeypatch, QColor(10, 60, 30))
     panel.background_colour_button.click()
     bg = session.look.background
@@ -1154,6 +1153,7 @@ def test_an_image_background_has_no_colour_to_pick(
     assert panel.background_colour_button.isVisible()
     panel.image_button.click()
     assert not panel.background_colour_button.isVisible()
+    assert panel.background_tiles["image"].isChecked()
 
 
 def test_low_contrast_shows_a_warning_that_names_the_part(
@@ -1200,13 +1200,12 @@ def test_a_built_in_background_keeps_the_colours_and_clears_dim(qt_app, session,
     panel = _panel(session, prefs)
     panel.palette_buttons["ocean"].click()
     panel.dim_slider.setValue(40)
-    combo = panel.background_combo
-    combo.setCurrentIndex(combo.findData("solid"))
+    panel.background_tiles["solid"].click()
     bg = session.look.background
     frame_bg = PRESETS["ocean"].frame_bg
     assert (bg.kind, bg.colour, bg.colour2, bg.dim) == ("solid", frame_bg, frame_bg, 0.0)
     assert session.look.frame_bg == bg.colour
-    combo.setCurrentIndex(combo.findData("pattern_stars"))
+    panel.background_tiles["pattern_stars"].click()
     bg = session.look.background
     assert bg.kind == "pattern_stars" and bg.colour == frame_bg and bg.colour2 != bg.colour
 
@@ -1225,21 +1224,21 @@ def test_choosing_an_image_copies_it_beside_the_project(
     bg = session.look.background
     assert bg.kind == "image" and bg.dim == 0.35
     assert bg.image.parent.name.endswith(".look") and bg.image.is_file()
-    assert panel.background_combo.currentData() == "image"
+    assert panel.background_tiles["image"].isChecked()
     assert panel.dim_slider.value() == 35
 
 
-def test_choosing_image_in_the_list_runs_the_same_flow(
+def test_cancelling_the_image_tile_leaves_the_kind(
     qt_app, session, prefs, tmp_path, monkeypatch
 ) -> None:
     from PySide6.QtWidgets import QFileDialog
 
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: ("", ""))
     panel = _panel(session, prefs)
-    combo = panel.background_combo
-    combo.setCurrentIndex(combo.findData("image"))
+    panel.background_tiles["image"].click()
     assert not session.can_undo, "a cancelled choice is no edit"
-    assert combo.currentData() == "solid", "the list goes back to what the look has"
+    assert panel.background_tiles["solid"].isChecked(), "the tiles go back to what the look has"
+    assert not panel.background_tiles["image"].isChecked()
 
 
 def test_an_image_that_cannot_be_used_says_so(
@@ -1283,6 +1282,8 @@ def test_a_project_without_a_file_cannot_take_an_image(qt_app, prefs) -> None:
     panel = _panel(ReviewSession(Project(audio=Path("a.mp3"))), prefs)
     assert not panel.image_button.isEnabled()
     assert panel.image_button.toolTip() == "This project has no file to write back to."
+    assert not panel.background_tiles["image"].isEnabled()
+    assert panel.background_tiles["image"].toolTip() == panel.image_button.toolTip()
 
 
 def test_use_for_new_videos_saves_the_default(qt_app, session, prefs) -> None:
@@ -1406,13 +1407,93 @@ def test_readouts_and_hex_read_left_to_right_in_arabic(qt_app, session, prefs) -
     assert row.property("rtl") is True
 
 
-# -- the panel's sliders and list in a scroll area: wheel and lost grabs -------------
+def test_there_is_a_tile_per_background_kind_and_the_looks_kind_is_checked(
+    qt_app, session, prefs
+) -> None:
+    from PySide6.QtCore import QSize
+
+    from qurantext.core.looks import BACKGROUND_KINDS
+    from qurantext.gui.i18n import t
+
+    panel = _panel(session, prefs)
+    assert tuple(panel.background_tiles) == BACKGROUND_KINDS
+    assert [k for k, b in panel.background_tiles.items() if b.isChecked()] == ["solid"]
+    for kind, tile in panel.background_tiles.items():
+        assert tile.iconSize() == QSize(56, 36) and tile.property("swatch") is True, kind
+        assert tile.text() == t(f"look.bg.{kind}")
+    panel.background_tiles["gradient"].click()
+    assert [k for k, b in panel.background_tiles.items() if b.isChecked()] == ["gradient"]
+    assert session.look.background.kind == "gradient"
+
+
+def test_a_tile_is_painted_in_the_looks_colours(qt_app, session, prefs) -> None:
+    from PySide6.QtCore import QSize
+    from PySide6.QtGui import QColor, QIcon
+
+    from qurantext.core.looks import PRESETS
+
+    panel = _panel(session, prefs)
+    panel.palette_buttons["ocean"].click()
+    image = (
+        panel.background_tiles["solid"]
+        .icon()
+        .pixmap(QSize(56, 36), QIcon.Mode.Normal, QIcon.State.Off)
+        .toImage()
+    )
+    assert image.pixelColor(28, 18) == QColor(*PRESETS["ocean"].frame_bg[:3])
+
+
+def test_clicking_the_current_tile_again_changes_nothing(qt_app, session, prefs) -> None:
+    panel = _panel(session, prefs)
+    panel.background_tiles["solid"].click()
+    assert not session.can_undo and panel.background_tiles["solid"].isChecked()
+
+
+def test_a_gone_image_gives_the_image_tile_its_icon(
+    qt_app, session, prefs, tmp_path, monkeypatch
+) -> None:
+    from PIL import Image
+    from PySide6.QtWidgets import QFileDialog
+
+    src = tmp_path / "photo.png"
+    Image.new("RGB", (20, 20), (200, 10, 10)).save(src)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(src), ""))
+    panel = _panel(session, prefs)
+    panel.image_button.click()
+    assert panel.background_tiles["image"].isChecked()
+    session.look.background.image.unlink()
+    panel.dim_slider.setValue(10)  # a change: the tiles rebuild with the image gone
+    # No exception above is the point: the tile fell back to its icon and stays chosen.
+    assert panel.background_tiles["image"].isChecked()
+    assert session.look.background.kind == "image"
+
+
+def test_the_tiles_do_not_widen_the_panel(qt_app, session, prefs) -> None:
+    panel = _panel(session, prefs)
+    assert panel.minimumSizeHint().width() <= 286
+
+
+def test_the_background_tiles_keep_their_order_in_arabic(qt_app, session, prefs) -> None:
+    from qurantext.gui import i18n
+
+    i18n.set_language("ar")
+    panel = _panel(session, prefs)
+    panel.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+    panel.resize(294, 900)
+    panel.show()
+    _spin_briefly(qt_app)
+    xs = [panel.background_tiles[k].x() for k in ("solid", "gradient", "pattern_stars")]
+    assert xs == sorted(xs)
+    panel.close()
+
+
+# -- the panel's sliders in a scroll area: wheel and lost grabs -------------------
 
 
 def _wheel(widget, ticks: int, *, up: bool) -> list[bool]:
     """*ticks* notches of the mouse wheel over *widget*; whether each was taken.
 
-    Up raises a slider; down moves a list to its next entry. A real wheel event
+    Up raises a slider, down lowers it. A real wheel event
     that a widget ignores goes on to its parents, the scroll area among them;
     Qt does not pass on one sent by hand, so the tests check it was ignored.
     """
@@ -1452,9 +1533,7 @@ def _handle_centre(slider) -> QPoint:
     )
 
 
-def test_the_wheel_scrolls_past_the_sliders_and_the_list(
-    qt_app, session, prefs, monkeypatch
-) -> None:
+def test_the_wheel_scrolls_past_the_sliders(qt_app, session, prefs, monkeypatch) -> None:
     """Scrolling the panel must not edit each control passing under the pointer."""
     from PySide6.QtWidgets import QFileDialog, QScrollArea
 
@@ -1474,11 +1553,9 @@ def test_the_wheel_scrolls_past_the_sliders_and_the_list(
     taken = []
     for control in (panel.opacity_slider, panel.dim_slider, panel.blur_slider):
         taken += _wheel(control, 3, up=True)
-    taken += _wheel(panel.background_combo, 6, up=False)  # far enough to reach "My image"
 
     assert not any(taken), "every notch is left to the scroll area"
     assert session.look == NIGHT_GOLD and not session.can_undo
-    assert panel.background_combo.currentData() == "solid"
     assert not asked, "no file dialog nobody asked for"
     scroll.close()
 
@@ -1492,10 +1569,6 @@ def test_a_control_with_focus_still_takes_the_wheel(qt_app, session, prefs) -> N
     assert panel.dim_slider.hasFocus()
     assert _wheel(panel.dim_slider, 1, up=True) == [True]
     assert session.look.background.dim > 0
-    panel.background_combo.setFocus(Qt.FocusReason.MouseFocusReason)
-    qt_app.processEvents()
-    assert _wheel(panel.background_combo, 1, up=False) == [True]
-    assert session.look.background.kind == "gradient"
     panel.close()
 
 

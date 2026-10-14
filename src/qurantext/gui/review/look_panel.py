@@ -13,9 +13,9 @@ on this background (its average colour, from the same cached layer the
 preview draws on), and the same layer says when a chosen image has gone
 missing or cannot be read.
 
-The panel sits in a scroll area, so its sliders and its background list take
-the mouse wheel only once they have focus: scrolling past them moves the
-panel, never the look.
+The panel sits in a scroll area, so its sliders take the mouse wheel only
+once they have focus, and the background tiles never take it: scrolling past
+them moves the panel, never the look.
 """
 
 from __future__ import annotations
@@ -30,17 +30,16 @@ from PySide6.QtGui import (
     QFocusEvent,
     QHideEvent,
     QIcon,
+    QImage,
     QMouseEvent,
     QPainter,
     QPalette,
     QPen,
     QPixmap,
-    QStandardItemModel,
     QWheelEvent,
 )
 from PySide6.QtWidgets import (
     QColorDialog,
-    QComboBox,
     QFileDialog,
     QGridLayout,
     QHBoxLayout,
@@ -53,6 +52,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from qurantext.core.backgrounds import tile_image
 from qurantext.core.frame_renderer import frame_base_layer
 from qurantext.core.looks import (
     BACKGROUND_KINDS,
@@ -70,7 +70,7 @@ from qurantext.core.looks import (
 from qurantext.gui import theme
 from qurantext.gui.colors import warning_color
 from qurantext.gui.i18n import is_rtl, plain_title, t
-from qurantext.gui.icons import set_icon
+from qurantext.gui.icons import icon, set_icon
 from qurantext.gui.prefs import Prefs
 from qurantext.gui.review.session import ReviewSession
 from qurantext.gui.widgets import SectionHeader
@@ -219,6 +219,44 @@ def _shade(colour: RGBA) -> RGBA:
     return (*(max(0, min(255, c + step)) for c in (r, g, b)), a)  # type: ignore[return-value]
 
 
+def _second_colour(look: Look, colour: RGBA) -> RGBA:
+    """The preset's own second colour when it has one, else a shade of *colour*."""
+    preset = PRESETS.get(look.base_preset, NIGHT_GOLD).background
+    if preset.colour == colour and preset.colour2 != colour:
+        return preset.colour2
+    return _shade(colour)
+
+
+def _background_for_kind(look: Look, kind: str) -> Background:
+    """The background choosing *kind* gives *look*: a solid one is the frame's colour,
+    the rest keep the colours and derive a second when there is none; dim and blur start over."""
+    if kind == "solid":
+        return Background("solid", look.frame_bg, look.frame_bg)
+    colour = look.background.colour
+    colour2 = look.background.colour2
+    if colour2 == colour:
+        colour2 = _second_colour(look, colour)
+    return Background(kind, colour, colour2)
+
+
+def _pil_pixmap(image) -> QPixmap:  # noqa: ANN001 — a PIL image
+    rgba = image.convert("RGBA")
+    width, height = rgba.size
+    qimage = QImage(rgba.tobytes(), width, height, 4 * width, QImage.Format.Format_RGBA8888)
+    return QPixmap.fromImage(qimage.copy())
+
+
+def _icon_tile(colour: RGBA, name: str) -> QPixmap:
+    """*name*'s icon centred on *colour*: the image tile while the look has no image."""
+    pixmap = QPixmap(_SWATCH)
+    pixmap.fill(_qcolor(colour))
+    glyph = icon(name, "secondary").pixmap(QSize(20, 20))
+    painter = QPainter(pixmap)
+    painter.drawPixmap((_SWATCH.width() - 20) // 2, (_SWATCH.height() - 20) // 2, glyph)
+    painter.end()
+    return pixmap
+
+
 def _alpha_percent(alpha: int) -> int:
     return round(alpha * 100 / 255)
 
@@ -310,24 +348,6 @@ class _GestureSlider(QSlider):
         if event.type() == QEvent.Type.EnabledChange and not self.isEnabled():
             self.let_go()
         super().changeEvent(event)
-
-
-class _WheelSafeCombo(QComboBox):
-    """A list that takes the wheel only with focus: scrolling past it must not change it.
-
-    Over the background list a stray wheel would swap the background (and on
-    "My image" open a file dialog nobody asked for).
-    """
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-
-    def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802 - Qt override
-        if not self.hasFocus():
-            event.ignore()  # on to the scroll area
-            return
-        super().wheelEvent(event)
 
 
 class LookPanel(QWidget):
@@ -447,11 +467,30 @@ class LookPanel(QWidget):
 
         background_label = QLabel(t("look.background"))
         column.addWidget(background_label)
-        self.background_combo = _WheelSafeCombo()
-        for kind in BACKGROUND_KINDS:
-            self.background_combo.addItem(_background_name(kind), kind)
-        background_label.setBuddy(self.background_combo)
-        column.addWidget(self.background_combo)
+        # A row of samples like the palette's: one order in both languages.
+        tiles = QWidget()
+        tiles.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        tile_grid = QGridLayout(tiles)
+        tile_grid.setContentsMargins(0, 0, 0, 0)
+        tile_grid.setSpacing(2)
+        self.background_tiles: dict[str, QToolButton] = {}
+        for index, kind in enumerate(BACKGROUND_KINDS):
+            tile = QToolButton()
+            tile.setCheckable(True)
+            tile.setAutoRaise(True)
+            tile.setProperty("swatch", True)
+            tile.setIconSize(_SWATCH)
+            tile.setText(_background_name(kind))
+            tile.setToolTip(_background_name(kind))
+            tile.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+            tile.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            self.background_tiles[kind] = tile
+            tile_grid.addWidget(tile, index // _SWATCH_COLUMNS, index % _SWATCH_COLUMNS)
+        for column_index in range(_SWATCH_COLUMNS):
+            tile_grid.setColumnStretch(column_index, 1)
+        column.addWidget(tiles)
+        #: What the tiles were last painted for; they are rebuilt when it changes.
+        self._tiles_key: tuple | None = None
 
         self.image_button = QPushButton(t("look.choose_image"))
         self.image_button.setProperty("quiet", True)
@@ -461,11 +500,8 @@ class LookPanel(QWidget):
             # The image is copied beside the project file; without one there is nowhere.
             self.image_button.setEnabled(False)
             self.image_button.setToolTip(t("session.no_file"))
-            model = self.background_combo.model()
-            if isinstance(model, QStandardItemModel):
-                item = model.item(self.background_combo.findData("image"))
-                item.setEnabled(False)
-                item.setToolTip(t("session.no_file"))
+            self.background_tiles["image"].setEnabled(False)
+            self.background_tiles["image"].setToolTip(t("session.no_file"))
 
         self.dim_label = QLabel(t("look.dim"))
         self.dim_slider = _GestureSlider()
@@ -528,7 +564,8 @@ class LookPanel(QWidget):
             slider.sliderPressed.connect(self._session.begin_gesture)
             slider.sliderReleased.connect(self._end_gesture)
             slider.valueChanged.connect(on_value)
-        self.background_combo.currentIndexChanged.connect(self._on_background_kind)
+        for kind, tile in self.background_tiles.items():
+            tile.clicked.connect(lambda _checked=False, k=kind: self._choose_background(k))
         self.image_button.clicked.connect(self._choose_image)
         self.default_button.clicked.connect(self._use_for_new_videos)
         self.reset_button.clicked.connect(lambda: self._apply(NIGHT_GOLD))
@@ -577,8 +614,38 @@ class LookPanel(QWidget):
         self.opacity_readout.setText(t("look.percent", value=self.opacity_slider.value()))
         self.dim_readout.setText(t("look.percent", value=self.dim_slider.value()))
         self.blur_readout.setText(str(self.blur_slider.value()))
-        with QSignalBlocker(self.background_combo):
-            self.background_combo.setCurrentIndex(self.background_combo.findData(bg.kind))
+        self._paint_tiles(look)
+        for kind, tile in self.background_tiles.items():
+            with QSignalBlocker(tile):
+                tile.setChecked(kind == bg.kind)
+
+    def _paint_tiles(self, look: Look) -> None:
+        """Each kind in *look*'s colours; only when those colours (or the preset a second
+        colour comes from) or the image changed."""
+        bg = look.background
+        image = bg.image if bg.kind == "image" else None
+        try:
+            stamp = image.stat().st_mtime_ns if image is not None else None
+        except OSError:
+            stamp = None
+        key = (look.base_preset, look.frame_bg, bg.colour, bg.colour2, image, stamp)
+        if key == self._tiles_key:
+            return
+        self._tiles_key = key
+        for kind, tile in self.background_tiles.items():
+            if kind == "image":
+                background = bg if bg.kind == "image" else None
+            else:
+                background = _background_for_kind(look, kind)
+            pixmap = None
+            if background is not None:
+                try:
+                    pixmap = _pil_pixmap(tile_image(background, _SWATCH.width(), _SWATCH.height()))
+                except (ValueError, OSError):
+                    pixmap = None  # a missing or unreadable image: the icon tile below
+            if pixmap is None:
+                pixmap = _icon_tile(look.frame_bg, "image")
+            tile.setIcon(_two_state_icon(pixmap))
 
     @staticmethod
     def _set_slider(slider: QSlider, value: int) -> None:
@@ -615,6 +682,8 @@ class LookPanel(QWidget):
             self._colour_contrast_label()
             for name, button in self.palette_buttons.items():
                 button.setIcon(_swatch_icon(PRESETS[name]))
+            self._tiles_key = None
+            self._paint_tiles(self._session.look)
 
     # -- changes ----------------------------------------------------------------
 
@@ -667,7 +736,7 @@ class LookPanel(QWidget):
                 return replace(
                     start, frame_bg=rgba, background=replace(bg, colour=rgba, colour2=rgba)
                 )
-            colour2 = self._second_colour(start, rgba)
+            colour2 = _second_colour(start, rgba)
             return replace(start, background=replace(bg, colour=rgba, colour2=colour2))
 
         self._ask_colour(
@@ -732,31 +801,14 @@ class LookPanel(QWidget):
         look = self._session.look
         self._apply(replace(look, background=replace(look.background, blur=float(value))))
 
-    def _on_background_kind(self, index: int) -> None:
-        kind = self.background_combo.itemData(index)
+    def _choose_background(self, kind: str) -> None:
         if kind == "image":
             if not self._choose_image():
                 self._shown = None
-                self.refresh()  # the list goes back to the background the look has
+                self.refresh()  # the tiles go back to the background the look has
             return
         look = self._session.look
-        if kind == "solid":
-            colour = colour2 = look.frame_bg
-        else:
-            colour = look.background.colour
-            colour2 = look.background.colour2
-            if colour2 == colour:
-                colour2 = self._second_colour(look, colour)
-        background = Background(kind, colour, colour2)
-        self._apply(replace(look, background=background))
-
-    @staticmethod
-    def _second_colour(look: Look, colour: RGBA) -> RGBA:
-        """The preset's own second colour when it has one, else a shade of *colour*."""
-        preset = PRESETS.get(look.base_preset, NIGHT_GOLD).background
-        if preset.colour == colour and preset.colour2 != colour:
-            return preset.colour2
-        return _shade(colour)
+        self._apply(replace(look, background=_background_for_kind(look, kind)))
 
     def _choose_image(self) -> bool:
         """Ask for an image, copy it beside the project, and show it; whether it did."""
