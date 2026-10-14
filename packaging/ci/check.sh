@@ -6,7 +6,7 @@
 # at all. Leaving the real PATH in place is how a build passes here and then
 # fails on a real machine.
 #
-# --release makes playback, Qt's Arabic translation and an Arabic interface font
+# --release makes playback, Qt's Arabic translation and Qt's font list
 # blocking: a developer's checkout is only told about them, a release must have
 # them. It also makes the Replicate client's import blocking whatever engine is
 # configured, because the window offers WhisperX online. The engine here is set

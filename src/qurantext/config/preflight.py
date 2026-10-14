@@ -13,12 +13,14 @@ deep inside a job:
   there fails at the encode rather than at startup.
 * **The store and the font.** Both resolve differently from a checkout than from
   an installed copy.
-* **Playback, Qt's Arabic translation and an Arabic interface font.** Each is a
-  separate file a frozen build can leave behind while every module still imports,
-  so each is exercised here rather than imported. A developer's checkout is only
-  told about them; ``run_checks(release=True)`` (``qalun --doctor --release``, the
+* **Playback, Qt's Arabic translation and Qt's font list.** Each is a separate
+  file a frozen build can leave behind while every module still imports, so each
+  is exercised here rather than imported. A developer's checkout is only told
+  about them; ``run_checks(release=True)`` (``qalun --doctor --release``, the
   build gate) fails on them, because a release without them is broken in Arabic
-  or cannot play the recording under review.
+  or cannot play the recording under review. A machine with no Arabic font is not
+  one of them: the window draws Arabic letters in the bundled Noto Sans Arabic,
+  whose two files the "Interface font" check requires.
 
 Each check answers three questions: is it usable, what exactly is wrong, and
 what should the person do. The last one is the point — "libraqm missing" is not
@@ -1047,9 +1049,10 @@ def arabic_ui_families() -> list[str]:
     """The font families on this machine that can draw Arabic interface text.
 
     Qt's list of families supporting the Arabic writing system, without the
-    bundled Quran font: it has Arabic letters but no Latin ones, so it can stand
-    in for Arabic but never be the interface font, and it is in the list whenever
-    the window has registered it (or someone installed it). Uses the running Qt
+    bundled Quran font, which has Arabic letters but no Latin ones and is in the
+    list whenever something has registered it (the video's drawing, or someone who
+    installed it). Once the window has registered its own fallback, the bundled
+    Noto Sans Arabic, that family is in the list too. Uses the running Qt
     application, or makes one for the doctor (see ``_qt_application``).
 
     Raises ``CannotMeasureFonts`` when this process has no window application and
@@ -1073,11 +1076,12 @@ def arabic_ui_families() -> list[str]:
 
 
 def _arabic_ui_font(release: bool) -> CheckResult:
-    """Can the Arabic window draw its words in a font meant for an interface?
+    """Which font draws the Arabic window's words: an installed one, or the bundled Noto?
 
-    A machine with no Arabic font shows the Arabic window as empty boxes; Qalun
-    then falls back to its bundled Quran font, which is legible but not meant for
-    interface text, so a release is checked on a machine that has a real one.
+    A machine with an Arabic font keeps it; one without draws Arabic letters in
+    the bundled Noto Sans Arabic, an interface face, so having none is not a
+    fault. The "Interface font" check is what fails when Noto's files are missing.
+    Only a Qt that cannot list fonts at all fails a release here.
     """
     name = "Arabic interface font"
     try:
@@ -1098,11 +1102,8 @@ def _arabic_ui_font(release: bool) -> CheckResult:
         return CheckResult(name, Status.OK, f"{shown}{more}")
     return CheckResult(
         name,
-        _strict(release),
-        "no installed font can draw Arabic interface text",
-        "Install an Arabic font (for example Noto Sans Arabic); Qalun falls back to its "
-        "bundled Quran font for Arabic letters, which is legible but not meant for "
-        "interface text.",
+        Status.OK,
+        "none installed; Arabic letters are drawn in the bundled Noto Sans Arabic",
     )
 
 

@@ -297,7 +297,7 @@ class TestTranscriptionCheck:
 
 
 class TestWhatThePackagedAppMustDo:
-    """Playback, Qt's Arabic translation and an Arabic interface font.
+    """Playback, Qt's Arabic translation and Qt's font list for the Arabic interface.
 
     Each is a separate file a frozen build can leave behind while every module
     still imports, so each is exercised rather than imported. A developer's
@@ -388,12 +388,14 @@ class TestWhatThePackagedAppMustDo:
         assert result.status == Status.FAIL
         assert "English" in result.detail
 
-    def test_no_arabic_font_fails_a_release(self, monkeypatch) -> None:
+    def test_no_arabic_font_names_the_bundled_fallback(self, monkeypatch) -> None:
+        """The window draws Arabic in the bundled Noto then: nothing to fix, nothing to block."""
         monkeypatch.setattr(preflight, "arabic_ui_families", lambda: [])
-        assert preflight._arabic_ui_font(release=False).status == Status.WARN
-        result = preflight._arabic_ui_font(release=True)
-        assert result.status == Status.FAIL
-        assert "Noto Sans Arabic" in result.remedy
+        for release in (False, True):
+            result = preflight._arabic_ui_font(release=release)
+            assert result.status == Status.OK, release
+            assert "bundled Noto Sans Arabic" in result.detail
+            assert "Quran" not in result.detail and not result.remedy
 
     def test_an_arabic_font_is_named(self, monkeypatch) -> None:
         monkeypatch.setattr(preflight, "arabic_ui_families", lambda: ["A", "B", "C"])
