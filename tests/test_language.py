@@ -167,6 +167,19 @@ def test_without_a_system_arabic_font_the_bundled_one_is_the_fallback(
     assert QFontDatabase.families().count(family) == 1
 
 
+def test_a_registered_fallback_is_returned_though_it_now_counts_as_installed(
+    qt_app, monkeypatch, _forget_the_fallback
+) -> None:
+    """Once registered, Noto has the Arabic writing system: the next call must not take it for the system's."""
+    from qurantext.gui import language
+
+    monkeypatch.setattr(language, "arabic_ui_families", lambda: [])
+    family = language.ensure_arabic_font(QApplication.instance())
+    assert family == "Noto Sans Arabic"
+    monkeypatch.setattr(language, "arabic_ui_families", lambda: ["Noto Sans Arabic"])
+    assert language.ensure_arabic_font(QApplication.instance()) == family
+
+
 def test_one_missing_noto_file_still_registers_the_other(
     qt_app, monkeypatch, tmp_path, _forget_the_fallback
 ) -> None:

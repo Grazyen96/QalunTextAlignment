@@ -69,12 +69,14 @@ def ensure_arabic_font(app: QApplication) -> str | None:
     registered it), or None when nothing was registered.
     """
     global _fallback
-    try:
-        if arabic_ui_families():
-            return None
-    except CannotMeasureFonts:
-        return None
+    # Once registered, Noto has the Arabic writing system and is not a private
+    # family, so ``arabic_ui_families`` counts it as installed: ask only before.
     if _fallback is None:
+        try:
+            if arabic_ui_families():
+                return None
+        except CannotMeasureFonts:
+            return None
         ids = [QFontDatabase.addApplicationFont(str(path)) for path in NOTO_FONT_PATHS]
         families = [
             family
