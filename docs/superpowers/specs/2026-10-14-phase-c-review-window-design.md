@@ -51,8 +51,10 @@ table, hover-only controls.
 Under the toolbar and the banner, a horizontal `QSplitter` with two
 columns.
 
-- **Left column**, width = the preview's width + 2 × 12 px, not
-  collapsible: the preview (`FrameView`) on top, under it a row with the
+- **Left column**, minimum width = the portrait preview's width + 2 × 12 px
+  (294 px) for every preset, opened at the preset's preview width + 24 px when
+  the window is wide enough, resizable by the splitter, not collapsible
+  (fix wave 2026-10-14: a landscape preset pinned at 504 px did not fit 1280 px): the preview (`FrameView`) on top, under it a row with the
   fit / 100% toggle (two small checkable tool buttons, `zoom-out` /
   `zoom-in` icons, tooltips "Fit" / "Actual size"), then the Look panel in
   its scroll area taking the rest of the height.
@@ -130,8 +132,8 @@ start/end · ? all shortcuts".
   notices; coverage and look/surah/episode notices come back on the next
   check, as they are state, not news.
 - **Render outcomes**: success → the banner (no dialog); the window's
-  `_announce_render` becomes the banner call, and `render_finished_text`
-  stays for the CLI-side messages; failed / cancelled / episode-failed →
+  `_announce_render` becomes the banner call, and `render_finished_text`,
+  which nothing else used, is removed (fix wave 2026-10-14); failed / cancelled / episode-failed →
   dialogs as today (`_say_render`).
 
 ### 2.4 Shortcut sheet
