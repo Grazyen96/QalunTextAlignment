@@ -304,6 +304,9 @@ by a native speaker.
 
 The window follows the desktop's light or dark scheme until you choose one in
 Settings → General; the sun/moon button in the header switches between the two.
+More options on the home form and Customise in the review's Look panel open and
+close in a short motion; turn off **Animate panels** in Settings → General and
+they open at once.
 
 **Where settings live.** The window's settings (the language, the theme, the
 last choices on the form, hidden jobs and job output folders) are kept where Qt keeps
@@ -893,5 +896,7 @@ The licence does not cover the bundled Quran font (`qaloon.10.ttf`,
 third-party works, their provenance and terms to be confirmed by the owner;
 see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Nor does it cover the
 bundled Amiri font (`Amiri-Regular.ttf`, `Amiri-Bold.ttf`), which the generated
-intro and outro write their titles in: it is under the SIL Open Font License
-1.1, whose text ships beside it.
+intro and outro write their titles in, or the bundled Noto Sans Arabic
+(`NotoSansArabic-Regular.ttf`, `NotoSansArabic-Bold.ttf`), the window's own
+fallback for Arabic letters: both are under the SIL Open Font License 1.1, whose
+text ships beside each.

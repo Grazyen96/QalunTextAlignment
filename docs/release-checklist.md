@@ -167,8 +167,9 @@ this is the only place anyone hears each platform's build recognise speech.
 - [ ] Window title bars show no boxes.
 - [ ] Qt's own buttons, in the file dialog and in Save/Discard, are in Arabic.
 - [ ] On a machine without an Arabic font (a fresh Linux VM), the window still draws
-      Arabic letters, using the bundled Quran font. Check that the result is readable.
-      This has not been seen on a real machine yet.
+      Arabic letters, using the bundled Noto Sans Arabic (the interface no longer falls
+      back to the Quran font). Check that the result is readable. This has not been seen
+      on a real machine yet.
 - [ ] On macOS, after choosing a language, check that the settings file is at
       `~/Library/Preferences/com.qalun.Qalun.plist`, as `README.md` says.
 - [ ] Run `QT_QPA_PLATFORM=offscreen venv/bin/python tools/screenshots.py output/shots` and
@@ -177,6 +178,13 @@ this is the only place anyone hears each platform's build recognise speech.
       design; the review's nudge buttons carry chevrons and snap a crosshair), nothing
       unreadable or cut off, including the Settings tabs and the empty first launch, and
       the review window's shortcut sheet and full-size preview.
+- [ ] In `settings-general-ar-dark.png` and `review-recitation-en-dark.png` from the same
+      run, every checkbox, radio button and field has an outline that shows on the dark
+      surface, drawn on its own box and not beside it.
+- [ ] The focus ring on buttons, palette swatches and cards now paints for keyboard
+      focus only: on a real desktop, Tab and Shift+Tab through the home form, the Settings
+      dialog and the review window show the ring on each in turn, and a click on a button
+      shows none. A field keeps Fusion's own highlighted frame however it got focus.
 
 ## Words
 
@@ -327,6 +335,9 @@ this is the only place anyone hears each platform's build recognise speech.
     `home.open_log_folder.tip` («حيث يدوّن قالون ما حدث من أخطاء») and
     `home.open_log_failed` («تعذّر فتح مجلد السجلات»). Is «السجلات» what a person would
     look for, or «سجل الأخطاء»?
+  - `settings.animate_panels` («تحريك اللوحات»), the Settings → General checkbox that
+    turns off the opening and closing motion of More options on the home form and of
+    Customise in the review's Look panel: is «اللوحات» what a person calls these parts?
 - [ ] Keep every direction mark: the U+2066…U+2069 isolates and the U+200F marks,
       written as `\u2066`-style escapes in the source. The tests fail if a key goes
       missing.
