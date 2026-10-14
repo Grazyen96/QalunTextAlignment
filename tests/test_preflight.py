@@ -935,3 +935,19 @@ def test_the_doctor_checks_what_generated_parts_need(monkeypatch, tmp_path) -> N
     broken = preflight._title_parts()
     assert broken.status == Status.FAIL and broken.remedy
     assert "Amiri-Bold.ttf" in broken.detail and "segno" in broken.detail
+
+
+def test_the_interface_font_check_names_the_missing_file(monkeypatch, tmp_path) -> None:
+    from qurantext.config import preflight
+    from qurantext.config.paths import NOTO_FONT_PATHS
+
+    ok = preflight._interface_font()
+    assert ok.status == Status.OK and "NotoSansArabic-Regular.ttf" in ok.detail
+    monkeypatch.setattr(preflight, "NOTO_FONT_PATHS", (NOTO_FONT_PATHS[0], tmp_path / "x-Bold.ttf"))
+    bad = preflight._interface_font()
+    assert bad.status == Status.FAIL and "x-Bold.ttf" in bad.detail and bad.remedy
+
+
+def test_the_interface_font_is_checked_beside_the_bundled_font() -> None:
+    names = [r.name for r in run_checks()]
+    assert names.index("Interface font") == names.index("Bundled font") + 1

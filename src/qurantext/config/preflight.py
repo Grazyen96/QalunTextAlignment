@@ -43,6 +43,7 @@ from qurantext.config.fribidi import fribidi_names
 from qurantext.config.paths import (
     DEFAULT_FONT_PATH,
     DEFAULT_QURAN_PATH,
+    NOTO_FONT_PATHS,
     OUTPUT_DIR,
     QURAN_DB_PATH,
     TEXT_FONT_BOLD_PATH,
@@ -324,6 +325,21 @@ def _arabic_shaping() -> CheckResult:
         if features.check(name)
     ]
     return CheckResult("Arabic shaping", Status.OK, ", ".join(parts))
+
+
+def _interface_font() -> CheckResult:
+    """The Arabic fallback for the window's own text: both Noto Sans Arabic files."""
+    missing = [path.name for path in NOTO_FONT_PATHS if not path.is_file()]
+    if not missing:
+        detail = ", ".join(f"{p.name} ({p.stat().st_size // 1024} KB)" for p in NOTO_FONT_PATHS)
+        return CheckResult("Interface font", Status.OK, detail)
+    return CheckResult(
+        "Interface font",
+        Status.FAIL,
+        f"missing {', '.join(missing)} under {NOTO_FONT_PATHS[0].parent}",
+        "Noto Sans Arabic ships inside the package (tools/fetch_fonts.py puts it there); "
+        "a build missing it shows Arabic as boxes on a machine with no Arabic font.",
+    )
 
 
 def _bundled_font() -> CheckResult:
@@ -1161,6 +1177,7 @@ def run_checks(*, release: bool = False) -> list[CheckResult]:
         _episode_join(release),
         *_transcription(release),
         _bundled_font(),
+        _interface_font(),
         _title_parts(),
         _interface_icons(),
         _bundled_quran(),

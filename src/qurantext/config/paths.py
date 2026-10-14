@@ -37,6 +37,7 @@ __all__ = [
     "DEFAULT_FONT_PATH",
     "DEFAULT_QURAN_PATH",
     "INPUT_DIR",
+    "NOTO_FONT_PATHS",
     "LECTURES_INPUT_DIR",
     "LECTURE_MATCHING_OUTPUT_DIR",
     "OUTPUT_DIR",
@@ -197,6 +198,11 @@ RANGE_MATCHING_OUTPUT_DIR = OUTPUT_DIR / "range_matching"
 
 #: The Qalun font that ships with the package.
 DEFAULT_FONT_PATH = bundled_asset("fonts/qaloon.10.ttf")
+#: The interface's Arabic fallback: Noto Sans Arabic, Regular then Bold (SIL OFL 1.1).
+NOTO_FONT_PATHS = (
+    bundled_asset("fonts/NotoSansArabic-Regular.ttf"),
+    bundled_asset("fonts/NotoSansArabic-Bold.ttf"),
+)
 #: The text font for everything that is not Quran text: the generated intro's and
 #: outro's titles. Amiri (SIL OFL 1.1) draws Latin and Arabic letters alike, which
 #: the Quran font does not. See assets/README.md for the release and its hashes.

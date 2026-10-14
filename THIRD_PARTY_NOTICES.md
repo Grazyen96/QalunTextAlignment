@@ -77,6 +77,26 @@ The licence text is beside them, at `qurantext/assets/fonts/Amiri-OFL.txt`
 the source at `packaging/licenses/Amiri-OFL.txt`. The OFL is not the GPL; it lets
 the font be bundled with any software, and it stays under the OFL.
 
+## Noto Sans Arabic font
+
+The window's own text falls back to **Noto Sans Arabic** for Arabic letters on a
+machine with no Arabic font of its own: release `NotoSansArabic-v2.013`,
+https://github.com/notofonts/arabic/releases/tag/NotoSansArabic-v2.013,
+Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic),
+licensed under the SIL Open Font License, Version 1.1. These files ship
+unmodified inside the app, the Python package and `qalun-source.zip`:
+
+- `qurantext/assets/fonts/NotoSansArabic-Regular.ttf`, sha256
+  `bd86ca02f087d7f3c3788ba458fb6b73744c7639ed276b8d870dba6def6c40d0`
+- `qurantext/assets/fonts/NotoSansArabic-Bold.ttf`, sha256
+  `f4cb79f842a07d1bcf597879574358fb7010f73761396d1d0f2445dfedb4d2ca`
+
+The licence text is beside them, at `qurantext/assets/fonts/NotoSansArabic-OFL.txt`
+(in the app's folder, `_internal/qurantext/assets/fonts/NotoSansArabic-OFL.txt`),
+and in the source at `packaging/licenses/NotoSansArabic-OFL.txt`. The OFL is not
+the GPL; it lets the font be bundled with any software, and it stays under the
+OFL. `tools/fetch_fonts.py` fetches the files from the release.
+
 ## Lucide icons
 
 The window's icons are from **Lucide**, release 1.56.0,

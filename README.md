@@ -31,7 +31,8 @@ retranscribing), or from a match JSON result (to render a video).
 - Matches a recitation (detected or stated range) or a lecture (the Quran
   ayat quoted in it) against the bundled Quran text: KFGQPC's Qaloon text v10,
   converted by `tools/convert_mushaf_v10.py`. Videos draw it in the bundled
-  Qaloon font; the generated intro and outro write their titles in Amiri.
+  Qaloon font; the generated intro and outro write their titles in Amiri; the interface falls back to Noto Sans
+  Arabic for Arabic letters on a machine with no Arabic font.
 - A review window to correct word timing and subtitles, change the ayah cards
   (including cards placed by hand), choose the video's look and set up an episode
   (intro, recitation, lecture, outro) before anything is rendered.
@@ -407,7 +408,7 @@ src/qurantext/
   jobs/                Job catalogue, episode and generated intro/outro steps, export
   gui/                 The Qalun window (home and review)
   data/                The SQLite Quran store
-  assets/              Bundled Quran text (KFGQPC Qaloon v10) and fonts (Qaloon, Amiri)
+  assets/              Bundled Quran text (KFGQPC Qaloon v10) and fonts (Qaloon, Amiri, Noto Sans Arabic)
   pipelines/           End-to-end workflows
   services/            Transcription engines (local model, WhisperX on Replicate) and the model store
   utils/               Small generic helpers

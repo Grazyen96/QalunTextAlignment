@@ -139,7 +139,8 @@ def _forget_the_fallback(qt_app):
     language._fallback = None
     yield
     if language._fallback is not None:
-        QFontDatabase.removeApplicationFont(language._fallback[0])
+        for font_id in language._fallback[0]:
+            QFontDatabase.removeApplicationFont(font_id)
         language._fallback = None
     QFont.removeSubstitutions(app_family)
     for family in before:
@@ -155,7 +156,7 @@ def test_without_a_system_arabic_font_the_bundled_one_is_the_fallback(
 
     monkeypatch.setattr(language, "arabic_ui_families", lambda: [])
     family = language.ensure_arabic_font(QApplication.instance())
-    assert family  # registered from DEFAULT_FONT_PATH
+    assert family == "Noto Sans Arabic"  # registered from NOTO_FONT_PATHS
     assert family in QFontDatabase.families()
     # Qt keeps substitutes in lower case.
     substitutes = QFont.substitutes(QApplication.font().family())
@@ -164,6 +165,29 @@ def test_without_a_system_arabic_font_the_bundled_one_is_the_fallback(
     assert language.ensure_arabic_font(QApplication.instance()) == family
     assert QFont.substitutes(QApplication.font().family()) == substitutes
     assert QFontDatabase.families().count(family) == 1
+
+
+def test_one_missing_noto_file_still_registers_the_other(
+    qt_app, monkeypatch, tmp_path, _forget_the_fallback
+) -> None:
+    from qurantext.config.paths import NOTO_FONT_PATHS
+    from qurantext.gui import language
+
+    monkeypatch.setattr(language, "arabic_ui_families", lambda: [])
+    monkeypatch.setattr(
+        language, "NOTO_FONT_PATHS", (NOTO_FONT_PATHS[0], tmp_path / "gone-Bold.ttf")
+    )
+    assert language.ensure_arabic_font(QApplication.instance()) == "Noto Sans Arabic"
+
+
+def test_no_noto_file_registers_nothing(
+    qt_app, monkeypatch, tmp_path, _forget_the_fallback
+) -> None:
+    from qurantext.gui import language
+
+    monkeypatch.setattr(language, "arabic_ui_families", lambda: [])
+    monkeypatch.setattr(language, "NOTO_FONT_PATHS", (tmp_path / "a.ttf", tmp_path / "b.ttf"))
+    assert language.ensure_arabic_font(QApplication.instance()) is None
 
 
 def test_with_a_system_arabic_font_nothing_is_registered(

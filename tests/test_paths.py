@@ -148,3 +148,11 @@ def test_the_notices_file_is_found_in_a_checkout_and_in_a_bundle(monkeypatch, tm
     assert notices_path().is_file()  # the checkout's own copy
     monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
     assert notices_path() == tmp_path / "THIRD_PARTY_NOTICES.md"
+
+
+def test_the_interface_font_travels_with_the_package() -> None:
+    from qurantext.config.paths import NOTO_FONT_PATHS
+
+    for path in NOTO_FONT_PATHS:
+        assert path.is_file() and path.stat().st_size > 100_000, path
+    assert NOTO_FONT_PATHS[0].with_name("NotoSansArabic-OFL.txt").is_file()
