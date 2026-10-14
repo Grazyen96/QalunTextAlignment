@@ -2818,6 +2818,46 @@ def test_a_landscape_preview_opens_as_wide_as_the_timeline_allows(qt_app, tmp_pa
         window.deleteLater()
 
 
+@pytest.mark.parametrize("width", [1150, 1280, 1600])
+def test_a_landscape_window_opens_its_left_column_wide_only_with_timeline_room(
+    qt_app, tmp_path, width
+) -> None:
+    """The left column asks for the preset's width; the right column's own minimum decides.
+
+    With the 1920×1080 preset the wide left column is 480 + 2 × 24 = 504 px. The
+    right column cannot go below its minimum, which the one-row transport sets
+    (920 px in English, above :data:`_TIMELINE_ROOM`), and the first show already
+    has the final width, so: at 1600 the left column opens wide; at 1280 the
+    splitter gives it what the transport leaves (338 px); a window asked for at
+    1150 opens at its own minimum width, with the left column at its least.
+    """
+    from qurantext.gui import theme
+    from qurantext.gui.review import window as module
+
+    theme.apply_theme(qt_app, "light")
+    window = _lecture_window(qt_app, tmp_path, preset="high")
+    try:
+        window.resize(width, 800)
+        window.show()
+        qt_app.processEvents()
+        wide = window.frame_view.preset_size.width() + 2 * theme.SP_12
+        least = window.left_column.minimumWidth()
+        right_least = window._splitter.widget(1).minimumSizeHint().width()
+        left, right = window._splitter.sizes()
+        assert window.width() - wide >= module._TIMELINE_ROOM  # the wide branch is taken
+        assert left == max(least, min(wide, left + right - right_least))
+        if width >= 1600:
+            assert left == wide
+        elif width == 1280:
+            assert least < left < wide
+        else:
+            assert window.width() == window.minimumSizeHint().width()
+            assert left == least
+    finally:
+        window.close()
+        window.deleteLater()
+
+
 def test_the_full_size_button_opens_the_frame_at_the_time_shown(qt_app, tmp_path) -> None:
     window, _, _ = _window(qt_app, tmp_path)
     try:
@@ -2850,7 +2890,7 @@ def test_a_window_shown_at_its_own_size_keeps_the_preview_at_its_preset_height(
 
     The offscreen screen is 800 px tall, so a plain ``show()`` would cap the
     window at two thirds of it; the window is shown at its own size hint
-    instead, which is what ``show()`` gives on a screen of 1080 px and up.
+    instead, as a screen tall enough to hold the size hint would show it.
     """
     from qurantext.gui import theme
 

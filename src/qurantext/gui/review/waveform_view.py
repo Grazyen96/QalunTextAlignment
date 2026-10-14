@@ -154,13 +154,17 @@ class WaveformView(QWidget):
 
             playhead_x = self._playhead_column(width)
             if playhead_x is not None:
-                painter.setPen(QPen(playhead_color(palette), 2))
-                painter.drawLine(playhead_x, 0, playhead_x, height)
+                # A filled rect, not a 2 px pen: the pen's two columns depend on
+                # antialiasing and the line's direction; the rect always ends at x.
+                painter.fillRect(playhead_x - 1, 0, 2, height, playhead_color(palette))
         finally:
             painter.end()
 
     def _playhead_column(self, width: int) -> int | None:
-        """The pixel column the playhead is drawn in, or ``None`` outside the window.
+        """The pixel column the playhead ends at, or ``None`` outside the window.
+
+        The playhead is a 2 px rect over columns ``x - 1`` and ``x``, so at
+        column 0 it draws one column and at the right edge two.
 
         Right to left, ``ceil(x) - 1`` puts pixel column ``p`` over the times
         in ``[t_for(p + 1), t_for(p))``: the same column as the waveform bar

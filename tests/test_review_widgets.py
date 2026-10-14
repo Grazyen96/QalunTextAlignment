@@ -181,7 +181,7 @@ def test_a_playhead_outside_the_window_is_not_drawn(qt_app) -> None:
     view.set_playhead(70.0)  # after it: not pinned to its left edge
     assert _playhead_columns(view) == []
     view.set_playhead(55.0)
-    # Halfway: column 99 holds [55, 55.05); the 2 px line spans it and its left neighbour.
+    # Halfway: column 99 holds [55, 55.05); the 2 px rect covers it and its left neighbour.
     assert _playhead_columns(view) == [98, 99]
 
 
@@ -216,6 +216,28 @@ def test_a_playhead_at_the_windows_start_is_drawn(qt_app) -> None:
     view.set_playhead(0.0)
     image = view.grab().toImage()
     assert image.pixelColor(199, 45) == playhead_color(view.palette())
+
+
+def test_the_playhead_is_a_two_pixel_rect_ending_at_its_column(qt_app) -> None:
+    from PySide6.QtGui import QColor
+
+    from qurantext.gui.colors import playhead_color
+    from qurantext.gui.review.waveform_view import WaveformView
+
+    viewport = Viewport()
+    viewport.set_duration(10.0)
+    viewport.set_window(0.0, 10.0)
+    view = WaveformView(viewport)
+    view.resize(200, 60)
+    view.show()
+    _spin_briefly(qt_app)
+    view.set_playhead(5.0)
+    x = view._playhead_column(view.width())
+    image = view.grab().toImage()
+    red = playhead_color(view.palette())
+    hits = [dx for dx in range(-3, 4) if image.pixelColor(x + dx, 30) == QColor(red)]
+    assert hits == [-1, 0], hits
+    view.close()
 
 
 def test_waveform_paints_without_peaks_and_with_gaps(qt_app) -> None:
