@@ -2,9 +2,19 @@
 
 For the phase reviews: run it before and after a visual change and look at
 the pairs. It builds its own project from four Al-Furqan words, so it needs
-no media on disk; the home window lists whatever jobs the checkout has.
+no media on disk; the home window lists the one job it makes.
 
     QT_QPA_PLATFORM=offscreen venv/bin/python tools/screenshots.py output/shots
+
+Per theme and language (``<tag>`` is ``en-light``, ``ar-dark`` and so on):
+
+- ``home-<tag>``, ``home-running-<tag>``, ``home-empty-<tag>`` and
+  ``settings-<tab>-<tag>`` for each Settings tab;
+- ``review-recitation-<tag>``, ``review-customise-<tag>`` (the Look panel
+  alone and whole, Customise open), ``review-full-frame-<tag>``,
+  ``shortcuts-<tag>``, ``export-<tag>`` and ``ayah-picker-<tag>``;
+- ``review-lecture-<tag>``, ``review-rendering-<tag>`` and ``episode-<tag>``
+  (the Episode strip with a generated intro and its pane open).
 """
 
 from __future__ import annotations
@@ -162,6 +172,16 @@ def _shoot(app: QApplication, out_dir: Path, themes, languages) -> list[Path]:
                     review.resize(1280, 800)
                     review.seek(1.2)
                     written.append(_grab(review, out_dir / f"review-{mode}-{tag}.png"))
+                    if mode == "recitation":
+                        # The Look panel with Customise open: tiles, colour rows and readouts.
+                        # The panel itself, whole: in the window its scroll area shows only the
+                        # first row of tiles, so a grab of the window would not differ.
+                        review.look_panel.customise_toggle.setChecked(True)
+                        _spin(100)
+                        written.append(
+                            _grab(review.look_panel, out_dir / f"review-customise-{tag}.png")
+                        )
+                        review.look_panel.customise_toggle.setChecked(False)
                     if mode == "lecture":
                         # A render most of the way: the label sits over the chunk.
                         review._set_render_running(True)
@@ -190,7 +210,12 @@ def _shoot(app: QApplication, out_dir: Path, themes, languages) -> list[Path]:
                         )
                         review._full_frame.hide()
                     else:
+                        # A generated intro, so the strip's card and the pane under it both show.
                         episode = EpisodeDialog(review.session, prefs=prefs, parent=review)
+                        episode.intro_kind.setCurrentIndex(episode.intro_kind.findData("generated"))
+                        episode.intro_name_edit.setText("دروس الشيخ")
+                        episode.flush_previews()
+                        _spin(100)
                         written.append(_grab(episode, out_dir / f"episode-{tag}.png"))
                         episode.close()
                         episode.deleteLater()

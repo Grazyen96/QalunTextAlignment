@@ -201,7 +201,10 @@ separate ASS renderer keeps its own white-text style.
 **Episode: intro, recitation and outro.** In a lecture's review, "Episode…"
 (beside Render) chooses what plays around the lecture: an intro clip, the video
 of one of your recitation jobs, and an outro clip (MP4, MOV, MKV or WebM). The
-dialog shows each clip's length and the episode's total. Rendering the lecture
+dialog lays the four parts out as cards in the order they play (intro,
+recitation, lecture, outro), each with a picture of it and its length, and the
+episode's total under them; a generated intro or outro, once its card is
+selected, shows its fields and preview under the strip. Rendering the lecture
 then also writes `<name> – episode.mp4` beside it: the parts joined in order,
 each scaled and letterboxed to the lecture's size, so a phone clip filmed
 upright keeps black bars rather than being stretched. A recitation that changed

@@ -202,11 +202,19 @@ this is the only place anyone hears each platform's build recognise speech.
     palette names (`look.preset.*`: «ذهبي ليلي»، «زمردي»، «رملي»، «حبر على ورق»، «محيطي»،
     «وردي»), the colour names (`look.colour.*`, among them «نص الترجمة النصية», «الكلمة
     المنطوقة الآن», «نص الافتتاح» and the background colour picker «لون الخلفية»),
-    `look.card_opacity` («عتامة البطاقة»), the backgrounds (`look.bg.*`),
+    `look.card_opacity` («عتامة البطاقة»), the backgrounds (`look.bg.*`, shortened in
+    phase D to fit under the tiles: «لون واحد»، «تدرّج»، «نجوم»، «شبكة»، «أقواس»، «صورتي»;
+    the image file dialog's filter reads `look.bg.image` too), the slider readout
+    `look.percent` («٪90»: the Arabic percent sign after the number, so it shows on its
+    left; or «90%»?),
     `look.dim` and `look.blur` («تعتيم»، «تمويه»), `look.use_for_new`, `look.reset`,
     `look.low_contrast`, and the image lines `look.image_failed`, `look.image_missing` and
     `look.image_unreadable`. A list of colour names in `look.low_contrast` is joined
     with «، ».
+  - the Export subtitles dialog, read with a recitation that was never rendered: the
+    line under each format, `export.format.srt` («للمشغّلات والمحرّرات ويوتيوب؛ تقرؤها
+    البرامج كلّها تقريبًا.»), `export.format.vtt` and `export.format.ass`, and the chip
+    beside the disabled video choice, `export.needs_render` («يحتاج إلى إخراج أولًا»).
   - a lecture's studied surah, read on the new-job screen in lecture mode and in the
     review window's toolbar: `surah.detect` («تحديد تلقائي»: is «اكتشاف تلقائي» or
     «تلقائيًا» better?), `surah.number` («سورة 25»), `review.studied_surah` («السورة على
@@ -240,7 +248,11 @@ this is the only place anyone hears each platform's build recognise speech.
     - `episode.error.recitation_changed` («أُعيد إخراج فيديو التلاوة … أثناء صنع الحلقة») and
       `episode.error.locked` («تعذّر استبدال …: قد يكون مفتوحًا في برنامج آخر»);
     - the Episode dialog, read in a lecture's review: `episode.title` («الحلقة»),
-      `episode.intro`, `episode.recitation` («التلاوة»), `episode.outro`, `episode.none`
+      `episode.intro`, `episode.recitation` («التلاوة»), the lecture's card
+      `episode.lecture` («المحاضرة»: the review elsewhere says «الدرس» for the lecture, as
+      in `render.running_lecture`; which should the card use?), the cards' chips
+      `episode.chip.missing` («المقطع مفقود») and `episode.chip.attention` («يحتاج إلى
+      انتباه»), `episode.outro`, `episode.none`
       («بدون»), `episode.choose` («اختر…»), `episode.remove` («أزل»), the recitation states
       `episode.rendered` («مُخرَجة»), `episode.render_first` («ستُخرَج أولًا») and
       `episode.damaged` («تالفة»): do these agree with a recitation as feminine? They

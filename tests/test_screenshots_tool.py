@@ -33,6 +33,7 @@ def test_the_tool_writes_one_image_per_screen_theme_and_language(
         "home-running-en-light.png",
         "review-rendering-en-light.png",
         "review-recitation-en-light.png",
+        "review-customise-en-light.png",
         "shortcuts-en-light.png",
         "review-full-frame-en-light.png",
         "export-en-light.png",
