@@ -21,6 +21,17 @@ pytestmark = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def _real_cache(_private_cache_dir, monkeypatch):
+    """The model and its transcript live in the person's real cache, as the docstring promises.
+
+    The suite points every test at a private cache folder (``_private_cache_dir`` in
+    conftest.py), which would download the model on every run; this test takes the
+    real one back after that fixture has run.
+    """
+    monkeypatch.delenv("QURANTEXT_CACHE_DIR", raising=False)
+
+
 def test_the_real_model_finds_furqan_7_to_11(tmp_path) -> None:
     from qurantext.config.paths import DEFAULT_QURAN_PATH
     from qurantext.pipelines.detection import run_detection
