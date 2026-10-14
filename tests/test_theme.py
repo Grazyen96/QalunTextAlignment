@@ -285,3 +285,94 @@ def test_current_tokens_before_any_apply_is_light() -> None:
 def test_a_toolbar_separator_is_drawn_in_the_border_colour(tokens) -> None:
     rule = _rule(theme.stylesheet(tokens), 'QFrame[separator="true"]')
     assert rule["color"] == tokens.border
+
+
+@pytest.mark.parametrize("tokens", THEMES, ids=IDS)
+def test_quiet_buttons_and_the_chosen_tile_keep_focus_disabled_and_pressed_looks(tokens) -> None:
+    """The quiet rule and the checked tile come late in the sheet: their states must follow."""
+    sheet = theme.stylesheet(tokens)
+    focus = _rule(sheet, 'QPushButton[quiet="true"]:focus')
+    assert focus["border"] == f"2px solid {tokens.accent}" and focus["padding"] == "4px 9px"
+    assert _rule(sheet, 'QPushButton[quiet="true"]:disabled')["color"] == tokens.secondary
+    assert _rule(sheet, 'QPushButton[quiet="true"]:pressed')["background"] == tokens.border
+    for state in (":focus", ":disabled", ":pressed"):
+        assert sheet.index(f'QPushButton[quiet="true"]{state}') > sheet.index(
+            'QPushButton[quiet="true"] {'
+        ), state
+    tile = _rule(sheet, 'QToolButton[swatch="true"]:checked:focus')
+    assert tile["border-color"] == tokens.accent
+    assert _rule(sheet, 'QToolButton[swatch="true"]:checked')["border-color"] == "transparent"
+
+
+def _near(colour: QColor, target: QColor, slack: int = 24) -> bool:
+    return all(
+        abs(a - b) <= slack for a, b in zip(colour.getRgb()[:3], target.getRgb()[:3], strict=True)
+    )
+
+
+def _edge_has(widget, target: QColor) -> bool:
+    """Whether *target* is drawn on the middle of each of the widget's four edges."""
+    image = widget.grab().toImage()
+    w, h = image.width(), image.height()
+    sides = (
+        [(x, h // 2) for x in range(3)],
+        [(w - 1 - x, h // 2) for x in range(3)],
+        [(w // 2, y) for y in range(3)],
+        [(w // 2, h - 1 - y) for y in range(3)],
+    )
+    return all(any(_near(image.pixelColor(x, y), target) for x, y in side) for side in sides)
+
+
+@pytest.mark.parametrize("mode", ["light", "dark"])
+def test_a_focused_quiet_button_and_a_focused_chosen_tile_show_the_accent_ring(
+    qt_app, mode
+) -> None:
+    from PySide6.QtWidgets import (
+        QApplication,
+        QHBoxLayout,
+        QLineEdit,
+        QPushButton,
+        QToolButton,
+        QWidget,
+    )
+
+    tokens = theme.apply_theme(qt_app, mode)
+    accent = QColor(theme.current_tokens().accent)
+    assert accent == QColor(tokens.accent)
+    window = QWidget()
+    row = QHBoxLayout(window)
+    elsewhere = QLineEdit()
+    row.addWidget(elsewhere)
+    quiet = QPushButton("Reset")
+    quiet.setProperty("quiet", True)
+    tile = QToolButton()
+    tile.setText("Solid")
+    tile.setAutoRaise(True)
+    tile.setProperty("swatch", True)
+    tile.setCheckable(True)
+    tile.setChecked(True)
+    tile.setFixedSize(56, 36)
+    disabled = QPushButton("Choose image")
+    disabled.setProperty("quiet", True)
+    disabled.setEnabled(False)
+    for widget in (quiet, tile, disabled):
+        row.addWidget(widget)
+    window.show()
+    window.activateWindow()
+    elsewhere.setFocus()
+    QApplication.processEvents()
+    assert not _edge_has(quiet, accent) and not _edge_has(tile, accent)
+    for widget in (quiet, tile):
+        widget.setFocus()
+        QApplication.processEvents()
+        assert widget.hasFocus()
+        assert _edge_has(widget, accent), widget.text()
+    # A disabled quiet button reads as off: no accent anywhere in it.
+    image = disabled.grab().toImage()
+    assert not any(
+        _near(image.pixelColor(x, y), accent, slack=12)
+        for x in range(image.width())
+        for y in range(image.height())
+    )
+    window.close()
+    window.deleteLater()

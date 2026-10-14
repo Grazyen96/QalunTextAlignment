@@ -168,6 +168,7 @@ QToolButton[swatch="true"]:checked {{
     color: {t.accent};
     border-color: transparent;
 }}
+QToolButton[swatch="true"]:checked:focus {{ border-color: {t.accent}; }}
 QPushButton:disabled, QToolButton:disabled {{ color: {t.secondary}; border-color: {t.border}; }}
 QToolButton[swatch="true"]:disabled {{ border-color: transparent; }}
 QPushButton[segment="true"]:checked:disabled, QToolButton[swatch="true"]:checked:disabled {{
@@ -206,6 +207,9 @@ QPushButton[quiet="true"] {{
     color: {t.accent};
 }}
 QPushButton[quiet="true"]:hover {{ background: {t.raised}; border-color: transparent; }}
+QPushButton[quiet="true"]:pressed {{ background: {t.border}; }}
+QPushButton[quiet="true"]:focus {{ border: 2px solid {t.accent}; padding: 4px 9px; }}
+QPushButton[quiet="true"]:disabled {{ color: {t.secondary}; }}
 QLabel[placeholder="true"] {{ border: 2px dashed {t.border}; border-radius: 6px; background: transparent; }}
 QFrame[card="true"] {{
     background: {t.raised};
