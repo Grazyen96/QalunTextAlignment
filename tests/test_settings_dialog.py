@@ -239,3 +239,12 @@ def test_clearing_a_generated_intro_keeps_the_outro(qt_app, prefs) -> None:
     assert not dialog.intro_clear_button.isEnabled()
     assert dialog.outro_label.text() == t("settings.episode.generated")
     dialog.deleteLater()
+
+
+def test_general_has_an_animate_panels_box_that_writes_the_pref(dialog, prefs) -> None:
+    assert dialog.animate_box.text() == t("settings.animate_panels")
+    assert dialog.animate_box.isChecked() is True
+    dialog.animate_box.setChecked(False)
+    assert prefs.animate_panels is False
+    dialog.animate_box.setChecked(True)
+    assert prefs.animate_panels is True

@@ -67,7 +67,7 @@ from qurantext.core.looks import (
     Look,
     readability_warnings,
 )
-from qurantext.gui import theme
+from qurantext.gui import disclosure, theme
 from qurantext.gui.colors import warning_color
 from qurantext.gui.i18n import is_rtl, plain_title, t
 from qurantext.gui.icons import icon, set_icon
@@ -574,7 +574,9 @@ class LookPanel(QWidget):
         self.reset_button.clicked.connect(lambda: self._apply(NIGHT_GOLD))
 
     def _toggle_customise(self, open_: bool) -> None:
-        self.customise_box.setVisible(open_)
+        disclosure.reveal(
+            self.customise_box, open_, animate=disclosure.animations_enabled(self._prefs)
+        )
         set_icon(self.customise_toggle, "chevron-down" if open_ else "chevron-right", size=16)
 
     # -- reading the look back --------------------------------------------------

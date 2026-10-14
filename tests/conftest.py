@@ -52,6 +52,16 @@ _THEME_PROPERTIES = (
 
 
 @pytest.fixture(autouse=True)
+def _panels_do_not_animate(monkeypatch):
+    """Every disclosure opens at once under test; tests/test_disclosure.py drives the motion itself."""
+    try:
+        from qurantext.gui import disclosure
+    except ImportError:
+        return
+    monkeypatch.setattr(disclosure, "animations_enabled", lambda prefs: False)
+
+
+@pytest.fixture(autouse=True)
 def _theme_does_not_leak():
     """Every test leaves the application's palette, sheet, style and theme as it found them.
 

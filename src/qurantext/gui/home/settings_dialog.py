@@ -16,6 +16,7 @@ from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QShowEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -128,12 +129,19 @@ class SettingsDialog(QDialog):
         self.theme_combo.setCurrentIndex(self.theme_combo.findData(self._prefs.theme))
         self.theme_combo.activated.connect(self._theme_chosen)
         form.addRow(t("home.theme"), self.theme_combo)
+        self.animate_box = QCheckBox(t("settings.animate_panels"))
+        self.animate_box.setChecked(self._prefs.animate_panels)
+        self.animate_box.toggled.connect(self._animate_chosen)
+        form.addRow("", self.animate_box)
         return page
 
     def _theme_chosen(self, index: int) -> None:
         code = self.theme_combo.itemData(index)
         self._prefs.theme = code
         self.theme_requested.emit(code)
+
+    def _animate_chosen(self, on: bool) -> None:
+        self._prefs.animate_panels = on
 
     def language_refused(self, reason: str) -> None:
         """The window would not switch: put the combo back and say why."""

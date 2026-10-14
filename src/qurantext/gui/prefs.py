@@ -155,6 +155,19 @@ class Prefs:
         self._settings.setValue("preview_fit", bool(value))
         self._settings.sync()
 
+    # -- motion ------------------------------------------------------------------
+
+    @property
+    def animate_panels(self) -> bool:
+        """Whether More options and Customise open with a 150 ms motion (True) or at once."""
+        value = self._settings.value("animate_panels", True)
+        return value not in (False, "false", "0", 0)
+
+    @animate_panels.setter
+    def animate_panels(self, value: bool) -> None:
+        self._settings.setValue("animate_panels", bool(value))
+        self._settings.sync()
+
     # -- mode -----------------------------------------------------------------
 
     @property

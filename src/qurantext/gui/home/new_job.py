@@ -40,7 +40,7 @@ from qurantext.config.paths import QURAN_DB_PATH
 from qurantext.config.settings import VIDEO_PRESETS, env_dir, get_settings
 from qurantext.core.subtitles import SUBTITLE_FORMATS
 from qurantext.data.quran_db import ensure_quran_db, list_surahs
-from qurantext.gui import theme
+from qurantext.gui import disclosure, theme
 from qurantext.gui.i18n import path_text, plain_title, t, tn
 from qurantext.gui.icons import icon, set_icon
 from qurantext.gui.jobs import JobSpec
@@ -612,7 +612,9 @@ class NewJobPanel(QWidget):
         self._set_more_options_visibility(checked)
 
     def _set_more_options_visibility(self, open_: bool) -> None:
-        self.more_group.setVisible(open_)
+        disclosure.reveal(
+            self.more_group, open_, animate=disclosure.animations_enabled(self._prefs)
+        )
         # Down when the options show; else along the reading direction (the
         # icon module mirrors it in Arabic).
         set_icon(self.more_button, "chevron-down" if open_ else "chevron-right", size=16)
