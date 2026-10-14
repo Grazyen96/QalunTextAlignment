@@ -52,6 +52,7 @@ class PartCard(Card):
         self.setFixedWidth(CARD_WIDTH)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setProperty("clickable", True)
         self.setAccessibleName(title)
         self.body.setContentsMargins(theme.SP_12, theme.SP_12, theme.SP_12, theme.SP_12)
         self._selectable = True

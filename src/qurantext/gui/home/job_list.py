@@ -804,6 +804,7 @@ class _ModeCard(Card):
         super().__init__(parent)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setProperty("clickable", True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAccessibleName(title)
         self.setAccessibleDescription(description)

@@ -218,9 +218,11 @@ QFrame[card="true"] {{
 }}
 QFrame[card="true"][empty="true"] {{ border: none; background: {t.border}; border-radius: 2px; }}
 QFrame[card="true"][part="true"] {{ border: 2px solid transparent; }}
-QFrame[card="true"]:hover {{ border-color: {t.accent}; }}
+QFrame[card="true"][clickable="true"]:hover {{ border-color: {t.accent}; }}
+QFrame[card="true"][part="true"]:hover {{ border-color: {t.border}; }}
 QFrame[card="true"][kbdfocus="true"] {{ border: 2px solid {t.accent}; }}
 QFrame[card="true"][selected="true"] {{ border: 2px solid {t.accent}; }}
+QFrame[card="true"][selected="true"]:hover {{ border-color: {t.accent}; }}
 QFrame#dropZone {{
     background: {t.panel};
     border: 2px dashed {t.border};

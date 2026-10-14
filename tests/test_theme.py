@@ -403,14 +403,32 @@ def test_focus_is_a_property_not_a_pseudo_class(tokens) -> None:
 @pytest.mark.parametrize("tokens", THEMES, ids=IDS)
 def test_cards_hover_and_focus_like_buttons(tokens) -> None:
     sheet = theme.stylesheet(tokens)
-    assert _rule(sheet, 'QFrame[card="true"]:hover')["border-color"] == tokens.accent
+    assert _rule(sheet, 'QFrame[card="true"][clickable="true"]:hover')["border-color"] == (
+        tokens.accent
+    )
+    assert _rule(sheet, 'QFrame[card="true"][part="true"]:hover')["border-color"] == tokens.border
     assert _rule(sheet, 'QFrame[card="true"][kbdfocus="true"]')["border"] == (
         f"2px solid {tokens.accent}"
     )
     # The selected Episode card's border wins over hover: its rule comes later.
-    assert sheet.index('QFrame[card="true"][selected="true"]') > sheet.index(
-        'QFrame[card="true"]:hover'
+    for hover in (
+        'QFrame[card="true"][clickable="true"]:hover',
+        'QFrame[card="true"][part="true"]:hover',
+    ):
+        assert sheet.index('QFrame[card="true"][selected="true"]') > sheet.index(hover), hover
+    # The hover rules outrank [selected] by one term, so selection repeats itself with :hover.
+    assert _rule(sheet, 'QFrame[card="true"][selected="true"]:hover')["border-color"] == (
+        tokens.accent
     )
+    assert sheet.index('QFrame[card="true"][selected="true"]:hover') > sheet.index(
+        'QFrame[card="true"][part="true"]:hover'
+    )
+
+
+@pytest.mark.parametrize("tokens", THEMES, ids=IDS)
+def test_only_clickable_cards_hover(tokens) -> None:
+    """The Banner, the job cards and the Settings cards are not clickable: no hover border."""
+    assert 'QFrame[card="true"]:hover' not in theme.stylesheet(tokens)
 
 
 def test_apply_theme_installs_the_focus_marker(qt_app) -> None:
@@ -441,3 +459,17 @@ def test_a_selected_card_keeps_its_border_when_hovered(qt_app) -> None:
     y = image.height() // 2
     assert _near(image.pixelColor(0, y), accent) and _near(image.pixelColor(1, y), accent)
     card.close()
+    # An unselected card hovered shows the border token, so hover never reads as selection.
+    other = PartCard("Outro")
+    other.show()
+    qt_app.processEvents()
+    centre = QPointF(other.rect().center())
+    qt_app.sendEvent(other, QEnterEvent(centre, centre, other.mapToGlobal(centre.toPoint())))
+    qt_app.processEvents()
+    assert other.underMouse() or other.testAttribute(Qt.WidgetAttribute.WA_UnderMouse)
+    image = other.grab().toImage()
+    y = image.height() // 2
+    border = QColor(tokens.border)
+    assert _near(image.pixelColor(0, y), border, slack=8)
+    assert not _near(image.pixelColor(0, y), accent)
+    other.close()
