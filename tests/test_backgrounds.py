@@ -554,7 +554,8 @@ def test_a_solid_tile_is_its_colour_and_a_pattern_tile_is_not() -> None:
     solid = tile_image(Background("solid", (20, 30, 40, 255), (20, 30, 40, 255)), 56, 36)
     assert solid.convert("RGB").getpixel((28, 18)) == (20, 30, 40)
     stars = tile_image(Background("pattern_stars", (20, 30, 40, 255), (230, 200, 90, 255)), 56, 36)
-    assert len(set(stars.convert("RGB").getdata())) > 1, "the lines reach the small tile"
+    colours = np.unique(np.asarray(stars.convert("RGB")).reshape(-1, 3), axis=0)
+    assert len(colours) > 1, "the lines reach the small tile"
 
 
 def test_a_tile_ignores_dim_and_blur() -> None:
