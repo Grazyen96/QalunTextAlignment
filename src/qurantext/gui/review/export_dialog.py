@@ -14,6 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -31,10 +32,11 @@ from PySide6.QtWidgets import (
 
 from qurantext.config.paths import QURAN_DB_PATH, VIDEOS_OUTPUT_DIR
 from qurantext.core.subtitles import SUBTITLE_FORMATS
+from qurantext.gui import theme
 from qurantext.gui.files import show_in_folder
 from qurantext.gui.i18n import plain_title, t, tn
 from qurantext.gui.review.session import ReviewSession
-from qurantext.gui.widgets import make_primary
+from qurantext.gui.widgets import StatusChip, make_primary
 from qurantext.jobs.episode_assets import EPISODE_SUFFIXES
 from qurantext.jobs.project_render import export_project_subtitles
 
@@ -42,6 +44,9 @@ __all__ = ["ExportDialog"]
 
 #: SRT is the format almost everything downstream understands; preselect it.
 _DEFAULT_FORMAT = "srt"
+
+#: A format description lines up with its checkbox label: the indicator plus its gap.
+_HINT_INDENT = 24
 
 
 class ExportDialog(QDialog):
@@ -72,14 +77,19 @@ class ExportDialog(QDialog):
     def _build(self) -> None:
         layout = QVBoxLayout(self)
 
-        formats_row = QHBoxLayout()
-        formats_row.addWidget(QLabel(t("export.formats")))
+        layout.addWidget(QLabel(t("export.formats")))
+        self.format_hints: dict[str, QLabel] = {}
         for name in SUBTITLE_FORMATS:
             box = QCheckBox(name.upper())
             self._format_boxes[name] = box
-            formats_row.addWidget(box)
-        formats_row.addStretch(1)
-        layout.addLayout(formats_row)
+            layout.addWidget(box)
+            hint = QLabel(t(f"export.format.{name}"))
+            hint.setWordWrap(True)
+            hint.setFont(theme.font("secondary"))
+            hint.setForegroundRole(QPalette.ColorRole.PlaceholderText)
+            hint.setIndent(_HINT_INDENT)  # follows the text direction, unlike a margin
+            self.format_hints[name] = hint
+            layout.addWidget(hint)
 
         form = QFormLayout()
         folder_row = QHBoxLayout()
@@ -98,7 +108,12 @@ class ExportDialog(QDialog):
 
         self._video_radio = QRadioButton(t("export.match_video"))
         self._audio_radio = QRadioButton(t("export.match_audio"))
-        layout.addWidget(self._video_radio)
+        video_row = QHBoxLayout()
+        video_row.addWidget(self._video_radio)
+        self.needs_render_chip = StatusChip(t("export.needs_render"), "info", "neutral")
+        video_row.addWidget(self.needs_render_chip)
+        video_row.addStretch(1)
+        layout.addLayout(video_row)
         layout.addWidget(self._audio_radio)
 
         self._result_label = QLabel()
@@ -143,6 +158,7 @@ class ExportDialog(QDialog):
             # Still the video's clock, but not the video's content: say so.
             self._video_radio.setText(t("export.match_video_stale"))
         self._video_radio.setEnabled(available)
+        self.needs_render_chip.setVisible(not available)
         self._video_radio.setChecked(available)
         self._audio_radio.setChecked(not available)
 

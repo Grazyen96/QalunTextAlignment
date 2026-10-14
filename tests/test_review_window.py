@@ -551,6 +551,32 @@ def test_export_on_the_video_timeline_is_offered_only_after_a_render(qt_app, tmp
     assert dialog.video_timeline_available() and dialog.timeline() == "video"
 
 
+def test_each_format_has_a_description_and_the_disabled_radio_says_why(qt_app, tmp_path) -> None:
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.export_dialog import ExportDialog
+    from qurantext.gui.review.session import ReviewSession
+
+    project = _project(tmp_path)
+    dialog = ExportDialog(ReviewSession(project))
+    for name in ("srt", "vtt", "ass"):
+        assert dialog.format_hints[name].text() == t(f"export.format.{name}")
+    assert not dialog.needs_render_chip.isHidden()
+    assert dialog.needs_render_chip.text_label.text() == t("export.needs_render")
+    project.record_render(tmp_path / "v.mp4", preset="social", basmala_offset_s=1.0)
+    dialog = ExportDialog(ReviewSession(project))
+    assert dialog.needs_render_chip.isHidden()
+
+
+def test_the_format_descriptions_read_in_arabic(qt_app, tmp_path) -> None:
+    from qurantext.gui import i18n
+    from qurantext.gui.review.export_dialog import ExportDialog
+    from qurantext.gui.review.session import ReviewSession
+
+    i18n.set_language("ar")
+    dialog = ExportDialog(ReviewSession(_project(tmp_path)))
+    assert dialog.format_hints["srt"].text() == i18n.STRINGS["ar"]["export.format.srt"]
+
+
 def test_export_rejects_a_blank_file_name_inline(qt_app, tmp_path) -> None:
     from qurantext.gui.i18n import t
     from qurantext.gui.review.export_dialog import ExportDialog
