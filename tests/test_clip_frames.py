@@ -76,3 +76,29 @@ def test_a_failing_or_slow_ffmpeg_gives_none_and_leaves_no_part_file(tmp_path, m
     monkeypatch.setattr(subprocess, "run", slow)
     assert clip_frame(tmp_path / "y.mp4", tmp_path / "cache", seconds=1.0) is None
     assert not list((tmp_path / "cache" / "thumbs").glob("*.part"))
+
+
+@ffmpeg
+def test_a_seek_past_the_picture_falls_back_to_the_first_frame(tmp_path) -> None:
+    """A short picture under a long sound: half the length lands after the last frame."""
+    clip = _clip(tmp_path / "sting.mp4")
+    png = clip_frame(clip, tmp_path / "cache", seconds=10.0)  # the seek lands at 5 s
+    assert png is not None and png.stat().st_size > 0
+    with Image.open(png) as image:
+        assert image.size == (176, 99)
+
+
+def test_an_empty_frame_twice_gives_none_and_caches_nothing(tmp_path, monkeypatch) -> None:
+    (tmp_path / "y.mp4").write_bytes(b"a clip")
+    monkeypatch.setattr(clip_frames, "require_binary", lambda name, hint=None: "ffmpeg")
+    seeks = []
+
+    def writes_nothing(command, **kwargs):
+        seeks.append(command[command.index("-ss") + 1])
+        Path(command[-1]).write_bytes(b"")
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(subprocess, "run", writes_nothing)
+    assert clip_frame(tmp_path / "y.mp4", tmp_path / "cache", seconds=10.0) is None
+    assert seeks == ["5.000", "0.000"]
+    assert not list((tmp_path / "cache" / "thumbs").iterdir())

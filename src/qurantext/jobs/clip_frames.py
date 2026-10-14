@@ -56,20 +56,26 @@ def clip_frame(
         )
         handle.close()
         part = Path(handle.name)
-        subprocess.run(
-            [
-                ffmpeg, "-y", "-nostdin", "-v", "error",
-                "-ss", f"{at:.3f}", "-i", str(path),
-                "-frames:v", "1", "-vf", scale, "-c:v", "png", "-f", "image2", "-update", "1",
-                str(part),
-            ],
-            check=True,
-            timeout=TIMEOUT_S,
-            capture_output=True,
-        )  # fmt: skip
-        os.replace(part, target)
-        part = None
-        return target
+        # A seek past the picture's end (a short sting under a longer sound) exits 0 and
+        # writes nothing: try the first frame then, and cache nothing if that is empty too.
+        for seek in (at, 0.0) if at > 0 else (at,):
+            subprocess.run(
+                [
+                    ffmpeg, "-y", "-nostdin", "-v", "error",
+                    "-ss", f"{seek:.3f}", "-i", str(path),
+                    "-frames:v", "1", "-vf", scale, "-c:v", "png", "-f", "image2", "-update", "1",
+                    str(part),
+                ],
+                check=True,
+                timeout=TIMEOUT_S,
+                capture_output=True,
+            )  # fmt: skip
+            if part.stat().st_size > 0:
+                os.replace(part, target)
+                part = None
+                return target
+        _log.debug("No frame for %s: ffmpeg wrote nothing", path)
+        return None
     except Exception as error:  # noqa: BLE001 - a picture is never worth a failed dialog
         _log.debug("No frame for %s: %s", path, error)
         return None
