@@ -68,7 +68,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtGui import QGuiApplication, QImage, QPalette, QPixmap
+from PySide6.QtGui import QFontMetrics, QGuiApplication, QImage, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -294,7 +294,12 @@ class _ClipRow:
             self.label.setToolTip("")
         else:
             shown = _length_text(length) if length is not None else t("episode.unknown")
-            self.label.setText(t("episode.clip", name=self.shown_name(), length=ltr(shown)))
+            # A name with no space to wrap at is shortened in the middle to the card's
+            # inner width, keeping its start and its extension; the tooltip has it whole.
+            name_shown = QFontMetrics(self.label.font()).elidedText(
+                self.shown_name(), Qt.TextElideMode.ElideMiddle, THUMB_BOX[0]
+            )
+            self.label.setText(t("episode.clip", name=name_shown, length=ltr(shown)))
             self.label.setToolTip(str(path))
         self.remove.setEnabled(path is not None)
         self.frame = (

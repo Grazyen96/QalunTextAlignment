@@ -3578,3 +3578,29 @@ def test_focus_starts_on_the_selected_parts_kind_and_tab_runs_along_the_strip(
     assert dialog.selected_part() == "outro"
     assert dialog.focusWidget() is dialog.outro_kind
     dialog.reject()
+
+
+def test_a_long_clip_name_is_shortened_in_the_middle_to_fit_its_card(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    from PySide6.QtGui import QFontMetrics
+
+    from qurantext.gui.review.episode_cards import THUMB_BOX
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+
+    name = "PXL_20241014_123456789.TS.mp4"
+    _recitation_jobs(monkeypatch, tmp_path, episode_lecture.project.path)
+    _fake_probe(monkeypatch, {name: 4.0})
+    _no_frames(monkeypatch)
+    clip = tmp_path / name
+    clip.write_bytes(b"intro")
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    _choose_file(monkeypatch, clip)
+    dialog.intro_choose.click()
+    text = dialog.intro_label.text()
+    assert "…" in text and name not in text
+    shown = text.split("\u2068", 1)[1].split("\u2069", 1)[0]
+    assert shown.startswith("PXL_") and shown.endswith(".mp4")
+    assert QFontMetrics(dialog.intro_label.font()).horizontalAdvance(shown) <= THUMB_BOX[0]
+    assert dialog.intro_label.toolTip() == str(clip)
+    dialog.reject()
