@@ -67,6 +67,32 @@ def _panels_do_not_animate(monkeypatch):
     monkeypatch.setattr(disclosure, "animations_enabled", lambda prefs: False)
 
 
+def restore_theme(app, *, palette, sheet: str, style_name: str, properties: dict) -> None:  # noqa: ANN001 - a QApplication and a QPalette
+    """Put back the palette, sheet, style and theme properties a test found, deleting what it let go first.
+
+    A widget a test let go with ``deleteLater()`` waits for an event loop
+    that may come tests later, and must not outlive the style sheet it was
+    styled under. Taking the sheet off deletes Qt's sheet caches, and with
+    them the hook that drops a widget from them when it is destroyed; a
+    widget already marked as styled by a sheet is never hooked to the next
+    caches, so if it dies under the next sheet a pointer to it stays behind,
+    and that sheet's next change follows it into freed memory. That is how
+    ``tools/screenshots.py`` crashed in its last ``apply_theme``: it ran the
+    deferred deletes of a dialog from ``tests/test_widgets.py``.
+    """
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    if app.styleSheet() != sheet:
+        app.setStyleSheet(sheet)
+    if app.style().objectName() != style_name and style_name:
+        app.setStyle(style_name)
+    if app.palette() != palette:
+        app.setPalette(palette)
+    for name, value in properties.items():
+        app.setProperty(name, value)
+
+
 @pytest.fixture(autouse=True)
 def _theme_does_not_leak():
     """Every test leaves the application's palette, sheet, style and theme as it found them.
@@ -92,14 +118,7 @@ def _theme_does_not_leak():
     style_name = app.style().objectName()
     properties = {name: app.property(name) for name in _THEME_PROPERTIES}
     yield
-    if app.styleSheet() != sheet:
-        app.setStyleSheet(sheet)
-    if app.style().objectName() != style_name and style_name:
-        app.setStyle(style_name)
-    if app.palette() != palette:
-        app.setPalette(palette)
-    for name, value in properties.items():
-        app.setProperty(name, value)
+    restore_theme(app, palette=palette, sheet=sheet, style_name=style_name, properties=properties)
     try:
         from qurantext.gui.icons import clear_cache
     except ImportError:
