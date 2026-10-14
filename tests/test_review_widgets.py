@@ -1472,9 +1472,24 @@ def test_a_tile_is_painted_in_the_looks_colours(qt_app, session, prefs) -> None:
 
 
 def test_clicking_the_current_tile_again_changes_nothing(qt_app, session, prefs) -> None:
+    from dataclasses import replace
+
+    from qurantext.core.looks import PRESETS
+
     panel = _panel(session, prefs)
     panel.background_tiles["solid"].click()
     assert not session.can_undo and panel.background_tiles["solid"].isChecked()
+    # A dimmed, blurred gradient keeps its dim and blur, and no undo step is recorded.
+    ocean = PRESETS["ocean"]
+    look = replace(ocean, background=replace(ocean.background, dim=0.4, blur=6.0))
+    session.set_look(look)
+    panel.refresh()
+    revision = session.revision
+    assert panel.background_tiles["gradient"].isChecked()
+    panel.background_tiles["gradient"].click()
+    assert session.look == look and session.revision == revision
+    assert panel.background_tiles["gradient"].isChecked()
+    assert (panel.dim_slider.value(), panel.blur_slider.value()) == (40, 6)
 
 
 def test_a_gone_image_gives_the_image_tile_its_icon(

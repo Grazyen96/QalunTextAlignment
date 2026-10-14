@@ -811,6 +811,12 @@ class LookPanel(QWidget):
                 self.refresh()  # the tiles go back to the background the look has
             return
         look = self._session.look
+        if kind == look.background.kind:
+            # The chosen tile again: keep the look (dim and blur too); Qt's toggle just
+            # unchecked the tile, so put it back.
+            self._shown = None
+            self.refresh()
+            return
         self._apply(replace(look, background=_background_for_kind(look, kind)))
 
     def _choose_image(self) -> bool:
