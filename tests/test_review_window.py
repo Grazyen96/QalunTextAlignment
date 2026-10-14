@@ -2143,6 +2143,8 @@ def _episode_answers(monkeypatch, tmp_path, *, intro=None, recitation=None, acce
     if recitation is not None:
         entries.append(JobEntry(recitation, "rec", "recitation", NEEDS_REVIEW, 1.0, 5, "25:7-11"))
     monkeypatch.setattr(episode_dialog, "list_jobs", lambda *a, **k: entries)
+    # A clip's frame and a recitation's picture are cached: not in the real cache.
+    monkeypatch.setenv("QURANTEXT_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setattr(
         episode_dialog,
         "probe_part",

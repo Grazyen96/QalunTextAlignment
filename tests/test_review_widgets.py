@@ -1859,6 +1859,7 @@ def episode_lecture(tmp_path, monkeypatch):
     from qurantext.jobs.project import CaptionCue, Project, load_project, save_project
 
     monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("QURANTEXT_CACHE_DIR", str(tmp_path / "cache"))
     project = Project(
         audio=tmp_path / "dars.mp3",
         mode="lecture",
@@ -2246,6 +2247,7 @@ def test_a_seeded_lecture_shows_the_default_s_own_name(
     from qurantext.jobs.project import CaptionCue, Project
 
     monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("QURANTEXT_CACHE_DIR", str(tmp_path / "cache"))
     source = tmp_path / "Channel intro 2024.mp4"
     source.write_bytes(b"an intro")
     prefs.save_default_episode(source, None)
@@ -3185,6 +3187,127 @@ def test_no_label_in_the_episode_dialog_is_clipped(
         ]
         assert not clipped, (language, clipped)
         dialog.reject()
+
+
+def _no_frames(monkeypatch) -> list:
+    """``clip_frame`` makes nothing; what it was asked for."""
+    from qurantext.gui.review import episode_dialog
+
+    asked: list = []
+    monkeypatch.setattr(
+        episode_dialog, "clip_frame", lambda path, cache, **kw: asked.append(path.name) or None
+    )
+    return asked
+
+
+def test_the_cards_show_each_parts_length_and_picture(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    from PIL import Image
+
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review import episode_dialog
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+
+    _recitation_jobs(monkeypatch, tmp_path, episode_lecture.project.path)
+    _fake_probe(monkeypatch, {"intro.mp4": 4.0})
+    (tmp_path / "intro.mp4").write_bytes(b"intro")
+    frame = tmp_path / "frame.png"
+    Image.new("RGB", (176, 99), (0, 200, 0)).save(frame)
+    monkeypatch.setattr(episode_dialog, "clip_frame", lambda path, cache, **kw: frame)
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    cards = dialog.cards
+    assert cards["lecture"].length_label.text() == "01:40"
+    assert cards["lecture"].thumb_label.property("placeholder") is True, "no card: empty tile"
+    assert cards["intro"].length_label.text() == "—"
+    _choose_file(monkeypatch, tmp_path / "intro.mp4")
+    dialog.intro_choose.click()
+    assert cards["intro"].length_label.text() == "00:04"
+    assert cards["intro"].thumb_label.pixmap().size().toTuple() == (176, 99)
+    dialog.outro_kind.setCurrentIndex(dialog.outro_kind.findData("generated"))
+    dialog.outro_link.setText("")
+    dialog.flush_previews()
+    assert cards["outro"].length_label.text() == "00:06"
+    assert cards["outro"].thumb_label.pixmap() is not None
+    assert not cards["outro"].thumb_label.pixmap().isNull()
+    assert cards["outro"].chip.isHidden()
+    assert t("episode.unknown") not in cards["recitation"].length_label.text()
+
+
+def test_a_clip_without_a_frame_shows_the_film_icon(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+
+    _recitation_jobs(monkeypatch, tmp_path, episode_lecture.project.path)
+    _fake_probe(monkeypatch, {"intro.mp4": 4.0})
+    (tmp_path / "intro.mp4").write_bytes(b"intro")
+    asked = _no_frames(monkeypatch)
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    _choose_file(monkeypatch, tmp_path / "intro.mp4")
+    dialog.intro_choose.click()
+    assert asked == ["intro.mp4"]
+    card = dialog.cards["intro"]
+    assert card.thumb_label.property("placeholder") is False
+    assert card.thumb_label.pixmap().width() < 100, "the film icon, not a frame"
+    dialog.ok_button.click()
+    assert dialog.result() == dialog.DialogCode.Accepted
+
+
+def test_a_gone_clip_and_a_refused_link_are_said_on_the_cards(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+    from qurantext.jobs.episode_assets import EpisodeChoice
+
+    _recitation_jobs(monkeypatch, tmp_path, episode_lecture.project.path)
+    _fake_probe(monkeypatch, {})
+    _no_frames(monkeypatch)
+    episode_lecture.set_episode(EpisodeChoice(intro=tmp_path / "gone.mp4", intro_name="gone.mp4"))
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    chip = dialog.cards["intro"].chip
+    assert not chip.isHidden() and chip.text_label.text() == t("episode.chip.missing")
+    assert chip.property("kind") == "attention"
+    dialog.intro_remove.click()
+    assert chip.isHidden()
+
+
+def test_a_refused_link_marks_the_outro_card_without_selecting_it(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui.i18n import t
+
+    _no_frames(monkeypatch)
+    dialog = _generated_dialog(episode_lecture, prefs, tmp_path, monkeypatch)
+    dialog.select_part("intro")
+    dialog.outro_link.setText("http://bad host")
+    assert dialog.selected_part() == "intro"
+    chip = dialog.cards["outro"].chip
+    assert not chip.isHidden() and chip.text_label.text() == t("episode.chip.attention")
+    dialog.outro_link.setText("example.org")
+    assert chip.isHidden()
+
+
+def test_the_recitation_card_repeats_the_chosen_jobs_standing(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+
+    paths = _recitation_jobs(monkeypatch, tmp_path, episode_lecture.project.path)
+    _fake_probe(monkeypatch, {"fatiha.mp4": 7.0})
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    card = dialog.cards["recitation"]
+    assert card.chip.isHidden() and card.length_label.text() == "—"
+    box = dialog.recitation_box
+    box.setCurrentIndex(box.findData(paths["rendered"]))
+    assert card.chip.text_label.text() == t("episode.rendered")
+    assert card.chip.property("kind") == "accent"
+    assert card.length_label.text() == "00:07"
+    box.setCurrentIndex(box.findData(paths["fresh"]))
+    assert card.chip.text_label.text() == t("episode.render_first")
+    assert card.chip.property("kind") == "neutral"
 
 
 def test_the_strip_fills_the_selected_word_with_the_accent(qt_app) -> None:

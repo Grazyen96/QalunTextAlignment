@@ -1,7 +1,23 @@
 """The Episode dialog: what plays around a lecture — an intro, a recitation, an outro.
 
 Rendering a lecture with an episode also writes ``<stem> – episode.mp4``, the
-parts joined in order around it. This dialog is where the person chooses them:
+parts joined in order around it. This dialog is where the person chooses them.
+
+The parts stand in a strip of four cards in render order: Intro, Recitation,
+Lecture, Outro. Each card holds its part's controls, a picture, its length and,
+when there is something to say, a chip. The picture is what the part shows: a
+clip's middle frame (``clip_frame``: ffmpeg into the thumbnail cache, a film
+icon when it cannot), a generated part's preview, the recitation's thumbnail,
+the lecture's own first card in its look; the dashed tile when nothing is
+chosen. The chip says a clip is gone, a generated part needs attention, or
+the recitation's standing, as its list says. One of intro and outro is
+selected (at first the first Generated one, else the intro; never the lecture
+or the recitation): a click, Enter, Space or focus on its card selects it,
+and the pane under the strip holds the selected part's generated fields. A
+part that needs attention is marked on its card, not selected, so typing in
+one part never moves the pane to the other.
+
+Each part, and the total:
 
 - the intro and outro are each None, My clip or Generated:
   - a clip is read (``probe_part``) as soon as it is chosen, so a file that is
@@ -18,8 +34,8 @@ parts joined in order around it. This dialog is where the person chooses them:
     part with nothing to show, disable OK and say why; a link too long for a
     QR code at the size the next render makes, an address that could pass for
     another, and letters the title font cannot draw are warned about. Each
-    has a still preview, its middle frame in the lecture's look, drawn once
-    typing rests (300 ms; about 20 ms a frame);
+    has a still preview, its middle frame in the lecture's look, drawn in the
+    pane and on its card once typing rests (300 ms; about 20 ms a frame);
 - the recitation is one of the recitation jobs in the job list. Each says
   whether its current video can be used as it is, or will be rendered first;
   a damaged job cannot be chosen;
@@ -39,8 +55,9 @@ reason to lose the episode, and is said by the window after it closes
 (:attr:`EpisodeDialog.default_error`).
 
 The dialog reads on the UI thread: the job folders once (about 0.1 s for 150
-local jobs) and each clip with ffprobe (about 10 ms). It is modal, so nothing
-else waits on it but the person who opened it.
+local jobs), each clip with ffprobe (about 10 ms) and its frame with ffmpeg
+(about as much, once: cached), and the lecture's picture once. It is modal, so
+nothing else waits on it but the person who opened it.
 """
 
 from __future__ import annotations
@@ -67,6 +84,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from qurantext.config.paths import user_cache_dir
 from qurantext.config.settings import VIDEO_PRESETS
 from qurantext.core.title_cards import (
     MAX_SECONDS,
@@ -84,7 +102,7 @@ from qurantext.gui import theme
 from qurantext.gui.colors import warning_color
 from qurantext.gui.i18n import ltr, plain_title, t
 from qurantext.gui.prefs import KEEP_DEFAULT, Prefs
-from qurantext.gui.review.episode_cards import PartCard
+from qurantext.gui.review.episode_cards import THUMB_BOX, PartCard, fitted_size
 from qurantext.gui.review.session import ReviewSession
 from qurantext.gui.surahs import stored_surah_names
 from qurantext.gui.widgets import make_primary
@@ -97,6 +115,7 @@ from qurantext.jobs.catalog import (
     job_status,
     list_jobs,
 )
+from qurantext.jobs.clip_frames import clip_frame
 from qurantext.jobs.episode import EpisodeError, probe_part, recitation_needs_render
 from qurantext.jobs.episode_assets import (
     DEFAULT_PHRASE,
@@ -116,6 +135,7 @@ from qurantext.jobs.generated_parts import (
 )
 from qurantext.jobs.project import Project, job_settings, load_project
 from qurantext.jobs.project_render import default_video_path
+from qurantext.jobs.thumbnails import thumbnail_for, thumbnail_image
 
 __all__ = ["KINDS", "PHRASES", "EpisodeDialog"]
 
@@ -138,7 +158,7 @@ PREVIEW_WIDTH = 320
 PREVIEW_BOX = (320, 180)
 #: How long typing rests before the previews are drawn again.
 PREVIEW_DELAY_MS = 300
-#: How far a generated part's fields are set in from its row (mirrored in Arabic).
+#: How far a generated part's fields are set in within the detail pane (mirrored in Arabic).
 _FIELDS_INDENT = 16
 #: The longest written address the dialog shows whole, in characters.
 _SHOWN_ADDRESS = 40
@@ -149,6 +169,13 @@ _TRACKED_MIN_WIDTH = 280
 _FIELDS = {
     "intro": ("name", "style", "seconds"),
     "outro": ("phrase", "link", "platform", "style", "seconds"),
+}
+
+#: A recitation's standing (``_status_code``) as its card's chip: its kind and icon.
+_CODE_CHIPS = {
+    "rendered": ("accent", "circle-check"),
+    "render_first": ("neutral", "info"),
+    "damaged": ("attention", "triangle-alert"),
 }
 
 #: The sentence for each reason a link is refused (``LinkError.code``).
@@ -208,6 +235,8 @@ class _ClipRow:
         #: The clip's original file name, when known (its copy is named by content).
         self.name: str | None = None
         self.length: float | None = None
+        #: The clip's middle frame as a PNG, when one could be made.
+        self.frame: Path | None = None
         self.touched = False
         #: The clip chosen before the dialog opened is not on disk any more.
         self.missing = False
@@ -268,6 +297,9 @@ class _ClipRow:
             self.label.setText(t("episode.clip", name=self.shown_name(), length=ltr(shown)))
             self.label.setToolTip(str(path))
         self.remove.setEnabled(path is not None)
+        self.frame = (
+            clip_frame(path, user_cache_dir(), seconds=length) if path is not None else None
+        )
         self._dialog._update_total()
 
     def _remove(self) -> None:
@@ -321,6 +353,12 @@ class EpisodeDialog(QDialog):
         self.default_error: str | None = None
         #: Each recitation's length once read, by project path (None: unknown).
         self._recitation_lengths: dict[Path, float | None] = {}
+        #: Each listed recitation's standing (``_status_code``), by resolved project path.
+        self._recitation_codes: dict[Path, str] = {}
+        #: Each recitation's project once read, by resolved path (None: unreadable).
+        self._recitation_projects: dict[Path, Project | None] = {}
+        #: The lecture's own picture, drawn once the size is known (None: nothing to draw).
+        self._lecture_pixmap: QPixmap | None = None
         #: Read once: the lecture does not change while the dialog is open.
         self._lecture_seconds = self._lecture_length()
         self._building = True
@@ -357,6 +395,7 @@ class EpisodeDialog(QDialog):
             "outro": PartCard(t("episode.outro")),
         }
         self.cards["lecture"].set_selectable(False)
+        self._lecture_pixmap = self._lecture_picture()
         self.cards["recitation"].set_selectable(False)
         strip = QHBoxLayout()
         strip.setSpacing(theme.SP_8)
@@ -801,6 +840,7 @@ class EpisodeDialog(QDialog):
         for label, lines in ((self.intro_warning, intro_lines), (self.outro_warning, outro_lines)):
             label.setText(" ".join(lines))
             label.setVisible(bool(lines))
+        self._update_cards()
 
     # -- the previews --------------------------------------------------------------------
 
@@ -829,8 +869,10 @@ class EpisodeDialog(QDialog):
                 # A text the font cannot lay out: said under the fields, not drawn.
                 _log.warning("The %s preview could not be drawn", part, exc_info=True)
                 preview.clear()
+                self.cards[part].set_icon_tile("film")
                 continue
             preview.setPixmap(_pixmap(image, preview.size()))
+            self.cards[part].set_thumbnail(_pixmap(image, QSize(*THUMB_BOX)))
             if part == "outro":
                 self._qr_warning = self._qr_fit_warning(spec)
         self._show_warnings()
@@ -864,13 +906,18 @@ class EpisodeDialog(QDialog):
             if not _is_recitation(entry) or path == own or path in listed:
                 continue
             listed.add(path)
-            box.addItem(_entry_text(entry, lecture_video), entry.project)
+            code = self._recitation_codes[path] = _status_code(entry, lecture_video)
+            box.addItem(_entry_text(entry, code), entry.project)
             if entry.status == DAMAGED:
                 box.model().item(box.count() - 1).setEnabled(False)
         if current is not None and _resolved(current) not in listed:
             # Chosen earlier, and no longer in the list (removed from it, or its
             # folder is not scanned): kept, so OK does not drop it unasked.
-            box.addItem(_entry_text(_entry_of(current), lecture_video), current)
+            entry = _entry_of(current)
+            code = self._recitation_codes[Path(current).expanduser().resolve()] = _status_code(
+                entry, lecture_video
+            )
+            box.addItem(_entry_text(entry, code), current)
         index = 0
         for i in range(1, box.count()):
             if _resolved(box.itemData(i)) == _resolved(current):
@@ -882,17 +929,31 @@ class EpisodeDialog(QDialog):
         data = self.recitation_box.currentData()
         return Path(data) if data else None
 
+    def _recitation_project(self, path: Path) -> Project | None:
+        """The recitation's project, read once for both its length and its picture."""
+        key = _resolved(path)
+        assert key is not None
+        if key not in self._recitation_projects:
+            try:
+                self._recitation_projects[key] = load_project(key)
+            except (OSError, ValueError, KeyError, TypeError):
+                self._recitation_projects[key] = None
+        return self._recitation_projects[key]
+
     def _recitation_length(self, path: Path) -> float | None:
         key = _resolved(path)
         assert key is not None
         if key not in self._recitation_lengths:
-            try:
-                project = load_project(key)
-            except (OSError, ValueError, KeyError, TypeError):
-                self._recitation_lengths[key] = None
-            else:
-                self._recitation_lengths[key] = _render_length(project) or _audio_length(project)
+            project = self._recitation_project(key)
+            self._recitation_lengths[key] = (
+                None if project is None else _render_length(project) or _audio_length(project)
+            )
         return self._recitation_lengths[key]
+
+    def _lecture_picture(self) -> QPixmap | None:
+        """The lecture's first card in its look, for its card; None when it shows no card."""
+        image = thumbnail_image(self._session.project, self._session.look, fitted_size(self._size))
+        return None if image is None else _pixmap(image, QSize(*THUMB_BOX))
 
     def _lecture_length(self) -> float | None:
         project = self._session.project
@@ -925,6 +986,71 @@ class EpisodeDialog(QDialog):
         if any(length is None for length in lengths):
             shown = f"{shown} + {t('episode.unknown')}"
         self.total_label.setText(t("episode.total", length=ltr(shown)))
+        self._update_cards()
+
+    # -- the cards -----------------------------------------------------------------
+
+    def _update_cards(self) -> None:
+        """Each card's picture, length and standing, from what the dialog holds now."""
+        if self._building:
+            return
+        for part, row in (("intro", self._intro), ("outro", self._outro)):
+            card = self.cards[part]
+            kind = self._kind(part)
+            if kind == "clip" and row.path is not None:
+                card.set_length(
+                    _length_text(row.length) if row.length is not None else t("episode.unknown")
+                )
+                frame = QPixmap(str(row.frame)) if row.frame is not None else QPixmap()
+                if not frame.isNull():
+                    card.set_thumbnail(frame)
+                else:
+                    card.set_icon_tile("film")
+            elif kind == "generated":
+                box = self.intro_seconds if part == "intro" else self.outro_seconds
+                card.set_length(_length_text(float(box.value())))
+                # Its picture is set by flush_previews, with the pane's preview.
+            else:
+                card.set_length("—")
+                card.set_placeholder()
+            if kind == "clip" and row.missing:
+                card.set_chip(t("episode.chip.missing"), "attention", "triangle-alert")
+            elif kind == "generated" and self._needs_attention(part):
+                card.set_chip(t("episode.chip.attention"), "attention", "triangle-alert")
+            else:
+                card.set_chip(None)
+
+        card = self.cards["recitation"]
+        recitation = self._recitation()
+        if recitation is None:
+            card.set_length("—")
+            card.set_placeholder()
+            card.set_chip(None)
+        else:
+            length = self._recitation_length(recitation)
+            card.set_length(_length_text(length) if length is not None else t("episode.unknown"))
+            project = self._recitation_project(recitation)
+            png = thumbnail_for(project, user_cache_dir()) if project is not None else None
+            picture = QPixmap(str(png)) if png is not None else QPixmap()
+            if not picture.isNull():
+                card.set_thumbnail(picture)
+            elif project is None:
+                card.set_placeholder()
+            else:
+                card.set_icon_tile("film")
+            code = self._recitation_codes.get(recitation.expanduser().resolve(), "render_first")
+            chip_kind, glyph = _CODE_CHIPS[code]
+            card.set_chip(t(f"episode.{code}"), chip_kind, glyph)
+
+        card = self.cards["lecture"]
+        seconds = self._lecture_seconds
+        card.set_length(_length_text(seconds) if seconds is not None else t("episode.unknown"))
+        card.set_thumbnail(self._lecture_pixmap)
+
+    def _needs_attention(self, part: str) -> bool:
+        """Whether *part*'s warning line has text, or the outro's link is refused."""
+        label = self.intro_warning if part == "intro" else self.outro_warning
+        return bool(label.text()) or (part == "outro" and self._link_error is not None)
 
     # -- reading and keeping -----------------------------------------------------------
 
@@ -973,6 +1099,7 @@ class EpisodeDialog(QDialog):
         elif self._missing_shown:
             self._show_message("")
         self._missing_shown = bool(text)
+        self._update_cards()
 
     def _keep(self) -> None:
         """Copy new clips beside the project, set the episode, keep what changed as default."""
@@ -1079,7 +1206,7 @@ def _unclipped_labels(form: QFormLayout) -> None:
 def _beside_preview(box: QWidget, form: QFormLayout, preview: QLabel) -> QWidget:
     _unclipped_labels(form)
     row = QHBoxLayout(box)
-    # Set in from the part's own row, so the fields read as that part's.
+    # Set in within the pane under the strip, so the fields read as the selected part's.
     row.setContentsMargins(_FIELDS_INDENT, 0, 0, 0)
     row.addLayout(form, 1)
     row.addWidget(preview, 0, Qt.AlignmentFlag.AlignTop)
@@ -1127,28 +1254,29 @@ def _is_recitation(entry: JobEntry) -> bool:
     )
 
 
-def _status_text(entry: JobEntry, lecture_video: Path | None) -> str:
-    """ "rendered" only when the episode would use the recorded video as it is.
+def _status_code(entry: JobEntry, lecture_video: Path | None) -> str:
+    """``rendered`` only when the episode would use the recorded video as it is.
 
     The rule the render itself follows (``recitation_needs_render``): the job
     list calls it current, its file is there, and it is not the lecture's own
     video. Only entries the job list calls rendered are read again for it.
+    Else ``render_first``, or ``damaged`` for a job that cannot be read.
     """
     if entry.status == DAMAGED:
-        return t("episode.damaged")
+        return "damaged"
     if entry.status != RENDERED:
-        return t("episode.render_first")
+        return "render_first"
     try:
         project = load_project(Path(entry.project))
         needs = recitation_needs_render(project, avoid=lecture_video)
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         needs = True
-    return t("episode.render_first") if needs else t("episode.rendered")
+    return "render_first" if needs else "rendered"
 
 
-def _entry_text(entry: JobEntry, lecture_video: Path | None = None) -> str:
-    """``fatiha · 1:1-7 · rendered``: which job, which ayat, and whether it renders first."""
-    status = _status_text(entry, lecture_video)
+def _entry_text(entry: JobEntry, code: str) -> str:
+    """``fatiha · 1:1-7 · rendered``: which job, which ayat, and its standing (*code*)."""
+    status = t(f"episode.{code}")
     if entry.ayah_range:
         return t(
             "episode.recitation_entry",
