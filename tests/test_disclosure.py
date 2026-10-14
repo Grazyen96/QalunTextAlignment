@@ -55,6 +55,31 @@ def test_with_animation_it_grows_then_frees_its_height(qt_app, panel) -> None:
     assert panel.maximumHeight() == _NO_LIMIT
 
 
+def test_a_finished_animation_is_deleted(qt_app, panel) -> None:
+    """Each open and close made a QPropertyAnimation that lived as long as the panel."""
+    from PySide6.QtCore import QCoreApplication, QEvent, QPropertyAnimation
+
+    def animations() -> list:
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        return panel.findChildren(QPropertyAnimation)
+
+    disclosure.reveal(panel, True, animate=True)
+    assert len(animations()) == 1
+    assert wait_for(lambda: panel.maximumHeight() == _NO_LIMIT, 2000)
+    assert animations() == []
+    disclosure.reveal(panel, False, animate=True)
+    assert wait_for(lambda: not panel.isVisible(), 2000)
+    assert animations() == []
+
+
+def test_closing_a_hidden_panel_is_instant(qt_app, panel) -> None:
+    """No 0-height panel shown for the length of an animation, taking its layout spacing."""
+    assert not panel.isVisible()
+    disclosure.reveal(panel, False, animate=True)
+    assert panel.isHidden()
+    assert panel.property("qalun.disclosure") is None
+
+
 def test_a_toggle_mid_animation_reverses_and_frees_the_height(qt_app, panel) -> None:
     disclosure.reveal(panel, True, animate=True)
     qt_app.processEvents()

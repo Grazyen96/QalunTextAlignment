@@ -7,9 +7,10 @@ the same way, driving its maximum height meanwhile and releasing it after.
 A toggle during the motion restarts from where the panel is.
 
 The motion is off when the person turned "Animate panels" off, when the
-style says widgets should not animate (``SH_Widget_Animate``), and when the
+style says widgets should not animate (``SH_Widget_Animate``), when the
 panel's window is not on screen yet (a panel opened at start-up by a saved
-setting appears as the window does).
+setting appears as the window does), and when closing a panel that is not
+showing. A finished animation deletes itself.
 """
 
 from __future__ import annotations
@@ -45,7 +46,9 @@ def reveal(widget: QWidget, open_: bool, *, animate: bool, duration_ms: int = DU
         running.stop()
         running.deleteLater()
     window = widget.window()
-    if not animate or window is None or not window.isVisible():
+    # Closing what is not on screen has nothing to shrink: hide it at once.
+    closing_hidden = not open_ and not widget.isVisible()
+    if not animate or window is None or not window.isVisible() or closing_hidden:
         widget.setMaximumHeight(_NO_LIMIT)
         widget.setVisible(open_)
         return
@@ -66,6 +69,7 @@ def reveal(widget: QWidget, open_: bool, *, animate: bool, duration_ms: int = DU
         widget.setMaximumHeight(_NO_LIMIT)
         if not open_:
             widget.setVisible(False)
+        animation.deleteLater()
 
     animation.finished.connect(finished)
     widget.setProperty(_ANIMATION, animation)
