@@ -184,7 +184,9 @@ this is the only place anyone hears each platform's build recognise speech.
 - [ ] The focus ring on buttons, palette swatches and cards now paints for keyboard
       focus only: on a real desktop, Tab and Shift+Tab through the home form, the Settings
       dialog and the review window show the ring on each in turn, and a click on a button
-      shows none. A field keeps Fusion's own highlighted frame however it got focus.
+      shows none. A checkbox, radio button or combo reached by Tab has its outline in the
+      accent; a line edit or spin box keeps Fusion's own highlighted frame however it got
+      focus, and a combo picked with the mouse keeps its plain border.
 
 ## Words
 

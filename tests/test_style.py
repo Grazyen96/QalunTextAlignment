@@ -8,8 +8,10 @@ pytest.importorskip("PySide6", reason="the window needs Qt: pip install 'qurante
 
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QColor  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QCheckBox,
+    QComboBox,
     QLineEdit,
     QProxyStyle,
     QRadioButton,
@@ -41,9 +43,9 @@ def _indicator_left(box) -> tuple[int, int]:
     return rect.left(), rect.center().y()
 
 
-def _column_has(widget, x: int, y: int, target: QColor) -> bool:
+def _column_has(widget, x: int, y: int, target: QColor, slack: int = 28) -> bool:
     image = widget.grab().toImage()
-    return any(_near(image.pixelColor(x + dx, y), target) for dx in range(3))
+    return any(_near(image.pixelColor(x + dx, y), target, slack) for dx in range(3))
 
 
 def _application_style(app) -> QStyle:
@@ -114,3 +116,51 @@ def test_the_sheet_still_names_none_of_fusions_widgets(qt_app) -> None:
     sheet = theme.stylesheet(theme.DARK)
     for name in ("QCheckBox", "QRadioButton", "QComboBox", "QSpinBox"):
         assert name not in sheet
+
+
+def test_a_keyboard_focused_checkbox_keeps_fusions_highlight_on_its_indicator(qt_app) -> None:
+    """The proxy's grey stroke stays off a box that has keyboard focus.
+
+    Fusion strokes the box in the highlight when the focus came from the
+    keyboard; drawing the secondary outline on top would hide the one cue a
+    keyboard user has on a checkbox. Qt marks keyboard focus on the window
+    when a real Tab key goes through the application, so the test presses one.
+    """
+    tokens = theme.apply_theme(qt_app, "dark")
+    window = QWidget()
+    column = QVBoxLayout(window)
+    other, box = QLineEdit(), QCheckBox("x")
+    column.addWidget(other)
+    column.addWidget(box)
+    window.show()
+    window.activateWindow()
+    other.setFocus(Qt.FocusReason.MouseFocusReason)
+    qt_app.processEvents()
+    x, y = _indicator_left(box)
+    assert _column_has(box, x, y, QColor(tokens.secondary)), "unfocused: the outline"
+    QTest.keyClick(other, Qt.Key.Key_Tab)
+    qt_app.processEvents()
+    assert box.hasFocus()
+    assert _column_has(box, x, y, QColor(tokens.accent), slack=40), "focused: the highlight"
+    assert not _column_has(box, x, y, QColor(tokens.secondary), slack=12)
+    window.close()
+
+
+@pytest.mark.parametrize("mode", ["light", "dark"])
+def test_a_combo_focused_by_a_click_keeps_the_border_frame(qt_app, mode) -> None:
+    """Fusion frames a combo in its highlight only for keyboard focus, so the proxy frames a clicked one."""
+    tokens = theme.apply_theme(qt_app, mode)
+    window = QWidget()
+    column = QVBoxLayout(window)
+    combo = QComboBox()
+    combo.addItems(["one", "two"])
+    column.addWidget(combo)
+    column.addWidget(QLineEdit())
+    window.show()
+    window.activateWindow()
+    combo.setFocus(Qt.FocusReason.MouseFocusReason)
+    qt_app.processEvents()
+    assert combo.hasFocus()
+    edge = combo.grab().toImage().pixelColor(0, combo.height() // 2)
+    assert _near(edge, QColor(tokens.border), slack=8), (mode, edge.name())
+    window.close()
