@@ -56,7 +56,6 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QSplitter,
     QStyle,
     QToolButton,
@@ -217,6 +216,18 @@ class _FrameScroll(QScrollArea):
         super().resizeEvent(event)
         if event.oldSize().width() != event.size().width():
             self.updateGeometry()  # a new width is a new height to ask for
+
+
+class _LookScroll(QScrollArea):
+    """The Look panel's scroll area, asking for its :data:`_LOOK_MIN_HEIGHT` floor in height.
+
+    Its whole panel's height would crowd the preview out of a short window,
+    and no height at all (an Ignored policy) would open the window that much
+    too short, as a window shown at its size hint is.
+    """
+
+    def sizeHint(self) -> QSize:  # noqa: D102 - Qt override, documented by the class
+        return QSize(super().sizeHint().width(), _LOOK_MIN_HEIGHT)
 
 
 def _separator() -> QFrame:
@@ -474,8 +485,9 @@ class ReviewWindow(QMainWindow):
         # The full-size view, also a double-click on the preview away.
         self.full_frame_button = QToolButton()
         self.full_frame_button.setAutoRaise(True)
-        self.full_frame_button.setToolTip(t("review.full_frame"))
-        self.full_frame_button.setAccessibleName(t("review.full_frame"))
+        # Its own tip: the preview's names the double-click, which a button does not need.
+        self.full_frame_button.setToolTip(t("review.full_frame_button"))
+        self.full_frame_button.setAccessibleName(t("review.full_frame_button"))
         set_icon(self.full_frame_button, "maximize-2", size=16)
         fit_row = QHBoxLayout()
         fit_row.addStretch(1)
@@ -536,16 +548,13 @@ class ReviewWindow(QMainWindow):
             frame_size=(self.frame_view.sizeHint().width(), self.frame_view.sizeHint().height()),
             reserve_caption_band=self.session.frame_inputs(0.0)[2],
         )
-        scroll = QScrollArea()
+        scroll = _LookScroll()
         scroll.setWidget(self.look_panel)
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        # Its height is whatever the preview leaves: no height of its own to ask
-        # for (Ignored), only a floor below which the preview gives way instead.
-        policy = scroll.sizePolicy()
-        policy.setVerticalPolicy(QSizePolicy.Policy.Ignored)
-        scroll.setSizePolicy(policy)
+        # It asks for its floor only (see _LookScroll) and takes whatever the
+        # preview leaves; below that floor the preview gives way instead.
         scroll.setMinimumHeight(_LOOK_MIN_HEIGHT)
         self.look_scroll = scroll
         return scroll

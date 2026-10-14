@@ -108,7 +108,8 @@ def test_every_key_the_window_answers_to_is_on_the_sheet(qt_app, tmp_path) -> No
     save_project(project, tmp_path / "m.qalun.json")
     window = ReviewWindow(project, player=FakePlayer(duration=10.0))
     try:
-        shown = " ".join(keys for _, keys, _ in BINDINGS)
+        # Each key exactly as the sheet lists it ("Shift+, / Shift+." is two).
+        shown = {key for _, keys, _ in BINDINGS for key in keys.split(" / ") if key}
         arrows = {"Left": "←", "Right": "→"}
         # Key-press aliases of a key the sheet already names (what a shifted
         # press reports on a US layout).

@@ -2796,7 +2796,8 @@ def test_the_full_size_button_opens_the_frame_at_the_time_shown(qt_app, tmp_path
         window.show()
         window.seek(2.5)
         assert window.full_frame_button.property("qalun.icon")[0] == "maximize-2"
-        assert window.full_frame_button.toolTip() == t("review.full_frame")
+        assert window.full_frame_button.toolTip() == t("review.full_frame_button")
+        assert window.frame_view.toolTip() == t("review.full_frame")  # the double-click's
         seen = []
         window.frame_view.full_frame_requested.connect(seen.append)
         window.full_frame_button.click()
@@ -2812,3 +2813,30 @@ def test_the_remove_button_says_its_whole_sentence_as_a_tip(qt_app, tmp_path) ->
     window, _, _ = _window(qt_app, tmp_path)
     assert window.remove_button.text() == t("review.remove")
     assert window.remove_button.toolTip() == t("review.remove.tip")
+
+
+def test_a_window_shown_at_its_own_size_keeps_the_preview_at_its_preset_height(
+    qt_app, tmp_path
+) -> None:
+    """The home window shows the review without resizing it: its size hint must make room.
+
+    The offscreen screen is 800 px tall, so a plain ``show()`` would cap the
+    window at two thirds of it; the window is shown at its own size hint
+    instead, which is what ``show()`` gives on a screen of 1080 px and up.
+    """
+    from qurantext.gui import theme
+
+    theme.apply_theme(qt_app, "light")
+    window = _lecture_window(qt_app, tmp_path)
+    try:
+        hint = window.sizeHint()
+        assert hint.height() >= 700
+        window.resize(hint)
+        window.show()
+        _spin(50)
+        assert window.height() >= 700
+        assert window.frame_view.height() >= 440
+        assert window.look_scroll.height() >= 120
+    finally:
+        window.close()
+        window.deleteLater()
