@@ -7,15 +7,17 @@ The parts stand in a strip of four cards in render order: Intro, Recitation,
 Lecture, Outro. Each card holds its part's controls, a picture, its length and,
 when there is something to say, a chip. The picture is what the part shows: a
 clip's middle frame (``clip_frame``: ffmpeg into the thumbnail cache, a film
-icon when it cannot), a generated part's preview, the recitation's thumbnail,
-the lecture's own first card in its look; the dashed tile when nothing is
-chosen. The chip says a clip is gone, a generated part needs attention, or
-the recitation's standing, as its list says. One of intro and outro is
-selected (at first the first Generated one, else the intro; never the lecture
-or the recitation): a click, Enter, Space or focus on its card selects it,
-and the pane under the strip holds the selected part's generated fields. A
-part that needs attention is marked on its card, not selected, so typing in
-one part never moves the pane to the other.
+icon when it cannot), a generated part's preview, the recitation's own first
+card in its look and the lecture's in its, each drawn at the card's size; the
+dashed tile when nothing is chosen. A picture is drawn or read once per clip
+frame or recitation while the dialog is open, so typing elsewhere redraws
+none. The chip says a clip is gone, a generated part needs attention, or the
+recitation's standing, as its list says. One of intro and outro is selected
+(at first the first Generated one, else the intro; never the lecture or the
+recitation): a click, Enter, Space or focus on its card selects it, and the
+pane under the strip holds the selected part's generated fields. A part that
+needs attention is marked on its card, not selected, so typing in one part
+never moves the pane to the other.
 
 Each part, and the total:
 
@@ -56,8 +58,9 @@ reason to lose the episode, and is said by the window after it closes
 
 The dialog reads on the UI thread: the job folders once (about 0.1 s for 150
 local jobs), each clip with ffprobe (about 10 ms) and its frame with ffmpeg
-(about as much, once: cached), and the lecture's picture once. It is modal, so
-nothing else waits on it but the person who opened it.
+(about as much, once: cached), and the lecture's picture and each chosen
+recitation's once. It is modal, so nothing else waits on it but the person
+who opened it.
 """
 
 from __future__ import annotations
@@ -86,6 +89,7 @@ from PySide6.QtWidgets import (
 
 from qurantext.config.paths import user_cache_dir
 from qurantext.config.settings import VIDEO_PRESETS
+from qurantext.core.looks import look_from_style
 from qurantext.core.title_cards import (
     MAX_SECONDS,
     MIN_SECONDS,
@@ -135,7 +139,7 @@ from qurantext.jobs.generated_parts import (
 )
 from qurantext.jobs.project import Project, job_settings, load_project
 from qurantext.jobs.project_render import default_video_path
-from qurantext.jobs.thumbnails import thumbnail_for, thumbnail_image
+from qurantext.jobs.thumbnails import thumbnail_image
 
 __all__ = ["KINDS", "PHRASES", "EpisodeDialog"]
 
@@ -294,8 +298,8 @@ class _ClipRow:
             self.label.setToolTip("")
         else:
             shown = _length_text(length) if length is not None else t("episode.unknown")
-            # A name with no space to wrap at is shortened in the middle to the card's
-            # inner width, keeping its start and its extension; the tooltip has it whole.
+            # Any name wider than the card's inner width is elided in the middle, keeping
+            # its start and its extension; the tooltip has it whole.
             name_shown = QFontMetrics(self.label.font()).elidedText(
                 self.shown_name(), Qt.TextElideMode.ElideMiddle, THUMB_BOX[0]
             )
@@ -362,6 +366,9 @@ class EpisodeDialog(QDialog):
         self._recitation_codes: dict[Path, str] = {}
         #: Each recitation's project once read, by resolved path (None: unreadable).
         self._recitation_projects: dict[Path, Project | None] = {}
+        #: Each card picture once drawn or read, by ("recitation", resolved project path)
+        #: or ("clip", frame path); None when there is none to show.
+        self._card_pixmaps: dict[tuple[str, Path], QPixmap | None] = {}
         #: The lecture's own picture, drawn once the size is known (None: nothing to draw).
         self._lecture_pixmap: QPixmap | None = None
         #: Read once: the lecture does not change while the dialog is open.
@@ -979,6 +986,34 @@ class EpisodeDialog(QDialog):
             )
         return self._recitation_lengths[key]
 
+    def _recitation_picture(self, path: Path) -> QPixmap | None:
+        """The recitation's first card at its own look, drawn once per job for the card's box.
+
+        Drawn at the card's size in the recitation's shape, not the home list's
+        96 px thumbnail scaled up; kept, so an edit elsewhere in the dialog does
+        not draw it again.
+        """
+        key = ("recitation", path.expanduser().resolve())
+        if key not in self._card_pixmaps:
+            project = self._recitation_project(path)
+            pixmap: QPixmap | None = None
+            if project is not None:
+                base_dir = project.path.parent if project.path is not None else None
+                look = look_from_style(project.style, base_dir=base_dir)
+                width, height = VIDEO_PRESETS[job_settings(project).preset][:2]
+                image = thumbnail_image(project, look, fitted_size((int(width), int(height))))
+                pixmap = None if image is None else _pixmap(image, QSize(*THUMB_BOX))
+            self._card_pixmaps[key] = pixmap
+        return self._card_pixmaps[key]
+
+    def _clip_picture(self, frame: Path) -> QPixmap | None:
+        """A clip's middle frame, read once; None when the file is not a picture."""
+        key = ("clip", frame)
+        if key not in self._card_pixmaps:
+            pixmap = QPixmap(str(frame))
+            self._card_pixmaps[key] = None if pixmap.isNull() else pixmap
+        return self._card_pixmaps[key]
+
     def _lecture_picture(self) -> QPixmap | None:
         """The lecture's first card in its look, for its card; None when it shows no card."""
         image = thumbnail_image(self._session.project, self._session.look, fitted_size(self._size))
@@ -1030,8 +1065,8 @@ class EpisodeDialog(QDialog):
                 card.set_length(
                     _length_text(row.length) if row.length is not None else t("episode.unknown")
                 )
-                frame = QPixmap(str(row.frame)) if row.frame is not None else QPixmap()
-                if not frame.isNull():
+                frame = self._clip_picture(row.frame) if row.frame is not None else None
+                if frame is not None:
                     card.set_thumbnail(frame)
                 else:
                     card.set_icon_tile("film")
@@ -1058,12 +1093,10 @@ class EpisodeDialog(QDialog):
         else:
             length = self._recitation_length(recitation)
             card.set_length(_length_text(length) if length is not None else t("episode.unknown"))
-            project = self._recitation_project(recitation)
-            png = thumbnail_for(project, user_cache_dir()) if project is not None else None
-            picture = QPixmap(str(png)) if png is not None else QPixmap()
-            if not picture.isNull():
+            picture = self._recitation_picture(recitation)
+            if picture is not None:
                 card.set_thumbnail(picture)
-            elif project is None:
+            elif self._recitation_project(recitation) is None:
                 card.set_placeholder()
             else:
                 card.set_icon_tile("film")

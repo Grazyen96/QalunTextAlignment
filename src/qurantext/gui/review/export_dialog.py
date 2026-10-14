@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -26,6 +26,8 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QRadioButton,
+    QStyle,
+    QStyleOptionButton,
     QVBoxLayout,
     QWidget,
 )
@@ -44,9 +46,6 @@ __all__ = ["ExportDialog"]
 
 #: SRT is the format almost everything downstream understands; preselect it.
 _DEFAULT_FORMAT = "srt"
-
-#: A format description lines up with its checkbox label: the indicator plus its gap.
-_HINT_INDENT = 24
 
 
 class ExportDialog(QDialog):
@@ -87,7 +86,7 @@ class ExportDialog(QDialog):
             hint.setWordWrap(True)
             hint.setFont(theme.font("secondary"))
             hint.setForegroundRole(QPalette.ColorRole.PlaceholderText)
-            hint.setIndent(_HINT_INDENT)  # follows the text direction, unlike a margin
+            hint.setIndent(_text_start(box))  # follows the text direction, unlike a margin
             self.format_hints[name] = hint
             layout.addWidget(hint)
 
@@ -266,3 +265,17 @@ def _named_files(destination: Path) -> Path:
     if suffix.lstrip(".") in SUBTITLE_FORMATS or suffix in EPISODE_SUFFIXES:
         name = Path(name).stem
     return destination.with_name(f"{name}.subtitles")
+
+
+def _text_start(box: QCheckBox) -> int:
+    """How far *box*'s text starts from its leading edge: the style's indicator and gap.
+
+    Measured left to right: the style gives a visual rect, which in a right-to-left
+    window starts at the left edge, away from the indicator. A label's indent is
+    already taken from its leading edge, so it wants the logical distance.
+    """
+    option = QStyleOptionButton()
+    box.initStyleOption(option)
+    option.direction = Qt.LayoutDirection.LeftToRight
+    contents = box.style().subElementRect(QStyle.SubElement.SE_CheckBoxContents, option, box)
+    return contents.left()

@@ -118,7 +118,10 @@ def test_a_chip_in_a_list_paints_its_word_in_its_own_colour(qt_app) -> None:
     host.setItemWidget(item, chip)
     shown = chip.text_label.palette().color(chip.text_label.foregroundRole())
     assert shown == QColor(theme.LIGHT.accent)
-    host.deleteLater()
+    # No ``host.deleteLater()``: it hands the list to Qt until some later event loop
+    # deletes it, and with the chip's own wrapper gone by then, the next theme switch's
+    # ``setPalette`` (the screenshot tool's, in the same run) met a freed widget and
+    # crashed about two runs in three. Python deletes the list when the test ends.
 
 
 def test_a_chip_can_change_its_icon(qt_app) -> None:
@@ -130,3 +133,20 @@ def test_a_chip_can_change_its_icon(qt_app) -> None:
     assert chip.icon_label.pixmap().toImage() != before
     chip.set_icon(None)
     assert chip.icon_label.isHidden()
+
+
+def test_chip_and_tile_pixmaps_carry_the_widgets_device_pixel_ratio(qt_app) -> None:
+    from PySide6.QtCore import QSize
+
+    from qurantext.core.looks import NIGHT_GOLD
+    from qurantext.gui.review.look_panel import _chip_icon, _swatch_icon
+    from qurantext.gui.widgets import StatusChip
+
+    chip = StatusChip("x", "info", "neutral")
+    assert chip.icon_label.pixmap().devicePixelRatio() == chip.icon_label.devicePixelRatioF()
+    for ratio in (1.0, 2.0):
+        pixmap = _swatch_icon(NIGHT_GOLD, ratio=ratio).pixmap(QSize(56, 36), ratio)
+        assert pixmap.devicePixelRatio() == ratio
+        assert pixmap.size() == QSize(round(56 * ratio), round(36 * ratio))
+        chip_pixmap = _chip_icon(NIGHT_GOLD.card, ratio=ratio).pixmap(QSize(24, 24), ratio)
+        assert chip_pixmap.devicePixelRatio() == ratio

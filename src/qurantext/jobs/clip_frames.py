@@ -2,11 +2,14 @@
 
 ffmpeg writes the clip's middle frame as a PNG under the same ``thumbs``
 cache the home list's thumbnails use, keyed by the clip's path, time and
-size, so a clip is read once however often the dialog opens. Everything that
-can go wrong (no ffmpeg, a file that is not a video, a slow decode, a cache
-that cannot be written) gives ``None``: the card then shows an icon, and the
-dialog opens all the same. Runs where it is called: the dialog already reads
-each clip with ffprobe on the UI thread, and a frame costs about as much.
+size, so a clip is read once however often the dialog opens. When ffmpeg
+writes an empty file (the seek landed past the picture, as in a short sting
+under a longer sound) the frame at 0 s is taken instead, and only then does
+the result give up. Everything that can go wrong (no ffmpeg, a file that is
+not a video, a slow decode, a cache that cannot be written, no picture even at
+0 s) gives ``None``: the card then shows an icon, and the dialog opens all the
+same. Runs where it is called: the dialog already reads each clip with ffprobe
+on the UI thread, and a frame costs about as much.
 """
 
 from __future__ import annotations
@@ -33,7 +36,9 @@ def clip_frame(
 ) -> Path | None:
     """The PNG of *path*'s frame at ``seconds / 2`` (0 when unknown), *long_side* wide or tall.
 
-    Served from the cache when it is there; ``None`` for anything that fails.
+    Served from the cache when it is there. When ffmpeg writes an empty file (the
+    seek landed past the picture) the frame at 0 s is taken instead, and only
+    then does this give up; ``None`` for anything that fails.
     """
     if cache_dir is None:
         return None

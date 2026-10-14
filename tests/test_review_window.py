@@ -567,6 +567,30 @@ def test_each_format_has_a_description_and_the_disabled_radio_says_why(qt_app, t
     assert dialog.needs_render_chip.isHidden()
 
 
+def test_the_format_hint_lines_up_with_the_checkbox_text(qt_app, tmp_path) -> None:
+    from PySide6.QtWidgets import QStyle, QStyleOptionButton
+
+    from qurantext.gui.review.export_dialog import ExportDialog
+    from qurantext.gui.review.session import ReviewSession
+
+    dialog = ExportDialog(ReviewSession(_project(tmp_path)))
+    box = dialog._format_boxes["srt"]
+    option = QStyleOptionButton()
+    box.initStyleOption(option)
+    contents = box.style().subElementRect(QStyle.SubElement.SE_CheckBoxContents, option, box)
+    assert dialog.format_hints["srt"].indent() == contents.left()
+    # In Arabic the style's rect is mirrored (its left is the far side); the indent is
+    # still the distance from the box's leading edge to its text.
+    from qurantext.gui import i18n
+    from qurantext.gui.language import apply_language
+
+    apply_language(qt_app, "ar")
+    arabic = ExportDialog(ReviewSession(_project(tmp_path)))
+    assert arabic._format_boxes["srt"].layoutDirection() == Qt.LayoutDirection.RightToLeft
+    assert arabic.format_hints["srt"].indent() == contents.left()
+    assert i18n.is_rtl()
+
+
 def test_the_format_descriptions_read_in_arabic(qt_app, tmp_path) -> None:
     from qurantext.gui import i18n
     from qurantext.gui.review.export_dialog import ExportDialog
@@ -2169,8 +2193,6 @@ def _episode_answers(monkeypatch, tmp_path, *, intro=None, recitation=None, acce
     if recitation is not None:
         entries.append(JobEntry(recitation, "rec", "recitation", NEEDS_REVIEW, 1.0, 5, "25:7-11"))
     monkeypatch.setattr(episode_dialog, "list_jobs", lambda *a, **k: entries)
-    # A clip's frame and a recitation's picture are cached: not in the real cache.
-    monkeypatch.setenv("QURANTEXT_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setattr(
         episode_dialog,
         "probe_part",

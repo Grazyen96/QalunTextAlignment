@@ -189,3 +189,12 @@ def test_thumbnail_image_is_none_for_no_cards_or_a_failing_renderer(tmp_path, mo
 
     monkeypatch.setattr(thumbnails, "render_frame_pillow", boom)
     assert thumbnails.thumbnail_image(_project(tmp_path), NIGHT_GOLD, (54, 96)) is None
+
+
+def test_every_test_has_a_private_cache_dir() -> None:
+    import os
+
+    from qurantext.config.paths import user_cache_dir
+
+    assert os.environ.get("QURANTEXT_CACHE_DIR"), "conftest points the cache at tmp_path"
+    assert "pytest" in str(user_cache_dir()) or "tmp" in str(user_cache_dir())

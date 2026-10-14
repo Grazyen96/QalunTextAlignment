@@ -1380,9 +1380,47 @@ def test_palette_tiles_are_56_by_36_and_the_chosen_one_wears_a_gold_ring(
     assert tile.iconSize() == QSize(56, 36)
     on = tile.icon().pixmap(QSize(56, 36), QIcon.Mode.Normal, QIcon.State.On).toImage()
     off = tile.icon().pixmap(QSize(56, 36), QIcon.Mode.Normal, QIcon.State.Off).toImage()
-    assert on.pixelColor(0, 18) == QColor(theme.current_tokens().gold)
+    # Night gold's frame is dark, so its ring takes the dark theme's gold, whatever
+    # the theme (the ring reads on the tile it sits on: see the test below).
+    assert on.pixelColor(0, 18) == QColor(theme.DARK.gold)
     assert off.pixelColor(0, 18) == QColor(*NIGHT_GOLD.frame_bg[:3])
     assert tile.isChecked()
+
+
+def test_a_chosen_tile_s_ring_takes_the_gold_that_reads_on_the_tile(qt_app, session, prefs) -> None:
+    """The dark theme's gold is 1.98:1 on a pale tile: a pale tile wears the light theme's."""
+    from PySide6.QtCore import QSize
+    from PySide6.QtGui import QColor, QIcon
+
+    from qurantext.gui import theme
+
+    theme.apply_theme(qt_app, "dark")
+    panel = _panel(session, prefs)
+
+    def ring(name: str) -> QColor:
+        tile = panel.palette_buttons[name]
+        on = tile.icon().pixmap(QSize(56, 36), QIcon.Mode.Normal, QIcon.State.On).toImage()
+        return on.pixelColor(0, 18)
+
+    assert ring("ink_on_paper") == QColor(theme.LIGHT.gold)
+    assert ring("night_gold") == QColor(theme.DARK.gold)
+    # At a HiDPI ratio the tile is sampled at its logical (2, 2), and ringed at its edge.
+    from qurantext.core.looks import PRESETS
+    from qurantext.gui.review.look_panel import _swatch_icon
+
+    for name, gold in (("ink_on_paper", theme.LIGHT.gold), ("night_gold", theme.DARK.gold)):
+        icon = _swatch_icon(PRESETS[name], ratio=2.0)
+        on = icon.pixmap(QSize(56, 36), 2.0, QIcon.Mode.Normal, QIcon.State.On).toImage()
+        assert on.devicePixelRatio() == 2.0
+        assert on.pixelColor(0, 36) == QColor(gold), name
+        assert on.pixelColor(on.width() - 1, 36) == QColor(gold), "the far edge too"
+
+
+def test_a_colour_row_tells_a_screen_reader_its_hex(qt_app, session, prefs) -> None:
+    panel = _panel(session, prefs)
+    row = panel.colour_buttons["card"]
+    assert row.hex_label.text()
+    assert row.accessibleDescription() == row.hex_label.text()
 
 
 def test_colour_rows_show_the_hex_and_follow_a_pick(qt_app, session, prefs, monkeypatch) -> None:
@@ -1924,7 +1962,6 @@ def episode_lecture(tmp_path, monkeypatch):
     from qurantext.jobs.project import CaptionCue, Project, load_project, save_project
 
     monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("QURANTEXT_CACHE_DIR", str(tmp_path / "cache"))
     project = Project(
         audio=tmp_path / "dars.mp3",
         mode="lecture",
@@ -2039,6 +2076,43 @@ def test_the_episode_dialog_starts_from_the_sessions_choice(
     assert dialog.choice() == EpisodeChoice(
         intro.resolve(), jobs["rendered"].resolve(), None, intro_name="Channel intro.mp4"
     )
+
+
+def test_the_recitation_card_is_drawn_sharp_at_its_box_and_cached(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    """Drawn for the card's box at the recitation's own shape, once; not upscaled from 96 px."""
+    from PIL import Image
+
+    from qurantext.config.settings import VIDEO_PRESETS
+    from qurantext.gui.review import episode_dialog
+    from qurantext.gui.review.episode_cards import fitted_size
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+
+    paths = _recitation_jobs(monkeypatch, tmp_path, episode_lecture.project.path)
+    _fake_probe(monkeypatch, {"fatiha.mp4": 7.0})
+    drawn = []
+
+    def picture(project, look, size):
+        drawn.append(size)
+        return Image.new("RGB", size, (10, 200, 10))
+
+    monkeypatch.setattr(episode_dialog, "thumbnail_image", picture)
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    # The lecture's own card draws once at open, at the same size (both are social):
+    # only the draws after the recitation is chosen are the recitation's.
+    before = len(drawn)
+    box = dialog.recitation_box
+    box.setCurrentIndex(box.findData(paths["rendered"]))
+    card = dialog.cards["recitation"]
+    shape = fitted_size(VIDEO_PRESETS["social"][:2])
+    assert shape == (56, 99)
+    assert card.thumb_label.pixmap().size().toTuple() == shape
+    assert drawn[before:] == [shape], "drawn for the card, not upscaled from 96 px"
+    first = card.thumb_label.pixmap().cacheKey()
+    dialog.outro_link.setText("example.org")  # any edit: _update_cards runs again
+    assert card.thumb_label.pixmap().cacheKey() == first
+    assert len(drawn) == before + 1, "cached"
 
 
 def test_the_recitation_list_shows_each_jobs_state_and_hides_the_lecture(
@@ -2312,7 +2386,6 @@ def test_a_seeded_lecture_shows_the_default_s_own_name(
     from qurantext.jobs.project import CaptionCue, Project
 
     monkeypatch.setenv("QURANTEXT_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("QURANTEXT_CACHE_DIR", str(tmp_path / "cache"))
     source = tmp_path / "Channel intro 2024.mp4"
     source.write_bytes(b"an intro")
     prefs.save_default_episode(source, None)

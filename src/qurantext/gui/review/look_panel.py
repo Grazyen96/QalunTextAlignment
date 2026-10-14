@@ -152,17 +152,33 @@ def _qcolor(colour: tuple[int, ...]) -> QColor:
     return QColor(*colour)
 
 
+def _ring_gold(pixmap: QPixmap) -> QColor:
+    """The gold that reads on *pixmap*'s edge, whatever the theme.
+
+    The dark theme's gold is 1.98:1 on a pale tile, so a pale tile (its pixel at
+    2, 2 has a lightness of 128 or more) wears the light theme's gold, and a dark
+    one the dark theme's.
+    """
+    ratio = pixmap.devicePixelRatio()
+    at = int(2 * ratio)  # logical (2, 2) in the pixmap's own pixels
+    corner = pixmap.toImage().pixelColor(at, at)
+    return QColor(theme.LIGHT.gold if corner.lightness() >= 128 else theme.DARK.gold)
+
+
 def _ringed(pixmap: QPixmap) -> QPixmap:
-    """*pixmap* with the theme's gold ring on its edge: the chosen tile."""
+    """*pixmap* with a gold ring on its edge, in the gold that reads on it: the chosen tile.
+
+    The copy keeps *pixmap*'s pixel ratio, so the ring is painted in its logical pixels.
+    """
+    ratio = pixmap.devicePixelRatio()
     ringed = QPixmap(pixmap)
     painter = QPainter(ringed)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setPen(QPen(QColor(theme.current_tokens().gold), _RING))
+    painter.setPen(QPen(_ring_gold(pixmap), _RING))
     painter.setBrush(Qt.BrushStyle.NoBrush)
     half = _RING / 2
-    painter.drawRoundedRect(
-        QRectF(half, half, pixmap.width() - _RING, pixmap.height() - _RING), 3, 3
-    )
+    width, height = pixmap.width() / ratio, pixmap.height() / ratio
+    painter.drawRoundedRect(QRectF(half, half, width - _RING, height - _RING), 3, 3)
     painter.end()
     return ringed
 
@@ -175,9 +191,19 @@ def _two_state_icon(pixmap: QPixmap) -> QIcon:
     return result
 
 
-def _swatch_icon(look: Look) -> QIcon:
+def _canvas(size: QSize, ratio: float) -> QPixmap:
+    """A pixmap *size* logical pixels big at *ratio*: sharp on a HiDPI screen.
+
+    A painter on it works in logical pixels (Qt scales it by the ratio).
+    """
+    pixmap = QPixmap(size * ratio)
+    pixmap.setDevicePixelRatio(ratio)
+    return pixmap
+
+
+def _swatch_icon(look: Look, ratio: float = 1.0) -> QIcon:
     """The preset in miniature: its card on its background, a line of text and a highlight."""
-    pixmap = QPixmap(_SWATCH)
+    pixmap = _canvas(_SWATCH, ratio)
     pixmap.fill(_qcolor(look.frame_bg))
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -193,9 +219,9 @@ def _swatch_icon(look: Look) -> QIcon:
     return _two_state_icon(pixmap)
 
 
-def _chip_icon(colour: RGBA) -> QIcon:
+def _chip_icon(colour: RGBA, ratio: float = 1.0) -> QIcon:
     """A colour as a small square, over a checkerboard so a see-through colour shows as one."""
-    pixmap = QPixmap(_CHIP)
+    pixmap = _canvas(_CHIP, ratio)
     pixmap.fill(QColor(255, 255, 255))
     painter = QPainter(pixmap)
     painter.setPen(Qt.PenStyle.NoPen)
@@ -239,18 +265,21 @@ def _background_for_kind(look: Look, kind: str) -> Background:
     return Background(kind, colour, colour2)
 
 
-def _pil_pixmap(image) -> QPixmap:  # noqa: ANN001 — a PIL image
+def _pil_pixmap(image, ratio: float = 1.0) -> QPixmap:  # noqa: ANN001 — a PIL image
+    """*image* (drawn at *ratio* times the logical size) as a pixmap at *ratio*."""
     rgba = image.convert("RGBA")
     width, height = rgba.size
     qimage = QImage(rgba.tobytes(), width, height, 4 * width, QImage.Format.Format_RGBA8888)
-    return QPixmap.fromImage(qimage.copy())
+    pixmap = QPixmap.fromImage(qimage.copy())
+    pixmap.setDevicePixelRatio(ratio)
+    return pixmap
 
 
-def _icon_tile(colour: RGBA, name: str) -> QPixmap:
+def _icon_tile(colour: RGBA, name: str, ratio: float = 1.0) -> QPixmap:
     """*name*'s icon centred on *colour*: the image tile while the look has no image."""
-    pixmap = QPixmap(_SWATCH)
+    pixmap = _canvas(_SWATCH, ratio)
     pixmap.fill(_qcolor(colour))
-    glyph = icon(name, "secondary").pixmap(QSize(20, 20))
+    glyph = icon(name, "secondary").pixmap(QSize(20, 20), ratio)
     painter = QPainter(pixmap)
     painter.drawPixmap((_SWATCH.width() - 20) // 2, (_SWATCH.height() - 20) // 2, glyph)
     painter.end()
@@ -290,10 +319,15 @@ class _ColourRow(QPushButton):
         self.hex_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         trailing.addWidget(self.hex_label)
 
-    def set_colour(self, colour: RGBA) -> None:
-        """Show *colour* as the chip and as its hex."""
-        self.setIcon(_chip_icon(colour))
+    def set_colour(self, colour: RGBA, ratio: float = 1.0) -> None:
+        """Show *colour* as the chip (drawn at *ratio*) and as its hex.
+
+        The hex is also the row's accessible description: a screen reader says the
+        row's name and then its colour, which the chip alone does not.
+        """
+        self.setIcon(_chip_icon(colour, ratio))
         self.hex_label.setText("#{:02X}{:02X}{:02X}".format(*colour[:3]))
+        self.setAccessibleDescription(self.hex_label.text())
 
 
 class _GestureSlider(QSlider):
@@ -417,7 +451,7 @@ class LookPanel(QWidget):
             # The chosen tile wears a gold ring (its On pixmap); the sheet gives it
             # the accent text (``swatch`` marks it).
             button.setProperty("swatch", True)
-            button.setIcon(_swatch_icon(look))
+            button.setIcon(_swatch_icon(look, self.devicePixelRatioF()))
             button.setIconSize(_SWATCH)
             button.setText(_preset_name(name))
             button.setToolTip(_preset_name(name))
@@ -599,6 +633,8 @@ class LookPanel(QWidget):
         self._check(self._session.look)
 
     def _show(self, look: Look) -> None:
+        # Every chip and tile is drawn at the screen's pixel ratio, so it is sharp on HiDPI.
+        ratio = self.devicePixelRatioF()
         current = look.base_preset if look.is_preset else None
         for name, button in self.palette_buttons.items():
             with QSignalBlocker(button):
@@ -608,9 +644,9 @@ class LookPanel(QWidget):
         else:
             self.status_label.setText(t("look.custom_from", name=_preset_name(look.base_preset)))
         for name, button in self.colour_buttons.items():
-            button.set_colour(getattr(look, name))
+            button.set_colour(getattr(look, name), ratio)
         bg = look.background
-        self.background_colour_button.set_colour(bg.colour)
+        self.background_colour_button.set_colour(bg.colour, ratio)
         self.background_colour_button.setVisible(bg.kind != "image")
         self._set_slider(self.opacity_slider, _alpha_percent(look.card[3]))
         self._set_slider(self.dim_slider, round(bg.dim * 100))
@@ -619,21 +655,21 @@ class LookPanel(QWidget):
         self.opacity_readout.setText(t("look.percent", value=self.opacity_slider.value()))
         self.dim_readout.setText(t("look.percent", value=self.dim_slider.value()))
         self.blur_readout.setText(str(self.blur_slider.value()))
-        self._paint_tiles(look)
+        self._paint_tiles(look, ratio)
         for kind, tile in self.background_tiles.items():
             with QSignalBlocker(tile):
                 tile.setChecked(kind == bg.kind)
 
-    def _paint_tiles(self, look: Look) -> None:
-        """Each kind in *look*'s colours; only when those colours (or the preset a second
-        colour comes from) or the image changed."""
+    def _paint_tiles(self, look: Look, ratio: float) -> None:
+        """Each kind in *look*'s colours at *ratio*; only when those colours (or the preset a
+        second colour comes from), the image or the pixel ratio changed."""
         bg = look.background
         image = bg.image if bg.kind == "image" else None
         try:
             stamp = image.stat().st_mtime_ns if image is not None else None
         except OSError:
             stamp = None
-        key = (look.base_preset, look.frame_bg, bg.colour, bg.colour2, image, stamp)
+        key = (look.base_preset, look.frame_bg, bg.colour, bg.colour2, image, stamp, ratio)
         if key == self._tiles_key:
             return
         self._tiles_key = key
@@ -645,11 +681,14 @@ class LookPanel(QWidget):
             pixmap = None
             if background is not None:
                 try:
-                    pixmap = _pil_pixmap(tile_image(background, _SWATCH.width(), _SWATCH.height()))
+                    drawn = tile_image(
+                        background, round(_SWATCH.width() * ratio), round(_SWATCH.height() * ratio)
+                    )
+                    pixmap = _pil_pixmap(drawn, ratio)
                 except (ValueError, OSError):
                     pixmap = None  # a missing or unreadable image: the icon tile below
             if pixmap is None:
-                pixmap = _icon_tile(look.frame_bg, "image")
+                pixmap = _icon_tile(look.frame_bg, "image", ratio)
             tile.setIcon(_two_state_icon(pixmap))
 
     @staticmethod
@@ -681,14 +720,23 @@ class LookPanel(QWidget):
 
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802 - Qt override
         # A theme switch: the amber picked for the old palette may not read on the new one,
-        # and the chosen tile's ring was painted in the old theme's gold.
+        # and the image tile's glyph was drawn in the old theme's secondary colour. (A
+        # ring's gold follows the tile it sits on, not the theme: see ``_ring_gold``.)
         super().changeEvent(event)
         if event.type() in (QEvent.Type.PaletteChange, QEvent.Type.ApplicationPaletteChange):
             self._colour_contrast_label()
-            for name, button in self.palette_buttons.items():
-                button.setIcon(_swatch_icon(PRESETS[name]))
             self._tiles_key = None
-            self._paint_tiles(self._session.look)
+            self._paint_tiles(self._session.look, self.devicePixelRatioF())
+
+    def event(self, event: QEvent) -> bool:  # noqa: A003 - Qt override
+        handled = super().event(event)
+        if event.type() == QEvent.Type.DevicePixelRatioChange and hasattr(self, "palette_buttons"):
+            # Moved to a screen of another pixel ratio: every chip and tile again, sharp there.
+            ratio = self.devicePixelRatioF()
+            for name, button in self.palette_buttons.items():
+                button.setIcon(_swatch_icon(PRESETS[name], ratio))
+            self._show(self._session.look)
+        return handled
 
     # -- changes ----------------------------------------------------------------
 

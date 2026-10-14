@@ -42,6 +42,12 @@ def _english_left_to_right():
     _reset_to_english()
 
 
+@pytest.fixture(autouse=True)
+def _private_cache_dir(monkeypatch, tmp_path):
+    """No test writes thumbnails or clip frames into the person's real cache."""
+    monkeypatch.setenv("QURANTEXT_CACHE_DIR", str(tmp_path / "cache"))
+
+
 #: The application properties ``gui.theme.apply_theme`` sets; restored after every test.
 _THEME_PROPERTIES = (
     "qalun.tokens",
