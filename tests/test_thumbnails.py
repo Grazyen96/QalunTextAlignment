@@ -163,3 +163,29 @@ def test_the_key_carries_its_version(tmp_path, monkeypatch) -> None:
 def test_the_png_is_written_whole_and_leaves_no_part_file(tmp_path) -> None:
     png = thumbnails.thumbnail_for(_project(tmp_path), tmp_path / "cache")
     assert [p.name for p in png.parent.iterdir()] == [png.name]
+
+
+def test_thumbnail_image_draws_at_the_asked_size_with_the_given_look(tmp_path) -> None:
+    from qurantext.core.looks import PRESETS
+
+    project = _project(tmp_path)
+    image = thumbnails.thumbnail_image(project, PRESETS["ocean"], (56, 99))
+    assert image is not None and image.size == (56, 99)
+    corner = image.convert("RGB").getpixel((2, 2))
+    # The renderer shades the frame a hair (a vignette), so the corner is the colour within 2.
+    assert all(
+        abs(got - want) <= 2
+        for got, want in zip(corner, PRESETS["ocean"].frame_bg[:3], strict=True)
+    )
+
+
+def test_thumbnail_image_is_none_for_no_cards_or_a_failing_renderer(tmp_path, monkeypatch) -> None:
+    from qurantext.core.looks import NIGHT_GOLD
+
+    assert thumbnails.thumbnail_image(_project(tmp_path, cards=[]), NIGHT_GOLD, (54, 96)) is None
+
+    def boom(*a, **k):
+        raise RuntimeError("no renderer")
+
+    monkeypatch.setattr(thumbnails, "render_frame_pillow", boom)
+    assert thumbnails.thumbnail_image(_project(tmp_path), NIGHT_GOLD, (54, 96)) is None

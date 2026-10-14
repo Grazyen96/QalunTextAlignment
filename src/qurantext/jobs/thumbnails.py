@@ -29,11 +29,11 @@ from PIL import Image
 from qurantext.config.paths import DEFAULT_FONT_PATH
 from qurantext.config.settings import VIDEO_PRESETS
 from qurantext.core.frame_renderer import render_frame_pillow
-from qurantext.core.looks import look_from_style
+from qurantext.core.looks import Look, look_from_style
 from qurantext.core.video_common import cards_on_screen, validated_matches
 from qurantext.jobs.project import Project, job_settings
 
-__all__ = ["LONG_SIDE", "background_for", "cache_key", "thumbnail_for"]
+__all__ = ["LONG_SIDE", "background_for", "cache_key", "thumbnail_for", "thumbnail_image"]
 
 _log = logging.getLogger(__name__)
 
@@ -86,6 +86,38 @@ def _first_card(project: Project) -> dict | None:
     return min(cards, key=lambda card: float(card["_start_time"]))
 
 
+def thumbnail_image(project: Project, look: Look, size: tuple[int, int]) -> Image.Image | None:
+    """The first shown card at *look*, drawn at *size*; None when there is nothing to draw.
+
+    None for a project with no card the video would show, or a renderer that
+    raises. Not cached: ``thumbnail_for`` is the cached path.
+    """
+    if not project.cards:
+        return None
+    try:
+        card = _first_card(project)
+        if card is None:
+            return None
+        width, height = size
+        # Halfway in: past the opening, and far enough that a word is lit.
+        start, end = float(card["_start_time"]), float(card["_end_time"])
+        at = start + max(0.1, (end - start) / 2)
+        frame = render_frame_pillow(
+            at,
+            card,
+            width * _OVERSAMPLE,
+            height * _OVERSAMPLE,
+            DEFAULT_FONT_PATH,
+            reserve_caption_band=False,
+            look=look,
+        )
+        rgb = np.ascontiguousarray(frame[:, :, ::-1])
+        return Image.fromarray(rgb).resize((width, height), Image.Resampling.LANCZOS)
+    except Exception as error:  # noqa: BLE001 - a picture is never worth a damaged row
+        _log.debug("No thumbnail for %s: %s", project.path, error)
+        return None
+
+
 def thumbnail_for(project: Project, cache_dir: Path | None) -> Path | None:
     """The PNG for *project*, made if it is not cached; None when it cannot be.
 
@@ -101,27 +133,12 @@ def thumbnail_for(project: Project, cache_dir: Path | None) -> Path | None:
         target = folder / f"{cache_key(project)}.png"
         if target.is_file():
             return target
-        card = _first_card(project)
-        if card is None:
+        image = thumbnail_image(project, _look(project), _size(project))
+        if image is None:
             return None
-        width, height = _size(project)
-        # Halfway in: past the opening, and far enough that a word is lit.
-        start, end = float(card["_start_time"]), float(card["_end_time"])
-        at = start + max(0.1, (end - start) / 2)
-        frame = render_frame_pillow(
-            at,
-            card,
-            width * _OVERSAMPLE,
-            height * _OVERSAMPLE,
-            DEFAULT_FONT_PATH,
-            reserve_caption_band=False,
-            look=_look(project),
-        )
-        rgb = np.ascontiguousarray(frame[:, :, ::-1])
-        image = Image.fromarray(rgb).resize((width, height), Image.Resampling.LANCZOS)
         _save_atomically(image, target)
         return target
-    except Exception as error:  # noqa: BLE001 - a picture is never worth a damaged row
+    except Exception as error:  # noqa: BLE001
         _log.debug("No thumbnail for %s: %s", project.path, error)
         return None
 
