@@ -23,12 +23,13 @@ from __future__ import annotations
 import unicodedata
 from typing import Any
 
-from PySide6.QtCore import QPoint, Qt, Signal
-from PySide6.QtGui import QColor, QContextMenuEvent
+from PySide6.QtCore import QEvent, QPoint, Qt, Signal
+from PySide6.QtGui import QBrush, QColor, QContextMenuEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
     QMenu,
+    QStyle,
     QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
@@ -155,7 +156,7 @@ class SegmentList(QTableWidget):
             # reference alone has no letter to set the cell's direction by.
             ref_text = f"{_RLM if is_rtl() else ''}{MANUAL_MARK} {ref_text}"
         ref_item = self._set_item(row, _COLUMN_REF, ref_text, kind, index, editable=False)
-        ref_item.setIcon(icon("book-open" if kind == CARD else "mic", "secondary"))
+        ref_item.setIcon(_row_icon(kind))
         if manual:
             ref_item.setToolTip(t("segments.manual"))
         span = ltr(time_span(start, end))
@@ -166,7 +167,8 @@ class SegmentList(QTableWidget):
             text_item.setToolTip(t("segments.locked"))
         # Nothing retimed is an empty cell, so the rows that were stand out.
         retimed = str(count) if count else ""
-        self._set_item(row, _COLUMN_RETIMED, retimed, kind, index, editable=False)
+        retimed_item = self._set_item(row, _COLUMN_RETIMED, retimed, kind, index, editable=False)
+        retimed_item.setForeground(_secondary_brush())
 
     def _set_item(
         self, row: int, column: int, text: str, kind: str, index: int, *, editable: bool
@@ -179,6 +181,29 @@ class SegmentList(QTableWidget):
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         self.setItem(row, column, item)
         return item
+
+    def changeEvent(self, event: QEvent) -> None:  # noqa: N802 - Qt override
+        """Redraw the row icons and the counts in the new theme's colours.
+
+        An item's icon and brush are not a button's icon, which ``refresh_icons``
+        redraws on a theme switch; rebuilding the rows would drop the selection.
+        """
+        if event.type() in (QEvent.Type.PaletteChange, QEvent.Type.ApplicationPaletteChange):
+            self._recolour()
+        super().changeEvent(event)
+
+    def _recolour(self) -> None:
+        loading, self._loading = self._loading, True
+        try:
+            for row, (kind, _index, _start) in enumerate(self._rows):
+                ref_item = self.item(row, _COLUMN_REF)
+                if ref_item is not None:
+                    ref_item.setIcon(_row_icon(kind))
+                retimed_item = self.item(row, _COLUMN_RETIMED)
+                if retimed_item is not None:
+                    retimed_item.setForeground(_secondary_brush())
+        finally:
+            self._loading = loading
 
     # -- reading --------------------------------------------------------------
 
@@ -315,7 +340,11 @@ class SegmentList(QTableWidget):
 
 
 class _PlayheadRuleDelegate(QStyledItemDelegate):
-    """A 3 px accent rule on the leading edge of the playhead row's first cell."""
+    """A 3 px accent rule on the leading edge of the playhead row's first cell.
+
+    On a selected row, whose fill is the accent too, the rule is drawn in the
+    colour of the text on that fill so it still shows.
+    """
 
     def paint(self, painter, option, index) -> None:  # noqa: D102 - Qt override
         super().paint(painter, option, index)
@@ -324,7 +353,20 @@ class _PlayheadRuleDelegate(QStyledItemDelegate):
             return
         rect = option.rect
         x = rect.right() - 2 if table.isRightToLeft() else rect.left()
-        painter.fillRect(x, rect.top(), 3, rect.height(), QColor(theme.current_tokens().accent))
+        tokens = theme.current_tokens()
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        colour = tokens.on_accent if selected else tokens.accent
+        painter.fillRect(x, rect.top(), 3, rect.height(), QColor(colour))
+
+
+def _row_icon(kind: str):
+    """A row's kind at a glance: an open book for a card, a microphone for a caption."""
+    return icon("book-open" if kind == CARD else "mic", "secondary")
+
+
+def _secondary_brush() -> QBrush:
+    """The detail colour a row's retimed-words count is drawn in."""
+    return QBrush(QColor(theme.current_tokens().secondary))
 
 
 def _starts_right_to_left(text: str) -> bool:

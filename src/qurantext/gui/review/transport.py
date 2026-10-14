@@ -43,6 +43,13 @@ class Transport(QWidget):
         self.prev_word_button = self._button("", "skip-back", t("review.prev_word"))
         self.play_button = self._button(t("review.play"), "play", t("review.play"))
         self.next_word_button = self._button("", "skip-forward", t("review.next_word"))
+        # The tips name the arrow keys, which follow the right-to-left timeline:
+        # → steps back to the previous word, ← on to the next.
+        for button, key, arrow in (
+            (self.prev_word_button, "review.prev_word", "→"),
+            (self.next_word_button, "review.next_word", "←"),
+        ):
+            button.setToolTip(t("review.tip", action=t(key), keys=arrow))
         self.time_label = QLabel(clock(0.0))
         self.time_label.setFont(theme.font("clock"))
         self.time_label.setLayoutDirection(Qt.LayoutDirection.LeftToRight)

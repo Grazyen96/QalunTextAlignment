@@ -24,7 +24,7 @@ from qurantext.gui import theme
 from qurantext.gui.colors import warning_color
 from qurantext.gui.icons import icon
 
-__all__ = ["CHIP_KINDS", "Card", "SectionHeader", "StatusChip", "make_primary"]
+__all__ = ["CHIP_KINDS", "Card", "SectionHeader", "StatusChip", "make_primary", "repolish"]
 
 CHIP_KINDS = ("attention", "accent", "neutral")
 
@@ -39,7 +39,7 @@ def _keep_its_height(widget: QWidget) -> None:
     widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
 
-def _repolish(widget: QWidget) -> None:
+def repolish(widget: QWidget) -> None:
     """Make the stylesheet read a property set after the widget was styled."""
     style = widget.style()
     style.unpolish(widget)
@@ -53,7 +53,7 @@ def make_primary(button: QPushButton) -> QPushButton:
     button.setCursor(Qt.CursorShape.PointingHandCursor)
     if isinstance(button.window(), QDialog):
         button.setDefault(True)
-    _repolish(button)
+    repolish(button)
     return button
 
 
@@ -137,7 +137,7 @@ class StatusChip(QFrame):
         self._kind = kind
         self.setProperty("kind", kind)
         self._recolour()
-        _repolish(self)
+        repolish(self)
 
     def event(self, event: QEvent) -> bool:  # noqa: A003 - Qt override
         handled = super().event(event)

@@ -14,15 +14,15 @@ from __future__ import annotations
 import html
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QSize, Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QToolButton, QWidget
 
 from qurantext.core.coverage import UncoveredSpeech
 from qurantext.gui import theme
-from qurantext.gui.i18n import clock, t, time_span, tn
+from qurantext.gui.i18n import clock, is_rtl, t, time_span, tn
 from qurantext.gui.icons import icon, set_icon
 from qurantext.gui.jobs import JobOutcome
-from qurantext.gui.widgets import Card
+from qurantext.gui.widgets import Card, repolish
 
 __all__ = ["Banner"]
 
@@ -58,7 +58,7 @@ class Banner(Card):
         row.addWidget(self.text_label, 1)
         self.play_button = QPushButton(t("render.play"))
         set_icon(self.play_button, "play", size=16)
-        self.reveal_button = QPushButton(t("render.show"))
+        self.reveal_button = QPushButton(t("home.show_in_folder"))
         set_icon(self.reveal_button, "folder", size=16)
         self.dismiss_button = QToolButton()
         self.dismiss_button.setAutoRaise(True)
@@ -195,7 +195,8 @@ class Banner(Card):
         parts = [html.escape(line) for line in self.lines()]
         if self._gaps:
             count = len(self._gaps)
-            arrow = "▾" if self._gaps_expanded else "▸"
+            # Folded, the arrow points where the line reads on to.
+            arrow = "▾" if self._gaps_expanded else ("◂" if is_rtl() else "▸")
             parts.append(
                 f'<a href="gaps">{html.escape(tn("review.gaps_toggle", count))} {arrow}</a>'
             )
@@ -243,13 +244,26 @@ class Banner(Card):
         self.reveal_button.setVisible(has_render)
         self.dismiss_button.setVisible(bool(self._notices) or self._render_line is not None)
         self.text_label.setVisible(not empty)
-        self.setProperty("empty", empty)
+        if self.property("empty") != empty:
+            self.setProperty("empty", empty)
+            # The sheet reads a property only when it polishes the widget.
+            repolish(self)
         if empty:
             self.setFixedHeight(self.EMPTY_HEIGHT)
         else:
             self.setMinimumHeight(0)
             self.setMaximumHeight(16777215)
         self.updateGeometry()
+
+    def changeEvent(self, event: QEvent) -> None:  # noqa: N802 - Qt override
+        """Draw the kind icon again in a new theme's colours (a label's pixmap is not redrawn)."""
+        palette_changed = event.type() in (
+            QEvent.Type.PaletteChange,
+            QEvent.Type.ApplicationPaletteChange,
+        )
+        if palette_changed and hasattr(self, "_render_more"):  # not while __init__ builds it
+            self._render()
+        super().changeEvent(event)
 
     def sizeHint(self) -> QSize:
         hint = super().sizeHint()

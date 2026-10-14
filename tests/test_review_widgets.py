@@ -3091,3 +3091,44 @@ def test_the_playhead_rule_leads_from_the_right_under_arabic(qt_app) -> None:
     assert image.pixelColor(rect.right() - 1, rect.center().y()).name().upper() == accent
     assert image.pixelColor(rect.left() + 1, rect.center().y()).name().upper() != accent
     table.close()
+
+
+def test_the_playhead_rule_shows_on_a_selected_row(qt_app) -> None:
+    """The selection fill is the accent too, so there the rule is drawn in the text-on-accent colour."""
+    from qurantext.gui import theme
+    from qurantext.gui.review.segment_list import SegmentList
+
+    theme.apply_theme(qt_app, "light")
+    table = SegmentList(_three_cue_session())
+    table.resize(500, 200)
+    table.show()
+    table.activateWindow()
+    qt_app.processEvents()
+    table.highlight_at(2.5)
+    table.selectRow(1)
+    rect = table.visualRect(table.model().index(1, 0))
+    image = table.viewport().grab().toImage()
+    rule = image.pixelColor(rect.left() + 1, rect.center().y())
+    fill = image.pixelColor(rect.left() + 8, rect.top() + 2)
+    assert rule.name().upper() == theme.LIGHT.on_accent.upper()
+    assert rule != fill
+    table.close()
+
+
+def test_the_retimed_count_is_drawn_in_the_secondary_colour_and_follows_the_theme(qt_app) -> None:
+    from qurantext.gui import theme
+    from qurantext.gui.review.segment_list import SegmentList
+
+    theme.apply_theme(qt_app, "light")
+    try:
+        table = SegmentList(_three_cue_session())
+        item = table.item(0, 3)
+        assert item.foreground().color().name().upper() == theme.LIGHT.secondary.upper()
+        icon_before = table.item(0, 0).icon().pixmap(16, 16).toImage()
+        theme.apply_theme(qt_app, "dark")
+        qt_app.processEvents()
+        item = table.item(0, 3)
+        assert item.foreground().color().name().upper() == theme.DARK.secondary.upper()
+        assert table.item(0, 0).icon().pixmap(16, 16).toImage() != icon_before
+    finally:
+        theme.apply_theme(qt_app, "light")

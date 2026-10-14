@@ -101,3 +101,13 @@ def test_the_selection_bar_delegates_its_buttons_to_the_transport(transport) -> 
     assert bar.snap_button is transport.snap_button
     bar.show_word(None)
     assert bar.label.text() == t("review.no_selection")
+
+
+def test_the_step_buttons_name_their_arrow_keys(transport) -> None:
+    assert transport.prev_word_button.toolTip() == t(
+        "review.tip", action=t("review.prev_word"), keys="→"
+    )
+    assert transport.next_word_button.toolTip() == t(
+        "review.tip", action=t("review.next_word"), keys="←"
+    )
+    assert transport.prev_word_button.accessibleName() == t("review.prev_word")

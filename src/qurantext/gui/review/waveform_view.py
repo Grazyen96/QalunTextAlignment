@@ -193,16 +193,23 @@ class WaveformView(QWidget):
         half = height / 2.0
         # Column i of the reduction is the i-th slice of time from the window's
         # start, which right to left is the i-th pixel column from the right.
-        for i in range(width):
-            x = width - 1 - i
-            inside = False
-            if current is not None:
-                t = self._viewport.t_for(x + 0.5, width)
-                inside = current[0] <= t < current[1]
-            painter.setPen(strong if inside else faint)
-            y_top = mid - float(col_max[i]) * half
-            y_bottom = mid - float(col_min[i]) * half
-            painter.drawLine(x, int(y_top), x, int(y_bottom))
+        # Worked out for every column at once (this runs 60 times a second while
+        # playing), then drawn in two runs so the pen changes only twice.
+        tops = (mid - col_max[:width].astype(np.float64) * half).astype(np.int64).tolist()
+        bottoms = (mid - col_min[:width].astype(np.float64) * half).astype(np.int64).tolist()
+        xs = list(range(width - 1, -1, -1))
+        inside = [False] * width
+        if current is not None:
+            # Time is linear in x, so two columns give every column's centre time.
+            first = self._viewport.t_for(0.5, width)
+            step = self._viewport.t_for(1.5, width) - first
+            centres = first + step * np.asarray(xs, dtype=np.float64)
+            inside = ((centres >= current[0]) & (centres < current[1])).tolist()
+        for pen, wanted in ((faint, False), (strong, True)):
+            painter.setPen(pen)
+            for i in range(width):
+                if inside[i] == wanted:
+                    painter.drawLine(xs[i], tops[i], xs[i], bottoms[i])
 
 
 def column_extremes(

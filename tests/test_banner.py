@@ -33,6 +33,64 @@ def test_empty_it_keeps_a_four_pixel_rule(banner) -> None:
     assert banner.isVisibleTo(banner.parentWidget() or banner)
 
 
+def _fill(banner: Banner) -> str:
+    """The colour inside the banner near its trailing bottom corner, clear of text and icon."""
+    banner.resize(400, banner.sizeHint().height())
+    image = banner.grab().toImage()
+    return image.pixelColor(image.width() // 2, image.height() - 2).name().upper()
+
+
+def test_the_fill_follows_the_empty_state_both_ways(qt_app) -> None:
+    """Polished empty, then given a line, the card turns white; emptied again, the rule is back."""
+    theme.apply_theme(qt_app, "light")
+    banner = Banner()
+    try:
+        banner.show()
+        qt_app.processEvents()
+        assert _fill(banner) == theme.LIGHT.border.upper()
+        banner.add_notice("FFmpeg failed")
+        assert _fill(banner) == theme.LIGHT.raised.upper()
+        banner.dismiss()
+        assert banner.kind() == ""
+        assert _fill(banner) == theme.LIGHT.border.upper()
+    finally:
+        banner.deleteLater()
+
+
+def test_the_folded_gaps_arrow_points_the_way_the_line_reads(qt_app) -> None:
+    from qurantext.gui.language import apply_language
+
+    for language, arrow in (("en", "▸"), ("ar", "◂")):
+        apply_language(qt_app, language)
+        try:
+            banner = Banner()
+            banner.set_gaps([_gap(1.0, 2.0)])
+            assert arrow in banner.text(), language
+            banner.toggle_gaps()
+            assert "▾" in banner.text()
+            banner.deleteLater()
+        finally:
+            apply_language(qt_app, "en")
+
+
+def test_a_theme_switch_redraws_the_kind_icon(qt_app) -> None:
+    theme.apply_theme(qt_app, "light")
+    banner = Banner()
+    try:
+        banner.add_notice("FFmpeg failed")
+        light = banner.icon_label.pixmap().toImage()
+        theme.apply_theme(qt_app, "dark")
+        qt_app.processEvents()
+        assert banner.icon_label.pixmap().toImage() != light
+    finally:
+        theme.apply_theme(qt_app, "light")
+        banner.deleteLater()
+
+
+def test_the_reveal_action_says_show_in_folder(banner) -> None:
+    assert banner.reveal_button.text() == t("home.show_in_folder")
+
+
 def test_notices_are_lines_once_each_and_make_it_info(banner) -> None:
     banner.add_notice("FFmpeg failed")
     banner.add_notice("FFmpeg failed")
