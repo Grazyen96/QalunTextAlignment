@@ -149,11 +149,19 @@ def test_only_segments_are_filled_when_checked(tokens) -> None:
 
 
 @pytest.mark.parametrize("tokens", THEMES, ids=IDS)
+def test_a_disabled_tile_draws_no_frame_its_neighbours_lack(tokens) -> None:
+    """The image tile without a project file: greyed name, no box around it."""
+    rule = _rule(theme.stylesheet(tokens), 'QToolButton[swatch="true"]:disabled')
+    assert rule["border-color"] == "transparent"
+
+
+@pytest.mark.parametrize("tokens", THEMES, ids=IDS)
 def test_rows_quiet_buttons_placeholders_and_selected_cards_have_rules(tokens) -> None:
     sheet = theme.stylesheet(tokens)
     row = _rule(sheet, 'QPushButton[row="true"]')
     assert row["background"] == "transparent" and row["text-align"] == "left"
-    assert _rule(sheet, 'QPushButton[row="true"][rtl="true"]')["text-align"] == "right"
+    # Qt mirrors "left" in a right-to-left window; a "right" for Arabic would land on the left.
+    assert "[rtl=" not in sheet
     quiet = _rule(sheet, 'QPushButton[quiet="true"]')
     assert quiet["background"] == "transparent" and quiet["color"] == tokens.accent
     assert contrast(_c(tokens.accent), _c(tokens.window)) >= 4.5

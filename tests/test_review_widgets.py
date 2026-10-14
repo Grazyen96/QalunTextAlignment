@@ -1404,7 +1404,35 @@ def test_readouts_and_hex_read_left_to_right_in_arabic(qt_app, session, prefs) -
     assert panel.dim_readout.layoutDirection() == Qt.LayoutDirection.LeftToRight
     row = panel.colour_buttons["card"]
     assert row.hex_label.layoutDirection() == Qt.LayoutDirection.LeftToRight
-    assert row.property("rtl") is True
+
+
+def test_an_arabic_colour_row_starts_at_the_right_clear_of_its_hex(qt_app, session, prefs) -> None:
+    """The sheet's ``text-align: left`` is the line's start: Qt mirrors it for Arabic.
+
+    A rule aligning Arabic rows "right" was mirrored as well, which drew the chip
+    and the name at the left, over the hex.
+    """
+    from PySide6.QtGui import QColor
+
+    from qurantext.gui import i18n, theme
+
+    i18n.set_language("ar")
+    panel = _panel(session, prefs)
+    panel.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+    row = panel.colour_buttons["card"]
+    row.setStyleSheet(theme.stylesheet(theme.current_tokens()))
+    row.hex_label.hide()  # only the chip and the name are left to draw
+    row.setFixedWidth(280)
+    row.adjustSize()
+    image = row.grab().toImage()
+    ground = QColor(image.pixel(2, image.height() // 2))
+    inked = [
+        x
+        for x in range(image.width())
+        for y in range(image.height())
+        if QColor(image.pixel(x, y)) != ground
+    ]
+    assert inked and min(inked) > image.width() // 2, (min(inked), image.width())
 
 
 def test_there_is_a_tile_per_background_kind_and_the_looks_kind_is_checked(

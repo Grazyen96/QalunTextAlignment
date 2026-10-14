@@ -266,12 +266,15 @@ def _rgba(colour: QColor) -> RGBA:
 
 
 class _ColourRow(QPushButton):
-    """One editable colour: its chip, its name, and its hex at the trailing end."""
+    """One editable colour: its chip, its name, and its hex at the trailing end.
+
+    The sheet's ``text-align: left`` is the start of the line: Qt mirrors it in a
+    right-to-left window, so an Arabic row starts at the right with no rule of its own.
+    """
 
     def __init__(self, name: str, parent: QWidget | None = None) -> None:
         super().__init__(name, parent)
         self.setProperty("row", True)
-        self.setProperty("rtl", is_rtl())
         self.setIconSize(_CHIP)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
