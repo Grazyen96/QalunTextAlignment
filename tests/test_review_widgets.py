@@ -2514,6 +2514,84 @@ def test_each_kind_shows_only_its_own_fields(
     assert (dialog.intro_seconds.value(), dialog.outro_seconds.value()) == (5, 6)
 
 
+def test_the_strip_has_four_cards_in_render_order_and_the_lecture_is_fixed(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui.i18n import t
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+
+    _recitation_jobs(monkeypatch, tmp_path, episode_lecture.project.path)
+    _fake_probe(monkeypatch, {})
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    assert list(dialog.cards) == ["intro", "recitation", "lecture", "outro"]
+    assert dialog.cards["lecture"].title_label.text() == t("episode.lecture")
+    assert dialog.cards["lecture"].controls.count() == 0
+    assert dialog.cards["lecture"].focusPolicy() == Qt.FocusPolicy.NoFocus
+    assert dialog.cards["intro"].controls.count() >= 1  # the kind box
+    assert dialog.intro_kind.parent() is dialog.cards["intro"]
+    assert dialog.recitation_box.parent() is dialog.cards["recitation"]
+    dialog.show()
+    _spin_briefly(qt_app)
+    xs = [dialog.cards[p].x() for p in ("intro", "recitation", "lecture", "outro")]
+    assert xs == sorted(xs)
+    dialog.close()
+
+
+def test_the_strip_mirrors_in_arabic(qt_app, episode_lecture, prefs, tmp_path, monkeypatch) -> None:
+    from qurantext.gui import i18n
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+
+    i18n.set_language("ar")
+    _recitation_jobs(monkeypatch, tmp_path, episode_lecture.project.path)
+    _fake_probe(monkeypatch, {})
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    dialog.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+    dialog.show()
+    _spin_briefly(qt_app)
+    xs = [dialog.cards[p].x() for p in ("intro", "recitation", "lecture", "outro")]
+    assert xs == sorted(xs, reverse=True)
+    dialog.close()
+
+
+def test_selection_starts_on_the_first_generated_part_else_intro(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+    from qurantext.jobs.episode_assets import EpisodeChoice, GeneratedOutro
+
+    _recitation_jobs(monkeypatch, tmp_path, episode_lecture.project.path)
+    _fake_probe(monkeypatch, {})
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    assert dialog.selected_part() == "intro" and dialog.cards["intro"].selected
+    assert dialog.detail_pane.isHidden(), "nothing generated: no fields to show"
+    episode_lecture.set_episode(EpisodeChoice(outro_generated=GeneratedOutro(link="example.org")))
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    assert dialog.selected_part() == "outro"
+    assert not dialog.detail_pane.isHidden() and _shown(dialog.outro_fields)
+    assert dialog.intro_fields.isHidden()
+
+
+def test_switching_a_part_to_generated_selects_it_and_shows_its_fields(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    dialog = _generated_dialog(episode_lecture, prefs, tmp_path, monkeypatch)
+    assert dialog.selected_part() == "intro" and _shown(dialog.intro_fields)
+    assert dialog.outro_fields.isHidden(), "one part's fields at a time"
+    dialog.outro_kind.setCurrentIndex(dialog.outro_kind.findData("none"))
+    dialog.outro_kind.setCurrentIndex(dialog.outro_kind.findData("generated"))
+    assert dialog.selected_part() == "outro"
+    assert _shown(dialog.outro_fields) and dialog.intro_fields.isHidden()
+    dialog.select_part("intro")
+    assert _shown(dialog.intro_fields) and dialog.outro_fields.isHidden()
+    assert dialog.cards["intro"].selected and not dialog.cards["outro"].selected
+    dialog.intro_kind.setCurrentIndex(dialog.intro_kind.findData("none"))
+    assert dialog.detail_pane.isHidden() and dialog.selected_part() == "intro"
+    dialog.cards["outro"].click()
+    assert dialog.selected_part() == "outro" and _shown(dialog.outro_fields)
+    dialog.select_part("lecture")
+    assert dialog.selected_part() == "outro", "the lecture is never selected"
+
+
 def test_the_tracked_link_follows_the_link_and_the_platform_live(
     qt_app, episode_lecture, prefs, tmp_path, monkeypatch
 ) -> None:

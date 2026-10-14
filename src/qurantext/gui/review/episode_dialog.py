@@ -80,9 +80,11 @@ from qurantext.core.title_cards import (
 )
 from qurantext.core.tracked_link import PLATFORMS, LinkError, lookalike_host
 from qurantext.core.video_common import get_audio_duration
+from qurantext.gui import theme
 from qurantext.gui.colors import warning_color
 from qurantext.gui.i18n import ltr, plain_title, t
 from qurantext.gui.prefs import KEEP_DEFAULT, Prefs
+from qurantext.gui.review.episode_cards import PartCard
 from qurantext.gui.review.session import ReviewSession
 from qurantext.gui.surahs import stored_surah_names
 from qurantext.gui.widgets import make_primary
@@ -223,12 +225,17 @@ class _ClipRow:
         else:
             self.set(None, None, None)
 
-    def layout(self) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.addWidget(self.label, 1)
-        row.addWidget(self.choose)
-        row.addWidget(self.remove)
-        return row
+    def layout(self) -> QVBoxLayout:
+        """The clip line over Choose… and Remove, so it fits a part's card."""
+        column = QVBoxLayout()
+        column.setSpacing(theme.SP_4)
+        self.label.setWordWrap(True)
+        column.addWidget(self.label)
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.choose)
+        buttons.addWidget(self.remove)
+        column.addLayout(buttons)
+        return column
 
     def set_visible(self, visible: bool) -> None:
         for widget in (self.label, self.choose, self.remove):
@@ -339,8 +346,26 @@ class EpisodeDialog(QDialog):
 
         current = session.episode
         layout = QVBoxLayout(self)
-        form = QFormLayout()
+        layout.setSpacing(theme.SP_12)
         self.total_label = QLabel()
+
+        #: The four parts in render order; the Lecture card is fixed.
+        self.cards: dict[str, PartCard] = {
+            "intro": PartCard(t("episode.intro")),
+            "recitation": PartCard(t("episode.recitation")),
+            "lecture": PartCard(t("episode.lecture")),
+            "outro": PartCard(t("episode.outro")),
+        }
+        self.cards["lecture"].set_selectable(False)
+        self.cards["recitation"].set_selectable(False)
+        strip = QHBoxLayout()
+        strip.setSpacing(theme.SP_8)
+        for card in self.cards.values():
+            strip.addWidget(card, 0, Qt.AlignmentFlag.AlignTop)
+        strip.addStretch(1)
+        layout.addLayout(strip)
+        for part in ("intro", "outro"):
+            self.cards[part].select_requested.connect(lambda p=part: self.select_part(p))
 
         self._intro = _ClipRow(self, "intro", current.intro, current.intro_name)
         self.intro_label, self.intro_choose, self.intro_remove = (
@@ -348,18 +373,22 @@ class EpisodeDialog(QDialog):
             self._intro.choose,
             self._intro.remove,
         )
-        self.intro_kind = self._kind_box(_kind_of(current, "intro"))
-        form.addRow(t("episode.intro"), self._kind_row(self.intro_kind, self._intro))
+        self.intro_kind = self._kind_box(_kind_of(current, "intro"), "intro")
+        self.cards["intro"].add_control(self.intro_kind)
+        self.cards["intro"].add_control_layout(self._intro.layout())
         self._intro_original = current.intro_generated
         self.intro_fields = self._intro_fields(
             current.intro_generated or prefs.remembered_intro_generated or GeneratedIntro()
         )
-        form.addRow(self.intro_fields)
 
         self.recitation_box = QComboBox()
+        self.recitation_box.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.recitation_box.setMinimumContentsLength(10)
         self._fill_recitations(job_dirs, current.recitation)
         self.recitation_box.currentIndexChanged.connect(self._update_total)
-        form.addRow(t("episode.recitation"), self.recitation_box)
+        self.cards["recitation"].add_control(self.recitation_box)
 
         self._outro = _ClipRow(self, "outro", current.outro, current.outro_name)
         self.outro_label, self.outro_choose, self.outro_remove = (
@@ -367,16 +396,27 @@ class EpisodeDialog(QDialog):
             self._outro.choose,
             self._outro.remove,
         )
-        self.outro_kind = self._kind_box(_kind_of(current, "outro"))
-        form.addRow(t("episode.outro"), self._kind_row(self.outro_kind, self._outro))
+        self.outro_kind = self._kind_box(_kind_of(current, "outro"), "outro")
+        self.cards["outro"].add_control(self.outro_kind)
+        self.cards["outro"].add_control_layout(self._outro.layout())
         self._outro_original = current.outro_generated
         self.outro_fields = self._outro_fields(
             current.outro_generated or prefs.remembered_outro_generated or GeneratedOutro()
         )
-        form.addRow(self.outro_fields)
-        _unclipped_labels(form)
-        layout.addLayout(form)
+
         layout.addWidget(self.total_label)
+        #: The selected part's generated fields, under the strip.
+        self.detail_pane = QWidget()
+        pane = QVBoxLayout(self.detail_pane)
+        pane.setContentsMargins(0, 0, 0, 0)
+        pane.addWidget(self.intro_fields)
+        pane.addWidget(self.outro_fields)
+        layout.addWidget(self.detail_pane)
+        #: Which of intro/outro the pane shows: the first Generated one, else the intro.
+        self._selected = next(
+            (part for part in ("intro", "outro") if self._kind(part) == "generated"), "intro"
+        )
+        self.cards[self._selected].set_selected(True)
 
         self.message_label = QLabel()
         self.message_label.setWordWrap(True)
@@ -419,20 +459,13 @@ class EpisodeDialog(QDialog):
 
     # -- the kinds -------------------------------------------------------------------
 
-    def _kind_box(self, kind: str) -> QComboBox:
+    def _kind_box(self, kind: str, part: str) -> QComboBox:
         box = QComboBox()
         for name in KINDS:
             box.addItem(t(f"episode.kind.{name}"), name)
         box.setCurrentIndex(box.findData(kind))
-        box.currentIndexChanged.connect(self._on_kind)
+        box.currentIndexChanged.connect(lambda _index, p=part: self._on_kind(p))
         return box
-
-    @staticmethod
-    def _kind_row(box: QComboBox, row: _ClipRow) -> QHBoxLayout:
-        line = row.layout()
-        line.insertWidget(0, box)
-        line.addStretch(0)  # keeps the kind box narrow while the clip is hidden
-        return line
 
     def _kind(self, part: str) -> str:
         box = self.intro_kind if part == "intro" else self.outro_kind
@@ -442,24 +475,46 @@ class EpisodeDialog(QDialog):
         box = self.intro_kind if part == "intro" else self.outro_kind
         box.setCurrentIndex(box.findData(kind))
 
-    def _on_kind(self) -> None:
+    def _on_kind(self, part: str | None = None) -> None:
         if self._building:
             return
+        if part is not None and self._kind(part) == "generated":
+            self.select_part(part)
         self._show_kinds()
         self._update_link()
         self._update_total()
         self._show_missing()
         self.flush_previews()
 
+    # -- the selection ---------------------------------------------------------------
+
+    def selected_part(self) -> str:
+        """Which of intro/outro the detail pane belongs to."""
+        return self._selected
+
+    def select_part(self, part: str) -> None:
+        """Make *part*'s card the selected one; the lecture and the recitation never are."""
+        if part not in ("intro", "outro") or part == self._selected:
+            return
+        self.cards[self._selected].set_selected(False)
+        self._selected = part
+        self.cards[part].set_selected(True)
+        if not self._building:
+            self._show_kinds()
+
     def _show_kinds(self) -> None:
-        """Each part's own fields: the clip row for My clip, the fields for Generated."""
+        """Each part's own controls: the clip line for My clip; the selected part's fields for Generated."""
+        shown = False
         for part, row, fields in (
             ("intro", self._intro, self.intro_fields),
             ("outro", self._outro, self.outro_fields),
         ):
             kind = self._kind(part)
             row.set_visible(kind == "clip")
-            fields.setVisible(kind == "generated")
+            visible = kind == "generated" and part == self._selected
+            fields.setVisible(visible)
+            shown = shown or visible
+        self.detail_pane.setVisible(shown)
         if self.isVisible():
             self.adjustSize()
 
