@@ -333,6 +333,101 @@ def test_amiris_licence_travels_with_the_font() -> None:
     assert "Amiri-OFL.txt" in readme
 
 
+NOTO_RELEASE = "NotoSansArabic-v2.013"
+NOTO_SHA256 = {
+    "NotoSansArabic-Regular.ttf": "bd86ca02f087d7f3c3788ba458fb6b73744c7639ed276b8d870dba6def6c40d0",
+    "NotoSansArabic-Bold.ttf": "f4cb79f842a07d1bcf597879574358fb7010f73761396d1d0f2445dfedb4d2ca",
+}
+
+
+def test_the_interface_font_is_the_pinned_noto_release() -> None:
+    """The window draws Arabic letters in Noto Sans Arabic (SIL OFL 1.1) on a machine
+    with no Arabic font. The files are the release's own, byte for byte, and the
+    notice, the assets README and the fetch tool name that release and those hashes,
+    so a swapped file fails here."""
+    import hashlib
+
+    fonts = ROOT / "src" / "qurantext" / "assets" / "fonts"
+    notice = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    section = notice.split("## Noto Sans Arabic", 1)[1].split("\n## ", 1)[0]
+    readme = (ROOT / "src" / "qurantext" / "assets" / "README.md").read_text(encoding="utf-8")
+    readme_section = readme.split("## Noto Sans Arabic", 1)[1].split("\n## ", 1)[0]
+    tool = (ROOT / "tools" / "fetch_fonts.py").read_text(encoding="utf-8")
+    for name, digest in NOTO_SHA256.items():
+        assert hashlib.sha256((fonts / name).read_bytes()).hexdigest() == digest, name
+        assert name in section and digest in section, name
+        assert name in readme_section and digest in readme_section, name
+        assert f'"{name}": "{digest}"' in tool, name
+    for text in (section, readme_section):
+        assert f"notofonts/arabic/releases/tag/{NOTO_RELEASE}" in text
+        assert "SIL Open Font License" in text and "NotoSansArabic-OFL.txt" in text
+    assert f'TAG = "{NOTO_RELEASE}"' in tool
+
+
+def test_notos_licence_travels_with_the_font() -> None:
+    """As with Amiri: the licence sits beside the fonts in assets/fonts/, and
+    packaging/licenses/ keeps the same text, listed in its README."""
+    kept = SPEC.parent / "licenses" / "NotoSansArabic-OFL.txt"
+    beside = ROOT / "src" / "qurantext" / "assets" / "fonts" / "NotoSansArabic-OFL.txt"
+    body = kept.read_text(encoding="utf-8")
+    assert "SIL Open Font License, Version 1.1" in body
+    assert "The Noto Project Authors" in body
+    assert beside.read_bytes() == kept.read_bytes()
+    readme = (SPEC.parent / "licenses" / "README.md").read_text(encoding="utf-8")
+    assert "NotoSansArabic-OFL.txt" in readme
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert "NotoSansArabic-Regular.ttf" in pyproject and "NotoSansArabic-OFL.txt" in pyproject
+
+
+def _load_fetch_fonts():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("fetch_fonts", ROOT / "tools" / "fetch_fonts.py")
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    return tool
+
+
+def _fetch_fonts_tool(monkeypatch, tmp_path, members: dict[str, bytes]):
+    """tools/fetch_fonts.py, writing under *tmp_path*, its download an archive of *members*."""
+    import io
+    import zipfile
+
+    tool = _load_fetch_fonts()
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for member, data in members.items():
+            archive.writestr(member, data)
+    monkeypatch.setattr(tool, "_download", lambda: zipfile.ZipFile(io.BytesIO(buffer.getvalue())))
+    monkeypatch.setattr(tool, "ROOT", tmp_path)
+    monkeypatch.setattr(tool, "FONTS", tmp_path / "fonts")
+    monkeypatch.setattr(tool, "LICENSES", tmp_path / "licenses")
+    (tmp_path / "licenses").mkdir(parents=True)
+    return tool
+
+
+def test_the_font_fetcher_writes_nothing_when_a_file_is_not_the_pinned_one(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    fonts = ROOT / "src" / "qurantext" / "assets" / "fonts"
+    members = _load_fetch_fonts().FILES
+    shipped = {member: (fonts / name).read_bytes() for member, name in members.items()}
+    swapped = dict(shipped)
+    bold = "NotoSansArabic/unhinted/ttf/NotoSansArabic-Bold.ttf"
+    swapped[bold] = b"not the release's bold"
+    tool = _fetch_fonts_tool(monkeypatch, tmp_path, swapped)
+    assert tool.main() == 1
+    assert not (tmp_path / "fonts").exists()
+    err = capsys.readouterr().err
+    assert NOTO_SHA256["NotoSansArabic-Bold.ttf"] in err and "nothing was written" in err
+    # The release's own files are written, with their sums.
+    tool = _fetch_fonts_tool(monkeypatch, tmp_path / "ok", shipped)
+    assert tool.main() == 0
+    for name in NOTO_SHA256:
+        assert (tmp_path / "ok" / "fonts" / name).read_bytes() == (fonts / name).read_bytes()
+    assert (tmp_path / "ok" / "licenses" / "NotoSansArabic-OFL.txt").is_file()
+
+
 def _segno_pin() -> str:
     tomllib = pytest.importorskip("tomllib")
     with (ROOT / "pyproject.toml").open("rb") as handle:

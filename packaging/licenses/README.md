@@ -42,6 +42,13 @@ the wheels the binaries come from do not carry them.
   copy of `assets/` puts it beside them in the app; it is kept here with the
   other licence texts, and a test holds the two copies equal.
 
+- `NotoSansArabic-OFL.txt`: the SIL Open Font License 1.1 for Noto Sans Arabic,
+  the window's fallback for Arabic letters, the release's own `OFL.txt` from
+  https://github.com/notofonts/arabic/releases/tag/NotoSansArabic-v2.013
+  (`NotoSansArabic-v2.013.zip`, put here by `tools/fetch_fonts.py`). As with
+  Amiri, the same file sits beside the fonts in `src/qurantext/assets/fonts/`,
+  so the wheel and the app carry it, and a test holds the two copies equal.
+
 sherpa-onnx's own licence (Apache 2.0) is not here: its wheel carries it, and the
 spec takes it from the installed distribution so it always matches the version built.
 

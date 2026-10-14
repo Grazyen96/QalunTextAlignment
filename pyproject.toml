@@ -17,10 +17,13 @@ readme = "README.md"
 # third-party works, their provenance and terms to be confirmed by the owner; see
 # src/qurantext/assets/README.md and THIRD_PARTY_NOTICES.md. Nor is the title font,
 # Amiri (assets/fonts/Amiri-Regular.ttf and Amiri-Bold.ttf), which stays under the SIL
-# Open Font License 1.1, its text beside it (Amiri-OFL.txt), nor the Lucide interface
-# icons (assets/icons/), under the ISC License and, for those derived from Feather, the
-# MIT License, both in assets/icons/LICENSE. The app icon (assets/icon/) is the
-# project's own work, under the project's licence.
+# Open Font License 1.1, its text beside it (Amiri-OFL.txt), nor the interface's Arabic
+# fallback, Noto Sans Arabic (assets/fonts/NotoSansArabic-Regular.ttf and
+# NotoSansArabic-Bold.ttf), also under the SIL Open Font License 1.1, its text beside it
+# (NotoSansArabic-OFL.txt), nor the Lucide interface icons (assets/icons/), under the
+# ISC License and, for those derived from Feather, the MIT License, both in
+# assets/icons/LICENSE. The app icon (assets/icon/) is the project's own work, under
+# the project's licence.
 license = "GPL-3.0-only"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"

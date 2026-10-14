@@ -13,6 +13,10 @@ resolves its default font into the Python installation directory.
 - `fonts/Amiri-Regular.ttf`, `fonts/Amiri-Bold.ttf` — the text font for the
   generated intro's and outro's titles, which need Latin letters as well as
   Arabic ones; the Quran font has no Latin. `fonts/Amiri-OFL.txt` is its licence.
+- `fonts/NotoSansArabic-Regular.ttf`, `fonts/NotoSansArabic-Bold.ttf` — the
+  window's own fallback for Arabic letters on a machine with no Arabic font,
+  registered by `qurantext.gui.language.ensure_arabic_font`.
+  `fonts/NotoSansArabic-OFL.txt` is its licence.
 - `quran/UthmanicQaloon1-v10.txt` — the certified Qalun text everything is
   built from: the store, the citation index, the ayah text on screen.
 - `icons/*.svg` — the window's interface icons, 31 Lucide icons at release
@@ -74,4 +78,24 @@ Copyright 2010-2022 The Amiri Project Authors, under the SIL Open Font License,
 Version 1.1. The licence, the release's `OFL.txt`, is `fonts/Amiri-OFL.txt`
 beside the fonts, so it travels wherever they do (the wheel, the app, the
 source zip); `packaging/licenses/Amiri-OFL.txt` keeps the same text.
+`tests/test_packaging_spec.py` checks both hashes.
+
+## Noto Sans Arabic: the interface's Arabic fallback
+
+`fonts/NotoSansArabic-Regular.ttf` and `fonts/NotoSansArabic-Bold.ttf` are Noto
+Sans Arabic release `NotoSansArabic-v2.013`,
+https://github.com/notofonts/arabic/releases/tag/NotoSansArabic-v2.013, taken
+unmodified (the `unhinted/ttf` files) from the release archive
+`NotoSansArabic-v2.013.zip` by `tools/fetch_fonts.py`, which refuses to write a
+file whose sum differs from these:
+
+- `NotoSansArabic-Regular.ttf`, sha256
+  `bd86ca02f087d7f3c3788ba458fb6b73744c7639ed276b8d870dba6def6c40d0`
+- `NotoSansArabic-Bold.ttf`, sha256
+  `f4cb79f842a07d1bcf597879574358fb7010f73761396d1d0f2445dfedb4d2ca`
+
+Copyright 2022 The Noto Project Authors, under the SIL Open Font License,
+Version 1.1. The licence, the release's `OFL.txt`, is `fonts/NotoSansArabic-OFL.txt`
+beside the fonts, so it travels wherever they do (the wheel, the app, the
+source zip); `packaging/licenses/NotoSansArabic-OFL.txt` keeps the same text.
 `tests/test_packaging_spec.py` checks both hashes.
