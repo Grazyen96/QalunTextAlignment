@@ -131,6 +131,11 @@ class StatusChip(QFrame):
     def set_text(self, text: str) -> None:
         self.text_label.setText(text)
 
+    def set_icon(self, name: str | None) -> None:
+        """Swap the icon, or drop it with None."""
+        self._icon_name = name
+        self._draw_icon()
+
     def set_kind(self, kind: str) -> None:
         if kind not in CHIP_KINDS:
             raise KeyError(kind)

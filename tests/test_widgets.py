@@ -119,3 +119,14 @@ def test_a_chip_in_a_list_paints_its_word_in_its_own_colour(qt_app) -> None:
     shown = chip.text_label.palette().color(chip.text_label.foregroundRole())
     assert shown == QColor(theme.LIGHT.accent)
     host.deleteLater()
+
+
+def test_a_chip_can_change_its_icon(qt_app) -> None:
+    from qurantext.gui.widgets import StatusChip
+
+    chip = StatusChip("x", "info", "neutral")
+    before = chip.icon_label.pixmap().toImage()
+    chip.set_icon("triangle-alert")
+    assert chip.icon_label.pixmap().toImage() != before
+    chip.set_icon(None)
+    assert chip.icon_label.isHidden()
