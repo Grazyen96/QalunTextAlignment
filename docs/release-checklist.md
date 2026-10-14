@@ -160,6 +160,10 @@ this is the only place anyone hears each platform's build recognise speech.
       the review. Do this on Windows and macOS as well as Linux: the key codes those two
       use have not been tried on real machines. Try it with the segment table not
       focused: while it has focus, an Arabic letter goes to the table instead, on purpose.
+- [ ] In the review, `?` opens the shortcut sheet on a US layout (Shift+/) and on an
+      Arabic layout (Shift and the same key, which types ؟). Only offscreen key events
+      have been tried. On a French AZERTY layout `?` is Shift+, — the fine nudge's key —
+      so both claim that press and Qt may run neither: try it and decide which it should be.
 - [ ] Window title bars show no boxes.
 - [ ] Qt's own buttons, in the file dialog and in Save/Discard, are in Arabic.
 - [ ] On a machine without an Arabic font (a fresh Linux VM), the window still draws
@@ -169,9 +173,10 @@ this is the only place anyone hears each platform's build recognise speech.
       `~/Library/Preferences/com.qalun.Qalun.plist`, as `README.md` says.
 - [ ] Run `QT_QPA_PLATFORM=offscreen venv/bin/python tools/screenshots.py output/shots` and
       look at every image in both themes and both languages: primary buttons filled,
-      icons on the buttons the phase A spec lists (Start, Cancel, Close and the nudge
-      buttons have none by design), nothing unreadable or cut off, including the Settings
-      tabs and the empty first launch, and the review window's shortcut sheet and full-size preview.
+      icons on the buttons the phase A spec lists (Start, Cancel and Close have none by
+      design; the review's nudge buttons carry chevrons and snap a crosshair), nothing
+      unreadable or cut off, including the Settings tabs and the empty first launch, and
+      the review window's shortcut sheet and full-size preview.
 
 ## Words
 

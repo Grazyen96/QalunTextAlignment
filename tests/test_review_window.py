@@ -1245,7 +1245,7 @@ def _layout_press(platform, latin, letter, modifiers=Qt.KeyboardModifier.NoModif
     from qurantext.gui.review.window import SCANCODE_KEYS
 
     qt_key = {"[": Qt.Key.Key_BracketLeft, "]": Qt.Key.Key_BracketRight}.get(latin)
-    qt_key = qt_key or {",": Qt.Key.Key_Comma, ".": Qt.Key.Key_Period}[latin]
+    qt_key = qt_key or {",": Qt.Key.Key_Comma, ".": Qt.Key.Key_Period, "/": Qt.Key.Key_Slash}[latin]
     (code,) = [c for c, k in SCANCODE_KEYS[platform].items() if k == qt_key]
     scan, virtual = (0, code) if platform == "macos" else (code, 0)
     return QKeyEvent(QEvent.Type.KeyPress, ord(letter), modifiers, scan, virtual, 0, letter)
@@ -1273,6 +1273,39 @@ def test_shortcuts_follow_the_physical_key_on_an_arabic_layout(
     QApplication.sendEvent(window, event)
     assert event.isAccepted()
     assert getattr(window.session.words()[word], edge) == pytest.approx(value)
+
+
+def test_question_mark_is_one_shortcut_and_shift_slash_a_key_press_alias(qt_app, tmp_path) -> None:
+    """Two shortcuts both matching a US Shift+/ would make the press ambiguous on a real keyboard."""
+    from PySide6.QtGui import QKeySequence, QShortcut
+
+    window, _, _ = _window(qt_app, tmp_path)
+    assert window._keys["?"] == window.show_shortcuts
+    assert window._keys["Shift+/"] == window.show_shortcuts
+    assert window._keys["Shift+?"] == window.show_shortcuts
+    sequences = [shortcut.key() for shortcut in window.findChildren(QShortcut)]
+    assert sequences.count(QKeySequence("?")) == 1
+    assert QKeySequence("Shift+/") not in sequences
+    assert QKeySequence("Shift+?") not in sequences
+
+
+@pytest.mark.parametrize("platform", ["xkb", "windows", "macos"])
+def test_shift_and_the_slash_key_opens_the_sheet_on_an_arabic_layout(
+    qt_app, tmp_path, monkeypatch, platform
+) -> None:
+    """An Arabic layout types ؟ there: the press is read by its place, as Shift+/."""
+    from PySide6.QtWidgets import QApplication
+
+    from qurantext.gui.review import window as window_module
+
+    monkeypatch.setattr(window_module, "_platform_family", lambda: platform)
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    event = _layout_press(platform, "/", "\u061f", Qt.KeyboardModifier.ShiftModifier)
+    QApplication.sendEvent(window, event)
+    assert event.isAccepted()
+    assert window.shortcut_sheet is not None and window.shortcut_sheet.isVisible()
+    window.shortcut_sheet.hide()
 
 
 def test_the_physical_key_table_is_read_for_this_platform(qt_app, tmp_path) -> None:
@@ -1522,10 +1555,10 @@ def test_a_window_without_prefs_never_touches_the_real_settings(qt_app, tmp_path
 # -- the surah on the cards ---------------------------------------------------------
 
 
-def _lecture_window(qt_app, tmp_path):
-    """A lecture on al-Fatiha that quotes al-Baqara once."""
+def _lecture_window(qt_app, tmp_path, preset=None):
+    """A lecture on al-Fatiha that quotes al-Baqara once (*preset*: the job's video preset)."""
     from qurantext.gui.review.window import ReviewWindow
-    from qurantext.jobs.project import CaptionCue
+    from qurantext.jobs.project import CaptionCue, JobSettings, set_job_settings
 
     studied = {
         "surah_num": 1,
@@ -1547,6 +1580,8 @@ def _lecture_window(qt_app, tmp_path):
         cards=[studied, quote],
         captions=[CaptionCue(0.0, 2.0, "one", words=[{"word": "one", "start": 0.0, "end": 2.0}])],
     )
+    if preset is not None:
+        set_job_settings(project, JobSettings(preset=preset))
     save_project(project, tmp_path / "dars.qalun.json")
     window = ReviewWindow(project, player=FakePlayer(duration=10.0, now=_Now()))
     window.resize(1100, 800)
@@ -1636,9 +1671,13 @@ def _quote(surah, ayah, start, end, text="نص"):
     }
 
 
-def _quoting_lecture_window(qt_app, tmp_path, db, *, cards=None, captions=()):
-    """A 100 s lecture quoting 25:7 at 10–20 s and 25:8 at 30–40 s (the session tests' lecture)."""
+def _quoting_lecture_window(qt_app, tmp_path, db, *, cards=None, captions=(), preset=None):
+    """A 100 s lecture quoting 25:7 at 10–20 s and 25:8 at 30–40 s (the session tests' lecture).
+
+    *preset* sets the job's video preset (the default is the portrait ``social``).
+    """
     from qurantext.gui.review.window import ReviewWindow
+    from qurantext.jobs.project import JobSettings, set_job_settings
 
     if cards is None:
         cards = [
@@ -1648,6 +1687,8 @@ def _quoting_lecture_window(qt_app, tmp_path, db, *, cards=None, captions=()):
     project = Project(
         audio=tmp_path / "missing.mp3", mode="lecture", cards=cards, captions=list(captions)
     )
+    if preset is not None:
+        set_job_settings(project, JobSettings(preset=preset))
     save_project(project, tmp_path / "dars.qalun.json")
     window = ReviewWindow(project, player=FakePlayer(duration=100.0, now=_Now()), db_path=db)
     window.resize(1100, 800)
@@ -1920,16 +1961,18 @@ def test_a_real_double_click_on_a_cards_ayah_cell_opens_the_picker(
     assert table.verticalScrollBar().value() == 0
 
 
+@pytest.mark.parametrize("preset", ["social", "high", "standard", "fast"])
 @pytest.mark.parametrize("parts", ["clips", "generated"])
 @pytest.mark.parametrize("language", ["en", "ar"])
 def test_a_lecture_window_fits_a_1280_px_screen_while_rendering(
-    qt_app, tmp_path, db, language, parts
+    qt_app, tmp_path, db, language, parts, preset
 ) -> None:
     """With the Episode button and "Episode: on" beside Render, idle and rendering.
 
     A generated intro and outro say "Episode: on" too, and their steps' words fit.
-    Measured with the theme on, as the app always runs: its padding is what
-    takes the room.
+    Every preset fits, the landscape ones (a 480 px preview) as well as the
+    portrait one. Measured with the theme on, as the app always runs: its
+    padding is what takes the room.
     """
     from qurantext.gui import theme
     from qurantext.gui.i18n import t
@@ -1938,7 +1981,7 @@ def test_a_lecture_window_fits_a_1280_px_screen_while_rendering(
 
     apply_language(qt_app, language)
     theme.apply_theme(qt_app, "light")
-    window = _quoting_lecture_window(qt_app, tmp_path, db)
+    window = _quoting_lecture_window(qt_app, tmp_path, db, preset=preset)
     if parts == "clips":
         choice = EpisodeChoice(tmp_path / "intro.mp4", None, tmp_path / "end.mp4")
     else:
@@ -1953,6 +1996,7 @@ def test_a_lecture_window_fits_a_1280_px_screen_while_rendering(
     assert not window.episode_label.isHidden() and not window.episode_button.isHidden()
     assert window.episode_label.text() == t("review.episode_on")
     assert window.minimumSizeHint().width() <= 1280
+    assert window.minimumSizeHint().height() <= 800
     # The longest step's words.
     window._render_progress_key = max(
         (
@@ -1966,6 +2010,7 @@ def test_a_lecture_window_fits_a_1280_px_screen_while_rendering(
     window._set_render_running(True)
     try:
         assert window.minimumSizeHint().width() <= 1280
+        assert window.minimumSizeHint().height() <= 800
         assert not window.render_progress.isHidden() and not window.render_cancel_button.isHidden()
         assert window.episode_button.isHidden() and not window.episode_label.isHidden()
     finally:
@@ -2287,26 +2332,6 @@ def test_a_render_s_episode_error_reaches_the_strip(qt_app, tmp_path, monkeypatc
     assert html.escape(why) not in window.warnings.text()
 
 
-def test_the_render_message_names_the_episode_or_why_it_was_not_made(tmp_path) -> None:
-    from qurantext.gui.i18n import path_text
-    from qurantext.gui.jobs import JobOutcome
-    from qurantext.gui.review.window import render_finished_text
-
-    video = tmp_path / "v.mp4"
-    done = t("render.done", path=path_text(video))
-    plain = JobOutcome(matches=tmp_path / "m.json", video=video, cards=1)
-    assert render_finished_text(plain) == done
-    written = JobOutcome(
-        matches=plain.matches, video=video, cards=1, episode_video=tmp_path / "v – episode.mp4"
-    )
-    assert render_finished_text(written) == (
-        f"{done}\n\n{t('review.episode_written', name='v – episode.mp4')}"
-    )
-    why = t("episode.error.cancelled")
-    failed = JobOutcome(matches=plain.matches, video=video, cards=1, episode_error=why)
-    assert render_finished_text(failed) == f"{done}\n\n{why}"
-
-
 def test_the_render_progress_names_each_step_of_an_episode(qt_app, tmp_path, monkeypatch) -> None:
     from qurantext.jobs.episode_assets import EpisodeChoice
     from qurantext.utils.progress import ProgressEvent
@@ -2483,8 +2508,9 @@ def test_two_columns_preview_and_look_left_timeline_and_table_right(qt_app, tmp_
         window.deleteLater()
 
 
-def test_a_lecture_at_1280_by_800_shows_eight_rows(qt_app, tmp_path) -> None:
-    window = _lecture_window(qt_app, tmp_path)
+@pytest.mark.parametrize("preset", ["social", "standard"])
+def test_a_lecture_at_1280_by_800_shows_eight_rows(qt_app, tmp_path, preset) -> None:
+    window = _lecture_window(qt_app, tmp_path, preset=preset)
     window.resize(1280, 800)
     window.show()
     _spin(100)
@@ -2699,3 +2725,90 @@ def test_a_fitted_preview_never_scrolls(qt_app, tmp_path) -> None:
     window.actual_button.click()
     _spin(20)
     assert window.frame_view.size() == window.frame_view.preset_size
+
+
+def test_the_preview_keeps_its_preset_height_and_the_look_panel_takes_the_rest(
+    qt_app, tmp_path
+) -> None:
+    """At 1280×800 a portrait preview is (nearly) full size in Fit and needs no scroll in Actual."""
+    window = _lecture_window(qt_app, tmp_path)
+    try:
+        window.resize(1280, 800)
+        window.show()
+        _spin(50)
+        assert window.frame_view.fit
+        assert window.frame_view.height() >= 440
+        assert window.frame_view.pixmap().height() >= 440
+        assert window.look_scroll.height() >= 120, "the Look panel keeps its floor"
+        window.actual_button.click()
+        _spin(20)
+        assert not window.frame_scroll.verticalScrollBar().isVisible()
+        assert not window.frame_scroll.horizontalScrollBar().isVisible()
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_a_short_window_shrinks_the_fitted_preview_before_the_look_panel(qt_app, tmp_path) -> None:
+    window = _lecture_window(qt_app, tmp_path)
+    try:
+        window.resize(1280, 640)
+        window.show()
+        _spin(50)
+        half = window.frame_view.preset_size.height() // 2
+        assert half <= window.frame_view.height() < window.frame_view.preset_size.height()
+        assert window.look_scroll.height() >= 120
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+@pytest.mark.parametrize("width", [1280, 1600])
+def test_a_landscape_preview_opens_as_wide_as_the_timeline_allows(qt_app, tmp_path, db, width):
+    """The left column is never narrower than a portrait preview, nor wider than the preset."""
+    from qurantext.gui import theme
+
+    window = _quoting_lecture_window(qt_app, tmp_path, db, preset="standard")
+    try:
+        window.resize(width, 800)
+        window.show()
+        _spin(50)
+        preset = window.frame_view.preset_size
+        least = 270 + 2 * theme.SP_12
+        assert window.left_column.minimumWidth() == least
+        assert least <= window.left_column.width() <= preset.width() + 2 * theme.SP_12
+        if width >= 1600:
+            assert window.left_column.width() == preset.width() + 2 * theme.SP_12
+        pixmap = window.frame_view.pixmap()
+        assert pixmap.width() <= window.frame_view.width()
+        assert window.frame_view.height() - pixmap.height() <= 2, "no empty band under the frame"
+        assert pixmap.width() * preset.height() == pytest.approx(
+            pixmap.height() * preset.width(), rel=0.02
+        )
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_the_full_size_button_opens_the_frame_at_the_time_shown(qt_app, tmp_path) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    try:
+        window.show()
+        window.seek(2.5)
+        assert window.full_frame_button.property("qalun.icon")[0] == "maximize-2"
+        assert window.full_frame_button.toolTip() == t("review.full_frame")
+        seen = []
+        window.frame_view.full_frame_requested.connect(seen.append)
+        window.full_frame_button.click()
+        assert seen == [pytest.approx(2.5)]
+        assert window._full_frame is not None and window._full_frame.isVisible()
+        window._full_frame.close_requested.emit()
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_the_remove_button_says_its_whole_sentence_as_a_tip(qt_app, tmp_path) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    assert window.remove_button.text() == t("review.remove")
+    assert window.remove_button.toolTip() == t("review.remove.tip")

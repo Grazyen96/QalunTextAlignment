@@ -430,7 +430,6 @@ def test_a_path_s_folders_read_left_to_right_in_either_language(qt_app, language
     for key in (
         "main.saved",
         "home.finished.rendered",
-        "render.done",
         "home.output_dir.custom",
         "home.quran_override.custom",
         "review.audio_missing",

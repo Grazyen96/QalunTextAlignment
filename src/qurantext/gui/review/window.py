@@ -33,12 +33,13 @@ from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QKeyCombination, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QKeyCombination, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (
     QCloseEvent,
     QDesktopServices,
     QKeyEvent,
     QKeySequence,
+    QResizeEvent,
     QShortcut,
     QShowEvent,
 )
@@ -55,6 +56,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSplitter,
     QStyle,
     QToolButton,
@@ -78,7 +80,7 @@ from qurantext.gui.review.background import BackgroundJobs
 from qurantext.gui.review.banner import Banner
 from qurantext.gui.review.episode_dialog import EpisodeDialog
 from qurantext.gui.review.export_dialog import ExportDialog
-from qurantext.gui.review.frame_view import FrameView, FullFrameView
+from qurantext.gui.review.frame_view import PORTRAIT_PREVIEW_WIDTH, FrameView, FullFrameView
 from qurantext.gui.review.look_panel import LookPanel, look_warning_text
 from qurantext.gui.review.player import RATES, Player, create_player
 from qurantext.gui.review.segment_list import SegmentList
@@ -101,7 +103,7 @@ from qurantext.gui.widgets import make_primary
 from qurantext.jobs.project import Project, job_settings
 from qurantext.utils.progress import CancelToken, ProgressEvent
 
-__all__ = ["SCANCODE_KEYS", "ReviewWindow", "render_finished_text"]
+__all__ = ["SCANCODE_KEYS", "ReviewWindow"]
 
 #: The physical key behind each layout-dependent shortcut, by the code Qt reports
 #: for it (``nativeScanCode``; on macOS ``nativeVirtualKey``, the scan code is 0).
@@ -111,30 +113,34 @@ __all__ = ["SCANCODE_KEYS", "ReviewWindow", "render_finished_text"]
 SCANCODE_KEYS: dict[str, dict[int, Qt.Key]] = {
     # X11 and Wayland report XKB keycodes, which are the Linux evdev codes plus 8
     # (linux/input-event-codes.h: KEY_LEFTBRACE 26, KEY_RIGHTBRACE 27,
-    # KEY_COMMA 51, KEY_DOT 52; xkeyboard-config keycodes/evdev: <AD11> = 34,
-    # <AD12> = 35, <AB08> = 59, <AB09> = 60).
+    # KEY_COMMA 51, KEY_DOT 52, KEY_SLASH 53; xkeyboard-config keycodes/evdev:
+    # <AD11> = 34, <AD12> = 35, <AB08> = 59, <AB09> = 60, <AB10> = 61).
     "xkb": {
         34: Qt.Key.Key_BracketLeft,
         35: Qt.Key.Key_BracketRight,
         59: Qt.Key.Key_Comma,
         60: Qt.Key.Key_Period,
+        61: Qt.Key.Key_Slash,
     },
     # Windows reports the PS/2 scan code set 1 make code (Microsoft's "Keyboard
     # Scan Code Specification"; bits 16-23 of WM_KEYDOWN's lParam): [ 0x1A,
-    # ] 0x1B, , 0x33, . 0x34.
+    # ] 0x1B, , 0x33, . 0x34, / 0x35.
     "windows": {
         0x1A: Qt.Key.Key_BracketLeft,
         0x1B: Qt.Key.Key_BracketRight,
         0x33: Qt.Key.Key_Comma,
         0x34: Qt.Key.Key_Period,
+        0x35: Qt.Key.Key_Slash,
     },
     # macOS reports the virtual key code (HIToolbox Events.h: kVK_ANSI_LeftBracket
-    # 0x21, kVK_ANSI_RightBracket 0x1E, kVK_ANSI_Comma 0x2B, kVK_ANSI_Period 0x2F).
+    # 0x21, kVK_ANSI_RightBracket 0x1E, kVK_ANSI_Comma 0x2B, kVK_ANSI_Period 0x2F,
+    # kVK_ANSI_Slash 0x2C).
     "macos": {
         0x21: Qt.Key.Key_BracketLeft,
         0x1E: Qt.Key.Key_BracketRight,
         0x2B: Qt.Key.Key_Comma,
         0x2F: Qt.Key.Key_Period,
+        0x2C: Qt.Key.Key_Slash,
     },
 }
 
@@ -150,6 +156,12 @@ _DEFAULT_SPAN_S = 20.0
 _SEPARATOR_GAP = 4
 #: How far one press of a zoom button moves the zoom slider (of its 0–100).
 _ZOOM_STEP = 10
+#: The least the left column's Look panel keeps under the preview before the
+#: fitted preview starts to give way to a short window.
+_LOOK_MIN_HEIGHT = 120
+#: The least room the right column must keep for the left one to open at the
+#: preset's width; on a narrower window the left column opens at its minimum.
+_TIMELINE_ROOM = 700
 #: What the render's progress bar says during each of the episode's steps.
 _EPISODE_PROGRESS_KEYS = {
     "episode_lecture": "render.running_lecture",
@@ -177,6 +189,34 @@ def _physical_key(event: QKeyEvent) -> Qt.Key | None:
     platform = _platform_family()
     code = event.nativeVirtualKey() if platform == "macos" else event.nativeScanCode()
     return SCANCODE_KEYS[platform].get(code)
+
+
+class _FrameScroll(QScrollArea):
+    """The preview's scroll area, asking for the preview's whole preset size.
+
+    A plain :class:`QScrollArea` caps its size hint at 24 lines of text, which
+    is less than a portrait preview's 480 px. Fitted (the area resizes its
+    frame), a column narrower than the preset asks for only the height the
+    frame then takes at the preset's shape, so no empty band is left under a
+    landscape frame; the hint follows the area's width as it changes.
+    """
+
+    def sizeHint(self) -> QSize:  # noqa: D102 - Qt override, documented by the class
+        widget = self.widget()
+        if widget is None:
+            return super().sizeHint()
+        frame = 2 * self.frameWidth()
+        hint = widget.sizeHint()
+        inner = self.width() - frame
+        if self.widgetResizable() and inner > 0 and hint.width() > 0:
+            height = min(hint.height(), math.ceil(inner * hint.height() / hint.width()))
+            hint = QSize(hint.width(), height)
+        return hint + QSize(frame, frame)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 - Qt override
+        super().resizeEvent(event)
+        if event.oldSize().width() != event.size().width():
+            self.updateGeometry()  # a new width is a new height to ask for
 
 
 def _separator() -> QFrame:
@@ -325,6 +365,8 @@ class ReviewWindow(QMainWindow):
         self.redo_button = QPushButton(t("review.redo"))
         self.reviewed_button = QPushButton(t("review.mark_reviewed"))
         self.remove_button = QPushButton(t("review.remove"))
+        # The label is short to keep the toolbar within 1280 px; the tip says it whole.
+        self.remove_button.setToolTip(t("review.remove.tip"))
         self.export_button = QPushButton(t("review.export"))
         self.render_button = QPushButton(t("review.render"))
         self.render_button.setToolTip(t("review.render.tip"))
@@ -409,7 +451,7 @@ class ReviewWindow(QMainWindow):
 
         # Left: the frame and the Look that changes it, at the preset's width.
         self.frame_view = FrameView(self.session, portrait=_is_portrait(self.session.project))
-        self.frame_scroll = QScrollArea()
+        self.frame_scroll = _FrameScroll()
         self.frame_scroll.setWidget(self.frame_view)
         self.frame_scroll.setWidgetResizable(True)
         self.frame_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
@@ -429,17 +471,30 @@ class ReviewWindow(QMainWindow):
         fit_group.setExclusive(True)
         fit_group.addButton(self.fit_button)
         fit_group.addButton(self.actual_button)
+        # The full-size view, also a double-click on the preview away.
+        self.full_frame_button = QToolButton()
+        self.full_frame_button.setAutoRaise(True)
+        self.full_frame_button.setToolTip(t("review.full_frame"))
+        self.full_frame_button.setAccessibleName(t("review.full_frame"))
+        set_icon(self.full_frame_button, "maximize-2", size=16)
         fit_row = QHBoxLayout()
         fit_row.addStretch(1)
         fit_row.addWidget(self.fit_button)
         fit_row.addWidget(self.actual_button)
+        fit_row.addWidget(self.full_frame_button)
         self.left_column = QWidget()
         left = QVBoxLayout(self.left_column)
         left.setContentsMargins(0, 0, 0, 0)
-        left.addWidget(self.frame_scroll, 1)
+        # The preview keeps its preset height and the Look panel under it takes
+        # what is left, scrolling; only when that would leave the panel less
+        # than _LOOK_MIN_HEIGHT does the fitted preview give way (to half size).
+        left.addWidget(self.frame_scroll, 0)
         left.addLayout(fit_row)
-        left.addWidget(self._build_look_panel(), 2)
-        self.left_column.setFixedWidth(self.frame_view.preset_size.width() + 2 * theme.SP_12)
+        left.addWidget(self._build_look_panel(), 1)
+        # As narrow as a portrait preview for every preset, so a landscape job
+        # fits a 1280 px screen too; the splitter opens it wider when there is
+        # room (see _size_columns) and the fitted frame scales to the column.
+        self.left_column.setMinimumWidth(PORTRAIT_PREVIEW_WIDTH + 2 * theme.SP_12)
 
         # Right: the timeline and its transport, then the table down to the status bar.
         self.right_column = QWidget()
@@ -457,6 +512,8 @@ class ReviewWindow(QMainWindow):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         self._splitter = splitter
+        #: Whether the first show has given the columns their opening widths.
+        self._columns_sized = False
         column.addWidget(splitter, 1)
 
         # A short line with a link to the sheet that lists every key.
@@ -484,6 +541,12 @@ class ReviewWindow(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        # Its height is whatever the preview leaves: no height of its own to ask
+        # for (Ignored), only a floor below which the preview gives way instead.
+        policy = scroll.sizePolicy()
+        policy.setVerticalPolicy(QSizePolicy.Policy.Ignored)
+        scroll.setSizePolicy(policy)
+        scroll.setMinimumHeight(_LOOK_MIN_HEIGHT)
         self.look_scroll = scroll
         return scroll
 
@@ -578,6 +641,7 @@ class ReviewWindow(QMainWindow):
         self.fit_button.clicked.connect(lambda: self._set_preview_fit(True))
         self.actual_button.clicked.connect(lambda: self._set_preview_fit(False))
         self.frame_view.full_frame_requested.connect(self._show_full_frame)
+        self.full_frame_button.clicked.connect(self.frame_view.request_full_frame)
         self.player.playing_changed.connect(self._on_playing_changed)
         self.player.duration_changed.connect(self._set_duration)
         self.player.error.connect(self.warnings.add_notice)
@@ -605,9 +669,11 @@ class ReviewWindow(QMainWindow):
             ("Ctrl+Z", self.undo),
             ("Ctrl+Shift+Z", self.redo),
             ("Ctrl+S", self.save),
-            # "?" where a layout types it unshifted, Shift+/ where it is US-shifted.
+            # One shortcut for "?", wherever the layout puts it: Qt offers the
+            # shortcut map both the typed "?" and the key under it (Shift+/ on a
+            # US layout), so a second shortcut for Shift+/ would make every press
+            # ambiguous and neither would fire.
             ("?", self.show_shortcuts),
-            ("Shift+/", self.show_shortcuts),
         ]
         self._keys: dict[str, Callable[[], None]] = {}
         for text, action in bindings:
@@ -622,8 +688,11 @@ class ReviewWindow(QMainWindow):
         # ambiguous. Other layouts put these characters elsewhere and may differ.
         self._keys["Shift+>"] = self._keys["Shift+."]
         self._keys["Shift+<"] = self._keys["Shift+,"]
-        # Likewise a real Shift+/ arrives as Shift+? (and a German Shift+ß too).
+        # Likewise a real Shift+/ arrives as Shift+? (and a German Shift+ß too); and
+        # an Arabic layout's Shift+/ types ؟, which _layout_action reads by its
+        # place as Shift+/.
         self._keys["Shift+?"] = self.show_shortcuts
+        self._keys["Shift+/"] = self.show_shortcuts
 
     def _set_tips(self) -> None:
         """Say each button's shortcut on the button itself, where a person hovers to learn it."""
@@ -760,10 +829,30 @@ class ReviewWindow(QMainWindow):
         )
         self.frame_scroll.setVerticalScrollBarPolicy(policy)
         self.frame_scroll.setHorizontalScrollBarPolicy(policy)
-        self.frame_scroll.setMinimumHeight(self.frame_view.minimumSizeHint().height() if fit else 0)
+        # Either way the area asks for the preset's height (see _FrameScroll) and
+        # gives way down to half of it, as the fitted frame does.
+        self.frame_scroll.setMinimumHeight(self.frame_view.minimumSizeHint().height())
+        self.frame_scroll.updateGeometry()
         (self.fit_button if fit else self.actual_button).setChecked(True)
         if remember:
             self._prefs.preview_fit = fit
+
+    def _size_columns(self) -> None:
+        """Open the left column at the preset's width when the timeline keeps its room.
+
+        The preset's width plus the column's margins when the window leaves the
+        right column at least :data:`_TIMELINE_ROOM`, else the column's minimum;
+        the person can drag the splitter either way afterwards.
+        """
+        layout = self.centralWidget().layout()
+        if layout is not None:
+            layout.activate()
+        wide = self.frame_view.preset_size.width() + 2 * theme.SP_12
+        least = self.left_column.minimumWidth()
+        left = wide if self.width() - wide >= _TIMELINE_ROOM else least
+        total = sum(self._splitter.sizes())
+        if total > left:
+            self._splitter.setSizes([left, total - left])
 
     def _show_full_frame(self, seconds: float) -> None:
         """Show the frame at *seconds* full size; playback goes on underneath."""
@@ -1344,8 +1433,14 @@ class ReviewWindow(QMainWindow):
         return "cancel"
 
     def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 - Qt override
-        """Shown again after a close: ask about changes next time, and resume what close stopped."""
+        """Shown again after a close: ask about changes next time, and resume what close stopped.
+
+        The first show also opens the columns at their widths (see :meth:`_size_columns`).
+        """
         super().showEvent(event)
+        if not self._columns_sized:
+            self._columns_sized = True
+            self._size_columns()
         if not self._closed:
             return
         self._closed = False
@@ -1431,13 +1526,3 @@ class ReviewWindow(QMainWindow):
         gaps = uncovered_from_levels(times, levels, floor, self.session.coverage_words())
         self.waveform.set_gaps([(gap.start, gap.end) for gap in gaps])
         self.warnings.set_gaps(gaps)
-
-
-def render_finished_text(outcome: JobOutcome) -> str:
-    """What a finished render says: the video, then its episode, written or not."""
-    lines = [t("render.done", path=path_text(outcome.video))]
-    if outcome.episode_video is not None:
-        lines.append(t("review.episode_written", name=Path(outcome.episode_video).name))
-    if outcome.episode_error:
-        lines.append(outcome.episode_error)
-    return "\n\n".join(lines)

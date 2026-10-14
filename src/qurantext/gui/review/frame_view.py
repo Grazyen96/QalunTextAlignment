@@ -53,13 +53,15 @@ from qurantext.core.frame_renderer import (
 from qurantext.gui import i18n
 from qurantext.gui.review.session import ReviewSession
 
-__all__ = ["FrameView", "FullFrameView"]
+__all__ = ["PORTRAIT_PREVIEW_WIDTH", "FrameView", "FullFrameView"]
 
 #: Renders at most this often while polled continuously (e.g. during playback).
 MIN_INTERVAL_S = 0.2
 
 _PORTRAIT_SIZE = (270, 480)
 _LANDSCAPE_SIZE = (480, 270)
+#: A portrait preview's width: the review window's left column is never narrower.
+PORTRAIT_PREVIEW_WIDTH = _PORTRAIT_SIZE[0]
 
 
 def _to_pixmap(frame: np.ndarray) -> QPixmap:
@@ -120,10 +122,14 @@ class FrameView(QLabel):
         self.updateGeometry()
         self.show_at(self._last_t, force=True)
 
+    def request_full_frame(self) -> None:
+        """Ask for the frame full size at the time shown (a double-click, or the button)."""
+        self.full_frame_requested.emit(self._last_t)
+
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt override
         """A left double-click asks for the frame full size at the time shown."""
         if event.button() == Qt.MouseButton.LeftButton:
-            self.full_frame_requested.emit(self._last_t)
+            self.request_full_frame()
             return
         super().mouseDoubleClickEvent(event)
 
