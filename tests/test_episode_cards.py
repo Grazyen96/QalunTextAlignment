@@ -111,3 +111,27 @@ def test_the_card_holds_its_picture_centred_and_selection_moves_nothing(qt_app) 
     assert card.minimumSizeHint().width() == CARD_WIDTH
     assert card.thumb_label.geometry() == before
     card.close()
+
+
+def test_enter_selects_only_from_the_card_itself_not_from_its_controls(qt_app) -> None:
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication
+
+    card = PartCard("Intro")
+    combo = QComboBox()
+    card.add_control(combo)
+    card.show()
+    card.activateWindow()
+    asked = []
+    card.select_requested.connect(lambda: asked.append(True))
+    combo.setFocus()
+    QApplication.processEvents()
+    asked.clear()  # focus landing on the control asked once; that is not the key
+    QTest.keyClick(combo, Qt.Key.Key_Return)
+    assert asked == [], "Enter in a control goes on to the dialog's OK"
+    card.setFocus()
+    QApplication.processEvents()
+    QTest.keyClick(card, Qt.Key.Key_Space)
+    QTest.keyClick(card, Qt.Key.Key_Return)
+    assert asked == [True, True]
+    card.close()

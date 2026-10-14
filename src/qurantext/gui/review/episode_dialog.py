@@ -449,6 +449,22 @@ class EpisodeDialog(QDialog):
             current.outro_generated or prefs.remembered_outro_generated or GeneratedOutro()
         )
 
+        # Tab runs along the strip: a card, then its controls, then the next card (the
+        # cards were parented before their controls, so Qt's own order jumps about).
+        strip_order = [
+            self.cards["intro"],
+            self.intro_kind,
+            self.intro_choose,
+            self.intro_remove,
+            self.recitation_box,
+            self.cards["outro"],
+            self.outro_kind,
+            self.outro_choose,
+            self.outro_remove,
+        ]
+        for first, second in zip(strip_order, strip_order[1:], strict=False):
+            QWidget.setTabOrder(first, second)
+
         layout.addWidget(self.total_label)
         #: The selected part's generated fields, under the strip.
         self.detail_pane = QWidget()
@@ -496,6 +512,8 @@ class EpisodeDialog(QDialog):
         self._update_total()
         self._show_missing()
         self.flush_previews()
+        # Focus opens on the selected part's kind, so Enter right away presses OK.
+        (self.intro_kind if self._selected == "intro" else self.outro_kind).setFocus()
 
     def done(self, result: int) -> None:
         """Closing: a preview still waiting for typing to rest is not drawn."""

@@ -176,7 +176,12 @@ class PartCard(Card):
         super().mouseReleaseEvent(event)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt override
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+        # Only the card's own keys: Enter a control lets through is the dialog's (OK).
+        if self.hasFocus() and event.key() in (
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Enter,
+            Qt.Key.Key_Space,
+        ):
             self.click()
             return
         super().keyPressEvent(event)

@@ -3537,3 +3537,44 @@ def test_the_four_pictures_line_up_when_no_part_is_chosen(
     }
     assert len(set(ys.values())) == 1, ys
     dialog.reject()
+
+
+def test_focus_starts_on_the_selected_parts_kind_and_tab_runs_along_the_strip(
+    qt_app, episode_lecture, prefs, tmp_path, monkeypatch
+) -> None:
+    from qurantext.gui.review.episode_dialog import EpisodeDialog
+    from qurantext.jobs.episode_assets import EpisodeChoice, GeneratedOutro
+
+    _recitation_jobs(monkeypatch, tmp_path, episode_lecture.project.path)
+    _fake_probe(monkeypatch, {})
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    dialog.show()
+    _spin_briefly(qt_app)
+    assert dialog.focusWidget() is dialog.intro_kind
+    # Along the strip: the intro's controls, then the recitation, and only then the outro.
+    seen = []
+    widget = dialog.intro_kind.nextInFocusChain()
+    while widget is not dialog.intro_kind and len(seen) < 200:
+        seen.append(widget)
+        widget = widget.nextInFocusChain()
+    recitation = min(
+        seen.index(w) for w in (dialog.cards["recitation"], dialog.recitation_box) if w in seen
+    )
+    outro = min(seen.index(w) for w in (dialog.cards["outro"], dialog.outro_kind))
+    for control in (dialog.intro_choose, dialog.intro_remove):
+        assert seen.index(control) < recitation
+    assert recitation < outro
+    assert seen.index(dialog.cards["outro"]) < seen.index(dialog.outro_kind)
+    # Enter on the kind box is the dialog's, not the card's: it presses OK.
+    QTest.keyClick(dialog.intro_kind, Qt.Key.Key_Return)
+    assert dialog.result() == dialog.DialogCode.Accepted
+
+    episode_lecture.set_episode(
+        EpisodeChoice(outro_generated=GeneratedOutro(link="example.org/dars", platform="youtube"))
+    )
+    dialog = EpisodeDialog(episode_lecture, prefs=prefs, job_dirs=[tmp_path])
+    dialog.show()
+    _spin_briefly(qt_app)
+    assert dialog.selected_part() == "outro"
+    assert dialog.focusWidget() is dialog.outro_kind
+    dialog.reject()
