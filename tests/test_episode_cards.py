@@ -64,3 +64,29 @@ def test_a_click_a_key_or_focus_in_a_control_asks_for_selection(qt_app) -> None:
     card.set_selectable(False)
     card.click()
     assert asked == [True, True], "an unselectable card asks for nothing"
+
+
+def test_a_nested_control_layout_is_added_once_and_its_widgets_are_watched(qt_app) -> None:
+    from PySide6.QtCore import QEvent, qInstallMessageHandler
+    from PySide6.QtGui import QFocusEvent
+    from PySide6.QtWidgets import QHBoxLayout, QPushButton, QVBoxLayout
+
+    card = PartCard("Intro")
+    column = QVBoxLayout()
+    buttons = QHBoxLayout()
+    choose = QPushButton("Choose")
+    buttons.addWidget(choose)
+    column.addLayout(buttons)
+    messages: list[str] = []
+    previous = qInstallMessageHandler(lambda _kind, _context, text: messages.append(text))
+    try:
+        card.add_control_layout(column)
+    finally:
+        qInstallMessageHandler(previous)
+    # The inner row is the column's: adding it to the card as well is what Qt warns about.
+    assert not [text for text in messages if "already has a parent" in text]
+    assert buttons.parent() is column
+    asked = []
+    card.select_requested.connect(lambda: asked.append(True))
+    qt_app.sendEvent(choose, QFocusEvent(QEvent.Type.FocusIn, Qt.FocusReason.TabFocusReason))
+    assert asked == [True]

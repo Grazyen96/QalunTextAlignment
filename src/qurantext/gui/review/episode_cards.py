@@ -85,13 +85,21 @@ class PartCard(Card):
     def add_control_layout(self, layout: QLayout) -> None:
         """Put a layout of controls under the title, watching each widget in it."""
         self.controls.addLayout(layout)
+        self._watch(layout)
+
+    def _watch(self, layout: QLayout) -> None:
+        """Watch every widget in *layout* and the layouts nested in it.
+
+        A nested layout already belongs to *layout*: it is walked, never added
+        again (Qt would warn that it already has a parent).
+        """
         for index in range(layout.count()):
             item = layout.itemAt(index)
             widget = item.widget() if item is not None else None
             if widget is not None:
                 widget.installEventFilter(self)
             elif item is not None and item.layout() is not None:
-                self.add_control_layout(item.layout())
+                self._watch(item.layout())
 
     def set_thumbnail(self, pixmap: QPixmap | None) -> None:
         if pixmap is None:
