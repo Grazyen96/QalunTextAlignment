@@ -168,7 +168,7 @@ QToolButton[swatch="true"]:checked {{
     color: {t.accent};
     border-color: transparent;
 }}
-QToolButton[swatch="true"]:checked:focus {{ border-color: {t.accent}; }}
+QToolButton[swatch="true"]:checked[kbdfocus="true"] {{ border-color: {t.accent}; }}
 QPushButton:disabled, QToolButton:disabled {{ color: {t.secondary}; border-color: {t.border}; }}
 QToolButton[swatch="true"]:disabled {{ border-color: transparent; }}
 QPushButton[segment="true"]:checked:disabled, QToolButton[swatch="true"]:checked:disabled {{
@@ -176,8 +176,8 @@ QPushButton[segment="true"]:checked:disabled, QToolButton[swatch="true"]:checked
     color: {t.secondary};
     border: 1px solid {t.accent};
 }}
-QPushButton:focus, QToolButton:focus {{ outline: none; border: 2px solid {t.accent}; padding: 4px 9px; }}
-QToolButton[autoRaise="true"]:focus {{ padding: 1px 3px; }}
+QPushButton[kbdfocus="true"], QToolButton[kbdfocus="true"] {{ outline: none; border: 2px solid {t.accent}; padding: 4px 9px; }}
+QToolButton[autoRaise="true"][kbdfocus="true"] {{ padding: 1px 3px; }}
 QPushButton[primary="true"] {{
     background: {t.accent};
     color: {t.on_accent};
@@ -186,7 +186,7 @@ QPushButton[primary="true"] {{
     padding: 7px 18px;
 }}
 QPushButton[primary="true"]:hover {{ background: {hover_primary}; }}
-QPushButton[primary="true"]:focus {{ border: 2px solid {t.text}; padding: 5px 16px; }}
+QPushButton[primary="true"][kbdfocus="true"] {{ border: 2px solid {t.text}; padding: 5px 16px; }}
 QPushButton[primary="true"]:disabled {{
     background: {t.panel};
     color: {t.secondary};
@@ -200,7 +200,7 @@ QPushButton[row="true"] {{
     padding: 4px 6px;
 }}
 QPushButton[row="true"]:hover {{ background: {t.raised}; border-color: {t.border}; }}
-QPushButton[row="true"]:focus {{ background: {t.raised}; border: 2px solid {t.accent}; padding: 3px 5px; }}
+QPushButton[row="true"][kbdfocus="true"] {{ background: {t.raised}; border: 2px solid {t.accent}; padding: 3px 5px; }}
 QPushButton[quiet="true"] {{
     background: transparent;
     border: 1px solid transparent;
@@ -208,7 +208,7 @@ QPushButton[quiet="true"] {{
 }}
 QPushButton[quiet="true"]:hover {{ background: {t.raised}; border-color: transparent; }}
 QPushButton[quiet="true"]:pressed {{ background: {t.border}; }}
-QPushButton[quiet="true"]:focus {{ border: 2px solid {t.accent}; padding: 4px 9px; }}
+QPushButton[quiet="true"][kbdfocus="true"] {{ border: 2px solid {t.accent}; padding: 4px 9px; }}
 QPushButton[quiet="true"]:disabled {{ color: {t.secondary}; }}
 QLabel[placeholder="true"] {{ border: 2px dashed {t.border}; border-radius: 6px; background: transparent; }}
 QFrame[card="true"] {{
@@ -218,6 +218,8 @@ QFrame[card="true"] {{
 }}
 QFrame[card="true"][empty="true"] {{ border: none; background: {t.border}; border-radius: 2px; }}
 QFrame[card="true"][part="true"] {{ border: 2px solid transparent; }}
+QFrame[card="true"]:hover {{ border-color: {t.accent}; }}
+QFrame[card="true"][kbdfocus="true"] {{ border: 2px solid {t.accent}; }}
 QFrame[card="true"][selected="true"] {{ border: 2px solid {t.accent}; }}
 QFrame#dropZone {{
     background: {t.panel};
@@ -321,6 +323,9 @@ def apply_theme(app, mode: str) -> Tokens:
         # Not asked of app.style(): once a sheet is set that is Qt's sheet proxy, never "fusion".
         app.setStyle("Fusion")
         app.setProperty(_FUSION_PROPERTY, True)
+    from qurantext.gui import focus
+
+    focus.install(app)
     app.setProperty(MODE_PROPERTY, mode)
     app.setProperty(TOKENS_PROPERTY, tokens)
     app.setPalette(palette(tokens))

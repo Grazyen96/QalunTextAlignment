@@ -296,15 +296,15 @@ def test_a_toolbar_separator_is_drawn_in_the_border_colour(tokens) -> None:
 def test_quiet_buttons_and_the_chosen_tile_keep_focus_disabled_and_pressed_looks(tokens) -> None:
     """The quiet rule and the checked tile come late in the sheet: their states must follow."""
     sheet = theme.stylesheet(tokens)
-    focus = _rule(sheet, 'QPushButton[quiet="true"]:focus')
+    focus = _rule(sheet, 'QPushButton[quiet="true"][kbdfocus="true"]')
     assert focus["border"] == f"2px solid {tokens.accent}" and focus["padding"] == "4px 9px"
     assert _rule(sheet, 'QPushButton[quiet="true"]:disabled')["color"] == tokens.secondary
     assert _rule(sheet, 'QPushButton[quiet="true"]:pressed')["background"] == tokens.border
-    for state in (":focus", ":disabled", ":pressed"):
+    for state in ('[kbdfocus="true"]', ":disabled", ":pressed"):
         assert sheet.index(f'QPushButton[quiet="true"]{state}') > sheet.index(
             'QPushButton[quiet="true"] {'
         ), state
-    tile = _rule(sheet, 'QToolButton[swatch="true"]:checked:focus')
+    tile = _rule(sheet, 'QToolButton[swatch="true"]:checked[kbdfocus="true"]')
     assert tile["border-color"] == tokens.accent
     assert _rule(sheet, 'QToolButton[swatch="true"]:checked')["border-color"] == "transparent"
 
@@ -368,7 +368,7 @@ def test_a_focused_quiet_button_and_a_focused_chosen_tile_show_the_accent_ring(
     QApplication.processEvents()
     assert not _edge_has(quiet, accent) and not _edge_has(tile, accent)
     for widget in (quiet, tile):
-        widget.setFocus()
+        widget.setFocus(Qt.FocusReason.TabFocusReason)
         QApplication.processEvents()
         assert widget.hasFocus()
         assert _edge_has(widget, accent), widget.text()
@@ -379,5 +379,65 @@ def test_a_focused_quiet_button_and_a_focused_chosen_tile_show_the_accent_ring(
         for x in range(image.width())
         for y in range(image.height())
     )
+    # A click focuses without the ring: only the keyboard paints it.
+    quiet.setFocus(Qt.FocusReason.MouseFocusReason)
+    QApplication.processEvents()
+    assert quiet.hasFocus()
+    assert not _edge_has(quiet, accent)
     window.close()
     window.deleteLater()
+
+
+@pytest.mark.parametrize("tokens", THEMES, ids=IDS)
+def test_focus_is_a_property_not_a_pseudo_class(tokens) -> None:
+    """A click or a dialog's first focus paints no ring; Tab does (gui.focus marks it)."""
+    sheet = theme.stylesheet(tokens)
+    assert ":focus" not in sheet
+    ring = _rule(sheet, 'QPushButton[kbdfocus="true"], QToolButton[kbdfocus="true"]')
+    assert ring["border"] == f"2px solid {tokens.accent}"
+    assert _rule(sheet, 'QPushButton[primary="true"][kbdfocus="true"]')["border"] == (
+        f"2px solid {tokens.text}"
+    )
+
+
+@pytest.mark.parametrize("tokens", THEMES, ids=IDS)
+def test_cards_hover_and_focus_like_buttons(tokens) -> None:
+    sheet = theme.stylesheet(tokens)
+    assert _rule(sheet, 'QFrame[card="true"]:hover')["border-color"] == tokens.accent
+    assert _rule(sheet, 'QFrame[card="true"][kbdfocus="true"]')["border"] == (
+        f"2px solid {tokens.accent}"
+    )
+    # The selected Episode card's border wins over hover: its rule comes later.
+    assert sheet.index('QFrame[card="true"][selected="true"]') > sheet.index(
+        'QFrame[card="true"]:hover'
+    )
+
+
+def test_apply_theme_installs_the_focus_marker(qt_app) -> None:
+    from qurantext.gui import focus
+
+    theme.apply_theme(qt_app, "light")
+    assert isinstance(qt_app.property("qalun.focus_marker"), focus.KeyboardFocusMarker)
+
+
+def test_a_selected_card_keeps_its_border_when_hovered(qt_app) -> None:
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QEnterEvent
+
+    from qurantext.gui.review.episode_cards import PartCard
+
+    tokens = theme.apply_theme(qt_app, "light")
+    card = PartCard("Intro")
+    card.set_selected(True)
+    card.show()
+    qt_app.processEvents()
+    assert card.testAttribute(Qt.WidgetAttribute.WA_Hover)
+    centre = QPointF(card.rect().center())
+    qt_app.sendEvent(card, QEnterEvent(centre, centre, card.mapToGlobal(centre.toPoint())))
+    qt_app.processEvents()
+    image = card.grab().toImage()
+    accent = QColor(tokens.accent)
+    # Two accent pixels deep on the left edge: the 2 px selection border, not a 1 px hover one.
+    y = image.height() // 2
+    assert _near(image.pixelColor(0, y), accent) and _near(image.pixelColor(1, y), accent)
+    card.close()
