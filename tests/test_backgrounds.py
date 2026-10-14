@@ -532,3 +532,46 @@ def test_rendering_never_draws_on_the_cached_layer() -> None:
     )
     assert frame_base_layer(look, 540, 960, reserve_caption_band=True) is layer
     assert layer.image.tobytes() == before
+
+
+# -- tiles for the Look panel ------------------------------------------------------
+
+
+def test_a_tile_has_the_asked_size_for_every_kind(tmp_path) -> None:
+    from qurantext.core.backgrounds import tile_image
+    from qurantext.core.looks import BACKGROUND_KINDS
+
+    for kind in BACKGROUND_KINDS:
+        if kind == "image":
+            continue
+        bg = Background(kind, (20, 30, 40, 255), (200, 200, 200, 255))
+        assert tile_image(bg, 56, 36).size == (56, 36), kind
+
+
+def test_a_solid_tile_is_its_colour_and_a_pattern_tile_is_not() -> None:
+    from qurantext.core.backgrounds import tile_image
+
+    solid = tile_image(Background("solid", (20, 30, 40, 255), (20, 30, 40, 255)), 56, 36)
+    assert solid.convert("RGB").getpixel((28, 18)) == (20, 30, 40)
+    stars = tile_image(Background("pattern_stars", (20, 30, 40, 255), (230, 200, 90, 255)), 56, 36)
+    assert len(set(stars.convert("RGB").getdata())) > 1, "the lines reach the small tile"
+
+
+def test_a_tile_ignores_dim_and_blur() -> None:
+    from qurantext.core.backgrounds import tile_image
+
+    plain = Background("solid", (200, 100, 50, 255), (200, 100, 50, 255))
+    dimmed = replace(plain, dim=0.8, blur=20.0)
+    assert tile_image(dimmed, 8, 8).tobytes() == tile_image(plain, 8, 8).tobytes()
+
+
+def test_an_image_tile_shows_the_photo_and_a_gone_one_raises(tmp_path) -> None:
+    from qurantext.core.backgrounds import tile_image
+
+    photo = tmp_path / "p.png"
+    Image.new("RGB", (40, 40), (250, 10, 10)).save(photo)
+    bg = Background("image", (0, 0, 0, 255), (0, 0, 0, 255), image=photo)
+    assert tile_image(bg, 16, 16).convert("RGB").getpixel((8, 8)) == (250, 10, 10)
+    photo.unlink()
+    with pytest.raises(ValueError, match="image_missing"):
+        tile_image(bg, 16, 16)

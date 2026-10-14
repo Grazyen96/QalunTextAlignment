@@ -31,7 +31,7 @@ import io
 import math
 import threading
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -39,7 +39,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageOps, ImageStat
 
 from qurantext.core.looks import NIGHT_GOLD, PRESETS, Background, Look
 
-__all__ = ["BaseLayer", "background_mean", "base_layer", "clear_cache"]
+__all__ = ["BaseLayer", "background_mean", "base_layer", "clear_cache", "tile_image"]
 
 _CACHE_SIZE = 4
 _PHOTO_CACHE_SIZE = 3
@@ -143,6 +143,26 @@ def background_mean(look: Look, width: int, height: int) -> tuple[int, int, int]
         mean = _background_or_fallback(look, width, height, stamp)[1]
         _store(_mean_cache, key, mean, _MEAN_CACHE_SIZE)
     return mean
+
+
+#: A tile is drawn this many times larger and shrunk, so a pattern's lines survive 56 px.
+TILE_OVERSAMPLE = 4
+
+
+def tile_image(background: Background, width: int, height: int) -> Image.Image:
+    """*background*'s kind in its colours at *width* × *height*, without dim or blur.
+
+    For the Look panel's background tiles: what the kind looks like, not how
+    far it is dimmed (the sliders show that). Raises ``ValueError`` with the
+    problem's code for an image that is missing or cannot be read.
+    """
+    flat = replace(background, dim=0.0, blur=0.0)
+    big = (width * TILE_OVERSAMPLE, height * TILE_OVERSAMPLE)
+    try:
+        image = _draw_background(flat, *big, _image_stamp(flat))
+    except _ImageProblem as problem:
+        raise ValueError(problem.code) from problem
+    return image.resize((width, height), Image.Resampling.LANCZOS)
 
 
 def _background_or_fallback(
