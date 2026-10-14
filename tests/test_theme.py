@@ -10,6 +10,7 @@ from PySide6.QtGui import QColor, QFont, QPalette  # noqa: E402
 
 from qurantext.gui import theme  # noqa: E402
 from qurantext.gui.colors import playhead_color, warning_color  # noqa: E402
+from qurantext.gui.style import QalunStyle  # noqa: E402
 from tests.test_colors import contrast  # noqa: E402
 
 THEMES = [theme.LIGHT, theme.DARK]
@@ -254,7 +255,9 @@ def test_light_and_dark_apply_their_palette_and_sheet(qt_app, hints) -> None:
     assert theme.current_tokens(qt_app) is theme.DARK
     assert theme.apply_theme(qt_app, "light") is theme.LIGHT
     qt_app.setStyleSheet("")  # with a sheet set, style() is Qt's sheet proxy, not Fusion
-    assert qt_app.style().objectName().lower() == "fusion"
+    style = qt_app.style()  # Qalun's proxy, which draws through Fusion
+    assert isinstance(style, QalunStyle)
+    assert style.baseStyle().objectName().lower() == "fusion"
 
 
 def test_system_follows_the_desktop_live(qt_app, hints) -> None:

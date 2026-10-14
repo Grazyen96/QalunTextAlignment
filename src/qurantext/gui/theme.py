@@ -323,7 +323,13 @@ def apply_theme(app, mode: str) -> Tokens:
     tokens = resolve(mode, app)
     if not app.property(_FUSION_PROPERTY):
         # Not asked of app.style(): once a sheet is set that is Qt's sheet proxy, never "fusion".
-        app.setStyle("Fusion")
+        from PySide6.QtWidgets import QStyleFactory
+
+        from qurantext.gui.style import QalunStyle
+
+        base = QStyleFactory.create("Fusion")
+        # A Qt built without Fusion: the proxy wraps whatever style is in force.
+        app.setStyle(QalunStyle(base) if base is not None else QalunStyle(app.style()))
         app.setProperty(_FUSION_PROPERTY, True)
     from qurantext.gui import focus
 
