@@ -48,7 +48,7 @@ def test_with_animation_it_grows_then_frees_its_height(qt_app, panel) -> None:
     disclosure.reveal(panel, True, animate=True)
     assert panel.isVisible() and panel.maximumHeight() < full
     assert wait_for(lambda: panel.maximumHeight() == _NO_LIMIT, 2000)
-    assert panel.height() >= full
+    assert wait_for(lambda: panel.height() >= full, 2000)
     disclosure.reveal(panel, False, animate=True)
     assert panel.isVisible(), "still on screen while it shrinks"
     assert wait_for(lambda: not panel.isVisible(), 2000)
