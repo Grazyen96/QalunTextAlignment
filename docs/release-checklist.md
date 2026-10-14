@@ -178,9 +178,9 @@ this is the only place anyone hears each platform's build recognise speech.
       design; the review's nudge buttons carry chevrons and snap a crosshair), nothing
       unreadable or cut off, including the Settings tabs and the empty first launch, and
       the review window's shortcut sheet and full-size preview.
-- [ ] In `settings-general-ar-dark.png` and `review-recitation-en-dark.png` from the same
-      run, every checkbox, radio button and field has an outline that shows on the dark
-      surface, drawn on its own box and not beside it.
+- [ ] In `settings-general-ar-dark.png`, `export-en-dark.png` and `home-running-en-dark.png`
+      from the same run, every checkbox, radio button and field has an outline that shows
+      on the dark surface, drawn on its own box and not beside it.
 - [ ] The focus ring on buttons, palette swatches and cards now paints for keyboard
       focus only: on a real desktop, Tab and Shift+Tab through the home form, the Settings
       dialog and the review window show the ring on each in turn, and a click on a button
