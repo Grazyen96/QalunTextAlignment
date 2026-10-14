@@ -158,8 +158,9 @@ _ZOOM_STEP = 10
 #: The least the left column's Look panel keeps under the preview before the
 #: fitted preview starts to give way to a short window.
 _LOOK_MIN_HEIGHT = 120
-#: The least room the right column must keep for the left one to open at the
-#: preset's width; on a narrower window the left column opens at its minimum.
+#: The room ``_size_columns`` asks the right column to keep beside a left column
+#: at the preset's width: the wide branch is taken only when the window leaves it.
+#: The splitter then clamps the left column to what the right column's minimum leaves.
 _TIMELINE_ROOM = 700
 #: What the render's progress bar says during each of the episode's steps.
 _EPISODE_PROGRESS_KEYS = {
@@ -847,11 +848,14 @@ class ReviewWindow(QMainWindow):
             self._prefs.preview_fit = fit
 
     def _size_columns(self) -> None:
-        """Open the left column at the preset's width when the timeline keeps its room.
+        """Open the left column at the preset's width when the splitter has the room.
 
-        The preset's width plus the column's margins when the window leaves the
-        right column at least :data:`_TIMELINE_ROOM`, else the column's minimum;
-        the person can drag the splitter either way afterwards.
+        Asks for the preset's width plus the column's margins when the window
+        leaves the right column at least :data:`_TIMELINE_ROOM`, else for the
+        column's minimum. The splitter clamps what is asked to what the right
+        column's minimum leaves, so on a window too narrow for both the left
+        column opens narrower than the preset. The person can drag the splitter
+        either way afterwards.
         """
         layout = self.centralWidget().layout()
         if layout is not None:
