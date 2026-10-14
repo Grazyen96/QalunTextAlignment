@@ -476,3 +476,32 @@ def test_a_selected_card_keeps_its_border_when_hovered(qt_app) -> None:
     assert _near(image.pixelColor(0, y), border, slack=8)
     assert not _near(image.pixelColor(0, y), accent)
     other.close()
+
+
+@pytest.mark.parametrize("tokens", THEMES, ids=IDS)
+def test_every_colour_added_since_phase_a_reads_on_its_surfaces(tokens) -> None:
+    """One table for the ring, the amber, the playhead, the quiet accent and the hex labels."""
+    pal = theme.palette(tokens)
+    surfaces = {"window": tokens.window, "panel": tokens.panel, "raised": tokens.raised}
+    checks = [
+        # white is the tile fill in the light theme only; the dark gold never sits on it
+        (
+            "gold",
+            tokens.gold,
+            {**surfaces, **({"white": "#FFFFFF"} if tokens is theme.LIGHT else {})},
+            3.0,
+        ),
+        ("amber", warning_color(pal).name(), surfaces, 4.5),
+        (
+            "playhead",
+            playhead_color(pal).name(),
+            {"window": tokens.window, "panel": tokens.panel},
+            3.0,
+        ),
+        ("accent", tokens.accent, {"raised": tokens.raised, "window": tokens.window}, 4.5),
+        ("secondary", tokens.secondary, {"raised": tokens.raised, "window": tokens.window}, 4.5),
+        ("on_accent", tokens.on_accent, {"accent": tokens.accent}, 4.5),
+    ]
+    for name, colour, on, floor in checks:
+        for surface, value in on.items():
+            assert contrast(_c(colour), _c(value)) >= floor, (tokens.name, name, surface)

@@ -71,7 +71,7 @@ LIGHT = Tokens(
     secondary="#5F5B55",
     accent="#2F5D8A",
     on_accent="#FFFFFF",
-    gold="#B8891C",
+    gold="#A67C11",
 )
 
 DARK = Tokens(
