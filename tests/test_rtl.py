@@ -390,6 +390,8 @@ def test_no_english_is_left_in_the_arabic_windows(
     roots = (main, review_window, review_window._make_export_dialog(), lecture_review_window)
     for root in roots:
         shown = [*_shown(root), *(text for menu in menus for text in menu)]
+        # A colour's hex code is a value, like the fixture's paths, not a word.
+        shown = [re.sub(r"#[0-9A-Fa-f]{6}\b", "", text) for text in shown]
         latin = {word for text in shown for word in _LATIN_WORD.findall(text)} - allowed
         assert not latin, (root, sorted(latin))
 
