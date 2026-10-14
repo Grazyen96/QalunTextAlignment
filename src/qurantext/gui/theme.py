@@ -158,10 +158,15 @@ QToolButton[autoRaise="true"] {{
 }}
 QPushButton:hover, QToolButton:hover {{ border-color: {t.accent}; }}
 QPushButton:pressed, QToolButton:pressed {{ background: {t.border}; }}
-QPushButton[segment="true"]:checked, QToolButton[swatch="true"]:checked {{
+QPushButton[segment="true"]:checked {{
     background: {t.accent};
     color: {t.on_accent};
     border-color: {t.accent};
+}}
+QToolButton[swatch="true"]:checked {{
+    background: transparent;
+    color: {t.accent};
+    border-color: transparent;
 }}
 QPushButton:disabled, QToolButton:disabled {{ color: {t.secondary}; border-color: {t.border}; }}
 QPushButton[segment="true"]:checked:disabled, QToolButton[swatch="true"]:checked:disabled {{
@@ -186,12 +191,29 @@ QPushButton[primary="true"]:disabled {{
     border: 1px solid {t.border};
     padding: 6px 17px;
 }}
+QPushButton[row="true"] {{
+    text-align: left;
+    background: transparent;
+    border: 1px solid transparent;
+    padding: 4px 6px;
+}}
+QPushButton[row="true"][rtl="true"] {{ text-align: right; }}
+QPushButton[row="true"]:hover {{ background: {t.raised}; border-color: {t.border}; }}
+QPushButton[row="true"]:focus {{ background: {t.raised}; border: 2px solid {t.accent}; padding: 3px 5px; }}
+QPushButton[quiet="true"] {{
+    background: transparent;
+    border: 1px solid transparent;
+    color: {t.accent};
+}}
+QPushButton[quiet="true"]:hover {{ background: {t.raised}; border-color: transparent; }}
+QLabel[placeholder="true"] {{ border: 2px dashed {t.border}; border-radius: 6px; background: transparent; }}
 QFrame[card="true"] {{
     background: {t.raised};
     border: 1px solid {t.border};
     border-radius: 10px;
 }}
 QFrame[card="true"][empty="true"] {{ border: none; background: {t.border}; border-radius: 2px; }}
+QFrame[card="true"][selected="true"] {{ border: 2px solid {t.accent}; }}
 QFrame#dropZone {{
     background: {t.panel};
     border: 2px dashed {t.border};

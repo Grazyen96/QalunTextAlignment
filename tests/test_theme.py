@@ -136,14 +136,29 @@ def test_a_checked_button_that_is_disabled_keeps_its_text_readable(tokens) -> No
 
 
 @pytest.mark.parametrize("tokens", THEMES, ids=IDS)
-def test_only_segments_and_swatches_are_filled_when_checked(tokens) -> None:
-    """A disclosure (More options, Customise) says open by its chevron, not by a fill."""
+def test_only_segments_are_filled_when_checked(tokens) -> None:
+    """A disclosure says open by its chevron; a checked swatch says chosen by its ring and name."""
     sheet = theme.stylesheet(tokens)
-    rule = _rule(sheet, 'QPushButton[segment="true"]:checked, QToolButton[swatch="true"]:checked')
+    rule = _rule(sheet, 'QPushButton[segment="true"]:checked')
     assert rule["background"] == tokens.accent and rule["color"] == tokens.on_accent
     assert _measured(rule) >= 4.5
+    swatch = _rule(sheet, 'QToolButton[swatch="true"]:checked')
+    assert swatch["background"] == "transparent" and swatch["color"] == tokens.accent
     for loose in ("QPushButton:checked", "QToolButton:checked"):
         assert loose not in sheet, loose
+
+
+@pytest.mark.parametrize("tokens", THEMES, ids=IDS)
+def test_rows_quiet_buttons_placeholders_and_selected_cards_have_rules(tokens) -> None:
+    sheet = theme.stylesheet(tokens)
+    row = _rule(sheet, 'QPushButton[row="true"]')
+    assert row["background"] == "transparent" and row["text-align"] == "left"
+    assert _rule(sheet, 'QPushButton[row="true"][rtl="true"]')["text-align"] == "right"
+    quiet = _rule(sheet, 'QPushButton[quiet="true"]')
+    assert quiet["background"] == "transparent" and quiet["color"] == tokens.accent
+    assert contrast(_c(tokens.accent), _c(tokens.window)) >= 4.5
+    assert tokens.border in _rule(sheet, 'QLabel[placeholder="true"]')["border"]
+    assert tokens.accent in _rule(sheet, 'QFrame[card="true"][selected="true"]')["border"]
 
 
 def test_tokens_are_found_by_name() -> None:
