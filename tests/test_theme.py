@@ -8,8 +8,10 @@ pytest.importorskip("PySide6", reason="the window needs Qt: pip install 'qurante
 
 from PySide6.QtGui import QColor, QFont, QPalette  # noqa: E402
 
+from qurantext.core.looks import PRESETS  # noqa: E402
 from qurantext.gui import theme  # noqa: E402
 from qurantext.gui.colors import playhead_color, warning_color  # noqa: E402
+from qurantext.gui.review.look_panel import _PALE_RING  # noqa: E402
 from qurantext.gui.style import QalunStyle  # noqa: E402
 from tests.test_colors import contrast  # noqa: E402
 
@@ -483,14 +485,16 @@ def test_every_colour_added_since_phase_a_reads_on_its_surfaces(tokens) -> None:
     """One table for the ring, the amber, the playhead, the quiet accent and the hex labels."""
     pal = theme.palette(tokens)
     surfaces = {"window": tokens.window, "panel": tokens.panel, "raised": tokens.raised}
+    # The ring sits on a preset tile's frame: a pale frame (lightness 128 or more) wears
+    # the pale-tile gold, a dark one the dark theme's gold, in either theme.
+    frames = {name: QColor(*preset.frame_bg[:3]) for name, preset in PRESETS.items()}
+    pale = {name: c.name() for name, c in frames.items() if c.lightness() >= 128}
+    dark = {name: c.name() for name, c in frames.items() if c.lightness() < 128}
+    assert pale and dark
     checks = [
-        # white is the tile fill in the light theme only; the dark gold never sits on it
-        (
-            "gold",
-            tokens.gold,
-            {**surfaces, **({"white": "#FFFFFF"} if tokens is theme.LIGHT else {})},
-            3.0,
-        ),
+        ("gold", tokens.gold, surfaces, 3.0),
+        ("pale ring", _PALE_RING, {**surfaces, **pale}, 3.0),
+        ("dark ring", theme.DARK.gold, dark, 3.0),
         ("amber", warning_color(pal).name(), surfaces, 4.5),
         (
             "playhead",

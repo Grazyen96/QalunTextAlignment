@@ -1388,11 +1388,12 @@ def test_palette_tiles_are_56_by_36_and_the_chosen_one_wears_a_gold_ring(
 
 
 def test_a_chosen_tile_s_ring_takes_the_gold_that_reads_on_the_tile(qt_app, session, prefs) -> None:
-    """The dark theme's gold is 1.98:1 on a pale tile: a pale tile wears the light theme's."""
+    """The dark theme's gold is 1.53:1 on a pale tile: a pale tile wears the deeper pale-tile gold."""
     from PySide6.QtCore import QSize
     from PySide6.QtGui import QColor, QIcon
 
     from qurantext.gui import theme
+    from qurantext.gui.review.look_panel import _PALE_RING
 
     theme.apply_theme(qt_app, "dark")
     panel = _panel(session, prefs)
@@ -1402,13 +1403,13 @@ def test_a_chosen_tile_s_ring_takes_the_gold_that_reads_on_the_tile(qt_app, sess
         on = tile.icon().pixmap(QSize(56, 36), QIcon.Mode.Normal, QIcon.State.On).toImage()
         return on.pixelColor(0, 18)
 
-    assert ring("ink_on_paper") == QColor(theme.LIGHT.gold)
+    assert ring("ink_on_paper") == QColor(_PALE_RING)
     assert ring("night_gold") == QColor(theme.DARK.gold)
     # At a HiDPI ratio the tile is sampled at its logical (2, 2), and ringed at its edge.
     from qurantext.core.looks import PRESETS
     from qurantext.gui.review.look_panel import _swatch_icon
 
-    for name, gold in (("ink_on_paper", theme.LIGHT.gold), ("night_gold", theme.DARK.gold)):
+    for name, gold in (("ink_on_paper", _PALE_RING), ("night_gold", theme.DARK.gold)):
         icon = _swatch_icon(PRESETS[name], ratio=2.0)
         on = icon.pixmap(QSize(56, 36), 2.0, QIcon.Mode.Normal, QIcon.State.On).toImage()
         assert on.devicePixelRatio() == 2.0

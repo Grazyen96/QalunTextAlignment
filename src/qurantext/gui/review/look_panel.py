@@ -92,6 +92,10 @@ _CHIP = QSize(24, 24)
 _SWATCH_COLUMNS = 3
 #: The ring a chosen tile wears, in pixels.
 _RING = 2
+#: The ring's gold on a pale tile: 3.03:1 on Ink on paper's frame (#E8E2D4), the palest
+#: preset, and 3.52:1 and 4.40:1 on the light and dark windows beside it. The light
+#: theme's gold token (#A67C11) is 2.95:1 on that frame, so the ring takes its own.
+_PALE_RING = "#A47A10"
 #: A slider's value readout, wide enough for "100%".
 _READOUT_WIDTH = 44
 #: What an image starts dimmed by, so the text on the card still reads.
@@ -155,14 +159,14 @@ def _qcolor(colour: tuple[int, ...]) -> QColor:
 def _ring_gold(pixmap: QPixmap) -> QColor:
     """The gold that reads on *pixmap*'s edge, whatever the theme.
 
-    The dark theme's gold is 1.98:1 on a pale tile, so a pale tile (its pixel at
-    2, 2 has a lightness of 128 or more) wears the light theme's gold, and a dark
-    one the dark theme's.
+    The dark theme's gold is 1.53:1 on the palest preset tile, so a pale tile (its
+    pixel at 2, 2 has a lightness of 128 or more) wears the deeper ``_PALE_RING``,
+    and a dark one the dark theme's gold.
     """
     ratio = pixmap.devicePixelRatio()
     at = int(2 * ratio)  # logical (2, 2) in the pixmap's own pixels
     corner = pixmap.toImage().pixelColor(at, at)
-    return QColor(theme.LIGHT.gold if corner.lightness() >= 128 else theme.DARK.gold)
+    return QColor(_PALE_RING if corner.lightness() >= 128 else theme.DARK.gold)
 
 
 def _ringed(pixmap: QPixmap) -> QPixmap:
