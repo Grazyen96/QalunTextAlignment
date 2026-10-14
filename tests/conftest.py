@@ -78,10 +78,17 @@ def restore_theme(app, *, palette, sheet: str, style_name: str, properties: dict
     caches, so if it dies under the next sheet a pointer to it stays behind,
     and that sheet's next change follows it into freed memory. That is how
     ``tools/screenshots.py`` crashed in its last ``apply_theme``: it ran the
-    deferred deletes of a dialog from ``tests/test_widgets.py``.
+    deferred deletes of a dialog from ``tests/test_widgets.py``. A widget
+    kept alive only by a reference cycle dies the same way when the garbage
+    collector gets to it, so when the sheet is about to come off the collector
+    runs first (only then: that is the only change that ends a sheet's era).
     """
+    import gc
+
     from PySide6.QtCore import QCoreApplication, QEvent
 
+    if app.styleSheet() != sheet:
+        gc.collect()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     if app.styleSheet() != sheet:
         app.setStyleSheet(sheet)
