@@ -32,6 +32,8 @@ from PySide6.QtGui import (
     QIcon,
     QMouseEvent,
     QPainter,
+    QPalette,
+    QPen,
     QPixmap,
     QStandardItemModel,
     QWheelEvent,
@@ -65,6 +67,7 @@ from qurantext.core.looks import (
     Look,
     readability_warnings,
 )
+from qurantext.gui import theme
 from qurantext.gui.colors import warning_color
 from qurantext.gui.i18n import is_rtl, plain_title, t
 from qurantext.gui.icons import set_icon
@@ -81,12 +84,16 @@ LOOK_WARNING_KEYS = {
     "image_unreadable": "look.image_unreadable",
 }
 
-#: The palette swatch, in pixels.
-_SWATCH = QSize(48, 28)
-#: A colour button's swatch.
-_CHIP = QSize(18, 18)
-#: Swatches per row; three fit the panel's width with their names under them.
+#: A palette or background tile, in pixels.
+_SWATCH = QSize(56, 36)
+#: A colour row's chip.
+_CHIP = QSize(24, 24)
+#: Tiles per row; three fit the panel's width with their names under them.
 _SWATCH_COLUMNS = 3
+#: The ring a chosen tile wears, in pixels.
+_RING = 2
+#: A slider's value readout, wide enough for "100%".
+_READOUT_WIDTH = 44
 #: What an image starts dimmed by, so the text on the card still reads.
 _IMAGE_DIM = 0.35
 #: How far a second colour sits from the first when a look has only one
@@ -145,6 +152,29 @@ def _qcolor(colour: tuple[int, ...]) -> QColor:
     return QColor(*colour)
 
 
+def _ringed(pixmap: QPixmap) -> QPixmap:
+    """*pixmap* with the theme's gold ring on its edge: the chosen tile."""
+    ringed = QPixmap(pixmap)
+    painter = QPainter(ringed)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(QPen(QColor(theme.current_tokens().gold), _RING))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    half = _RING / 2
+    painter.drawRoundedRect(
+        QRectF(half, half, pixmap.width() - _RING, pixmap.height() - _RING), 3, 3
+    )
+    painter.end()
+    return ringed
+
+
+def _two_state_icon(pixmap: QPixmap) -> QIcon:
+    """*pixmap* plain when not chosen, ringed when chosen (``QIcon.State.On``)."""
+    result = QIcon()
+    result.addPixmap(pixmap, QIcon.Mode.Normal, QIcon.State.Off)
+    result.addPixmap(_ringed(pixmap), QIcon.Mode.Normal, QIcon.State.On)
+    return result
+
+
 def _swatch_icon(look: Look) -> QIcon:
     """The preset in miniature: its card on its background, a line of text and a highlight."""
     pixmap = QPixmap(_SWATCH)
@@ -153,18 +183,14 @@ def _swatch_icon(look: Look) -> QIcon:
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(_qcolor(look.card))
-    painter.drawRoundedRect(QRectF(3, 3, _SWATCH.width() - 6, _SWATCH.height() - 6), 4, 4)
+    painter.drawRoundedRect(QRectF(4, 4, _SWATCH.width() - 8, _SWATCH.height() - 8), 4, 4)
     painter.setBrush(_qcolor(look.body_text))
-    painter.drawRoundedRect(QRectF(8, 9, 32, 3), 1.5, 1.5)
-    painter.drawRoundedRect(QRectF(8, 16, 12, 3), 1.5, 1.5)
+    painter.drawRoundedRect(QRectF(10, 11, 36, 3), 1.5, 1.5)
+    painter.drawRoundedRect(QRectF(10, 20, 14, 3), 1.5, 1.5)
     painter.setBrush(_qcolor(look.highlight_word))
-    painter.drawRoundedRect(QRectF(23, 16, 17, 3), 1.5, 1.5)
+    painter.drawRoundedRect(QRectF(27, 20, 19, 3), 1.5, 1.5)
     painter.end()
-    result = QIcon()
-    # The sample is the preset's own colours, chosen or not; say so for both states.
-    for state in (QIcon.State.Off, QIcon.State.On):
-        result.addPixmap(pixmap, QIcon.Mode.Normal, state)
-    return result
+    return _two_state_icon(pixmap)
 
 
 def _chip_icon(colour: RGBA) -> QIcon:
@@ -199,6 +225,34 @@ def _alpha_percent(alpha: int) -> int:
 
 def _rgba(colour: QColor) -> RGBA:
     return (colour.red(), colour.green(), colour.blue(), colour.alpha())
+
+
+class _ColourRow(QPushButton):
+    """One editable colour: its chip, its name, and its hex at the trailing end."""
+
+    def __init__(self, name: str, parent: QWidget | None = None) -> None:
+        super().__init__(name, parent)
+        self.setProperty("row", True)
+        self.setProperty("rtl", is_rtl())
+        self.setIconSize(_CHIP)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        trailing = QHBoxLayout(self)
+        trailing.setContentsMargins(0, 0, theme.SP_8, 0)
+        trailing.addStretch(1)
+        self.hex_label = QLabel()
+        self.hex_label.setFont(theme.font("secondary"))
+        self.hex_label.setForegroundRole(QPalette.ColorRole.PlaceholderText)
+        # A hex is a code, not a sentence: it reads left to right in both languages.
+        self.hex_label.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        # A click on the hex is a click on the row.
+        self.hex_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        trailing.addWidget(self.hex_label)
+
+    def set_colour(self, colour: RGBA) -> None:
+        """Show *colour* as the chip and as its hex."""
+        self.setIcon(_chip_icon(colour))
+        self.hex_label.setText("#{:02X}{:02X}{:02X}".format(*colour[:3]))
 
 
 class _GestureSlider(QSlider):
@@ -337,7 +391,8 @@ class LookPanel(QWidget):
             button = QToolButton()
             button.setCheckable(True)
             button.setAutoRaise(True)
-            # The sheet fills the chosen swatch with the accent (``swatch`` marks it).
+            # The chosen tile wears a gold ring (its On pixmap); the sheet gives it
+            # the accent text (``swatch`` marks it).
             button.setProperty("swatch", True)
             button.setIcon(_swatch_icon(look))
             button.setIconSize(_SWATCH)
@@ -363,10 +418,9 @@ class LookPanel(QWidget):
         self.customise_box = QWidget()
         custom = QVBoxLayout(self.customise_box)
         custom.setContentsMargins(0, 0, 0, 0)
-        self.colour_buttons: dict[str, QPushButton] = {}
+        self.colour_buttons: dict[str, _ColourRow] = {}
         for name in EDITABLE_COLOURS:
-            button = QPushButton(_colour_name(name))
-            button.setIconSize(_CHIP)
+            button = _ColourRow(_colour_name(name))
             self.colour_buttons[name] = button
             custom.addWidget(button)
             if name == "card":
@@ -374,11 +428,14 @@ class LookPanel(QWidget):
                 self.opacity_slider = _GestureSlider()
                 self.opacity_slider.setRange(0, 100)
                 self.opacity_label.setBuddy(self.opacity_slider)
+                self.opacity_readout = self._readout()
                 custom.addWidget(self.opacity_label)
-                custom.addWidget(self.opacity_slider)
+                opacity_row = QHBoxLayout()
+                opacity_row.addWidget(self.opacity_slider, 1)
+                opacity_row.addWidget(self.opacity_readout)
+                custom.addLayout(opacity_row)
         # The colour a built-in background is drawn in; an image has none to pick.
-        self.background_colour_button = QPushButton(t("look.colour.background"))
-        self.background_colour_button.setIconSize(_CHIP)
+        self.background_colour_button = _ColourRow(t("look.colour.background"))
         custom.addWidget(self.background_colour_button)
         self.customise_box.setVisible(False)
         column.addWidget(self.customise_box)
@@ -397,6 +454,7 @@ class LookPanel(QWidget):
         column.addWidget(self.background_combo)
 
         self.image_button = QPushButton(t("look.choose_image"))
+        self.image_button.setProperty("quiet", True)
         set_icon(self.image_button, "image", size=16)
         column.addWidget(self.image_button)
         if self._session.project.path is None:
@@ -417,21 +475,36 @@ class LookPanel(QWidget):
         self.blur_slider = _GestureSlider()
         self.blur_slider.setRange(0, round(MAX_BLUR))
         self.blur_label.setBuddy(self.blur_slider)
+        self.dim_readout = self._readout()
+        self.blur_readout = self._readout()
         sliders = QGridLayout()
         sliders.addWidget(self.dim_label, 0, 0)
         sliders.addWidget(self.dim_slider, 0, 1)
+        sliders.addWidget(self.dim_readout, 0, 2)
         sliders.addWidget(self.blur_label, 1, 0)
         sliders.addWidget(self.blur_slider, 1, 1)
+        sliders.addWidget(self.blur_readout, 1, 2)
         sliders.setColumnStretch(1, 1)
         column.addLayout(sliders)
 
         self.default_button = QPushButton(t("look.use_for_new"))
         set_icon(self.default_button, "circle-check", size=16)
         self.reset_button = QPushButton(t("look.reset"))
+        self.reset_button.setProperty("quiet", True)
         set_icon(self.reset_button, "refresh-cw", size=16)
         column.addWidget(self.default_button)
         column.addWidget(self.reset_button)
         column.addStretch(1)
+
+    @staticmethod
+    def _readout() -> QLabel:
+        """A slider's value beside it; a number reads left to right in both languages."""
+        label = QLabel()
+        label.setFixedWidth(_READOUT_WIDTH)
+        label.setFont(theme.font("secondary"))
+        label.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        return label
 
     def _wire(self) -> None:
         for name, button in self.palette_buttons.items():
@@ -440,6 +513,13 @@ class LookPanel(QWidget):
         for name, button in self.colour_buttons.items():
             button.clicked.connect(lambda _checked=False, n=name: self._pick_colour(n))
         self.background_colour_button.clicked.connect(self._pick_background_colour)
+        self.opacity_slider.valueChanged.connect(
+            lambda v: self.opacity_readout.setText(t("look.percent", value=v))
+        )
+        self.dim_slider.valueChanged.connect(
+            lambda v: self.dim_readout.setText(t("look.percent", value=v))
+        )
+        self.blur_slider.valueChanged.connect(lambda v: self.blur_readout.setText(str(v)))
         for slider, on_value in (
             (self.opacity_slider, self._on_opacity),
             (self.dim_slider, self._on_dim),
@@ -486,13 +566,17 @@ class LookPanel(QWidget):
         else:
             self.status_label.setText(t("look.custom_from", name=_preset_name(look.base_preset)))
         for name, button in self.colour_buttons.items():
-            button.setIcon(_chip_icon(getattr(look, name)))
+            button.set_colour(getattr(look, name))
         bg = look.background
-        self.background_colour_button.setIcon(_chip_icon(bg.colour))
+        self.background_colour_button.set_colour(bg.colour)
         self.background_colour_button.setVisible(bg.kind != "image")
         self._set_slider(self.opacity_slider, _alpha_percent(look.card[3]))
         self._set_slider(self.dim_slider, round(bg.dim * 100))
         self._set_slider(self.blur_slider, round(bg.blur))
+        # A blocked setValue says nothing, so the readouts are set here as well.
+        self.opacity_readout.setText(t("look.percent", value=self.opacity_slider.value()))
+        self.dim_readout.setText(t("look.percent", value=self.dim_slider.value()))
+        self.blur_readout.setText(str(self.blur_slider.value()))
         with QSignalBlocker(self.background_combo):
             self.background_combo.setCurrentIndex(self.background_combo.findData(bg.kind))
 
@@ -524,10 +608,13 @@ class LookPanel(QWidget):
         self.contrast_label.setStyleSheet(f"color: {colour};")
 
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802 - Qt override
-        # A theme switch: the amber picked for the old palette may not read on the new one.
+        # A theme switch: the amber picked for the old palette may not read on the new one,
+        # and the chosen tile's ring was painted in the old theme's gold.
         super().changeEvent(event)
         if event.type() in (QEvent.Type.PaletteChange, QEvent.Type.ApplicationPaletteChange):
             self._colour_contrast_label()
+            for name, button in self.palette_buttons.items():
+                button.setIcon(_swatch_icon(PRESETS[name]))
 
     # -- changes ----------------------------------------------------------------
 

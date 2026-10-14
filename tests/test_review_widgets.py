@@ -1343,6 +1343,69 @@ def test_the_swatches_keep_their_order_in_arabic(qt_app, session, prefs) -> None
     assert xs == sorted(xs)
 
 
+def test_palette_tiles_are_56_by_36_and_the_chosen_one_wears_a_gold_ring(
+    qt_app, session, prefs
+) -> None:
+    from PySide6.QtCore import QSize
+    from PySide6.QtGui import QColor, QIcon
+
+    from qurantext.core.looks import NIGHT_GOLD
+    from qurantext.gui import theme
+
+    panel = _panel(session, prefs)
+    tile = panel.palette_buttons["night_gold"]
+    assert tile.iconSize() == QSize(56, 36)
+    on = tile.icon().pixmap(QSize(56, 36), QIcon.Mode.Normal, QIcon.State.On).toImage()
+    off = tile.icon().pixmap(QSize(56, 36), QIcon.Mode.Normal, QIcon.State.Off).toImage()
+    assert on.pixelColor(0, 18) == QColor(theme.current_tokens().gold)
+    assert off.pixelColor(0, 18) == QColor(*NIGHT_GOLD.frame_bg[:3])
+    assert tile.isChecked()
+
+
+def test_colour_rows_show_the_hex_and_follow_a_pick(qt_app, session, prefs, monkeypatch) -> None:
+    from PySide6.QtGui import QColor
+
+    from qurantext.core.looks import NIGHT_GOLD
+
+    panel = _panel(session, prefs)
+    row = panel.colour_buttons["highlight_word"]
+    assert row.property("row") is True and row.text() == "Highlighted word"
+    assert row.hex_label.text() == "#{:02X}{:02X}{:02X}".format(*NIGHT_GOLD.highlight_word[:3])
+    _answer_colours(monkeypatch, QColor(1, 2, 3))
+    row.click()
+    assert row.hex_label.text() == "#010203"
+
+
+def test_every_slider_has_a_readout_that_follows_it(qt_app, session, prefs) -> None:
+    panel = _panel(session, prefs)
+    panel.opacity_slider.setValue(70)
+    panel.dim_slider.setValue(35)
+    panel.blur_slider.setValue(8)
+    assert panel.opacity_readout.text() == "70%"
+    assert panel.dim_readout.text() == "35%"
+    assert panel.blur_readout.text() == "8"
+    assert panel.dim_readout.width() == 44 or panel.dim_readout.minimumWidth() == 44
+
+
+def test_reset_and_choose_image_are_quiet_and_use_for_new_is_not(qt_app, session, prefs) -> None:
+    panel = _panel(session, prefs)
+    assert panel.reset_button.property("quiet") is True
+    assert panel.image_button.property("quiet") is True
+    assert panel.default_button.property("quiet") is None
+
+
+def test_readouts_and_hex_read_left_to_right_in_arabic(qt_app, session, prefs) -> None:
+    from qurantext.gui import i18n
+
+    i18n.set_language("ar")
+    panel = _panel(session, prefs)
+    panel.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+    assert panel.dim_readout.layoutDirection() == Qt.LayoutDirection.LeftToRight
+    row = panel.colour_buttons["card"]
+    assert row.hex_label.layoutDirection() == Qt.LayoutDirection.LeftToRight
+    assert row.property("rtl") is True
+
+
 # -- the panel's sliders and list in a scroll area: wheel and lost grabs -------------
 
 
