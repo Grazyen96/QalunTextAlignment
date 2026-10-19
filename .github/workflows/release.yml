@@ -95,7 +95,7 @@ jobs:
       # the two disagree. GitHub evicts a cache unused for 7 days, so a miss still
       # downloads once per platform.
       - name: Keep the speech model between runs
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .ci-cache/qalun/models
           key: qalun-model-${{ runner.os }}-bc9956a0f6485a797545b1240d63c43fb05f92a5c1ce0d5fb9818f31a4592d01
