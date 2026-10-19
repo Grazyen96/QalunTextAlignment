@@ -9,7 +9,7 @@ Each of these holds the first tag until it is done. Tick it once, with a note of
 what was decided; later releases only re-check it when the thing it names changes.
 
 - [ ] **Quran font and text: confirm their source and terms before the first tag.**
-      `src/qurantext/assets/fonts/qaloon.10.ttf`, `qaloon.10.woff2` and
+      `src/qurantext/assets/fonts/qaloon.10.ttf` and
       `src/qurantext/assets/quran/UthmanicQaloon1-v10.txt` ship inside every app
       zip, the Python package and `qalun-source.zip`. The text's source is
       recorded (KFGQPC Qaloon v10, see `src/qurantext/assets/README.md`); its

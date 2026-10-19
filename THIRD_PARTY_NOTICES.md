@@ -44,8 +44,7 @@ and other data under `Qalun.app/Contents/Resources/` (for example
 
 These files ship inside the app, the Python package and `qalun-source.zip`:
 
-- `qurantext/assets/fonts/qaloon.10.ttf` and `qaloon.10.woff2`: the Qalun
-  Quran font;
+- `qurantext/assets/fonts/qaloon.10.ttf`: the Qalun Quran font;
 - `qurantext/assets/quran/UthmanicQaloon1-v10.txt`: the Quran text in the
   Qalun riwaya.
 

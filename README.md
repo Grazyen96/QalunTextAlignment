@@ -891,8 +891,8 @@ the bundled GPL and LGPL components that are not Qalun's own: espeak-ng, and on
 Linux the ALSA library). The bundled components, the speech model and their
 licences are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-The licence does not cover the bundled Quran font (`qaloon.10.ttf`,
-`qaloon.10.woff2`) or the Quran text (`UthmanicQaloon1-v10.txt`). They are
+The licence does not cover the bundled Quran font (`qaloon.10.ttf`) or the
+Quran text (`UthmanicQaloon1-v10.txt`). They are
 third-party works, their provenance and terms to be confirmed by the owner;
 see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Nor does it cover the
 bundled Amiri font (`Amiri-Regular.ttf`, `Amiri-Bold.ttf`), which the generated

@@ -12,8 +12,8 @@ description = "Quran alignment, matching, transcription, and rendering workflows
 readme = "README.md"
 # GPL-3.0 because the bundled sherpa-onnx links espeak-ng (GPL-3.0) into the app's
 # process. See THIRD_PARTY_NOTICES.md and the "Licence finding" in docs/findings/asr-bakeoff.md.
-# Not covered: the package data's Quran font (assets/fonts/qaloon.10.ttf and
-# qaloon.10.woff2) and Quran text (assets/quran/UthmanicQaloon1-v10.txt) are
+# Not covered: the package data's Quran font (assets/fonts/qaloon.10.ttf) and
+# Quran text (assets/quran/UthmanicQaloon1-v10.txt) are
 # third-party works, their provenance and terms to be confirmed by the owner; see
 # src/qurantext/assets/README.md and THIRD_PARTY_NOTICES.md. Nor is the title font,
 # Amiri (assets/fonts/Amiri-Regular.ttf and Amiri-Bold.ttf), which stays under the SIL

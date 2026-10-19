@@ -252,7 +252,7 @@ def test_the_version_is_written_down_once() -> None:
 def test_the_quran_font_and_text_are_kept_out_of_the_gpl_statement() -> None:
     """Their provenance and terms are not known yet, so nothing may present them as
     Qalun's own GPL-3.0 code, and the release waits until the owner confirms them."""
-    files = ("qaloon.10.ttf", "qaloon.10.woff2", "UthmanicQaloon1-v10.txt")
+    files = ("qaloon.10.ttf", "UthmanicQaloon1-v10.txt")
     phrase = "to be confirmed by the owner"
     notice = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
     section = " ".join(notice.split("## Quran text and font", 1)[1].split("\n## ", 1)[0].split())

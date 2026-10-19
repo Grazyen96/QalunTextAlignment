@@ -9,7 +9,6 @@ makes `pip install qurantext` produce a working renderer instead of one that
 resolves its default font into the Python installation directory.
 
 - `fonts/qaloon.10.ttf` — the Qalun face the frame renderer draws with.
-- `fonts/qaloon.10.woff2` — the same face for web use.
 - `fonts/Amiri-Regular.ttf`, `fonts/Amiri-Bold.ttf` — the text font for the
   generated intro's and outro's titles, which need Latin letters as well as
   Arabic ones; the Quran font has no Latin. `fonts/Amiri-OFL.txt` is its licence.
@@ -53,7 +52,7 @@ edition's version number, is not carried over.
 
 ## Licence: not Qalun's
 
-The font (`fonts/qaloon.10.ttf`, `fonts/qaloon.10.woff2`) and the Quran text
+The font (`fonts/qaloon.10.ttf`) and the Quran text
 (`quran/UthmanicQaloon1-v10.txt`) are third-party works. Qalun's own licence,
 GPL-3.0-only, does not cover them, even though they ship inside the package,
 the app and its source zip. Their provenance and terms are to be confirmed by
