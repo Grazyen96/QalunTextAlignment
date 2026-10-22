@@ -106,6 +106,11 @@ class SharedRotatingFileHandler(RotatingFileHandler):
         self.retry_at = 0
 
     def shouldRollover(self, record: logging.LogRecord) -> bool:  # noqa: N802 - logging's name
+        if self.stream is not None:
+            # Measure the file, not what this window wrote: another window appends
+            # to it too. Python 3.12.4+ and 3.13 read the position without seeking
+            # to the end first (gh-116263), so they would miss the other's writes.
+            self.stream.seek(0, os.SEEK_END)
         if not super().shouldRollover(record):
             return False
         if self.retry_at and self.stream is not None and self.stream.tell() < self.retry_at:
