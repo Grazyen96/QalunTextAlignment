@@ -792,6 +792,8 @@ def test_an_ffmpeg_that_cannot_join_an_episode_is_named(monkeypatch) -> None:
     """The join's filters are checked at the gate, not found missing in a person's first episode."""
     full = frozenset({"apad", "setparams", "sidedata", "zscale", "tonemap"})
     monkeypatch.setattr(preflight, "ffmpeg_filters", lambda path: full)
+    monkeypatch.setattr(preflight, "require_binary", lambda name, *a: f"/usr/bin/{name}")
+    monkeypatch.setattr(preflight, "_trial_join", lambda **kwargs: None)
     assert preflight._episode_join(release=True).status == Status.OK
 
     monkeypatch.setattr(preflight, "ffmpeg_filters", lambda path: full - {"zscale"})
@@ -862,10 +864,10 @@ def test_a_trial_join_that_cannot_make_its_folder_fails_politely(monkeypatch) ->
         raise OSError("No space left on device")
 
     monkeypatch.setattr(preflight.tempfile, "TemporaryDirectory", refused)
+    monkeypatch.setattr(preflight, "require_binary", lambda name, *a: f"/usr/bin/{name}")
     assert "No space left" in (preflight._trial_join() or "")
     full = frozenset({"apad", "setparams", "sidedata", "zscale", "tonemap"})
     monkeypatch.setattr(preflight, "ffmpeg_filters", lambda path: full)
-    monkeypatch.setattr(preflight, "require_binary", lambda name, *a: f"/usr/bin/{name}")
     result = preflight._episode_join(release=True)
     assert result.status == Status.FAIL and "No space left" in result.detail
 
@@ -909,6 +911,7 @@ def test_the_trial_join_runs_only_at_the_release_gate(monkeypatch) -> None:
 
 def test_an_ffmpeg_that_cannot_list_its_filters_is_not_called_incomplete(monkeypatch) -> None:
     monkeypatch.setattr(preflight, "ffmpeg_filters", lambda path: frozenset())
+    monkeypatch.setattr(preflight, "require_binary", lambda name, *a: f"/usr/bin/{name}")
     result = preflight._episode_join(release=True)
     assert result.status == Status.FAIL and "could not list" in result.detail and result.remedy
     assert "no apad" not in result.detail
