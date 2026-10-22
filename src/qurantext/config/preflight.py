@@ -1151,7 +1151,12 @@ def _interface_icons() -> CheckResult:
     except ImportError as error:
         # Name what failed: a Qt without QtSvg is not "Qt is not installed".
         module = getattr(error, "name", None) or "a module"
-        return CheckResult("Interface icons", Status.WARN, f"Cannot load {module} ({error})")
+        return CheckResult(
+            "Interface icons",
+            Status.WARN,
+            f"Cannot load {module} ({error})",
+            "pip install 'qurantext[gui]'",
+        )
     missing = sorted(name for name in NAMES if not (ICON_DIR / f"{name}.svg").is_file())
     if missing:
         return CheckResult(
