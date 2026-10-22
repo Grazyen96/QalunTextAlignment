@@ -3,11 +3,20 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPixmap
-from PySide6.QtWidgets import QComboBox
+import pytest
 
-from qurantext.gui.review.episode_cards import CARD_WIDTH, THUMB_BOX, PartCard, fitted_size
+pytest.importorskip("PySide6", reason="the window needs Qt: pip install 'qurantext[gui]'")
+
+from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtGui import QColor, QPixmap  # noqa: E402
+from PySide6.QtWidgets import QComboBox  # noqa: E402
+
+from qurantext.gui.review.episode_cards import (  # noqa: E402
+    CARD_WIDTH,
+    THUMB_BOX,
+    PartCard,
+    fitted_size,
+)
 
 
 def test_fitted_size_keeps_the_frames_shape_inside_the_box() -> None:
