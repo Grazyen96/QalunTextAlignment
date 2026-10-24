@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
-__all__ = ["APP_SOURCE", "GITHUB_URL", "README_URL", "app_link"]
+__all__ = ["APP_SOURCE", "GITHUB_URL", "GUIDE_URL", "app_link"]
 
 #: Who sent the click: this desktop app.
 APP_SOURCE = "qalun-app"
@@ -39,5 +39,5 @@ def app_link(url: str, campaign: str) -> str:
 
 #: Settings → About's link to the project.
 GITHUB_URL = app_link(_REPOSITORY, "about")
-#: Where the header's Help goes: the README, which says how to use the app.
-README_URL = app_link(f"{_REPOSITORY}#readme", "help")
+#: Where the header's Help goes: the user guide, which says how to use the app in plain words.
+GUIDE_URL = app_link(f"{_REPOSITORY}/blob/master/USER_GUIDE.md", "help")

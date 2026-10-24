@@ -2187,10 +2187,10 @@ def test_open_log_folder_is_said_in_the_new_language(qt_app, home) -> None:
 
 
 def test_help_opens_the_readme(qt_app, home, desktop) -> None:
-    from qurantext.gui.main_window import README_URL
+    from qurantext.gui.main_window import GUIDE_URL
 
     home.header.help_requested.emit()
-    assert [url.toString() for url in desktop.opened] == [README_URL]
+    assert [url.toString() for url in desktop.opened] == [GUIDE_URL]
 
 
 def test_help_says_when_the_browser_would_not_open(qt_app, home, desktop) -> None:

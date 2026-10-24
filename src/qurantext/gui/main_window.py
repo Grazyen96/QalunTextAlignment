@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from qurantext.config.links import README_URL
+from qurantext.config.links import GUIDE_URL
 from qurantext.config.paths import DEFAULT_QURAN_PATH, QURAN_INPUT_DIR
 from qurantext.gui import i18n
 from qurantext.gui.files import show_in_folder
@@ -48,8 +48,8 @@ from qurantext.gui.theme import apply_theme, current_tokens
 from qurantext.jobs.project import Project, load_project, project_path_for
 from qurantext.utils.progress import CancelToken, ProgressCallback, ProgressEvent
 
-#: README_URL (where Help goes, tracked) is re-exported from ``config.links``.
-__all__ = ["README_URL", "MainWindow"]
+#: GUIDE_URL (where Help goes, tracked) is re-exported from ``config.links``.
+__all__ = ["GUIDE_URL", "MainWindow"]
 
 #: The job list's share of the window; the form takes the rest.
 _JOB_LIST_WIDTH = 300
@@ -290,7 +290,7 @@ class MainWindow(QMainWindow):
             self.header.show_theme(current_tokens().name)  # System followed the desktop
 
     def _open_help(self) -> None:
-        if not QDesktopServices.openUrl(QUrl(README_URL)):
+        if not QDesktopServices.openUrl(QUrl(GUIDE_URL)):
             self._answer(_Said("home.help_failed"))
 
     # -- settings -----------------------------------------------------------------

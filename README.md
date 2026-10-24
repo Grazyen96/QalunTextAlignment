@@ -88,7 +88,8 @@ python3 -m pip install pytest ruff
 Download the app for your system from the
 [Releases page](https://github.com/Grazyen96/QalunTextAlignment/releases),
 unzip it, and run **Qalun**. There is nothing to install: no Python, no FFmpeg,
-no Quran text file. Everything below is for working on the code.
+no Quran text file. The [user guide](USER_GUIDE.md) explains the app in plain
+words. Everything below is for working on the code.
 
 ## System requirements
 
@@ -125,7 +126,7 @@ qalun
 The window opens on every job it already knows about, listed on the left, with
 a form for starting a new one on the right. A header runs across the top: the
 app's icon and name, then a sun/moon button that switches the theme, the
-**Settings** gear and **Help**, which opens this README.
+**Settings** gear and **Help**, which opens the [user guide](USER_GUIDE.md).
 
 **The job list.** Each job is a card: a small picture of its first card at the
 job's own look, its name (shortened in the middle when it is long; the whole
