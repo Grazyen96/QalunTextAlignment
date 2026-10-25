@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, cast
 
+from qurantext.core.arabic import is_qaloon_face, portable_tanween
 from qurantext.core.video_common import (
     ass_time,
     ayah_label,
@@ -83,10 +84,14 @@ def build_ass(matches: list[dict[str, Any]], font_name: str, width: int, height:
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
 
+    # The Qaloon face draws the mushaf's own marks and has no U+08F0-08F2.
+    keep_marks = is_qaloon_face(font_name)
     valid_events = 0
     for match in validated_matches(matches):
         label = ayah_label(match)
         body = _wrap_ass_body_text(match["_display_text"])
+        if not keep_marks:
+            label, body = portable_tanween(label), portable_tanween(body)
         dialogue_text = f"{{\\an5}}{escape_ass(label)}\\N\\N{escape_ass(body)}"
         lines.append(
             f"Dialogue: 0,{ass_time(match['_start_time'])},{ass_time(match['_end_time'])},Ayah,,0,0,0,,{dialogue_text}"

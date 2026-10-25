@@ -2,10 +2,12 @@ from qurantext.core.arabic import (
     arabic_indic_to_int,
     ayah_text_with_marker,
     int_to_arabic_indic,
+    is_qaloon_face,
     normalize_alignment_ar,
     normalize_detection_ar,
     normalize_full_aya_ar,
     partial_ratio,
+    portable_tanween,
     similarity,
     word_recall,
 )
@@ -65,3 +67,23 @@ def test_partial_ratio_short_needle_uses_fine_step() -> None:
     needle = "الحمد لله"  # 9 chars — well under the 30-char threshold
     haystack = "xxx " + needle + " xxx"
     assert partial_ratio(needle, haystack) > 0.95
+
+
+# The shipped text writes open tanween with code points only its own font draws that way.
+RAJULAN = "\u0631\u064e\u062c\u064f\u0644\u0627\u0657"
+
+
+def test_portable_tanween_writes_the_standard_open_tanween() -> None:
+    assert portable_tanween("\u0657\u065e\u0656") == "\u08f0\u08f1\u08f2"
+
+
+def test_only_the_three_tanween_marks_change() -> None:
+    """Other mushaf marks, direction marks and Arabic-Indic digits pass through."""
+    others = "\u06de \u06ec\u06e2\u200f\u06d2 \u0661\u0660"
+    assert portable_tanween(f"{RAJULAN} {others}") == f"{RAJULAN[:-1]}\u08f0 {others}"
+
+
+def test_is_qaloon_face() -> None:
+    assert is_qaloon_face("KFGQPC QALOON Uthmanic Script")
+    assert not is_qaloon_face("Amiri")
+    assert not is_qaloon_face("Noto Sans Arabic")

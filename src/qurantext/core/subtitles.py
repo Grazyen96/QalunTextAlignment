@@ -9,6 +9,8 @@ Two different things are called subtitles here and they must not be confused:
 
 * **Ayah cues** carry the *canonical* Quran text for a card, split per ayah.
   The text comes from the store and is never the recogniser's version of it.
+  The files write its open tanween in standard Unicode (U+08F0-08F2), which any
+  font draws; only an ASS file in the Qaloon face keeps the mushaf's own marks.
 * **Caption cues** carry recognised speech. They are the ones meant to be
   corrected, and they live in the project file so a correction survives.
 """
@@ -21,6 +23,7 @@ from os import PathLike
 from pathlib import Path
 from typing import Any
 
+from qurantext.core.arabic import is_qaloon_face, portable_tanween
 from qurantext.core.video_common import warn
 from qurantext.utils.time_utils import seconds_to_srt_time
 
@@ -198,7 +201,7 @@ def write_srt(cues: list[Cue], destination: str | PathLike[str], *, bom: bool = 
     for index, cue in enumerate(_ordered(cues), start=1):
         lines.append(str(index))
         lines.append(f"{seconds_to_srt_time(cue.start)} --> {seconds_to_srt_time(cue.end)}")
-        lines.append(cue.text)
+        lines.append(portable_tanween(cue.text))
         lines.append("")
     # Some editors only detect UTF-8 in an SRT when it carries a byte-order mark,
     # and Arabic arrives as mojibake without it.
@@ -219,7 +222,7 @@ def write_vtt(cues: list[Cue], destination: str | PathLike[str]) -> Path:
         if cue.ref:
             lines.append(cue.ref)
         lines.append(f"{_vtt_time(cue.start)} --> {_vtt_time(cue.end)}")
-        lines.append(cue.text)
+        lines.append(portable_tanween(cue.text))
         lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
     return path
@@ -264,8 +267,11 @@ def write_ass(
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
+    # The Qaloon face draws the mushaf's own marks and has no U+08F0-08F2.
+    keep_marks = is_qaloon_face(font_name)
     for cue in _ordered(cues):
-        text = escape_ass(cue.text).replace("\n", "\\N")
+        text = cue.text if keep_marks else portable_tanween(cue.text)
+        text = escape_ass(text).replace("\n", "\\N")
         lines.append(
             f"Dialogue: 0,{ass_time(cue.start)},{ass_time(cue.end)},Default,,0,0,0,,{text}"
         )

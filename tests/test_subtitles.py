@@ -16,6 +16,8 @@ import pytest
 from qurantext.core.subtitles import (
     SUBTITLE_FORMATS,
     Cue,
+    ayah_caption_cues,
+    ayah_rows_for_card,
     card_ref,
     latched_card_windows,
     write_ass,
@@ -23,6 +25,7 @@ from qurantext.core.subtitles import (
     write_subtitles,
     write_vtt,
 )
+from qurantext.data.quran_db import connect
 
 _FFMPEG = shutil.which("ffmpeg")
 
@@ -138,3 +141,61 @@ def test_the_last_card_holds_to_whichever_is_later() -> None:
 )
 def test_card_refs_read_the_way_people_cite_ayat(card, expected) -> None:
     assert card_ref(card) == expected
+
+
+# --- tanween in the files ------------------------------------------------------
+#
+# The shipped text writes open fathatan, dammatan and kasratan as U+0657, U+065E and
+# U+0656, which only its own font draws as open tanween. Every other font (a player,
+# YouTube, the ASS file's Amiri) draws other marks, so the files carry U+08F0-08F2.
+
+JANNATUN = "\u062c\u064e\u0646\u064e\u0651\u0629\u065e"
+RAJULAN = "\u0631\u064e\u062c\u064f\u0644\u0627\u0657"
+JANNATIN = "\u062c\u064e\u0646\u0651\u064e\u0670\u062a\u0656"
+_MUSHAF_TANWEEN = ("\u0656", "\u0657", "\u065e")
+_STANDARD_TANWEEN = ("\u08f0", "\u08f1", "\u08f2")
+
+
+def test_written_subtitles_carry_no_kfgqpc_tanween(tmp_path) -> None:
+    cue = Cue(0.0, 2.0, f"{JANNATUN} {RAJULAN} {JANNATIN}", "25:8")
+    written = write_subtitles([cue], tmp_path / "x", ("srt", "vtt", "ass"))
+    assert len(written) == 3
+    for path in written:
+        text = path.read_text(encoding="utf-8-sig")
+        for mark in _MUSHAF_TANWEEN:
+            assert mark not in text, f"{path.suffix} still carries U+{ord(mark):04X}"
+        for mark in _STANDARD_TANWEEN:
+            assert mark in text, f"{path.suffix} lacks U+{ord(mark):04X}"
+
+
+def test_an_ass_file_in_the_qaloon_face_keeps_the_mushaf_marks(tmp_path) -> None:
+    """That face draws the mushaf's code points and has no U+08F0-08F2."""
+    path = write_ass(
+        [Cue(0.0, 2.0, JANNATUN, "25:8")],
+        tmp_path / "x.ass",
+        font_name="KFGQPC QALOON Uthmanic Script",
+    )
+    text = path.read_text(encoding="utf-8-sig")
+    assert "\u065e" in text
+    assert "\u08f1" not in text
+
+
+def test_store_cues_reach_the_file_mapped(tmp_path, store) -> None:
+    conn = connect(store)
+    try:
+        rows = ayah_rows_for_card(conn, 25, 8, 8)
+    finally:
+        conn.close()
+    words = int(rows[0]["word_count"])
+    card = {
+        "surah_num": 25,
+        "from_ayah": 8,
+        "to_ayah": 8,
+        "_word_timings": [{"start": i * 0.1, "end": (i + 1) * 0.1} for i in range(words)],
+    }
+    built = ayah_caption_cues(card, (0.0, 2.0), rows)
+    assert "\u065e" in built[0]["text"], "the cue keeps the mushaf's own code points"
+    cues = [Cue(c["in"], c["out"], c["text"], c["ref"]) for c in built]
+    text = write_srt(cues, tmp_path / "x.srt").read_text(encoding="utf-8")
+    assert "\u08f1" in text
+    assert "\u065e" not in text

@@ -4,6 +4,27 @@ import re
 import unicodedata
 from difflib import SequenceMatcher
 
+__all__ = [
+    "ALIGNMENT_TASHKEEL",
+    "ARABIC_INDIC_DIGIT_RE",
+    "AR_DIGIT_TRANSLATION",
+    "DETECTION_TASHKEEL",
+    "TO_ARABIC_INDIC",
+    "arabic_indic_to_int",
+    "ayah_text_with_marker",
+    "int_to_arabic_indic",
+    "is_qaloon_face",
+    "normalize_alignment_ar",
+    "normalize_detection_ar",
+    "normalize_full_aya_ar",
+    "partial_ratio",
+    "plain_surah_name",
+    "portable_tanween",
+    "similarity",
+    "surah_title",
+    "word_recall",
+]
+
 ALIGNMENT_TASHKEEL = re.compile(r"[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]")
 DETECTION_TASHKEEL = re.compile(r"[\u0600-\u0605\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]")
 
@@ -96,6 +117,28 @@ def int_to_arabic_indic(value: int) -> str:
 def ayah_text_with_marker(text_raw: str, ayah_num: int) -> str:
     """Append the ayah number as a bare Arabic-Indic digit (e.g. ``… ٧``)."""
     return f"{text_raw} {int_to_arabic_indic(ayah_num)}"
+
+
+# --- Tanween outside the mushaf font --------------------------------------------------
+
+# Only qaloon.10 draws U+0657, U+065E and U+0656 as open fathatan, dammatan and
+# kasratan; every other font draws an inverted damma, a fatha with two dots and a
+# subscript alef, so text leaving the app's own font uses the standard open tanween.
+_PORTABLE_TANWEEN = str.maketrans("\u0657\u065e\u0656", "\u08f0\u08f1\u08f2")
+
+
+def portable_tanween(text: str) -> str:
+    """*text* with U+0657, U+065E and U+0656 written as U+08F0, U+08F1 and U+08F2.
+
+    Those are the standard open fathatan, dammatan and kasratan that common Arabic
+    fonts draw. Nothing else changes.
+    """
+    return text.translate(_PORTABLE_TANWEEN)
+
+
+def is_qaloon_face(font_name: str) -> bool:
+    """True for the bundled Qaloon face, which draws the mushaf's own code points."""
+    return "qaloon" in font_name.casefold()
 
 
 # --- Surah names as a title reads them ----------------------------------------------
