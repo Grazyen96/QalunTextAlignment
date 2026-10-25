@@ -342,7 +342,7 @@ this is the only place anyone hears each platform's build recognise speech.
     Customise in the review's Look panel: is «اللوحات» what a person calls these parts?
   - the question when a review window is closed while its render runs:
     `review.stop_render_title` («إخراج الفيديو»), `review.stop_render_text` («ما زال الفيديو
-    قيد الإخراج. هل توقفه وتغلق النافذة؟ يبقى الفيديو الذي أخرجته من قبل كما هو.») and its
+    قيد الإخراج. هل توقفه وتغلق النافذة؟ وأيّ فيديو أخرجته من قبل يبقى كما هو.») and its
     two buttons `review.stop_render_stop` («أوقِف وأغلِق») and `review.stop_render_keep`
     («تابِع الإخراج»).
   - `render.locked` («تعذّر استبدال …: قد يكون مفتوحًا في برنامج آخر. أغلقه ثم أعد

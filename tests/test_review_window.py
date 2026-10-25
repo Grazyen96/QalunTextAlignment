@@ -1130,6 +1130,19 @@ def test_the_stop_question_keeps_rendering_by_default(qt_app, tmp_path, monkeypa
     assert texts == {t("review.stop_render_stop"), t("review.stop_render_keep")}
 
 
+def test_the_stop_question_holds_on_a_first_render() -> None:
+    """A first render has no earlier video, so the question speaks of any, not of one."""
+    from qurantext.gui import i18n
+
+    english = t("review.stop_render_text")
+    assert "Any video you made before stays as it was." in english
+    assert "The video you made before" not in english
+    i18n.set_language("ar")
+    arabic = t("review.stop_render_text")
+    assert "وأيّ فيديو أخرجته من قبل يبقى كما هو." in arabic
+    assert "يبقى الفيديو الذي أخرجته من قبل" not in arabic
+
+
 def test_cancelling_a_render_brings_the_buttons_back(qt_app, tmp_path, monkeypatch) -> None:
     import threading
 

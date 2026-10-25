@@ -306,7 +306,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.stop_render_title": "Rendering",
         "review.stop_render_text": (
             "The video is still being rendered. Stop and close? "
-            "The video you made before stays as it was."
+            "Any video you made before stays as it was."
         ),
         "review.stop_render_stop": "Stop and close",
         "review.stop_render_keep": "Keep rendering",
@@ -862,7 +862,7 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.stop_render_title": "إخراج الفيديو",
         "review.stop_render_text": (
             "ما زال الفيديو قيد الإخراج. هل توقفه وتغلق النافذة؟ "
-            "يبقى الفيديو الذي أخرجته من قبل كما هو."
+            "وأيّ فيديو أخرجته من قبل يبقى كما هو."
         ),
         "review.stop_render_stop": "أوقِف وأغلِق",
         "review.stop_render_keep": "تابِع الإخراج",
