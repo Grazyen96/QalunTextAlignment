@@ -507,19 +507,31 @@ def test_selecting_a_word_arms_its_start(qt_app) -> None:
 
 
 def test_the_armed_edge_is_painted(qt_app) -> None:
-    from PySide6.QtCore import QEvent
-    from PySide6.QtGui import QPalette
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent, QPalette
 
+    # Never shown and moved by synthetic events, so the real cursor, wherever an
+    # earlier test left it, can't hover an edge here.
     session, strip = _strip(qt_app)
-    strip.show()
-    # Until the offscreen window is exposed, Qt routes a move by the screen
-    # under the global point; an early move would be dropped.
-    assert QTest.qWaitForWindowExposed(strip)
-    qt_app.sendEvent(strip, QEvent(QEvent.Type.Leave))  # no hover left by the cursor's place
     a, b, c = session.words()
     mid = strip.height() // 2
     x_start = int(strip._viewport.x_for(a.start, strip.width()))
     window_colour = strip.palette().color(QPalette.ColorRole.Window)
+
+    def hover(x: float) -> None:
+        local = QPointF(x, mid)
+        qt_app.sendEvent(
+            strip,
+            QMouseEvent(
+                QEvent.Type.MouseMove,
+                local,
+                QPointF(strip.mapToGlobal(local)),
+                Qt.MouseButton.NoButton,
+                Qt.MouseButton.NoButton,
+                Qt.KeyboardModifier.NoModifier,
+            ),
+        )
+
     assert strip.painted_handle() is None
     # Just right of a's box (x 800-900) is bare window until a's start is armed.
     assert strip.grab().toImage().pixelColor(x_start + 2, mid) == window_colour
@@ -529,11 +541,10 @@ def test_the_armed_edge_is_painted(qt_app) -> None:
     assert strip.grab().toImage().pixelColor(x_start + 2, mid) != window_colour
 
     # The edge under the pointer is the one a press would grab, so it shows instead.
-    # QTest.mouseMove sets the cursor, which drops a move to where an earlier
-    # test left it; a move into c's body first makes the next one real.
-    QTest.mouseMove(strip, QPoint(650, mid))
-    QTest.mouseMove(strip, QPoint(600, mid))  # c's end
+    hover(600)  # c's end
     assert strip.painted_handle() == ("end", c.ref)
+    hover(650)  # c's body: no edge, so the armed start shows again
+    assert strip.painted_handle() == ("start", a.ref)
     # Mid-drag, the dragged edge shows.
     QTest.mousePress(strip, Qt.MouseButton.LeftButton, pos=QPoint(800, mid))  # a's end
     assert strip.painted_handle() == ("end", a.ref)
