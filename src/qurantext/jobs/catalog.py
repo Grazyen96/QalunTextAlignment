@@ -68,11 +68,23 @@ def _background(project: Project) -> tuple[int, int, int] | None:
 
 
 def job_status(project: Project) -> str:
-    if project.render is not None:
+    """Where the job stands: its review state, or what its render record says.
+
+    A record whose video is gone (deleted, moved, or never finished) reads as
+    the review it was: the job list would otherwise say Rendered over a file
+    that is not there, and the episode would take it as made.
+    """
+    if project.render is not None and not _video_is_gone(project.render):
         if project.render_is_stale or _choices_changed_since_render(project):
             return CHANGED_SINCE_RENDER
         return RENDERED
     return REVIEWED if project.review.get("state") == "reviewed" else NEEDS_REVIEW
+
+
+def _video_is_gone(render: dict[str, Any]) -> bool:
+    """Whether *render* names a video that is not on disk (a record without one is not judged)."""
+    video = render.get("video")
+    return bool(video) and not Path(video).is_file()
 
 
 def _choices_changed_since_render(project: Project) -> bool:

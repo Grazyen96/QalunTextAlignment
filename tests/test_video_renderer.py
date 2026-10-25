@@ -581,8 +581,12 @@ def test_write_frame_video_produces_h264_with_audio_and_no_leftovers(tmp_path) -
 
 @pytest.mark.skipif(not _BUNDLED_FONT.exists(), reason="bundled font not present")
 def test_write_frame_video_reports_ffmpeg_failure(tmp_path) -> None:
-    """A dead encoder must surface FFmpeg's own output, not a bare exit code."""
+    """A dead encoder must surface FFmpeg's own output, not a bare exit code.
+
+    The video an earlier render made stays as it was, and nothing is left beside it.
+    """
     output = tmp_path / "out.mp4"
+    output.write_bytes(b"the earlier video")
     with pytest.raises(RuntimeError) as excinfo:
         frame_renderer.write_frame_video(
             [],
@@ -596,6 +600,189 @@ def test_write_frame_video_reports_ffmpeg_failure(tmp_path) -> None:
             log_path=tmp_path / "enc.log",
         )
     assert "FFmpeg" in str(excinfo.value)
+    assert output.read_bytes() == b"the earlier video"
+    assert list(tmp_path.glob("*.part.mp4")) == []
+
+
+# --- a re-render never deletes the earlier video ---------------------------------
+
+
+def _encodes_into(encoder):
+    """A fake ``_start_frame_encoder`` that, like FFmpeg, writes the file it is handed."""
+
+    def start(audio_path, output_path, *args, **kwargs):
+        Path(output_path).write_bytes(b"the new video")
+        return encoder
+
+    return start
+
+
+def _silent_audio(tmp_path, seconds: float):
+    audio = tmp_path / "silence.m4a"
+    subprocess.run(
+        [
+            _FFMPEG,
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=44100:cl=mono",
+            "-t",
+            str(seconds),
+            "-c:a",
+            "aac",
+            str(audio),
+        ],
+        check=True,
+    )
+    return audio
+
+
+def _highlighted_matches(seconds: float):
+    """One card whose words light up in turn, so the render has many events."""
+    text = "وَقَالُواْ مَالِ هَٰذَا اَ۬لرَّسُولِ يَأْكُلُ اُ۬لطَّعَامَ"
+    words = text.split()
+    step = seconds / len(words)
+    return validated_matches(
+        [
+            {
+                "surah_num": 25,
+                "surah_name": "سُورَةُ الفُرقَانِ",
+                "from_ayah": 7,
+                "to_ayah": 7,
+                "full_text": text,
+                "confidence": 0.9,
+                "start_time": 0.0,
+                "end_time": seconds,
+                "word_timings": [
+                    {"word": word, "start": i * step, "end": (i + 1) * step}
+                    for i, word in enumerate(words)
+                ],
+            }
+        ],
+        bridge_gaps=False,
+    )
+
+
+@pytest.mark.skipif(
+    not (_FFMPEG and _FFPROBE and _BUNDLED_FONT.exists()),
+    reason="needs ffmpeg, ffprobe and the bundled font",
+)
+def test_a_cancelled_render_keeps_the_earlier_video(tmp_path) -> None:
+    """A second render of the same video, cancelled, leaves the first one as it was.
+
+    The review and the home window both render to the same ``<stem>.mp4``; the
+    encoder used to write that file directly and delete it on cancel.
+    """
+    from qurantext.utils.progress import CancelToken, JobCancelled
+
+    audio = _silent_audio(tmp_path, 6.0)
+    output = tmp_path / "out.mp4"
+    output.write_bytes(b"the earlier video")
+    token = CancelToken()
+
+    def cancel_at_first_progress(event) -> None:
+        if event.stage == "render" and event.fraction is not None:
+            token.cancel()
+
+    with pytest.raises(JobCancelled):
+        frame_renderer.write_frame_video(
+            _highlighted_matches(6.0),
+            6.0,
+            audio,
+            output,
+            160,
+            120,
+            10,
+            _BUNDLED_FONT,
+            log_path=tmp_path / "enc.log",
+            progress=cancel_at_first_progress,
+            cancel=token,
+        )
+
+    assert output.read_bytes() == b"the earlier video"
+    assert list(tmp_path.glob("*.part.mp4")) == []
+
+
+@pytest.mark.skipif(
+    not (_FFMPEG and _FFPROBE and _BUNDLED_FONT.exists()),
+    reason="needs ffmpeg, ffprobe and the bundled font",
+)
+def test_a_finished_render_replaces_the_earlier_video(tmp_path) -> None:
+    audio = _silent_audio(tmp_path, 2.0)
+    output = tmp_path / "out.mp4"
+    output.write_bytes(b"the earlier video")
+
+    frame_renderer.write_frame_video(
+        _highlighted_matches(2.0),
+        2.0,
+        audio,
+        output,
+        160,
+        120,
+        10,
+        _BUNDLED_FONT,
+        log_path=tmp_path / "enc.log",
+    )
+
+    probe = subprocess.run(
+        [_FFPROBE, "-v", "error", "-show_entries", "stream=codec_name", "-of", "csv=p=0"]
+        + [str(output)],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "h264" in probe, probe
+    assert list(tmp_path.glob("*.part.mp4")) == []
+
+
+def test_a_locked_target_keeps_the_earlier_video_and_says_why(monkeypatch, tmp_path) -> None:
+    """On Windows a video open in a player cannot be replaced: say so, keep it, tidy up."""
+    import io
+
+    import numpy as np
+
+    class _Encoder:
+        stdin = io.BytesIO()
+        returncode = 0
+
+        def wait(self):
+            return 0
+
+        def poll(self):
+            return 0
+
+    def locked(source, target):
+        raise PermissionError(13, "The process cannot access the file", str(target))
+
+    monkeypatch.setattr(
+        frame_renderer,
+        "render_frame_pillow",
+        lambda t, match, width, height, font_file, **kwargs: np.zeros((height, width, 3), np.uint8),
+    )
+    monkeypatch.setattr(frame_renderer, "_start_frame_encoder", _encodes_into(_Encoder()))
+    monkeypatch.setattr(frame_renderer.os, "replace", locked)
+    output = tmp_path / "out.mp4"
+    output.write_bytes(b"the earlier video")
+
+    with pytest.raises(RuntimeError, match="open in another program") as excinfo:
+        frame_renderer.write_frame_video(
+            [],
+            1.0,
+            tmp_path / "a.m4a",
+            output,
+            32,
+            24,
+            10,
+            _BUNDLED_FONT,
+            log_path=tmp_path / "enc.log",
+        )
+
+    assert "out.mp4" in str(excinfo.value)
+    assert output.read_bytes() == b"the earlier video"
+    assert list(tmp_path.glob("*.part.mp4")) == []
 
 
 # --- the look reaches every frame ----------------------------------------------
@@ -728,7 +915,7 @@ def test_write_frame_video_reports_the_warnings_its_frames_saw(monkeypatch, tmp_
             return 0
 
     monkeypatch.setattr(frame_renderer, "render_frame_pillow", fake_frame)
-    monkeypatch.setattr(frame_renderer, "_start_frame_encoder", lambda *a, **k: _Encoder())
+    monkeypatch.setattr(frame_renderer, "_start_frame_encoder", _encodes_into(_Encoder()))
     warnings = frame_renderer.write_frame_video(
         [],
         1.0,
@@ -893,7 +1080,7 @@ def test_overlapping_captions_the_renderer_the_preview_and_the_review_agree(
             return 0
 
     monkeypatch.setattr(frame_renderer, "render_frame_pillow", fake_frame)
-    monkeypatch.setattr(frame_renderer, "_start_frame_encoder", lambda *a, **k: _Encoder())
+    monkeypatch.setattr(frame_renderer, "_start_frame_encoder", _encodes_into(_Encoder()))
     frame_renderer.write_frame_video(
         [],
         5.0,
@@ -971,7 +1158,7 @@ def test_write_frame_video_hands_one_layer_to_every_frame(monkeypatch, tmp_path)
 
     monkeypatch.setattr(backgrounds, "base_layer", counting_base_layer)
     monkeypatch.setattr(frame_renderer, "render_frame_pillow", fake_frame)
-    monkeypatch.setattr(frame_renderer, "_start_frame_encoder", lambda *a, **k: _Encoder())
+    monkeypatch.setattr(frame_renderer, "_start_frame_encoder", _encodes_into(_Encoder()))
     captions = [
         {"start": 0.0, "end": 0.5, "text": "one"},
         {"start": 0.5, "end": 1.0, "text": "two"},
@@ -1308,7 +1495,7 @@ def test_a_manual_card_from_another_surah_is_drawn_by_export_preview_and_review(
             return 0
 
     monkeypatch.setattr(frame_renderer, "render_frame_pillow", fake_frame)
-    monkeypatch.setattr(frame_renderer, "_start_frame_encoder", lambda *a, **k: _Encoder())
+    monkeypatch.setattr(frame_renderer, "_start_frame_encoder", _encodes_into(_Encoder()))
     render_video(
         RenderRequest(
             audio=audio,
@@ -1426,7 +1613,7 @@ def test_the_export_the_preview_and_the_review_show_the_same_lecture_card(
             return 0
 
     monkeypatch.setattr(frame_renderer, "render_frame_pillow", fake_frame)
-    monkeypatch.setattr(frame_renderer, "_start_frame_encoder", lambda *a, **k: _Encoder())
+    monkeypatch.setattr(frame_renderer, "_start_frame_encoder", _encodes_into(_Encoder()))
     render_video(
         RenderRequest(
             audio=audio,

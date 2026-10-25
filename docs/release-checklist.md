@@ -340,6 +340,11 @@ this is the only place anyone hears each platform's build recognise speech.
   - `settings.animate_panels` («تحريك اللوحات»), the Settings → General checkbox that
     turns off the opening and closing motion of More options on the home form and of
     Customise in the review's Look panel: is «اللوحات» what a person calls these parts?
+  - the question when a review window is closed while its render runs:
+    `review.stop_render_title` («إخراج الفيديو»), `review.stop_render_text` («ما زال الفيديو
+    قيد الإخراج. هل توقفه وتغلق النافذة؟ يبقى الفيديو الذي أخرجته من قبل كما هو.») and its
+    two buttons `review.stop_render_stop` («أوقِف وأغلِق») and `review.stop_render_keep`
+    («تابِع الإخراج»).
 - [ ] Keep every direction mark: the U+2066…U+2069 isolates and the U+200F marks,
       written as `\u2066`-style escapes in the source. The tests fail if a key goes
       missing.

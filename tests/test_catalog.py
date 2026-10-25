@@ -48,6 +48,8 @@ def test_statuses(tmp_path) -> None:
     changed.record_render(tmp_path / "c.mp4", preset="social", basmala_offset_s=0.0)
     changed.cards[0]["start_time"] = 0.5
     save_project(changed, tmp_path / "c_recitation.qalun.json")
+    for video in ("v.mp4", "c.mp4"):
+        (tmp_path / video).write_bytes(b"video")
 
     by_name = {entry.name: entry.status for entry in list_jobs([tmp_path])}
     assert by_name == {
@@ -204,6 +206,7 @@ def test_a_job_whose_choices_changed_since_its_render_reads_changed(tmp_path) ->
         )
         set_job_settings(project, JobSettings(**settings))
         save_project(project, tmp_path / f"{name}_recitation.qalun.json")
+        (tmp_path / f"{name}.mp4").write_bytes(b"video")
 
     rendered("same", preset="social", subtitles="burn")
     rendered("resized", preset="high", subtitles="burn")
@@ -212,6 +215,7 @@ def test_a_job_whose_choices_changed_since_its_render_reads_changed(tmp_path) ->
     old.record_render(tmp_path / "old.mp4", preset="social", basmala_offset_s=0.0)
     set_job_settings(old, JobSettings(subtitles="both"))
     save_project(old, tmp_path / "old_recitation.qalun.json")
+    (tmp_path / "old.mp4").write_bytes(b"video")
 
     by_name = {entry.name: entry.status for entry in list_jobs([tmp_path])}
     assert by_name == {
@@ -220,6 +224,24 @@ def test_a_job_whose_choices_changed_since_its_render_reads_changed(tmp_path) ->
         "resubbed": CHANGED_SINCE_RENDER,
         "old": RENDERED,  # a render that did not record its subtitles is not second-guessed
     }
+
+
+def test_a_render_whose_video_is_gone_is_not_rendered(tmp_path) -> None:
+    """A record naming a deleted or moved video reads as the review it was, not as Rendered."""
+    gone = Project(audio=tmp_path / "gone.mp3", cards=[_card(1, 1, 7)])
+    gone.record_render(tmp_path / "gone.mp4", preset="social", basmala_offset_s=0.0)
+    save_project(gone, tmp_path / "gone_recitation.qalun.json")
+    reviewed = Project(audio=tmp_path / "rev.mp3", cards=[_card(1, 1, 7)])
+    reviewed.mark_reviewed()
+    reviewed.record_render(tmp_path / "rev.mp4", preset="social", basmala_offset_s=0.0)
+    save_project(reviewed, tmp_path / "rev_recitation.qalun.json")
+    kept = Project(audio=tmp_path / "kept.mp3", cards=[_card(1, 1, 7)])
+    kept.record_render(tmp_path / "kept.mp4", preset="social", basmala_offset_s=0.0)
+    save_project(kept, tmp_path / "kept_recitation.qalun.json")
+    (tmp_path / "kept.mp4").write_bytes(b"video")
+
+    by_name = {entry.name: entry.status for entry in list_jobs([tmp_path])}
+    assert by_name == {"gone": NEEDS_REVIEW, "rev": REVIEWED, "kept": RENDERED}
 
 
 def test_a_cancelled_listing_stops_between_files(tmp_path, monkeypatch) -> None:

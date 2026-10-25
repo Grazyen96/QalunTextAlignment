@@ -1445,6 +1445,24 @@ class ReviewWindow(QMainWindow):
             return "discard"
         return "cancel"
 
+    def _confirm_stop_render(self) -> bool:
+        """Ask whether to stop the running render and close; True means stop.
+
+        Keep rendering is the default and the Escape answer, so neither Enter
+        nor Escape throws away a render that may have run for minutes.
+        """
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(plain_title(t("review.stop_render_title")))
+        box.setText(t("review.stop_render_text"))
+        role = QMessageBox.ButtonRole
+        stop = box.addButton(t("review.stop_render_stop"), role.DestructiveRole)
+        keep = box.addButton(t("review.stop_render_keep"), role.RejectRole)
+        box.setDefaultButton(keep)
+        box.setEscapeButton(keep)
+        box.exec()
+        return box.clickedButton() is stop
+
     def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 - Qt override
         """Shown again after a close: ask about changes next time, and resume what close stopped.
 
@@ -1463,6 +1481,14 @@ class ReviewWindow(QMainWindow):
             self._start_reads()
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt override
+        """Ask about a running render first, then about unsaved changes; either can keep it open.
+
+        Closing stops a running render, and a person who closes mid-render may
+        not mean to; the earlier video stays either way.
+        """
+        if not self._closed and self._rendering and not self._confirm_stop_render():
+            event.ignore()
+            return
         if not self._closed and self.session.dirty:
             answer = self._confirm_discard()
             if answer == "cancel" or (answer == "save" and not self.save()):

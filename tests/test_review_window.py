@@ -953,6 +953,7 @@ def test_no_render_announcement_after_the_window_is_closed(qt_app, tmp_path, mon
 
     window.render_requested.emit()
     assert window._rendering
+    monkeypatch.setattr(window, "_confirm_stop_render", lambda: True)
     window.close()
     assert window._closed
 
@@ -986,6 +987,7 @@ def test_the_live_project_is_updated_even_though_the_render_finishes_after_close
 
     window.render_requested.emit()
     assert window._rendering
+    monkeypatch.setattr(window, "_confirm_stop_render", lambda: True)
     window.close()
     assert window._closed
     assert window.session.project.render is None
@@ -993,6 +995,94 @@ def test_the_live_project_is_updated_even_though_the_render_finishes_after_close
     release.set()
     assert _wait_for(lambda: not window._rendering, 5000)
     assert window.session.project.render is not None
+
+
+def _held_render_in(window, monkeypatch, tmp_path):
+    """Start a render that runs until the returned event is set, then cancels if asked."""
+    import threading
+
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.gui.jobs import JobOutcome
+
+    release = threading.Event()
+
+    def fake_render(project, *, cancel, **kwargs):
+        release.wait(timeout=5)
+        cancel.raise_if_cancelled("render")
+        return JobOutcome(matches=project.matches, video=tmp_path / "v.mp4", cards=1)
+
+    monkeypatch.setattr(jobs_module, "run_render", fake_render)
+    monkeypatch.setattr(window, "_announce_render", lambda outcome: None)
+    monkeypatch.setattr(window, "_say_render", lambda kind, text: None)
+    window.render_requested.emit()
+    assert window._rendering
+    return release
+
+
+def test_closing_while_rendering_asks_and_keeping_keeps_the_window(
+    qt_app, tmp_path, monkeypatch
+) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    closed = []
+    window.closed.connect(lambda: closed.append(True))
+    release = _held_render_in(window, monkeypatch, tmp_path)
+    token = window._render_cancel
+    asked = []
+    monkeypatch.setattr(window, "_confirm_stop_render", lambda: asked.append(True) or False)
+    discard_asked = []
+    monkeypatch.setattr(window, "_confirm_discard", lambda: discard_asked.append(True) or "cancel")
+
+    assert window.close() is False
+    assert asked == [True]
+    assert discard_asked == [], "the render question comes first, and Keep ends the close"
+    assert not closed and not window._closed and window.isVisible()
+    assert token is not None and not token.cancelled
+    assert window._rendering
+
+    release.set()
+    assert _wait_for(lambda: not window._rendering, 5000)
+    # Nothing to ask once the render is done.
+    asked.clear()
+    assert window.close() is True
+    assert asked == []
+
+
+def test_stop_and_close_cancels_the_render(qt_app, tmp_path, monkeypatch) -> None:
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    closed = []
+    window.closed.connect(lambda: closed.append(True))
+    release = _held_render_in(window, monkeypatch, tmp_path)
+    token = window._render_cancel
+    monkeypatch.setattr(window, "_confirm_stop_render", lambda: True)
+
+    assert window.close() is True
+    assert closed == [True] and window._closed
+    assert token is not None and token.cancelled
+
+    release.set()
+    assert _wait_for(lambda: not window._rendering, 5000)
+
+
+def test_the_stop_question_keeps_rendering_by_default(qt_app, tmp_path, monkeypatch) -> None:
+    """Enter and Escape both answer Keep rendering: stopping takes a deliberate click."""
+    from PySide6.QtWidgets import QMessageBox
+
+    window, _, _ = _window(qt_app, tmp_path)
+    boxes: list[QMessageBox] = []
+    monkeypatch.setattr(
+        "qurantext.gui.review.window.QMessageBox.exec", lambda self: boxes.append(self) or 0
+    )
+
+    assert window._confirm_stop_render() is False
+    (box,) = boxes
+    assert box.windowTitle() == t("review.stop_render_title")
+    assert box.text() == t("review.stop_render_text")
+    assert box.defaultButton().text() == t("review.stop_render_keep")
+    assert box.escapeButton().text() == t("review.stop_render_keep")
+    texts = {button.text() for button in box.buttons()}
+    assert texts == {t("review.stop_render_stop"), t("review.stop_render_keep")}
 
 
 def test_cancelling_a_render_brings_the_buttons_back(qt_app, tmp_path, monkeypatch) -> None:

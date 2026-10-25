@@ -303,6 +303,13 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.save_failed": "The corrections were not saved: {details}",
         "review.discard_title": "Save your corrections?",
         "review.discard_text": "This review has changes that are not saved.",
+        "review.stop_render_title": "Rendering",
+        "review.stop_render_text": (
+            "The video is still being rendered. Stop and close? "
+            "The video you made before stays as it was."
+        ),
+        "review.stop_render_stop": "Stop and close",
+        "review.stop_render_keep": "Keep rendering",
         "review.tip": "{action} ({keys})",
         "review.tip_fine": "{action} ({keys}; with Shift: 10 ms)",
         "review.key_space": "Space",
@@ -848,6 +855,13 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "review.save_failed": "لم تُحفظ التصحيحات: {details}",
         "review.discard_title": "هل تحفظ تصحيحاتك؟",
         "review.discard_text": "في هذه المراجعة تغييرات غير محفوظة.",
+        "review.stop_render_title": "إخراج الفيديو",
+        "review.stop_render_text": (
+            "ما زال الفيديو قيد الإخراج. هل توقفه وتغلق النافذة؟ "
+            "يبقى الفيديو الذي أخرجته من قبل كما هو."
+        ),
+        "review.stop_render_stop": "أوقِف وأغلِق",
+        "review.stop_render_keep": "تابِع الإخراج",
         "review.tip": "\u200f{action} ({keys})",
         "review.tip_fine": "{action} ({keys}؛ مع Shift: 10 م.ث)",
         "review.key_space": "المسافة",

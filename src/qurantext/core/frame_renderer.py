@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import bisect
 import math
+import os
 import subprocess
 import tempfile
 import time
+import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -1254,7 +1256,9 @@ def _start_frame_encoder(
     fps: int,
     log_handle: Any,
 ) -> Any:
-    """Start FFmpeg reading raw BGR frames on stdin and writing the final MP4.
+    """Start FFmpeg reading raw BGR frames on stdin and writing the MP4 at *output_path*.
+
+    :func:`write_frame_video` hands it a partial file, moved into place once complete.
 
     Frames go straight from Pillow into the H.264 encoder, so the video is
     encoded exactly once. The previous route wrote an OpenCV ``mp4v`` (MPEG-4
@@ -1345,6 +1349,13 @@ def write_frame_video(
     the encode, so drawing is no longer dominant. A process pool would also have
     to move 8.2 GB of frames between processes to save that. See
     docs/findings/parallel-rendering.md for when to revisit.
+
+    FFmpeg writes a hidden partial file beside *output_path*, which replaces
+    *output_path* only once the encode is complete. The review and the home
+    window both render to the same ``<stem>.mp4``, so a second render that is
+    cancelled or fails leaves the video the first one made as it was. A
+    target that cannot be replaced (on Windows, a video open in a player)
+    keeps the earlier video too, and the error says why.
     """
     total_frames = max(1, int(math.ceil(duration * fps)))
 
@@ -1463,10 +1474,11 @@ def write_frame_video(
         details = "\n".join(tail[-12:]) or "no FFmpeg output was captured"
         return RuntimeError(f"{reason}\n{details}")
 
+    partial = output_path.with_name(f".{output_path.stem}.{uuid.uuid4().hex[:8]}.part.mp4")
     process: Any = None
     completed = False
     try:
-        process = _start_frame_encoder(audio_path, output_path, width, height, fps, log_handle)
+        process = _start_frame_encoder(audio_path, partial, width, height, fps, log_handle)
         for ev_idx, (ev_start, ev_match, ev_caption) in enumerate(events):
             # Checked per event rather than per frame: an event is one Pillow
             # render, so this bounds how long Cancel takes to take effect while
@@ -1538,11 +1550,22 @@ def write_frame_video(
                 process.wait()
         log_handle.close()
         # A killed encoder leaves a container it never finalised — a few dozen
-        # bytes that no player opens. Cancelling should leave nothing behind
-        # rather than a broken file where the user expects their video.
+        # bytes that no player opens. Cancelling should leave nothing behind,
+        # and the earlier video, which this render never touched, stays.
         if not completed:
-            output_path.unlink(missing_ok=True)
+            partial.unlink(missing_ok=True)
 
+    try:
+        os.replace(partial, output_path)
+    except PermissionError as error:
+        partial.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"Could not replace {output_path.name}: it may be open in another program. "
+            "Close it and render again."
+        ) from error
+    except OSError:
+        partial.unlink(missing_ok=True)
+        raise
     return layer_warnings
 
 
