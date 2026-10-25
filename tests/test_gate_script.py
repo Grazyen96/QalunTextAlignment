@@ -213,6 +213,35 @@ def test_a_linux_bundle_without_libxcb_cursor_fails_the_gate(tmp_path: Path) -> 
     assert "libxcb-cursor.so.0" in result.stderr
 
 
+def test_an_app_whose_signature_is_broken_fails_the_gate(tmp_path: Path) -> None:
+    """The doctor runs the app unquarantined, so it would pass an app whose seal
+    misses the FFmpeg staged after signing; a download would be called damaged."""
+    marker = tmp_path / "doctor-ran"
+    app = tmp_path / "dist" / "Qalun.app" / "Contents" / "MacOS" / "qalun"
+    app.parent.mkdir(parents=True)
+    app.write_text(f"#!/bin/sh\n: > {marker}\necho 'Ready to render.'\n", encoding="utf-8")
+    app.chmod(0o755)
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    log = tmp_path / "codesign-calls"
+    (tools / "codesign").write_text(
+        f'#!/bin/sh\necho "$*" >> {log}\necho "dist/Qalun.app: a sealed resource is missing'
+        ' or invalid" >&2\nexit 1\n',
+        encoding="utf-8",
+    )
+    (tools / "codesign").chmod(0o755)
+    result = _gate(tmp_path, PATH=f"{tools}:{os.environ.get('PATH', '')}")
+    assert result.returncode != 0
+    assert (
+        "The gate failed: the app's signature does not cover everything in it"
+        " (codesign --verify; see above)."
+    ) in result.stderr
+    assert (
+        log.read_text(encoding="utf-8") == "--verify --deep --strict --verbose=2 dist/Qalun.app\n"
+    )
+    assert not marker.exists()
+
+
 def test_the_doctor_checks_the_local_engine_whatever_the_machine_chose(tmp_path: Path) -> None:
     """The local engine is what a person gets by default, so its runtime must block."""
     _bundle(tmp_path, 'echo "engine: $QURANTEXT_TRANSCRIBE_ENGINE"')

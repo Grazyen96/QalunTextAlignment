@@ -36,6 +36,16 @@ else
   app="dist/qalun/qalun"
 fi
 
+# The doctor runs the app unquarantined, so macOS never checks its signature
+# here; a download is checked, and an app whose seal misses a file staged after
+# signing is called damaged. Run with the real PATH, before the doctor.
+if [ -d "dist/Qalun.app" ]; then
+  if ! codesign --verify --deep --strict --verbose=2 dist/Qalun.app; then
+    echo "The gate failed: the app's signature does not cover everything in it (codesign --verify; see above)." >&2
+    exit 1
+  fi
+fi
+
 # Looked up here, while PATH is still the real one. macOS has no timeout(1);
 # perl's alarm survives the exec and ends the app the same way.
 if bound="$(command -v timeout)"; then
