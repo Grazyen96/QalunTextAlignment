@@ -23,7 +23,7 @@ import sqlite3
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QFontDatabase
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -37,9 +37,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from qurantext.config.paths import DEFAULT_FONT_PATH, QURAN_DB_PATH
+from qurantext.config.paths import QURAN_DB_PATH
 from qurantext.data.quran_db import ayah_range_card, connect, list_surahs
 from qurantext.gui.i18n import plain_title, t, tn
+from qurantext.gui.quran_face import with_quran_face
 from qurantext.gui.surahs import surah_label
 from qurantext.gui.widgets import make_primary
 from qurantext.jobs.project import SURAH_COUNT
@@ -51,24 +52,6 @@ PREVIEW_LINES = 5
 
 #: The preview's text size against the window's: Quran text is read closely here.
 _PREVIEW_SCALE = 1.4
-
-#: The bundled Quran face's family once registered with Qt ("" when it could not be).
-_quran_family: str | None = None
-
-
-def _quran_font_family() -> str:
-    """The bundled Qaloon face's family, registered on first use; "" when it cannot be.
-
-    The card in the video is drawn in this face, so the preview reads the
-    same. It has no Latin letters; Qt draws those (the "…and 3 more" line)
-    from the window's own font.
-    """
-    global _quran_family
-    if _quran_family is None:
-        font_id = QFontDatabase.addApplicationFont(str(DEFAULT_FONT_PATH))
-        families = QFontDatabase.applicationFontFamilies(font_id) if font_id != -1 else []
-        _quran_family = families[0] if families else ""
-    return _quran_family
 
 
 def _read_store(db_path: Path) -> dict[int, tuple[str, int]] | None:
@@ -137,10 +120,9 @@ class AyahPicker(QDialog):
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignAbsolute | Qt.AlignmentFlag.AlignTop
         )
         self.preview.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        font = QFont(self.font())
-        family = _quran_font_family()
-        if family:
-            font.setFamilies([family, *font.families()])
+        # The card in the video is drawn in the Quran face, so the preview reads the
+        # same; Qt draws the "…and 3 more" line's Latin from the window's own font.
+        font = QFont(with_quran_face(self.font()))
         if font.pointSizeF() > 0:  # -1 for a font sized in pixels
             font.setPointSizeF(font.pointSizeF() * _PREVIEW_SCALE)
         self.preview.setFont(font)

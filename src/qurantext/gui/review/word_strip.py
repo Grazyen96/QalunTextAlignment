@@ -29,6 +29,7 @@ from PySide6.QtCore import QEvent, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QFocusEvent,
+    QFont,
     QFontMetrics,
     QHideEvent,
     QMouseEvent,
@@ -40,7 +41,8 @@ from PySide6.QtWidgets import QWidget
 
 from qurantext.gui import theme
 from qurantext.gui.colors import warning_color
-from qurantext.gui.review.session import ReviewSession, TimelineWord, WordRef
+from qurantext.gui.quran_face import with_quran_face
+from qurantext.gui.review.session import CARD, ReviewSession, TimelineWord, WordRef
 from qurantext.gui.review.viewport import Viewport
 
 __all__ = ["WordStrip"]
@@ -161,6 +163,16 @@ class WordStrip(QWidget):
                 self._selected = None
                 self.selection_changed.emit(None)
         self.update()
+
+    def font_for(self, word: TimelineWord) -> QFont:
+        """The font *word* is drawn in: a card's in the Quran face, a caption's in the strip's.
+
+        A card's words are the mushaf's, whose open tanween only the Quran face
+        draws; a caption's are recognised speech.
+        """
+        if word.ref.kind == CARD:
+            return with_quran_face(self.font())
+        return self.font()
 
     def _visible_words(self) -> list[TimelineWord]:
         start = self._viewport.start
@@ -317,7 +329,6 @@ class WordStrip(QWidget):
             painter.fillRect(self.rect(), palette.window())
             width = self.width()
             height = self.height()
-            metrics = QFontMetrics(painter.font())
             playhead_ref = self._session.word_at(self._playhead)
             for tw in self._visible_words():
                 # Right to left: the end is the box's left edge, the start its right.
@@ -327,7 +338,7 @@ class WordStrip(QWidget):
                     continue
                 box_width = max(2.0, right - left)
                 rect = QRectF(left, 2.0, box_width, height - 4.0)
-                self._paint_word(painter, metrics, rect, tw, tw.ref == playhead_ref, palette)
+                self._paint_word(painter, rect, tw, tw.ref == playhead_ref, palette)
             handle = self._hover
             if isinstance(self._drag, _EdgeDrag):
                 handle = (self._drag.edge, self._drag.ref)
@@ -336,7 +347,7 @@ class WordStrip(QWidget):
         finally:
             painter.end()
 
-    def _paint_word(self, painter, metrics, rect, tw, is_under_playhead, palette) -> None:
+    def _paint_word(self, painter, rect, tw, is_under_playhead, palette) -> None:
         tokens = theme.current_tokens()
         selected = tw.ref == self._selected
         # The word under the playhead is outlined in the accent: the red playhead
@@ -362,6 +373,9 @@ class WordStrip(QWidget):
 
         text_color = QColor(tokens.on_accent) if selected else palette.windowText().color()
         painter.setPen(text_color)
+        font = self.font_for(tw)
+        painter.setFont(font)
+        metrics = QFontMetrics(font)
         elided = metrics.elidedText(
             tw.text, Qt.TextElideMode.ElideRight, max(0, int(rect.width()) - 4)
         )

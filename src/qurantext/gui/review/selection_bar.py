@@ -9,11 +9,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import QRect
+from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 from qurantext.gui import theme
 from qurantext.gui.i18n import t, time_span
-from qurantext.gui.review.session import TimelineWord
+from qurantext.gui.quran_face import with_quran_face
+from qurantext.gui.review.session import CARD, TimelineWord
 
 if TYPE_CHECKING:
     from qurantext.gui.review.transport import Transport
@@ -55,8 +58,20 @@ class SelectionBar(QWidget):
     def show_word(self, word: TimelineWord | None) -> None:
         """Describe *word*, or invite a selection when there is none."""
         self._transport.set_selection(word is not None)
+        # A card's word is the mushaf's, whose open tanween only the Quran face draws.
+        section = theme.font("section")
+        quran = with_quran_face(section)
+        self.label.setFont(quran if word is not None and word.ref.kind == CARD else section)
+        # The Quran face's line is taller; the bar keeps its height so nothing below it jumps.
+        self.label.setMinimumHeight(_line_height(quran))
         if word is None:
             self.label.setText(t("review.no_selection"))
             return
         span = time_span(word.start, word.end, sep=" → ")
         self.label.setText(t("review.selected", word=word.text, span=span))
+
+
+def _line_height(font: QFont) -> int:
+    """How tall the label lays out a selected word's line in *font*, fallbacks included."""
+    sample = t("review.selected", word="\u0645", span=time_span(0.0, 0.0, sep=" → "))
+    return QFontMetrics(font).boundingRect(QRect(0, 0, 10_000, 1_000), 0, sample).height()

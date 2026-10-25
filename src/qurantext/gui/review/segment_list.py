@@ -40,6 +40,7 @@ from qurantext.core.subtitles import card_ref
 from qurantext.gui import theme
 from qurantext.gui.i18n import is_rtl, ltr, t, time_span
 from qurantext.gui.icons import icon
+from qurantext.gui.quran_face import with_quran_face
 from qurantext.gui.review.session import CAPTION, CARD, ReviewSession
 
 __all__ = ["MANUAL_MARK", "SegmentList"]
@@ -163,6 +164,9 @@ class SegmentList(QTableWidget):
         self._set_item(row, _COLUMN_TIME, span, kind, index, editable=False)
         text_item = self._set_item(row, _COLUMN_TEXT, text, kind, index, editable=text_editable)
         text_item.setTextAlignment(_text_alignment(text))
+        if kind == CARD:
+            # The mushaf's open tanween is drawn as open tanween only by the Quran face.
+            text_item.setFont(with_quran_face(self.font()))
         if not text_editable:
             text_item.setToolTip(t("segments.locked"))
         # Nothing retimed is an empty cell, so the rows that were stand out.
