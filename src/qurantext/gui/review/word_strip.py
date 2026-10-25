@@ -104,7 +104,7 @@ class WordStrip(QWidget):
         self._viewport = viewport
         self._session = session
         self._selected: WordRef | None = None
-        self._last_edge = "end"
+        self._last_edge = "start"
         self._playhead = 0.0
         self._drag: _EdgeDrag | _RippleDrag | None = None
         self._hover: tuple[str, WordRef] | None = None
@@ -122,11 +122,13 @@ class WordStrip(QWidget):
 
     @property
     def last_edge(self) -> str:
-        """The selected word's edge the person last grabbed: ``"start"`` or ``"end"``.
+        """The selected word's armed edge, which nudges move: ``"start"`` or ``"end"``.
 
-        Keyboard and button nudges move this edge. It is ``"end"`` until an
-        edge of the selected word is grabbed, and again whenever the
-        selection changes.
+        It is ``"start"`` until an edge of the selected word is grabbed, and
+        again whenever another word is selected: the video lights a word up
+        when it starts, so selecting a word and nudging it moves when that
+        word lights up. A joined end is the next word's start, so arming the
+        end by default moved the neighbour's light-up instead.
         """
         return self._last_edge
 
@@ -135,12 +137,27 @@ class WordStrip(QWidget):
         """The edge under the pointer, ``("start"|"end", ref)``, drawn as a handle; else None."""
         return self._hover
 
+    def painted_handle(self) -> tuple[str, WordRef] | None:
+        """The one edge drawn as a handle, ``("start"|"end", ref)``, or None.
+
+        The edge being dragged; else the edge under the pointer, which a press
+        would grab; else the selected word's armed edge, so a person sees which
+        edge a nudge moves.
+        """
+        if isinstance(self._drag, _EdgeDrag):
+            return self._drag.edge, self._drag.ref
+        if self._hover is not None:
+            return self._hover
+        if self._selected is not None:
+            return self._last_edge, self._selected
+        return None
+
     def select(self, ref: WordRef | None) -> None:
         """Select *ref* (or clear the selection with ``None``) and repaint."""
         if ref == self._selected:
             return
         self._selected = ref
-        self._last_edge = "end"
+        self._last_edge = "start"
         self.selection_changed.emit(ref)
         self.update()
 
@@ -339,9 +356,7 @@ class WordStrip(QWidget):
                 box_width = max(2.0, right - left)
                 rect = QRectF(left, 2.0, box_width, height - 4.0)
                 self._paint_word(painter, rect, tw, tw.ref == playhead_ref, palette)
-            handle = self._hover
-            if isinstance(self._drag, _EdgeDrag):
-                handle = (self._drag.edge, self._drag.ref)
+            handle = self.painted_handle()
             if handle is not None:
                 self._paint_handle(painter, handle, width, height, palette)
         finally:
@@ -386,7 +401,7 @@ class WordStrip(QWidget):
             painter.fillRect(bar, warning_color(palette))
 
     def _paint_handle(self, painter, handle, width, height, palette) -> None:
-        """A :attr:`HANDLE_PX` bar on the edge the pointer can grab, seen before it is felt."""
+        """A :attr:`HANDLE_PX` bar on the edge a press or a nudge moves, seen before it is felt."""
         edge, ref = handle
         try:
             tw = self._session.word(ref)

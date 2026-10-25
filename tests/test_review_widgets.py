@@ -487,6 +487,63 @@ def test_the_edge_handle_shows_on_the_selected_word(qt_app) -> None:
         assert image.pixelColor(x, strip.height() // 2) != highlight
 
 
+def test_selecting_a_word_arms_its_start(qt_app) -> None:
+    session, strip = _strip(qt_app)
+    a, b, c = session.words()
+    assert strip.last_edge == "start"
+    # A click on a's body (x 800-900) selects it with its start armed: the edge
+    # that decides when it lights up.
+    QTest.mouseClick(strip, Qt.MouseButton.LeftButton, pos=QPoint(850, 17))
+    assert (strip.selected, strip.last_edge) == (a.ref, "start")
+    # Grabbing c's end (x 600) arms that end until another word is selected.
+    QTest.mousePress(strip, Qt.MouseButton.LeftButton, pos=QPoint(600, 17))
+    QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, pos=QPoint(600, 17))
+    assert (strip.selected, strip.last_edge) == (c.ref, "end")
+    strip.select(b.ref)
+    assert strip.last_edge == "start"
+    strip.select(None)
+    strip.select(c.ref)
+    assert strip.last_edge == "start"
+
+
+def test_the_armed_edge_is_painted(qt_app) -> None:
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QPalette
+
+    session, strip = _strip(qt_app)
+    strip.show()
+    # Until the offscreen window is exposed, Qt routes a move by the screen
+    # under the global point; an early move would be dropped.
+    assert QTest.qWaitForWindowExposed(strip)
+    qt_app.sendEvent(strip, QEvent(QEvent.Type.Leave))  # no hover left by the cursor's place
+    a, b, c = session.words()
+    mid = strip.height() // 2
+    x_start = int(strip._viewport.x_for(a.start, strip.width()))
+    window_colour = strip.palette().color(QPalette.ColorRole.Window)
+    assert strip.painted_handle() is None
+    # Just right of a's box (x 800-900) is bare window until a's start is armed.
+    assert strip.grab().toImage().pixelColor(x_start + 2, mid) == window_colour
+
+    strip.select(a.ref)
+    assert strip.painted_handle() == ("start", a.ref)
+    assert strip.grab().toImage().pixelColor(x_start + 2, mid) != window_colour
+
+    # The edge under the pointer is the one a press would grab, so it shows instead.
+    # QTest.mouseMove sets the cursor, which drops a move to where an earlier
+    # test left it; a move into c's body first makes the next one real.
+    QTest.mouseMove(strip, QPoint(650, mid))
+    QTest.mouseMove(strip, QPoint(600, mid))  # c's end
+    assert strip.painted_handle() == ("end", c.ref)
+    # Mid-drag, the dragged edge shows.
+    QTest.mousePress(strip, Qt.MouseButton.LeftButton, pos=QPoint(800, mid))  # a's end
+    assert strip.painted_handle() == ("end", a.ref)
+    QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, pos=QPoint(800, mid))
+    qt_app.sendEvent(strip, QEvent(QEvent.Type.Leave))
+    assert strip.painted_handle() == ("end", a.ref), "the grabbed end stays armed"
+    strip.select(None)
+    assert strip.painted_handle() is None
+
+
 def test_the_playhead_red_comes_from_the_palette(qt_app) -> None:
     from qurantext.gui.review import waveform_view, word_strip
 

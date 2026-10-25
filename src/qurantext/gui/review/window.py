@@ -952,7 +952,7 @@ class ReviewWindow(QMainWindow):
             self._after_edit()
 
     def _nudge(self, delta: float) -> None:
-        """Move the selected word's last-grabbed edge (its end, by default) by *delta* seconds."""
+        """Move the selected word's armed edge (its start, by default) by *delta* seconds."""
         if self._rendering:
             return
         ref = self.strip.selected

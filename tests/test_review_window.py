@@ -200,34 +200,34 @@ def test_comma_moves_the_edge_left_and_period_moves_it_right(qt_app, tmp_path) -
     QTest.keyClick(window, Qt.Key.Key_Left)
     width = window.strip.width()
 
-    def end_x() -> float:
-        return window.viewport.x_for(window.session.words()[0].end, width)
+    def start_x() -> float:
+        return window.viewport.x_for(window.session.words()[0].start, width)
 
-    before = end_x()
+    before = start_x()
     QTest.keyClick(window, Qt.Key.Key_Comma)  # "<": left on screen, later in time
-    assert window.session.words()[0].end == pytest.approx(2.05)
-    assert end_x() < before
+    assert window.session.words()[0].start == pytest.approx(1.05)
+    assert start_x() < before
     QTest.keyClick(window, Qt.Key.Key_Period)  # ">": right on screen, earlier in time
     QTest.keyClick(window, Qt.Key.Key_Period)
-    assert window.session.words()[0].end == pytest.approx(1.95)
-    assert end_x() > before
+    assert window.session.words()[0].start == pytest.approx(0.95)
+    assert start_x() > before
     QTest.keyClick(window, Qt.Key.Key_Comma, Qt.KeyboardModifier.ShiftModifier)
-    assert window.session.words()[0].end == pytest.approx(1.96)
+    assert window.session.words()[0].start == pytest.approx(0.96)
     QTest.keyClick(window, Qt.Key.Key_Period, Qt.KeyboardModifier.ShiftModifier)
-    assert window.session.words()[0].end == pytest.approx(1.95)
+    assert window.session.words()[0].start == pytest.approx(0.95)
     # A real Shift+, / Shift+. on a US layout arrives as "<" / ">".
     QTest.keyClick(window, Qt.Key.Key_Less, Qt.KeyboardModifier.ShiftModifier)
-    assert window.session.words()[0].end == pytest.approx(1.96)
+    assert window.session.words()[0].start == pytest.approx(0.96)
     QTest.keyClick(window, Qt.Key.Key_Greater, Qt.KeyboardModifier.ShiftModifier)
-    assert window.session.words()[0].end == pytest.approx(1.95)
+    assert window.session.words()[0].start == pytest.approx(0.95)
 
 
-def test_nudge_moves_the_end_by_fifty_milliseconds(qt_app, tmp_path) -> None:
+def test_nudge_moves_the_start_by_fifty_milliseconds(qt_app, tmp_path) -> None:
     window, _, _ = _window(qt_app, tmp_path)
     window.show()
     QTest.keyClick(window, Qt.Key.Key_Left)
     QTest.keyClick(window, Qt.Key.Key_Comma)
-    assert window.session.words()[0].end == pytest.approx(2.05)
+    assert window.session.words()[0].start == pytest.approx(1.05)
 
 
 def test_a_nudge_and_its_opposite_leave_nothing_to_save(qt_app, tmp_path) -> None:
@@ -235,8 +235,10 @@ def test_a_nudge_and_its_opposite_leave_nothing_to_save(qt_app, tmp_path) -> Non
     before = json.loads(json.dumps(window.session.project.cards))
     window.show()
     QTest.keyClick(window, Qt.Key.Key_Left)
+    QTest.keyClick(window, Qt.Key.Key_Left)  # b, whose start is joined to a's end
     QTest.keyClick(window, Qt.Key.Key_Comma)
     assert window.session.words()[1].start == pytest.approx(2.05)
+    assert window.session.words()[0].end == pytest.approx(2.05)
     QTest.keyClick(window, Qt.Key.Key_Period)
     assert window.session.project.cards == before
     assert not window.session.dirty
@@ -251,7 +253,7 @@ def test_ctrl_s_saves_and_the_title_loses_its_marker(qt_app, tmp_path) -> None:
     assert window.windowTitle().endswith("*")
     QTest.keyClick(window, Qt.Key.Key_S, Qt.KeyboardModifier.ControlModifier)
     assert not window.windowTitle().endswith("*")
-    assert load_project(window.session.project.path).cards[0]["word_timings"][0]["end"] == 2.05
+    assert load_project(window.session.project.path).cards[0]["word_timings"][0]["start"] == 1.05
 
 
 @pytest.mark.parametrize(
@@ -266,8 +268,8 @@ def test_closing_with_changes_asks(qt_app, tmp_path, monkeypatch, answer, closes
     monkeypatch.setattr(window, "_confirm_discard", lambda: answer)
     window.close()
     assert window.isVisible() is (not closes)
-    stored = load_project(window.session.project.path).cards[0]["word_timings"][0]["end"]
-    assert (stored == 2.05) is saved
+    stored = load_project(window.session.project.path).cards[0]["word_timings"][0]["start"]
+    assert (stored == 1.05) is saved
 
 
 def test_without_playback_the_window_still_edits(qt_app, tmp_path) -> None:
@@ -288,7 +290,7 @@ def test_shift_nudges_by_ten_milliseconds(qt_app, tmp_path) -> None:
     window.show()
     QTest.keyClick(window, Qt.Key.Key_Left)
     QTest.keyClick(window, Qt.Key.Key_Comma, Qt.KeyboardModifier.ShiftModifier)
-    assert window.session.words()[0].end == pytest.approx(2.01)
+    assert window.session.words()[0].start == pytest.approx(1.01)
 
 
 def _levels_with_speech_between(start, end):
@@ -416,22 +418,40 @@ def test_a_window_shown_again_after_closing_still_asks_about_changes(
     assert window.isVisible()
 
 
+def test_a_nudge_after_selecting_a_word_moves_when_it_lights_up(qt_app, tmp_path) -> None:
+    from PySide6.QtCore import QPoint
+
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    strip = window.strip
+    x = round(window.viewport.x_for(1.5, strip.width()))  # a's body (1-2 s)
+    QTest.mouseClick(strip, Qt.MouseButton.LeftButton, pos=QPoint(x, strip.height() // 2))
+    assert strip.selected == window.session.words()[0].ref
+    QTest.keyClick(window, Qt.Key.Key_Period)  # earlier
+    a, b = window.session.words()
+    assert a.start == pytest.approx(0.95)
+    assert (a.end, b.start) == (2.0, 2.0), "the next word lights up when it did"
+    QTest.keyClick(window, Qt.Key.Key_Comma)  # later
+    assert window.session.words()[0].start == pytest.approx(1.0)
+
+
 def test_a_nudge_moves_the_edge_last_grabbed(qt_app, tmp_path) -> None:
     from PySide6.QtCore import QPoint
 
     window, _, _ = _window(qt_app, tmp_path)
     window.show()
     strip = window.strip
-    x = round(window.viewport.x_for(1.0, strip.width()))
+    # 2.0 s is a's end, joined to b's start: a press there grabs a's end.
+    x = round(window.viewport.x_for(2.0, strip.width()))
     at = QPoint(x, strip.height() // 2)
     QTest.mousePress(strip, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at)
     QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at)
-    assert strip.last_edge == "start"
-    QTest.keyClick(window, Qt.Key.Key_Comma)
-    assert window.session.words()[0].start == pytest.approx(1.05)
-    assert window.session.words()[0].end == pytest.approx(2.0)
-    QTest.keyClick(window, Qt.Key.Key_Left)
     assert strip.last_edge == "end"
+    QTest.keyClick(window, Qt.Key.Key_Comma)
+    assert window.session.words()[0].end == pytest.approx(2.05)
+    assert window.session.words()[0].start == pytest.approx(1.0)
+    QTest.keyClick(window, Qt.Key.Key_Left)
+    assert strip.last_edge == "start"
 
 
 @pytest.mark.skipif(not MEDIA_AVAILABLE, reason=MEDIA_REASON)
@@ -705,8 +725,8 @@ def test_render_with_corrections_saves_then_renders_the_project(
     seen = {}
 
     def fake_render(project, **kwargs):
-        seen["end"] = project.cards[0]["word_timings"][0]["end"]
-        seen["saved"] = load_project(project.path).cards[0]["word_timings"][0]["end"]
+        seen["start"] = project.cards[0]["word_timings"][0]["start"]
+        seen["saved"] = load_project(project.path).cards[0]["word_timings"][0]["start"]
         return JobOutcome(matches=project.matches, video=tmp_path / "v.mp4", cards=1)
 
     monkeypatch.setattr(jobs_module, "run_render", fake_render)
@@ -716,7 +736,7 @@ def test_render_with_corrections_saves_then_renders_the_project(
     window.render_requested.emit()
     # PySide6's QTest has no qWaitFor; _wait_for above (in this file) is its replacement.
     assert _wait_for(lambda: "done" in seen, 5000)
-    assert seen["end"] == 2.05 and seen["saved"] == 2.05
+    assert seen["start"] == 1.05 and seen["saved"] == 1.05
 
 
 def test_render_with_corrections_uses_the_jobs_own_choices(qt_app, tmp_path, monkeypatch) -> None:
@@ -1145,7 +1165,7 @@ def test_discard_puts_the_saved_state_back(qt_app, tmp_path, monkeypatch) -> Non
     monkeypatch.setattr(window, "_confirm_discard", lambda: "discard")
     window.close()
     assert not window.session.dirty
-    assert window.session.words()[0].end == 2.0
+    assert window.session.words()[0].start == 1.0
 
 
 def _three_cue_window(tmp_path, words=("one", "two", "three")):
@@ -1366,10 +1386,10 @@ _ARABIC_LAYOUT_PRESSES = [
     ("[", "ج", False, 1, "start", 2.4),  # ج
     ("]", "د", False, 0, "end", 2.4),  # د
     # "," moves the edge left on the right-to-left timeline (later), "." right (earlier).
-    (",", "و", False, 0, "end", 2.05),  # و
-    (".", "ز", False, 0, "end", 1.95),  # ز
-    (",", "و", True, 0, "end", 2.01),
-    (".", "ز", True, 0, "end", 1.99),
+    (",", "و", False, 0, "start", 1.05),  # و
+    (".", "ز", False, 0, "start", 0.95),  # ز
+    (",", "و", True, 0, "start", 1.01),
+    (".", "ز", True, 0, "start", 0.99),
 ]
 
 
@@ -1457,7 +1477,7 @@ def test_the_physical_key_table_is_read_for_this_platform(qt_app, tmp_path) -> N
     window.show()
     QTest.keyClick(window, Qt.Key.Key_Left)
     QApplication.sendEvent(window, _layout_press(_platform_family(), ".", "ز"))
-    assert window.session.words()[0].end == pytest.approx(1.95)
+    assert window.session.words()[0].start == pytest.approx(0.95)
 
 
 @pytest.mark.parametrize(
@@ -1488,7 +1508,7 @@ def test_only_an_unmatched_non_latin_key_is_read_by_its_physical_place(
     QApplication.sendEvent(
         window, QKeyEvent(QEvent.Type.KeyPress, key, modifiers, scan, virtual, 0, text)
     )
-    assert window.session.words()[0].end == 2.0
+    assert window.session.words()[0].start == 1.0
     assert not window.session.dirty
 
 
@@ -2667,9 +2687,9 @@ def test_the_transport_drives_steps_rate_and_nudges(qt_app, tmp_path) -> None:
     assert window.strip.selected == words[1].ref
     window.transport.rate_buttons[0.5].click()
     assert window.player.rate() == 0.5
-    end_before = window.session.word(window.strip.selected).end
+    start_before = window.session.word(window.strip.selected).start
     window.selection_bar.plus_button.click()  # the old name still reaches the transport's button
-    assert window.session.word(window.strip.selected).end == pytest.approx(end_before + 0.05)
+    assert window.session.word(window.strip.selected).start == pytest.approx(start_before + 0.05)
     window.player.play()
     assert window.transport.play_button.property("qalun.icon")[0] == "pause"
     assert window.play_button is window.transport.play_button
