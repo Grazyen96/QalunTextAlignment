@@ -387,6 +387,10 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "render.running_recitation": "Recitation — {percent}%",
         "render.running_join": "Joining — {percent}%",
         "render.failed": "The render did not finish: {details}",
+        "render.locked": (
+            "Could not replace \u2068{name}\u2069: it may be open in another program. "
+            "Close it and render again."
+        ),
         "render.cancelled": "Rendering stopped.",
         "render.cancel": "Cancel",
         "session.card_follows_words": (
@@ -953,6 +957,9 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "render.running_recitation": "التلاوة — \u2066{percent}%\u2069",
         "render.running_join": "التجميع — \u2066{percent}%\u2069",
         "render.failed": "لم يكتمل إخراج الفيديو: {details}",
+        "render.locked": (
+            "تعذّر استبدال \u2068{name}\u2069: قد يكون مفتوحًا في برنامج آخر. أغلقه ثم أعد الإخراج."
+        ),
         "render.cancelled": "توقف إخراج الفيديو.",
         "render.cancel": "إلغاء",
         "session.card_follows_words": (

@@ -345,6 +345,9 @@ this is the only place anyone hears each platform's build recognise speech.
     قيد الإخراج. هل توقفه وتغلق النافذة؟ يبقى الفيديو الذي أخرجته من قبل كما هو.») and its
     two buttons `review.stop_render_stop` («أوقِف وأغلِق») and `review.stop_render_keep`
     («تابِع الإخراج»).
+  - `render.locked` («تعذّر استبدال …: قد يكون مفتوحًا في برنامج آخر. أغلقه ثم أعد
+    الإخراج.»), said when a render cannot replace the earlier video, on Windows because a
+    player has it open.
 - [ ] Keep every direction mark: the U+2066…U+2069 isolates and the U+200F marks,
       written as `\u2066`-style escapes in the source. The tests fail if a key goes
       missing.

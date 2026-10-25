@@ -767,7 +767,7 @@ def test_a_locked_target_keeps_the_earlier_video_and_says_why(monkeypatch, tmp_p
     output = tmp_path / "out.mp4"
     output.write_bytes(b"the earlier video")
 
-    with pytest.raises(RuntimeError, match="open in another program") as excinfo:
+    with pytest.raises(frame_renderer.TargetLocked, match="open in another program") as excinfo:
         frame_renderer.write_frame_video(
             [],
             1.0,
@@ -781,6 +781,10 @@ def test_a_locked_target_keeps_the_earlier_video_and_says_why(monkeypatch, tmp_p
         )
 
     assert "out.mp4" in str(excinfo.value)
+    # A RuntimeError still, so whatever caught the failure before still catches it;
+    # the name is carried for the window to say it in its own language.
+    assert isinstance(excinfo.value, RuntimeError)
+    assert excinfo.value.name == "out.mp4"
     assert output.read_bytes() == b"the earlier video"
     assert list(tmp_path.glob("*.part.mp4")) == []
 

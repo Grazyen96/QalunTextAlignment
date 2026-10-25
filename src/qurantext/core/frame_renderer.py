@@ -43,6 +43,22 @@ COLOUR_CAPTION_ACTIVE = (128, 226, 234, 255)  # soft cyan — word being spoken 
 COLOUR_CAPTION_UPCOMING = (150, 150, 162, 255)  # dimmed — not yet spoken
 COLOUR_PLACEHOLDER_TEXT = (205, 205, 215, 255)
 
+
+class TargetLocked(RuntimeError):
+    """The finished video could not take its target's place: on Windows, a file open in a player.
+
+    Carries the target's file *name* so the window can say it in its own
+    language (``render.locked``); the message is the English for logs and the CLI.
+    """
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(
+            f"Could not replace {name}: it may be open in another program. "
+            "Close it and render again."
+        )
+
+
 #: How often a finished video is put in its target's place while that file is held
 #: (on Windows, briefly by a scanner or for good by a player), and the pause between.
 _REPLACE_TRIES = 3
@@ -1574,10 +1590,7 @@ def write_frame_video(
                 continue
             with suppress(OSError):
                 partial.unlink(missing_ok=True)
-            raise RuntimeError(
-                f"Could not replace {output_path.name}: it may be open in another program. "
-                "Close it and render again."
-            ) from error
+            raise TargetLocked(output_path.name) from error
         except OSError:
             with suppress(OSError):
                 partial.unlink(missing_ok=True)

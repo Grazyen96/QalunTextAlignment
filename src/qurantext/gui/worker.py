@@ -27,7 +27,9 @@ from typing import Any
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal
 
+from qurantext.core.frame_renderer import TargetLocked
 from qurantext.data.quran_db import QuranDataError
+from qurantext.gui.i18n import t
 from qurantext.jobs.episode import EpisodeError
 from qurantext.services.errors import TranscriptionError
 from qurantext.utils.progress import CancelToken, JobCancelled, ProgressEvent
@@ -37,8 +39,14 @@ __all__ = ["JobWorker", "run_in_thread"]
 _log = logging.getLogger(__name__)
 
 #: The app's own error types, raised on purpose with a sentence for the person
-#: (``TranscriptionError`` covers WhisperX, the model download and the local engine).
-_APP_ERRORS: tuple[type[Exception], ...] = (EpisodeError, QuranDataError, TranscriptionError)
+#: (``TranscriptionError`` covers WhisperX, the model download and the local engine;
+#: ``TargetLocked`` is a video the machine would not let a render replace).
+_APP_ERRORS: tuple[type[Exception], ...] = (
+    EpisodeError,
+    QuranDataError,
+    TranscriptionError,
+    TargetLocked,
+)
 #: What the machine refused rather than what the code got wrong. Not every
 #: ``OSError``: a broken pipe is FFmpeg dying under the renderer, a bug to read.
 _REFUSED_BY_THE_MACHINE: tuple[type[OSError], ...] = (
@@ -103,6 +111,9 @@ def _foreseen(error: Exception) -> bool:
 
 def _readable(error: Exception) -> str:
     """A message worth showing someone who did not write the code."""
+    if isinstance(error, TargetLocked):
+        # The one render failure a person must act on, said in the window's language.
+        return t("render.locked", name=error.name)
     text = str(error).strip()
     if not text:
         return f"{type(error).__name__} (no details given)"

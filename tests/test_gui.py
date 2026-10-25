@@ -215,6 +215,28 @@ def _run_failing(job, caplog) -> tuple[list[str], list]:
     return messages, [r for r in caplog.records if r.name == "qurantext.gui.worker"]
 
 
+@pytest.mark.parametrize("language", ["en", "ar"])
+def test_a_locked_target_is_said_in_the_windows_language(qt_app, caplog, language) -> None:
+    """The one render failure a person must act on is not left in the renderer's English."""
+    import logging
+
+    from qurantext.core.frame_renderer import TargetLocked
+    from qurantext.gui import i18n
+    from qurantext.gui.i18n import t
+
+    i18n.set_language(language)
+
+    def job(*, progress, cancel):
+        raise TargetLocked("out.mp4")
+
+    messages, records = _run_failing(job, caplog)
+
+    assert messages == [t("render.locked", name="out.mp4")]
+    assert "out.mp4" in messages[0]
+    # The machine refused the file, as with a PermissionError: not a bug to read.
+    assert [r.levelno for r in records] == [logging.WARNING]
+
+
 @pytest.mark.parametrize(
     "name",
     [
