@@ -254,6 +254,11 @@ class WordStrip(QWidget):
             return
         # kind == "body"
         self.select(ref)
+        # A click on a word is a selection, so it arms the start even when the
+        # word was already selected with its end grabbed (select() returns early then).
+        if self._last_edge != "start":
+            self._last_edge = "start"
+            self.update()
         if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
             revision_before = self._session.revision
             self._session.begin_gesture()

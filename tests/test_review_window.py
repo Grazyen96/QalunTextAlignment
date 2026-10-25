@@ -454,6 +454,31 @@ def test_a_nudge_moves_the_edge_last_grabbed(qt_app, tmp_path) -> None:
     assert strip.last_edge == "start"
 
 
+def test_clicking_the_selected_word_again_arms_its_start(qt_app, tmp_path) -> None:
+    """Grab a word's end, then click its body as the guide says: . moves its light-up."""
+    from PySide6.QtCore import QPoint
+
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    strip = window.strip
+    mid = strip.height() // 2
+    # 2.0 s is a's end, joined to b's start: a press there grabs a's end.
+    at_end = QPoint(round(window.viewport.x_for(2.0, strip.width())), mid)
+    QTest.mousePress(strip, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at_end)
+    QTest.mouseRelease(strip, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at_end)
+    a = window.session.words()[0]
+    assert (strip.selected, strip.last_edge) == (a.ref, "end")
+    # A click on a's body (1-2 s), the word already selected.
+    body = QPoint(round(window.viewport.x_for(1.5, strip.width())), mid)
+    QTest.mouseClick(strip, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, body)
+    assert (strip.selected, strip.last_edge) == (a.ref, "start")
+    assert strip.painted_handle() == ("start", a.ref)
+    QTest.keyClick(window, Qt.Key.Key_Period)  # earlier
+    a, b = window.session.words()
+    assert a.start == pytest.approx(0.95)
+    assert (a.end, b.start) == (2.0, 2.0), "the next word lights up when it did"
+
+
 @pytest.mark.skipif(not MEDIA_AVAILABLE, reason=MEDIA_REASON)
 def test_a_real_recording_is_read_in_the_background_and_close_stops_it(qt_app, tmp_path) -> None:
     from qurantext.gui.i18n import t
