@@ -399,3 +399,45 @@ README, the guide, the release notes and any QR code at it.
 | RC-2 | The guide says "about 300 MB free" | Open. The Linux app folder is about 490 MB, plus the 110 MB model and the zip itself. |
 | RC-3 | `/releases/latest` lands on the list and drops the UTM query while every release is a pre-release | Open (section 9) |
 | RC-4 | pip-installed `qalun --help` opens the window | Rated minor (SHL-5); the shipped entry point handles `--help` |
+
+## 12. After the fix round
+
+Branch `fix/release-check-2026-10-25` fixes both blockers and the nine majors in section 4.2. Its
+one whole-branch review found two more defects, both in the new close and nudge flows:
+
+- I-1: Stop and close, then Save, did nothing.
+- I-2: clicking an already-selected word kept its end armed.
+
+Both were fixed and re-checked, together with three cheap minors.
+
+| Finding | Fixed in | How |
+|---|---|---|
+| QRN-1 | f50ff05 | SRT, VTT and ASS (and the CLI's ASS renderer) write U+08F0–08F2. The video and the window keep the mushaf's code points. |
+| REL-1 | 795600a | The spec ships Pillow's metadata and Python's `LICENSE.txt`, and the notices say where they are. |
+| SHL-1 | dbac022 | Icons render into their logical box, so they are whole at 2× and 1.5×. |
+| QRN-2 | 712d3cf | Card words are drawn in the Qaloon face in the strip, the table and the selection bar. |
+| QRN-3 | 2226c4a | The basmala card uses the shipped text's own Qaloon basmala. |
+| JRN-3, INT-3 | 6ba2301, 7442658, d558ac2, e778886 | Renders write to a hidden partial file and replace the video only once complete. The replace is retried when the file is locked, and a lock is reported in both languages. A missing video no longer reads "Rendered". Closing mid-render asks first, and Stop stops the render before the unsaved-changes question. |
+| JRN-2, REV-1 | a3bef44, 1a921ff, 4b2817b | Selecting or clicking a word arms its start, and the armed edge is drawn. |
+| REL-5 | 5e0cc1a | `stage.sh` signs `Qalun.app` again, and the gate fails unless a strict `codesign --verify` passes. |
+| JRN-1, JRN-6/REL-4, REL-6, RC-2 | 15e8c4c | The guide, README and release notes now say that a recitation states its ayat. They give the first-open steps for each system, the system requirements and about 1 GB of space. |
+
+**Checks at `e778886`** (evidence in `output/release-check-2026-10-25/rerun-e778886/`):
+
+- 2,543 tests pass. The three that need local recordings pass too when the recordings are present.
+- Lint is clean, and `--doctor --release` reports "Ready to render".
+- The recitation's subtitle files carry only standard tanween.
+- Every video frame is pixel-identical to the earlier render, except the basmala card, which now shows the Qaloon wasl marks.
+- Icons are whole at 2×.
+
+**Left for later.** None of these blocks a pre-release; the reasons are in the fix round's ledger.
+
+- A stopped render that keeps running for more than 2 s, followed by a new render, can confuse the window's render state. The cheap fix is to keep Render disabled until the old render ends.
+- Smaller items:
+  - Hidden partial files left by a killed app are never cleaned up.
+  - The CLI's `word-align` SRT still writes the mushaf's tanween.
+  - The strip measures its fonts for every word on every repaint.
+  - The CLI's `--renderer ass` still writes its target in place.
+  - The episode's own file replace has no retry.
+- In the review, the Qaloon face reads 15–23 % smaller than the interface text. A 1.2× scale fits; that is the owner's call.
+- The first CI build must prove two things before tagging: the macOS re-sign with its strict verify, and Python's `LICENSE.txt` on all three runners.
