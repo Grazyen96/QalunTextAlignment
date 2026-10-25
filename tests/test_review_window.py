@@ -982,10 +982,12 @@ def test_no_render_announcement_after_the_window_is_closed(qt_app, tmp_path, mon
     window, _, _ = _window(qt_app, tmp_path)
     window.show()
     release = threading.Event()
+    returned = threading.Event()
     seen: dict[str, object] = {}
 
     def fake_render(project, **kwargs):
         release.wait(timeout=5)
+        returned.set()
         return JobOutcome(matches=project.matches, video=tmp_path / "v.mp4", cards=1)
 
     monkeypatch.setattr(jobs_module, "run_render", fake_render)
@@ -1003,7 +1005,9 @@ def test_no_render_announcement_after_the_window_is_closed(qt_app, tmp_path, mon
     assert window._closed
 
     release.set()
-    assert _wait_for(lambda: not window._rendering, 5000)
+    # Closing left the rendering state at once; wait for the job's own end instead.
+    assert _wait_for(returned.is_set, 5000)
+    _spin(100)
     assert "announced" not in seen
     assert "said" not in seen
 
@@ -1038,12 +1042,16 @@ def test_the_live_project_is_updated_even_though_the_render_finishes_after_close
     assert window.session.project.render is None
 
     release.set()
-    assert _wait_for(lambda: not window._rendering, 5000)
-    assert window.session.project.render is not None
+    # Closing left the rendering state at once; the record comes back when the job ends.
+    assert _wait_for(lambda: window.session.project.render is not None, 5000)
 
 
 def _held_render_in(window, monkeypatch, tmp_path):
-    """Start a render that runs until the returned event is set, then cancels if asked."""
+    """Start a render that runs until the returned event is set or it is cancelled.
+
+    Like the real renderer it notices a cancel within moments, and it writes
+    ``v.mp4`` only if it finishes, so an earlier video there shows whether it did.
+    """
     import threading
 
     from qurantext.gui import jobs as jobs_module
@@ -1052,8 +1060,12 @@ def _held_render_in(window, monkeypatch, tmp_path):
     release = threading.Event()
 
     def fake_render(project, *, cancel, **kwargs):
-        release.wait(timeout=5)
+        for _ in range(500):
+            if release.wait(timeout=0.01):
+                break
+            cancel.raise_if_cancelled("render")
         cancel.raise_if_cancelled("render")
+        (tmp_path / "v.mp4").write_bytes(b"the new video")
         return JobOutcome(matches=project.matches, video=tmp_path / "v.mp4", cards=1)
 
     monkeypatch.setattr(jobs_module, "run_render", fake_render)
@@ -1108,6 +1120,153 @@ def test_stop_and_close_cancels_the_render(qt_app, tmp_path, monkeypatch) -> Non
 
     release.set()
     assert _wait_for(lambda: not window._rendering, 5000)
+
+
+def _stopping_with_a_look_edit(qt_app, tmp_path, monkeypatch, answer):
+    """A render held running over an earlier video, the look edited meanwhile (it stays
+    editable), and the close answered Stop and then *answer* to the unsaved changes."""
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"the earlier video")
+    closed: list[bool] = []
+    window.closed.connect(lambda: closed.append(True))
+    release = _held_render_in(window, monkeypatch, tmp_path)
+    token = window._render_cancel
+    said: list[str] = []
+    monkeypatch.setattr(window, "_say_render", lambda kind, text: said.append(kind))
+    look = replace(window.session.look, highlight_word=(1, 2, 3, 255))
+    window.session.set_look(look)
+    assert window.session.dirty
+    asked: list[str] = []
+    monkeypatch.setattr(window, "_confirm_stop_render", lambda: asked.append("stop") or True)
+    monkeypatch.setattr(window, "_confirm_discard", lambda: asked.append("discard") or answer)
+    # The recording is there, so the reads the stop cut short would start again.
+    reads: list[bool] = []
+    monkeypatch.setattr(window, "_audio", video)
+    monkeypatch.setattr(window, "_start_reads", lambda: reads.append(True))
+    accepted = window.close()
+    assert asked == ["stop", "discard"]
+    assert token is not None and token.cancelled
+    return SimpleNamespace(
+        window=window,
+        accepted=accepted,
+        closed=closed,
+        said=said,
+        look=look,
+        release=release,
+        video=video,
+        reads=reads,
+    )
+
+
+def _saved_look(tmp_path):
+    from qurantext.jobs.look_assets import project_look
+
+    return project_look(load_project(tmp_path / "m.qalun.json"))
+
+
+def test_stop_and_close_then_save_saves_and_closes(qt_app, tmp_path, monkeypatch) -> None:
+    """Save is the default answer after Stop: it must save, and the window must close."""
+    run = _stopping_with_a_look_edit(qt_app, tmp_path, monkeypatch, "save")
+    window = run.window
+
+    assert run.accepted is True
+    assert run.closed == [True] and window._closed and not window.isVisible()
+    assert not window._rendering and not window.session.dirty
+    assert _saved_look(tmp_path) == run.look
+
+    run.release.set()
+    _spin(100)
+    assert run.said == [], "the person stopped it: no box says the render stopped"
+    assert run.video.read_bytes() == b"the earlier video"
+    assert run.reads == []
+
+
+def test_stop_and_close_then_discard_closes_without_the_edit(qt_app, tmp_path, monkeypatch) -> None:
+    run = _stopping_with_a_look_edit(qt_app, tmp_path, monkeypatch, "discard")
+    window = run.window
+
+    assert run.accepted is True
+    assert run.closed == [True] and window._closed and not window.isVisible()
+    assert not window._rendering and not window.session.dirty
+    assert window.session.look != run.look
+    assert _saved_look(tmp_path) != run.look
+
+    run.release.set()
+    _spin(100)
+    assert run.said == []
+    assert run.video.read_bytes() == b"the earlier video"
+    assert run.reads == []
+
+
+def test_stop_and_close_then_cancel_keeps_the_window_with_the_render_stopped(
+    qt_app, tmp_path, monkeypatch
+) -> None:
+    run = _stopping_with_a_look_edit(qt_app, tmp_path, monkeypatch, "cancel")
+    window = run.window
+
+    assert run.accepted is False
+    assert run.closed == [] and not window._closed and window.isVisible()
+    assert not window._rendering, "the render stays stopped"
+    assert window.render_button.isEnabled() and window.render_button.isVisibleTo(window)
+    assert window.session.dirty and window.session.look == run.look
+
+    run.release.set()
+    _spin(100)
+    assert run.said == [], "the person stopped it: no box says the render stopped"
+    assert run.video.read_bytes() == b"the earlier video"
+    assert run.reads == [True], "the window stays, so the reads the stop cut short start again"
+    # The edit is still there to save, and Save now works.
+    assert window.save() is True
+    assert _saved_look(tmp_path) == run.look
+
+
+def test_a_render_that_outlives_the_stop_keeps_the_saved_edit_and_its_record(
+    qt_app, tmp_path, monkeypatch
+) -> None:
+    """A render past its last check finishes after Stop and close, and its job saves its
+    copy of the project then; the edit saved at close must not be lost to it."""
+    import threading
+    from dataclasses import replace
+
+    from qurantext.gui import jobs as jobs_module
+    from qurantext.gui.jobs import JobOutcome
+
+    window, _, _ = _window(qt_app, tmp_path)
+    window.show()
+    release = threading.Event()
+
+    def fake_render(project, **kwargs):
+        release.wait(timeout=5)
+        project.record_render(tmp_path / "v.mp4", preset="social", basmala_offset_s=0.0)
+        save_project(project, project.path)
+        return JobOutcome(matches=project.matches, video=tmp_path / "v.mp4", cards=1)
+
+    monkeypatch.setattr(jobs_module, "run_render", fake_render)
+    monkeypatch.setattr(window, "_announce_render", lambda outcome: None)
+    said: list[str] = []
+    monkeypatch.setattr(window, "_say_render", lambda kind, text: said.append(kind))
+    window.render_requested.emit()
+    assert window._rendering
+    look = replace(window.session.look, highlight_word=(1, 2, 3, 255))
+    window.session.set_look(look)
+    monkeypatch.setattr(window, "_confirm_stop_render", lambda: True)
+    monkeypatch.setattr(window, "_confirm_discard", lambda: "save")
+
+    assert window.close() is True
+    assert _saved_look(tmp_path) == look
+
+    release.set()
+    assert _wait_for(lambda: window.session.project.render is not None, 5000)
+    _spin(50)
+    saved = load_project(tmp_path / "m.qalun.json")
+    assert saved.render is not None
+    assert _saved_look(tmp_path) == look
+    assert said == []
 
 
 def test_the_stop_question_keeps_rendering_by_default(qt_app, tmp_path, monkeypatch) -> None:

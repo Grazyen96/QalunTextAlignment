@@ -30,6 +30,7 @@ import copy
 import math
 import sys
 from collections.abc import Callable
+from contextlib import suppress
 from functools import partial
 from pathlib import Path
 
@@ -325,6 +326,12 @@ class ReviewWindow(QMainWindow):
         #: The deep copy handed to the render job; read back into the live
         #: project's ``render`` once the job finishes (see ``_on_render_finished``).
         self._render_project_copy: Project | None = None
+        #: The running render was stopped by "Stop and close": what it does from
+        #: now on is taken back but never announced (see ``_stop_render_to_close``).
+        self._render_stopped_to_close = False
+        #: That render did not end within the close's wait, so its job may still
+        #: write the project file over a save made since (see ``_take_back_render``).
+        self._render_outlived_stop = False
         #: The segment list's edit triggers, saved while a render disables them.
         self._segment_list_edit_triggers: QAbstractItemView.EditTrigger | None = None
         #: The progress bar's sentence for the running render's current step.
@@ -1263,6 +1270,7 @@ class ReviewWindow(QMainWindow):
         # With an episode, the bar names each step: the lecture, then the rest.
         has_episode = self._is_lecture() and not self.session.episode.is_empty
         self._render_progress_key = "render.running_lecture" if has_episode else "render.running"
+        self._render_stopped_to_close = False
         # The last render's episode error is about that render, not this one.
         self.warnings.set_episode_notice(None)
         self._set_render_running(True)
@@ -1283,14 +1291,15 @@ class ReviewWindow(QMainWindow):
         """Bound so Qt queues it to the UI thread; looks up ``_announce_render`` by
         name each call, which is what lets a test replace it after connecting.
 
-        Says nothing once the window has closed: the queued signal can still
-        arrive after that (a render outlives a short close-time cancel wait).
+        Says nothing once the window has closed, or once "Stop and close"
+        stopped the render: the queued signal can still arrive after that (a
+        render outlives a short close-time cancel wait).
         The project update runs either way, so a render started before close
         and finished after it still lands on the live project once the
         window is shown again.
         """
         self._take_back_render(always=True)
-        if self._closed:
+        if self._closed or self._render_stopped_to_close:
             return
         # Said before the announcement, which waits for the person to close it.
         for code in outcome.look_warnings:
@@ -1319,11 +1328,18 @@ class ReviewWindow(QMainWindow):
             changed = False
         if (always or changed) and self.session.project.path is not None:
             # The render recorded itself in the project file (``render_project`` saves it).
+            if self._render_outlived_stop and not self.session.dirty:
+                # It wrote its copy of the project, from before the edits saved after
+                # "Stop and close", over that save: put the saved state back, record and all.
+                with suppress(OSError, ValueError):
+                    self.session.save()
             self.saved.emit(self.session.project.path)
 
     def _on_render_done(self) -> None:
         # Runs even after close, so the flags are right if the window reopens.
         self._set_render_running(False)
+        self._render_stopped_to_close = False
+        self._render_outlived_stop = False
 
     def _cancel_render(self) -> None:
         if self._render_cancel is not None:
@@ -1400,15 +1416,36 @@ class ReviewWindow(QMainWindow):
 
     def _on_render_failed(self, message: str) -> None:
         self._take_back_render()
-        if self._closed:
+        if self._closed or self._render_stopped_to_close:
             return
         self._say_render("failed", t("render.failed", details=message))
 
     def _on_render_cancelled(self) -> None:
         self._take_back_render()
-        if self._closed:
+        if self._closed or self._render_stopped_to_close:
             return
         self._say_render("cancelled", t("render.cancelled"))
+
+    def _stop_render_to_close(self) -> None:
+        """Stop the render the person chose to stop, before the unsaved-changes question.
+
+        Every job is cancelled and waited for briefly, and the window leaves
+        its rendering state, so Save can run and a Cancel there keeps the window
+        with the render stopped. What the render did is taken back first (a
+        lecture recorded before its episode step was stopped), so a Save writes
+        it too. Nothing is said about the stop: the person asked for it. A
+        render that outlives the wait keeps the copy its record comes back
+        through, and the reads the stop cut short start again if the window stays.
+        """
+        self._render_stopped_to_close = True
+        if self._jobs.stop():
+            self._take_back_render()
+            self._set_render_running(False)
+        else:
+            self._render_outlived_stop = True
+            copied = self._render_project_copy
+            self._set_render_running(False)
+            self._render_project_copy = copied
 
     # -- saving and closing ---------------------------------------------------
 
@@ -1484,15 +1521,25 @@ class ReviewWindow(QMainWindow):
         """Ask about a running render first, then about unsaved changes; either can keep it open.
 
         Closing stops a running render, and a person who closes mid-render may
-        not mean to; the earlier video stays either way.
+        not mean to; the earlier video stays either way. Stop ends the render
+        before the unsaved-changes question, so its Save works; a Cancel there
+        keeps the window open with the render stopped.
         """
-        if not self._closed and self._rendering and not self._confirm_stop_render():
-            event.ignore()
-            return
+        stopped = False
+        if not self._closed and self._rendering:
+            if not self._confirm_stop_render():
+                event.ignore()
+                return
+            # Stopped before the next question, so its Save is not refused mid-render.
+            self._stop_render_to_close()
+            stopped = True
         if not self._closed and self.session.dirty:
             answer = self._confirm_discard()
             if answer == "cancel" or (answer == "save" and not self.save()):
                 event.ignore()
+                if stopped:
+                    # After the stopped jobs' last callbacks, which free the reads to start.
+                    QTimer.singleShot(0, self._resume_reads)
                 return
             if answer == "discard":
                 # Discard means the edits are gone, not parked in memory for a re-show.
@@ -1507,6 +1554,11 @@ class ReviewWindow(QMainWindow):
         self.closed.emit()
 
     # -- background reads -------------------------------------------------------
+
+    def _resume_reads(self) -> None:
+        """Start again the reads a stop cut short, if the window is still open."""
+        if not self._closed and self._audio.is_file():
+            self._start_reads()
 
     def _start_reads(self) -> None:
         """Read what is still missing: the peaks, and the levels coverage is checked from.

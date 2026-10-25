@@ -128,8 +128,11 @@ class BackgroundJobs(QObject):
                 running.append(entry)
         self._running = running
 
-    def stop(self, wait_ms: int = _CLOSE_WAIT_MS) -> None:
+    def stop(self, wait_ms: int = _CLOSE_WAIT_MS) -> bool:
         """Cancel every running job and wait briefly (*wait_ms* each) for each to end.
+
+        Returns whether every one of them ended within its wait; the others are
+        parked, and their callbacks still arrive when they end.
 
         A job with nothing to lose by being cut short (a read whose result is no
         longer wanted) can pass ``wait_ms=0``: it is parked at once rather than
@@ -138,14 +141,17 @@ class BackgroundJobs(QObject):
         running, self._running = self._running, []
         for _thread, _worker, cancel in running:
             cancel.cancel()
+        all_ended = True
         for thread, worker, _cancel in running:
             thread.quit()
             if not thread.wait(wait_ms):
                 _LINGERING.append((thread, worker))
+                all_ended = False
         for pair in list(_LINGERING):
             if pair[0].isFinished():
                 _join(pair[0])
                 _LINGERING.remove(pair)
+        return all_ended
 
 
 def join_lingering(timeout_ms: int) -> bool:
