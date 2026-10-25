@@ -125,8 +125,10 @@ def _python_licence() -> Path:
 
 
 # Python's licence (PSF-2.0) once travelled only by accident, inside
-# typing_extensions' metadata. It goes to python/LICENSE.txt in the data folder.
-datas.append((str(_python_licence()), "python"))
+# typing_extensions' metadata. It goes to licenses/python/LICENSE.txt in the data
+# folder. Not to a top-level python/: a framework Python on macOS is collected with
+# a link named Python there, and macOS disks ignore case, so COLLECT refuses.
+datas.append((str(_python_licence()), "licenses/python"))
 
 # replicate/__about__.py runs `version("replicate")` at import time, so the
 # package's metadata has to travel with it or the import raises. recursive=True

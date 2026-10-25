@@ -239,7 +239,7 @@ folder.
   library, Python Software Foundation License (PSF-2.0). Python links further
   libraries, each under its own permissive licence (among them OpenSSL, Apache
   2.0; libffi, MIT; zlib; bzip2; XZ; SQLite, public domain; Expat, MIT).
-  Python's licence text is in the app's folder, at `_internal/python/LICENSE.txt`.
+  Python's licence text is in the app's folder, at `_internal/licenses/python/LICENSE.txt`.
 - **PyInstaller's bootloader**, https://pyinstaller.org, the start-up code of
   the `qalun` executable: GPL-2.0-or-later with PyInstaller's bootloader
   exception, which allows it to be distributed with any program.

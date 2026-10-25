@@ -518,10 +518,10 @@ def _spec_function(text: str, name: str):
 
 def test_the_spec_ships_pythons_licence() -> None:
     """Python's licence travelled only by accident, inside typing_extensions'
-    metadata. The spec now ships the interpreter's own LICENSE.txt under python/,
-    found where the python.org and setup-python builds keep it."""
+    metadata. The spec now ships the interpreter's own LICENSE.txt under
+    licenses/python/, found where the python.org and setup-python builds keep it."""
     text = SPEC.read_text(encoding="utf-8")
-    assert '(str(_python_licence()), "python")' in text
+    assert '(str(_python_licence()), "licenses/python")' in text
     found = _spec_function(text, "_python_licence")()
     base = Path(sys.base_prefix)
     candidates = (
@@ -533,10 +533,20 @@ def test_the_spec_ships_pythons_licence() -> None:
     assert "PYTHON SOFTWARE FOUNDATION LICENSE" in found.read_text(encoding="utf-8")
 
 
+def test_pythons_licence_folder_cannot_meet_the_macos_python_library() -> None:
+    """A framework Python on macOS (python.org's, which the runner uses) is collected
+    with a link named Python at the top of _internal/, and the runner's disk ignores
+    case, so a data folder called python there stops the build at COLLECT ("there
+    already exists a file at that path")."""
+    text = SPEC.read_text(encoding="utf-8")
+    destination = text.split("(str(_python_licence()), ", 1)[1].split(")", 1)[0].strip('"')
+    assert destination.split("/")[0].casefold() != "python"
+
+
 def test_the_notices_point_at_the_shipped_pillow_and_python_licences() -> None:
     notice = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
     python = notice.split("- **Python**", 1)[1].split("\n- **", 1)[0]
-    assert "`_internal/python/LICENSE.txt`" in python
+    assert "`_internal/licenses/python/LICENSE.txt`" in python
     pillow = notice.split("- **Pillow**", 1)[1].split("\n- **", 1)[0]
     assert "`_internal/pillow-<version>.dist-info/licenses/LICENSE`" in pillow
 
