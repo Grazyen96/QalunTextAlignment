@@ -43,6 +43,11 @@ COLOUR_CAPTION_ACTIVE = (128, 226, 234, 255)  # soft cyan — word being spoken 
 COLOUR_CAPTION_UPCOMING = (150, 150, 162, 255)  # dimmed — not yet spoken
 COLOUR_PLACEHOLDER_TEXT = (205, 205, 215, 255)
 
+#: How often a finished video is put in its target's place while that file is held
+#: (on Windows, briefly by a scanner or for good by a player), and the pause between.
+_REPLACE_TRIES = 3
+_REPLACE_RETRY_S = 0.3
+
 CARD_WIDTH_RATIO = 0.86
 # Ayah card height as a fraction of the region *above* the caption band.
 CARD_REGION_HEIGHT_RATIO = 0.90
@@ -1551,21 +1556,33 @@ def write_frame_video(
         log_handle.close()
         # A killed encoder leaves a container it never finalised — a few dozen
         # bytes that no player opens. Cancelling should leave nothing behind,
-        # and the earlier video, which this render never touched, stays.
+        # and the earlier video, which this render never touched, stays. A
+        # partial held for a moment (a scanner on Windows) is left rather than
+        # let its error hide why the render stopped.
         if not completed:
-            partial.unlink(missing_ok=True)
+            with suppress(OSError):
+                partial.unlink(missing_ok=True)
 
-    try:
-        os.replace(partial, output_path)
-    except PermissionError as error:
-        partial.unlink(missing_ok=True)
-        raise RuntimeError(
-            f"Could not replace {output_path.name}: it may be open in another program. "
-            "Close it and render again."
-        ) from error
-    except OSError:
-        partial.unlink(missing_ok=True)
-        raise
+    # A file just closed can be held for a moment by an antivirus scanner or the
+    # indexer, and giving up throws away a render that may have taken minutes.
+    for attempt in range(1, _REPLACE_TRIES + 1):
+        try:
+            os.replace(partial, output_path)
+        except PermissionError as error:
+            if attempt < _REPLACE_TRIES:
+                time.sleep(_REPLACE_RETRY_S)
+                continue
+            with suppress(OSError):
+                partial.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"Could not replace {output_path.name}: it may be open in another program. "
+                "Close it and render again."
+            ) from error
+        except OSError:
+            with suppress(OSError):
+                partial.unlink(missing_ok=True)
+            raise
+        break
     return layer_warnings
 
 

@@ -785,6 +785,127 @@ def test_a_locked_target_keeps_the_earlier_video_and_says_why(monkeypatch, tmp_p
     assert list(tmp_path.glob("*.part.mp4")) == []
 
 
+def _fake_frames_and_encoder(monkeypatch):
+    """Frames and an encoder that cost nothing; the encoder writes "the new video"."""
+    import io
+
+    import numpy as np
+
+    class _Encoder:
+        stdin = io.BytesIO()
+        returncode = 0
+
+        def wait(self):
+            return 0
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(
+        frame_renderer,
+        "render_frame_pillow",
+        lambda t, match, width, height, font_file, **kwargs: np.zeros((height, width, 3), np.uint8),
+    )
+    monkeypatch.setattr(frame_renderer, "_start_frame_encoder", _encodes_into(_Encoder()))
+
+
+def _write_small_video(tmp_path, output, **kwargs):
+    return frame_renderer.write_frame_video(
+        [],
+        1.0,
+        tmp_path / "a.m4a",
+        output,
+        32,
+        24,
+        10,
+        _BUNDLED_FONT,
+        log_path=tmp_path / "enc.log",
+        **kwargs,
+    )
+
+
+def test_a_target_held_for_a_moment_is_replaced_on_a_later_try(monkeypatch, tmp_path) -> None:
+    """An antivirus scan or the indexer can hold a file briefly: try again before giving up."""
+    import os
+
+    _fake_frames_and_encoder(monkeypatch)
+    real_replace = os.replace
+    tries = []
+
+    def held_twice(source, target):
+        tries.append(source)
+        if len(tries) < 3:
+            raise PermissionError(13, "The process cannot access the file", str(target))
+        real_replace(source, target)
+
+    sleeps = []
+    monkeypatch.setattr(frame_renderer.os, "replace", held_twice)
+    monkeypatch.setattr(frame_renderer.time, "sleep", sleeps.append)
+    output = tmp_path / "out.mp4"
+    output.write_bytes(b"the earlier video")
+
+    _write_small_video(tmp_path, output)
+
+    assert len(tries) == 3
+    assert sleeps == [pytest.approx(0.3)] * 2
+    assert output.read_bytes() == b"the new video"
+    assert list(tmp_path.glob("*.part.mp4")) == []
+
+
+def _held_partials(monkeypatch):
+    """Make every attempt to remove a partial file fail, as a scanner holding it would."""
+    real_unlink = Path.unlink
+    attempts = []
+
+    def unlink(self, missing_ok=False):
+        if self.name.endswith(".part.mp4"):
+            attempts.append(self)
+            raise PermissionError(13, "The process cannot access the file", str(self))
+        real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    return attempts
+
+
+def test_a_cancel_is_still_a_cancel_when_the_partial_cannot_be_removed(
+    monkeypatch, tmp_path
+) -> None:
+    from qurantext.utils.progress import CancelToken, JobCancelled
+
+    _fake_frames_and_encoder(monkeypatch)
+    attempts = _held_partials(monkeypatch)
+    cancel = CancelToken()
+    cancel.cancel()
+    output = tmp_path / "out.mp4"
+    output.write_bytes(b"the earlier video")
+
+    with pytest.raises(JobCancelled):
+        _write_small_video(tmp_path, output, cancel=cancel)
+
+    assert attempts, "the partial was to be removed"
+    assert output.read_bytes() == b"the earlier video"
+
+
+def test_a_locked_target_is_said_even_when_the_partial_cannot_be_removed(
+    monkeypatch, tmp_path
+) -> None:
+    def locked(source, target):
+        raise PermissionError(13, "The process cannot access the file", str(target))
+
+    _fake_frames_and_encoder(monkeypatch)
+    attempts = _held_partials(monkeypatch)
+    monkeypatch.setattr(frame_renderer.os, "replace", locked)
+    monkeypatch.setattr(frame_renderer.time, "sleep", lambda seconds: None)
+    output = tmp_path / "out.mp4"
+    output.write_bytes(b"the earlier video")
+
+    with pytest.raises(RuntimeError, match="open in another program"):
+        _write_small_video(tmp_path, output)
+
+    assert attempts, "the partial was to be removed"
+    assert output.read_bytes() == b"the earlier video"
+
+
 # --- the look reaches every frame ----------------------------------------------
 
 
