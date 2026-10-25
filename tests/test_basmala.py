@@ -1,6 +1,8 @@
 import json
+from collections import Counter
 from pathlib import Path
 
+from qurantext.config.paths import DEFAULT_QURAN_PATH
 from qurantext.core.basmala import (
     basmala_card,
     load_matches_meta,
@@ -9,6 +11,7 @@ from qurantext.core.basmala import (
     should_prepend_basmala,
 )
 from qurantext.core.preamble import BASMALA_DISPLAY, BASMALA_LABEL
+from qurantext.core.quran_parser import _is_basmala
 
 
 def _recitation_meta(**overrides) -> dict:
@@ -62,6 +65,14 @@ def test_basmala_card_is_static_and_spans_duration() -> None:
     assert card["full_text"] == BASMALA_DISPLAY
     assert card["surah_name"] == BASMALA_LABEL
     assert card["from_ayah"] is None and card["to_ayah"] is None
+
+
+def test_the_basmala_card_uses_the_shipped_texts_basmala() -> None:
+    # The card and its cue show the Qaloon mushaf's own basmala, with its wasl
+    # marks, not a Hafs-style one, so they match the ayahs that follow them.
+    lines = DEFAULT_QURAN_PATH.read_text(encoding="utf-16").splitlines()
+    basmalas = Counter(line.strip() for line in lines if _is_basmala(line))
+    assert basmalas.most_common(1)[0][0] == BASMALA_DISPLAY
 
 
 def test_offset_matches_shifts_cards_and_words() -> None:

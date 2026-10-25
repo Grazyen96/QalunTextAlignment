@@ -39,8 +39,11 @@ TAAWWUDH_VOCAB = frozenset(
 BASMALA_REST = frozenset({"الله", "الرحمن", "الرحيم"})
 
 # Canonical, fully-pointed display text + header label for each preamble kind.
+# The basmala is the shipped Qaloon text's own line, with its wasl marks (U+06EC)
+# and its shadda written before the fatha, as 111 of the file's 113 basmala lines
+# write it; the other two add a shadda on the ba. The istiʿādha is not mushaf text.
 ISTIAADHA_DISPLAY = "أَعُوذُ بِاللَّهِ مِنَ الشَّيْطَانِ الرَّجِيمِ"
-BASMALA_DISPLAY = "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ"
+BASMALA_DISPLAY = "بِسْمِ اِ۬للَّهِ اِ۬لرَّحْمَٰنِ اِ۬لرَّحِيمِ"
 ISTIAADHA_LABEL = "الاستعاذة"
 BASMALA_LABEL = "البسملة"
 
