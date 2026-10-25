@@ -103,6 +103,30 @@ datas += copy_metadata("certifi")
 # licence travels in its metadata, which replicate's recursive copy also brings;
 # named here so it stays if replicate goes.
 datas += copy_metadata("idna")
+# PyInstaller's Pillow hook puts the libraries Pillow vendors (libjpeg-turbo,
+# libtiff, FreeType, HarfBuzz, lcms2, OpenJPEG, libwebp, brotli, zstd, libavif,
+# libxcb and more) into pillow.libs/, and their licences allow redistribution
+# only with their notices. Pillow's LICENSE, in its metadata, carries every one.
+datas += copy_metadata("pillow")
+
+
+def _python_licence() -> Path:
+    """The licence of the Python running the build, which the bundle carries.
+
+    python.org's Windows builds keep it beside the interpreter; its macOS builds,
+    setup-python's Linux builds and the distributions' keep it with the library.
+    """
+    base = Path(sys.base_prefix)
+    version = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    for candidate in (base / "LICENSE.txt", base / "lib" / version / "LICENSE.txt"):
+        if candidate.is_file():
+            return candidate
+    raise SystemExit("qalun.spec: no LICENSE.txt for the Python running the build")
+
+
+# Python's licence (PSF-2.0) once travelled only by accident, inside
+# typing_extensions' metadata. It goes to python/LICENSE.txt in the data folder.
+datas.append((str(_python_licence()), "python"))
 
 # replicate/__about__.py runs `version("replicate")` at import time, so the
 # package's metadata has to travel with it or the import raises. recursive=True

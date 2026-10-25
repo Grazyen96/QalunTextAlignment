@@ -10,6 +10,7 @@ only in a comment.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -484,6 +485,60 @@ def test_idna_is_pinned_credited_and_its_licence_shipped() -> None:
     assert f"version {pin}" in section and "BSD 3-Clause" in section
     assert f"_internal/idna-{pin}.dist-info/licenses/LICENSE.md" in section
     assert any(f.name == "LICENSE.md" for f in distribution("idna").files or ())
+
+
+def test_the_spec_ships_pillows_licence_with_its_libraries() -> None:
+    """PyInstaller's Pillow hook puts the libraries Pillow vendors (libjpeg-turbo,
+    libtiff, FreeType, HarfBuzz, lcms2, OpenJPEG, libwebp and more) into pillow.libs/,
+    and their licences allow redistribution only with their notices. Pillow's
+    LICENSE in its metadata carries all of them, so the spec copies that metadata."""
+    from importlib.metadata import distribution
+
+    assert 'copy_metadata("pillow")' in SPEC.read_text(encoding="utf-8")
+    licence = next(f for f in distribution("pillow").files or () if f.name == "LICENSE")
+    body = licence.read_text(encoding="utf-8").lower()
+    # The vendored libjpeg-turbo's notice sits under the LICENSE's LIBJPEG heading.
+    for library in ("libjpeg", "freetype", "harfbuzz"):
+        assert library in body, library
+
+
+def _spec_function(text: str, name: str):
+    """Run the spec's top-level ``def name`` on its own and return the function."""
+    start = text.index(f"def {name}(")
+    lines = text[start:].splitlines()
+    end = next(
+        index
+        for index, line in enumerate(lines[1:], start=1)
+        if line and not line.startswith((" ", "\t"))
+    )
+    namespace: dict = {"sys": sys, "Path": Path}
+    exec("\n".join(lines[:end]), namespace)
+    return namespace[name]
+
+
+def test_the_spec_ships_pythons_licence() -> None:
+    """Python's licence travelled only by accident, inside typing_extensions'
+    metadata. The spec now ships the interpreter's own LICENSE.txt under python/,
+    found where the python.org and setup-python builds keep it."""
+    text = SPEC.read_text(encoding="utf-8")
+    assert '(str(_python_licence()), "python")' in text
+    found = _spec_function(text, "_python_licence")()
+    base = Path(sys.base_prefix)
+    candidates = (
+        base / "LICENSE.txt",
+        base / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "LICENSE.txt",
+    )
+    assert any(candidate.is_file() for candidate in candidates), candidates
+    assert found in candidates and found.is_file()
+    assert "PYTHON SOFTWARE FOUNDATION LICENSE" in found.read_text(encoding="utf-8")
+
+
+def test_the_notices_point_at_the_shipped_pillow_and_python_licences() -> None:
+    notice = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    python = notice.split("- **Python**", 1)[1].split("\n- **", 1)[0]
+    assert "`_internal/python/LICENSE.txt`" in python
+    pillow = notice.split("- **Pillow**", 1)[1].split("\n- **", 1)[0]
+    assert "`_internal/pillow-<version>.dist-info/licenses/LICENSE`" in pillow
 
 
 ICON_DIR = Path(__file__).resolve().parents[1] / "src" / "qurantext" / "assets" / "icons"

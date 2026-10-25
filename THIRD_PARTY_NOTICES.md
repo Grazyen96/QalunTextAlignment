@@ -239,6 +239,7 @@ folder.
   library, Python Software Foundation License (PSF-2.0). Python links further
   libraries, each under its own permissive licence (among them OpenSSL, Apache
   2.0; libffi, MIT; zlib; bzip2; XZ; SQLite, public domain; Expat, MIT).
+  Python's licence text is in the app's folder, at `_internal/python/LICENSE.txt`.
 - **PyInstaller's bootloader**, https://pyinstaller.org, the start-up code of
   the `qalun` executable: GPL-2.0-or-later with PyInstaller's bootloader
   exception, which allows it to be distributed with any program.
@@ -251,7 +252,8 @@ folder.
   (Historical Permission Notice and Disclaimer). Its package brings its own
   image and text libraries (among them libjpeg-turbo, libpng, libtiff, libwebp,
   OpenJPEG, Little CMS, FreeType, HarfBuzz and raqm), whose licences Pillow
-  lists in its `LICENSE`.
+  lists in its `LICENSE`. That file is in the app's folder, at
+  `_internal/pillow-<version>.dist-info/licenses/LICENSE`.
 - **NumPy**, https://numpy.org, BSD 3-Clause License. Its package brings
   OpenBLAS (BSD 3-Clause) and, on Linux, the GCC Fortran runtime
   (`libgfortran`, GPL-3.0-or-later with the GCC Runtime Library Exception);
