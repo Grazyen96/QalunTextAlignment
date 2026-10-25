@@ -43,6 +43,19 @@ download the file for your computer (Windows, Mac or Linux).
 Unzip the file you downloaded and double-click **Qalun**. That's it: there is
 nothing else to install.
 
+On Linux, unzip it with your file manager or with `unzip`. Some other unzip
+programs break the app.
+
+The first time you open Qalun, your computer may warn you about it, because
+Qalun is not yet signed by a known publisher. This is expected, and you only
+need to do this once:
+
+- **Windows** says the publisher is unknown. Click **More info**, then
+  **Run anyway**.
+- **Mac** refuses to open it. Open **System Settings → Privacy & Security**,
+  scroll down to the message about Qalun and click **Open Anyway**. (On macOS 14
+  or older, you can also right-click **Qalun** and choose **Open**.)
+
 ### 3. The first time only
 
 The first time you make a video, Qalun downloads its listening tool (about
@@ -51,10 +64,15 @@ first time. After that, Qalun works fully offline.
 
 ### What your computer needs
 
+- **Windows:** Windows 10 or 11 (64-bit).
+- **Mac:** a Mac with Apple silicon (M1 or newer). Macs with an Intel chip
+  can't run it.
+- **Linux:** a recent version with glibc 2.38 or newer, for example Ubuntu
+  24.04, Linux Mint 22, Debian 13, Fedora 39 or newer.
 - **Memory:** at least 4 GB. On a computer with only 4 GB, close other large
   programs (browsers with many tabs, for example) before starting a long
   lecture.
-- **Space:** about 300 MB free.
+- **Space:** about 1 GB free, plus room for your videos.
 - **Internet:** only once, for the first download.
 
 ---
@@ -68,8 +86,10 @@ first time) and a form on the right.
 
 1. **Drop your audio file** onto the form, or click to choose it.
 2. **Choose the kind:** *Recitation* or *Lecture*.
-3. **Pick the surah and ayat** if you know them. If you don't, leave it on
-   *Detect automatically* and Qalun will work it out.
+3. **Pick the surah.**
+   - For a *Recitation*, choose the surah and the first and last ayah recited.
+   - For a *Lecture*, choose the surah being studied, or leave it on *Detect
+     automatically* and Qalun will pick the surah it hears the most.
 4. **Choose a video size**:
    - *Portrait* (upright) for phones: Instagram, TikTok, Shorts.
    - *Landscape 1920×1080* for YouTube.
@@ -86,8 +106,10 @@ When Qalun has finished listening, the **review window** opens by itself. Here
 you watch a preview and fix anything before the video is made.
 
 - Press **Space** to play and pause.
-- Watch the words light up. If a word lights up too early or too late, select
-  it and nudge it with the **,** and **.** keys.
+- Watch the words light up. If a word lights up too early or too late, click
+  it and press **.** to make it light up earlier or **,** to make it light up
+  later, 50 ms (a twentieth of a second) a press. To move where the word ends
+  instead, drag the left edge of its box on the word timeline.
 - Made a mistake? Press **Ctrl+Z** to undo.
 - Press **Ctrl+S** to save your corrections.
 - Press **?** to see every shortcut.
@@ -208,8 +230,10 @@ the files.
 ## When something goes wrong
 
 **The video has the wrong ayat.**
-Start the job again and pick the surah and ayat yourself instead of *Detect
-automatically*.
+For a recitation, check the surah and the first and last ayah you chose, and
+start the job again. For a lecture, fix it in the review window. Use **Surah on
+the cards** to change the surah shown. To correct a card, right-click it in the
+list and choose **Change ayah…**. To add a card, use **Show ayah… from here**.
 
 **The computer slows down or Qalun closes during a long lecture.**
 Close other programs and try again. Long lectures need more memory.

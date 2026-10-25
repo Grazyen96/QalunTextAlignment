@@ -91,16 +91,28 @@ unzip it, and run **Qalun**. There is nothing to install: no Python, no FFmpeg,
 no Quran text file. The [user guide](USER_GUIDE.md) explains the app in plain
 words. Everything below is for working on the code.
 
+The builds are not code-signed or notarized yet, so the first open needs one
+extra step: on Windows, **More info → Run anyway**; on macOS, **System Settings
+→ Privacy & Security → Open Anyway** (since macOS 15 Sequoia, right-click →
+Open no longer gets past Gatekeeper; on macOS 14 or older it still does). On
+Linux, unzip with the file manager or `unzip`: some other extractors break the
+bundle's links.
+
 ## System requirements
 
+- **System:** Windows 10 or 11 (64-bit); a Mac with Apple silicon (M1 or newer;
+  the macOS build is arm64 only); or Linux with glibc 2.38 or newer, for
+  example Ubuntu 24.04, Linux Mint 22, Debian 13, Fedora 39 or newer (37 of the
+  bundled libraries need `GLIBC_2.38`).
 - **Memory:** transcribing on this computer, the default, uses up to about
   1.8 GB of RAM while it runs, however long the recording (about 1 GB for a
   short clip). On a machine with 4 GB, close other large programs first; a long
   lecture may otherwise run out of memory. WhisperX online, the optional engine,
   transcribes elsewhere and needs none of it.
-- **Disk:** the speech model takes about 140 MB once installed. It downloads
-  once, on first use (about 110 MB), and needs about 270 MB free while it
-  unpacks.
+- **Disk:** about 1 GB free, plus room for the videos. The release zips are
+  104–210 MB and the Linux app folder is about 490 MB unpacked. The speech model
+  takes about 140 MB once installed. It downloads once, on first use (about
+  110 MB), and needs about 270 MB free while it unpacks.
 - **Internet:** once, for that first download; after that, transcription works
   offline.
 
@@ -142,7 +154,8 @@ is any job, the list says who the app is for and offers a card for each kind
 of job, recitation or lecture; choosing one sets the form to it.
 
 **Starting a job.** Drop an audio file, say whether it is a recitation or a
-lecture, pick the surah and the ayat if you know them, choose a video size,
+lecture, pick the surah (and, for a recitation, its first and last ayah:
+a recitation has no automatic detection in the window), choose a video size,
 and press Start. For a lecture, the surah is the one it studies: the video's
 ayah card shows only that surah, and ayat quoted from other surahs stay in the
 subtitles. Leave it on "Detect automatically" and the surah heard the longest
