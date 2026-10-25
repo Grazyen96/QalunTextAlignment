@@ -12,7 +12,7 @@ right-to-left layout; undo and redo do not, their arrows mean time.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QByteArray, QSize, Qt
+from PySide6.QtCore import QByteArray, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QAbstractButton, QWidget
@@ -82,7 +82,8 @@ def _pixmap(svg: bytes, colour: QColor, size: int, ratio: float) -> QPixmap:
     painter = QPainter(pixmap)
     try:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        renderer.render(painter)
+        # Without a box the renderer fills the device size in logical pixels: a 2x pixmap held a quarter.
+        renderer.render(painter, QRectF(0, 0, size, size))
     finally:
         painter.end()
     return pixmap

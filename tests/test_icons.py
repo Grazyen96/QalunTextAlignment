@@ -148,3 +148,41 @@ def test_mirror_false_keeps_a_directional_icon_as_drawn_under_rtl(qt_app) -> Non
     finally:
         qt_app.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         icons.clear_cache()
+
+
+def _mask(pixmap, size: int = 20) -> set[tuple[int, int]]:
+    """The pixels of *pixmap*, smoothly scaled to *size*×*size*, whose alpha is at least 64."""
+    image = pixmap.toImage().scaled(
+        size, size, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation
+    )
+    return {
+        (x, y) for y in range(size) for x in range(size) if image.pixelColor(x, y).alpha() >= 64
+    }
+
+
+def _iou(a: set[tuple[int, int]], b: set[tuple[int, int]]) -> float:
+    return len(a & b) / len(a | b) if a | b else 1.0
+
+
+#: How much of the drawn shape a sharper pixmap, scaled down, must share with the plain one.
+FILL_IOU = 0.7
+
+
+def test_every_icon_fills_its_box_at_ratio_2(qt_app) -> None:
+    """A Retina or 150 % screen gets the 2× pixmap: it must hold the whole icon, not its top-left quarter."""
+    short = {}
+    for name in sorted(icons.NAMES):
+        drawn = icons.icon(name)
+        plain = _mask(drawn.pixmap(QSize(20, 20), 1.0))
+        sharp = _mask(drawn.pixmap(QSize(20, 20), 2.0))
+        overlap = _iou(sharp, plain)
+        if overlap < FILL_IOU:
+            short[name] = round(overlap, 3)
+    assert not short, f"the 2x pixmap misses most of the icon: {short}"
+
+
+def test_a_fractional_screen_scale_gets_the_whole_icon(qt_app) -> None:
+    drawn = icons.icon("settings")
+    plain = _mask(drawn.pixmap(QSize(20, 20), 1.0))
+    scaled = _mask(drawn.pixmap(QSize(20, 20), 1.5))
+    assert _iou(scaled, plain) >= FILL_IOU
