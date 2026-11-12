@@ -1,10 +1,3 @@
-"""The review window: listen, watch, and correct a job before it renders.
-
-``ReviewWindow`` is loaded on first use rather than here, so the Qt-free parts
-(``session``, the editing model) import on a machine without Qt, as the
-command-line install and its CI run do.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

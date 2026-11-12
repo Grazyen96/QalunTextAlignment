@@ -357,7 +357,6 @@ def select_recitation_timeline(
     last_to_ayah = first_ayah_num - 1
     last_end_time = -1.0
 
-    # Defensive guard: discard matches that belong to a different surah.
     ordered = sorted(
         [m for m in matches if m.get("surah_num") == target_surah],
         key=lambda match: (
@@ -401,8 +400,4 @@ def select_recitation_timeline(
             selected[index] = dict(selected[index])
             selected[index]["end_time"] = round(next_start, 2)
 
-    # The overlap trims above can push a span's start past its own end (a short
-    # span fully covered in time by its neighbour). Such a span cannot be
-    # displayed and would otherwise be silently dropped by the renderer's
-    # validated_matches with a confusing warning — drop it here instead.
     return [span for span in selected if span["end_time"] > span["start_time"]]

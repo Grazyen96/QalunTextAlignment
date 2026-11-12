@@ -46,7 +46,6 @@ NAMES = frozenset(
     }
 )  # fmt: skip
 
-#: Icons that point along the reading direction, each with its mirror.
 MIRRORED = {
     "chevron-right": "chevron-left",
     "chevron-left": "chevron-right",
@@ -129,7 +128,6 @@ def icon(
             if checked is not None:
                 on = QIcon.State.On
                 result.addPixmap(_pixmap(svg, checked, size, ratio), QIcon.Mode.Normal, on)
-                # A checked button that is disabled loses its fill (the sheet), so not its grey.
                 result.addPixmap(dimmed, QIcon.Mode.Disabled, on)
     _cache[key] = result
     return result

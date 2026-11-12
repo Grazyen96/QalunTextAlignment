@@ -9,12 +9,8 @@ from qurantext.core.arabic import DETECTION_TASHKEEL, arabic_indic_to_int, norma
 ARABIC_INDIC_DIGIT_RE = re.compile(r"^[٠١٢٣٤٥٦٧٨٩]+$")
 _ANY_ARABIC_INDIC_DIGIT_RE = re.compile(r"[٠-٩]")
 
-# Tanwīn marks (fathatan/dammatan/kasratan). A header is the construct «سُورَةُ»;
-# verse text that merely starts with the word uses the indefinite «سُورَةٌ» (tanwīn).
 _TANWIN_MARKS = ("ً", "ٌ", "ٍ")
 
-# Real surah headers are short standalone lines ("سُورَةُ <name>"); the longest is
-# "سُورَةُ آلِ عِمْرَانَ" (3 tokens). Anything longer is verse text.
 _MAX_HEADER_TOKENS = 4
 
 
@@ -31,12 +27,10 @@ def _is_surah_header(raw_line: str) -> bool:
     if not tokens:
         return False
     first = tokens[0]
-    # An indefinite «سُورَةٌ» (tanwīn) is verse text, never a header.
     if any(mark in first for mark in _TANWIN_MARKS):
         return False
     if DETECTION_TASHKEEL.sub("", first) not in {"سورة", "سوره"}:
         return False
-    # Headers are short and never contain an ayah-number marker.
     if len(tokens) > _MAX_HEADER_TOKENS or _ANY_ARABIC_INDIC_DIGIT_RE.search(raw_line):
         return False
     return True

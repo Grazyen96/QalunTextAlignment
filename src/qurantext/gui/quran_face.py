@@ -20,7 +20,6 @@ from qurantext.config.paths import DEFAULT_FONT_PATH
 
 __all__ = ["quran_font_family", "with_quran_face"]
 
-#: The bundled Quran face's family once registered with Qt ("" when it could not be).
 _quran_family: str | None = None
 
 

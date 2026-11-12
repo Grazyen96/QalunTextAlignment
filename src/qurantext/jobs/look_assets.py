@@ -32,10 +32,8 @@ __all__ = [
     "set_project_look",
 ]
 
-#: The style keys a look owns; every other key in a project's style is not its.
 _LOOK_KEYS = ("preset", "colours", "background")
 
-#: How much of a source image is read at once while it is hashed and copied.
 _CHUNK = 1 << 20
 
 
@@ -92,8 +90,8 @@ def seed_project_look(project: Project, project_path: Path, style: dict) -> None
     if bg.kind == "image" and bg.image is not None:
         try:
             copied = import_look_image(project_path, bg.image)
-        except (ValueError, OSError):  # FileNotFoundError is an OSError
-            copied = bg.image  # the original, reported where it is used (see above)
+        except (ValueError, OSError):
+            copied = bg.image
         look = replace(look, background=replace(bg, image=copied))
     set_project_look(project, look, project_dir=Path(project_path).parent)
 

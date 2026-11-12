@@ -66,8 +66,7 @@ def parse_words(quran_path: str | Path) -> list[dict]:
     surah_name = ""
     page = 0
     line_no = 0
-    prev_blank = True  # so the first non-empty line opens page 1
-    # Buffer of (word_raw, page, line) tuples for the ayah currently being read.
+    prev_blank = True
     buf: list[tuple[str, int, int]] = []
 
     def flush(ayah_num: int) -> None:
@@ -116,6 +115,4 @@ def parse_words(quran_path: str | Path) -> list[dict]:
             elif _ARABIC_LETTER_RE.search(token):
                 buf.append((token, page, line_no))
 
-    # Any unflushed buffer (the footer block, which has no trailing marker) is
-    # intentionally discarded — mirroring parse_ayat.
     return records

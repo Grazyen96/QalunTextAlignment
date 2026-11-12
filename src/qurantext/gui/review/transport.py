@@ -1,10 +1,3 @@
-"""The row under the timeline: play, step, the clock, the rate, and the nudges.
-
-The buttons only ask; the window turns each signal into a session call. The
-nudge chevrons point the way the edge moves on the always-right-to-left
-timeline, so they are not mirrored with the language.
-"""
-
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
@@ -19,19 +12,11 @@ __all__ = ["Transport"]
 
 
 class Transport(QWidget):
-    """See the module docstring."""
-
-    #: Play or pause was pressed.
     play_toggled = Signal()
-    #: Previous (−1) or next (+1) word was pressed.
     step_requested = Signal(int)
-    #: A rate was chosen by click (not by :meth:`set_rate`).
     rate_changed = Signal(float)
-    #: A nudge button was pressed; carries the step in seconds (negative moves earlier).
     nudge_requested = Signal(float)
-    #: "Snap to playhead" was pressed.
     snap_requested = Signal()
-    #: "Show ayah… from here" was pressed (lecture reviews only).
     show_ayah_requested = Signal()
 
     def __init__(self, rates: tuple[float, ...], parent: QWidget | None = None) -> None:
@@ -43,8 +28,6 @@ class Transport(QWidget):
         self.prev_word_button = self._button("", "skip-back", t("review.prev_word"))
         self.play_button = self._button(t("review.play"), "play", t("review.play"))
         self.next_word_button = self._button("", "skip-forward", t("review.next_word"))
-        # The tips name the arrow keys, which follow the right-to-left timeline:
-        # → steps back to the previous word, ← on to the next.
         for button, key, arrow in (
             (self.prev_word_button, "review.prev_word", "→"),
             (self.next_word_button, "review.next_word", "←"),
@@ -91,7 +74,6 @@ class Transport(QWidget):
         set_icon(self.snap_button, "crosshair", size=16)
         self.minus_button = QPushButton(t("review.minus"))
         set_icon(self.minus_button, "chevron-right", size=16, mirror=False)
-        # Left to right on screen: +50 (later, moves left) · snap · −50 (earlier, moves right).
         on_screen = (self.plus_button, self.snap_button, self.minus_button)
         # Tab walks the row the way the interface reads: from the left in
         # English, from the right in Arabic. Qt chains the buttons in the order
@@ -137,7 +119,6 @@ class Transport(QWidget):
                 return
 
     def set_playing(self, playing: bool) -> None:
-        """Show the button that would pause (*playing*) or play."""
         set_icon(self.play_button, "pause" if playing else "play")
         self.play_button.setText(t("review.pause") if playing else t("review.play"))
         self.play_button.setAccessibleName(self.play_button.text())
@@ -146,20 +127,16 @@ class Transport(QWidget):
         )
 
     def set_time(self, seconds: float) -> None:
-        """Show the playhead at *seconds*."""
         self.time_label.setText(clock(seconds))
 
     def set_rate(self, rate: float) -> None:
-        """Check *rate*'s button without emitting :attr:`rate_changed`."""
         button = self.rate_buttons.get(rate)
         if button is not None and not button.isChecked():
             button.setChecked(True)
 
     def set_selection(self, has: bool) -> None:
-        """Enable the nudges only while a word is selected."""
         for button in (self.minus_button, self.plus_button, self.snap_button):
             button.setEnabled(has)
 
     def set_lecture(self, lecture: bool) -> None:
-        """Offer "Show ayah… from here" on lecture reviews only."""
         self.show_ayah_button.setVisible(lecture)

@@ -1,18 +1,3 @@
-"""Playback behind a small interface, so the window never depends on Qt Multimedia directly.
-
-The window always talks to a :class:`Player`. Most of the time that is a
-:class:`QtPlayer` wrapping ``QMediaPlayer``; in a build without Qt Multimedia
-Addons, or when construction fails for any other reason, :func:`create_player`
-falls back to the base :class:`Player`, which is a real, usable object whose
-methods are safe no-ops — the window still opens, the waveform and word strip
-still work, and only sound and the live playhead are unavailable. Tests use
-:class:`FakePlayer`, which behaves like a real player without touching Qt
-Multimedia at all.
-
-Position is smoothed by :class:`PlaybackClock`, pure Python with no Qt, so it
-is trivial to test on its own.
-"""
-
 from __future__ import annotations
 
 import time
@@ -25,7 +10,6 @@ from qurantext.gui.i18n import t
 
 __all__ = ["RATES", "FakePlayer", "PlaybackClock", "Player", "QtPlayer", "create_player"]
 
-#: Playback speeds offered in the window, fastest first.
 RATES = (1.0, 0.75, 0.5)
 
 
@@ -85,19 +69,8 @@ class PlaybackClock:
 
 
 class Player(QObject):
-    """The interface the window uses, and an unavailable player by default.
-
-    A subclass that fails to construct (missing Addons, a bad device) is
-    replaced by a bare ``Player``: every method is a safe no-op, ``seek``
-    still records the position so a click on the waveform still moves the
-    playhead, and ``reason`` explains why there is no sound.
-    """
-
-    #: Whether playback just started or stopped.
     playing_changed = Signal(bool)
-    #: The loaded media's duration, in seconds.
     duration_changed = Signal(float)
-    #: Something went wrong; carries a message already fit to show a person.
     error = Signal(str)
 
     def __init__(self, parent: QObject | None = None, *, reason: str = "") -> None:
@@ -147,12 +120,6 @@ class Player(QObject):
 
 
 class FakePlayer(Player):
-    """A player that behaves like a real one without touching Qt Multimedia.
-
-    Tests drive it with an injectable clock, so they can advance playback time
-    explicitly instead of waiting on a real audio device.
-    """
-
     def __init__(
         self,
         duration: float = 60.0,
@@ -208,14 +175,11 @@ class FakePlayer(Player):
 
 
 class QtPlayer(Player):
-    """Real playback: ``QMediaPlayer`` plus ``QAudioOutput``, smoothed by :class:`PlaybackClock`."""
-
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         from PySide6.QtCore import QUrl
         from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 
-        #: Stashed so every other method can use them without importing Addons itself.
         self._make_url = QUrl.fromLocalFile
         self._playing_state = QMediaPlayer.PlaybackState.PlayingState
 
@@ -267,11 +231,6 @@ class QtPlayer(Player):
         self._media_player.setPosition(int(seconds * 1000))
 
     def position(self) -> float:
-        """The playhead, within the recording once its length is known.
-
-        Before that (a recording that is missing, or not read yet) the length
-        is 0, and clamping to it would put every edit made at the playhead at 0 s.
-        """
         position = max(0.0, self._clock.position())
         return min(position, self._duration) if self._duration > 0 else position
 
@@ -284,12 +243,11 @@ class QtPlayer(Player):
 
 
 def create_player(parent: QObject | None = None) -> Player:
-    """The best player available: real playback, or an unavailable one that explains why."""
     try:
         from PySide6 import QtMultimedia  # noqa: F401
-    except Exception as error:  # noqa: BLE001 - any failure falls back gracefully
+    except Exception as error:
         return Player(parent, reason=t("player.unavailable", details=str(error)))
     try:
         return QtPlayer(parent)
-    except Exception as error:  # noqa: BLE001 - any failure falls back gracefully
+    except Exception as error:
         return Player(parent, reason=t("player.unavailable", details=str(error)))

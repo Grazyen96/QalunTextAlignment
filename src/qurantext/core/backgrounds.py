@@ -1,4 +1,3 @@
-# src/qurantext/core/backgrounds.py
 """The part of every frame that does not change: the background and the card panel.
 
 A frame used to start as a flat colour with the card composited onto it from a
@@ -44,19 +43,13 @@ __all__ = ["BaseLayer", "background_mean", "base_layer", "clear_cache", "tile_im
 _CACHE_SIZE = 4
 _PHOTO_CACHE_SIZE = 3
 _MEAN_CACHE_SIZE = 16
-#: Above this many pixels (after JPEG's reduced decode) a photo counts as
-#: unreadable rather than costing gigabytes. Pillow's own bomb threshold.
 _MAX_DECODE_PIXELS = 89_478_485
 
-#: Guards the three caches. Layers and photos are built outside it, so a slow
-#: photo decode on one thread never blocks a preview on another; two threads
-#: building the same key at once is harmless (the second insert wins).
 _lock = threading.Lock()
 _cache: OrderedDict[tuple, BaseLayer] = OrderedDict()
 _photo_cache: OrderedDict[tuple, Image.Image] = OrderedDict()
 _mean_cache: OrderedDict[tuple, tuple] = OrderedDict()
 
-#: EXIF orientation → the transpose that makes the image upright.
 _ORIENTATION = {
     2: Image.Transpose.FLIP_LEFT_RIGHT,
     3: Image.Transpose.ROTATE_180,
@@ -106,7 +99,7 @@ def _image_stamp(background: Background) -> tuple[int, int] | None:
         return None
     try:
         stat = background.image.stat()
-    except (OSError, ValueError):  # unreadable folder, a NUL in a hand-edited path
+    except (OSError, ValueError):
         return None
     return (stat.st_size, stat.st_mtime_ns)
 
@@ -145,7 +138,6 @@ def background_mean(look: Look, width: int, height: int) -> tuple[int, int, int]
     return mean
 
 
-#: A tile is drawn this many times larger and shrunk, so a pattern's lines survive 56 px.
 TILE_OVERSAMPLE = 4
 
 
@@ -175,11 +167,11 @@ def _background_or_fallback(
     except _ImageProblem as problem:
         warnings = (problem.code,)
         fallback = PRESETS.get(look.base_preset, NIGHT_GOLD).background
-        if fallback.kind == "image":  # a preset never has one; belt and braces
+        if fallback.kind == "image":
             fallback = NIGHT_GOLD.background
         image = _draw_background(fallback, width, height, None)
     mean = tuple(int(round(c)) for c in ImageStat.Stat(image.convert("RGB")).mean)
-    return image, mean, warnings  # type: ignore[return-value]
+    return image, mean, warnings
 
 
 class _ImageProblem(Exception):
@@ -191,15 +183,11 @@ class _ImageProblem(Exception):
 def _draw_background(background: Background, width: int, height: int, stamp) -> Image.Image:
     kind = background.kind
     if kind == "solid":
-        # NIGHT_GOLD's solid colour is the old COLOUR_BG, so this is the old frame fill.
         image = Image.new("RGBA", (width, height), background.colour)
     elif kind == "gradient":
         image = _gradient(background.colour, background.colour2, width, height)
     elif kind == "image":
         photo = _photo(background.image, stamp, width, height)
-        # A transparent photo shows the background colour (opaque: the layer is
-        # the bottom of the frame). Compositing onto a new image also leaves the
-        # shared cached photo untouched.
         image = Image.new("RGBA", (width, height), (*background.colour[:3], 255))
         image.alpha_composite(photo)
     else:
@@ -252,8 +240,6 @@ def _decode_photo(path: Path, width: int, height: int) -> Image.Image:
         with Image.open(path) as source:
             orientation = _orientation(source)
             if source.format in ("JPEG", "MPO"):
-                # Decode at 1/2, 1/4 or 1/8 scale when that still covers the
-                # frame: a phone photo then never decodes at full resolution.
                 # Phones and cameras often write multi-picture JPEGs ("MPO").
                 source.draft("RGB", _decode_size(source.size, orientation, (width, height)))
             if source.width * source.height > _MAX_DECODE_PIXELS:
@@ -272,7 +258,7 @@ def _decode_photo(path: Path, width: int, height: int) -> Image.Image:
         raise
     except (FileNotFoundError, NotADirectoryError, IsADirectoryError):
         raise _ImageProblem("image_missing") from None
-    except Exception:  # noqa: BLE001 — see the docstring: never fail a render
+    except Exception:
         raise _ImageProblem("image_unreadable") from None
 
 
@@ -283,7 +269,7 @@ def _orientation(source: Image.Image) -> int:
     """
     try:
         return int(source.getexif().get(_EXIF_ORIENTATION_TAG, 1))
-    except Exception:  # noqa: BLE001 — malformed EXIF raises SyntaxError, ValueError, …
+    except Exception:
         return 1
 
 
@@ -320,7 +306,7 @@ def _to_srgb(image: Image.Image, icc: bytes | None) -> Image.Image:
         converted = ImageCms.profileToProfile(
             image.convert("RGB"), source, ImageCms.createProfile("sRGB"), outputMode="RGB"
         )
-    except Exception:  # noqa: BLE001 — a broken profile keeps the pixels as they are
+    except Exception:
         return image
     if converted is None:
         return image

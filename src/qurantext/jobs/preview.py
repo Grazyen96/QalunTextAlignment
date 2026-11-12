@@ -43,7 +43,6 @@ class PreviewRequest:
     font_file: Path | None = None
     title: str | None = None
     audio: Path | None = None
-    #: Colours and background to draw the frame with.
     look: Look = NIGHT_GOLD
     #: The surah a lecture's cards keep to; None guesses it, as the export does.
     studied_surah: int | None = None
@@ -104,8 +103,6 @@ def render_preview(request: PreviewRequest) -> PreviewResult:
 
     at = request.at
     if at is None:
-        # Halfway into the first card: past the placeholder, and far enough in
-        # that a word highlight is showing.
         if cards:
             first = cards[0]
             at = float(first["_start_time"]) + max(
@@ -119,7 +116,6 @@ def render_preview(request: PreviewRequest) -> PreviewResult:
     active = [c for c in cards if float(c["_start_time"]) <= at]
     card = active[-1] if active else None
 
-    # The renderer's rule, so overlapping cues preview as they will render.
     caption_index = active_caption_index(captions, at)
     caption = captions[caption_index] if caption_index is not None else None
     reserve_band = bool(captions)
@@ -143,12 +139,10 @@ def render_preview(request: PreviewRequest) -> PreviewResult:
         reserve_caption_band=reserve_band,
         look=request.look,
     )
-    # The layer the frame was drawn on is cached, so this is a lookup.
     look_warnings = frame_base_layer(
         request.look, width, height, reserve_caption_band=reserve_band
     ).warnings
 
-    # render_frame_pillow returns BGR for the encoder; PNG wants RGB.
     _, image_module, _, _, _ = _frame_dependencies()
     output = Path(request.output).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)

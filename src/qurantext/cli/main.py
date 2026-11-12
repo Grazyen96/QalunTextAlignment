@@ -399,8 +399,6 @@ def _run_project_init(args: argparse.Namespace) -> int:
 def _run_generate_video(args: argparse.Namespace) -> int:
     project = load_project(args.project) if getattr(args, "project", None) else None
     if project is not None:
-        # The project owns the job: its audio and its (possibly corrected)
-        # caption cues win over anything re-derived from the match file.
         args.audio = args.audio or str(project.audio)
         args.mode = project.mode
         args.matches = args.matches or (str(project.matches) if project.matches else None)
@@ -486,7 +484,6 @@ def _run_generate_video(args: argparse.Namespace) -> int:
 
 
 def _run_all(args: argparse.Namespace) -> int:
-    # Pre-flight: reject incompatible flags BEFORE running any slow work (billed, with WhisperX).
     if args.render_video and args.mode == "range":
         raise SystemExit("--render-video is only supported for lecture or recitation workflows.")
     _resolve_preset(args)
@@ -684,9 +681,6 @@ def build_parser() -> argparse.ArgumentParser:
             default=settings.lecture_matching.min_matched_words,
         )
         if mode == "recitation":
-            # Stating the range skips detection entirely. Detection cost ~583 s
-            # on a 19-minute recitation against 3.7 s here, and covered fewer
-            # ayat: it is a search for something the user already knows.
             subparser.add_argument(
                 "--surah-num",
                 type=int,
@@ -974,8 +968,6 @@ def main(argv: list[str] | None = None) -> int:
     try:
         parser = build_parser()
     except ValueError as error:
-        # e.g. a malformed QURANTEXT_* env override; report cleanly instead of
-        # crashing before argparse (which would break even `--help`).
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
     args = parser.parse_args(argv)
@@ -994,9 +986,5 @@ def main(argv: list[str] | None = None) -> int:
         TranscriptionError,
         json.JSONDecodeError,
     ) as error:
-        # TranscriptionError (and so WhisperXServiceError) is a RuntimeError;
-        # json.JSONDecodeError is a ValueError — both are covered. SystemExit
-        # (used for pre-flight guards) is not an Exception, so it propagates
-        # with its own message/exit code.
         print(f"ERROR: {error}", file=sys.stderr)
         return 1

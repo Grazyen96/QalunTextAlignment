@@ -92,7 +92,7 @@ class JobSpec:
     subtitles: str = "burn"
     #: Subtitle file formats, when files are written.
     formats: tuple[str, ...] = ("srt",)
-    #: Render as soon as matching finishes, skipping review. For jobs you trust.
+    #: Render as soon as matching finishes, skipping review.
     render_right_away: bool = False
     #: "local" (this computer) or "whisperx" (Replicate). Never switched automatically.
     engine: str = "local"
@@ -148,10 +148,9 @@ class JobSpec:
             return "job.need_quran"
         if self.mode == "recitation" and not self.has_stated_range:
             return "job.need_range"
-        if self.has_stated_range and self.to_ayah < self.from_ayah:  # type: ignore[operator]
+        if self.has_stated_range and self.to_ayah < self.from_ayah:
             return "job.bad_range"
         if self.subtitles in ("sidecar", "both") and not self.formats:
-            # Files beside the video, in no format, would write nothing.
             return "job.need_format"
         return None
 
@@ -226,8 +225,6 @@ def _keep_earlier(destination: Path, derived: Project) -> Path | str | None:
     earlier: Project | None = None
     try:
         earlier = load_project(destination)
-        # Content only: the look, the episode and the output choices (the
-        # studied surah among them) are not what matching derives.
         unchanged = (
             replace(earlier, style={}, export={}, episode={}).content_hash()
             == replace(derived, style={}, export={}, episode={}).content_hash()
@@ -296,9 +293,9 @@ def run_matching(
         run_recitation_range(
             quran=spec.quran,
             output=match_path,
-            surah_num=spec.surah_num,  # type: ignore[arg-type]
-            from_ayah=spec.from_ayah,  # type: ignore[arg-type]
-            to_ayah=spec.to_ayah,  # type: ignore[arg-type]
+            surah_num=spec.surah_num,
+            from_ayah=spec.from_ayah,
+            to_ayah=spec.to_ayah,
             audio=audio,
             engine=spec.engine,
             echo=False,
@@ -323,8 +320,6 @@ def run_matching(
     destination = project_path_for(match_path)
     kept = _keep_earlier(destination, project)
     if kept == _UNCHANGED:
-        # Same content: leave the file alone (review state, render record and
-        # all) unless this run chose differently, and then change only that.
         existing = load_project(destination)
         chosen = _with_earlier_surah(job_settings(project), existing)
         if job_settings(existing) != chosen:
@@ -334,13 +329,10 @@ def run_matching(
     if isinstance(kept, Path):
         report(progress, "detect", t("job.progress.kept", name=kept.name), translated=True)
     elif kept is None:
-        # Nothing was there: a brand-new video starts with the default look,
-        # and a brand-new lecture with the default intro and outro.
         if spec.style:
             seed_project_look(project, destination, spec.style)
         if spec.mode == "lecture" and (any(spec.episode_defaults) or any(spec.episode_generated)):
             intro, outro = (Path(clip) if clip else None for clip in spec.episode_defaults)
-            # A default clip that is gone is left out, and said as the backup is.
             seeded = seed_project_episode(
                 project,
                 destination,
@@ -379,8 +371,6 @@ def run_render(
     chosen_subtitles = subtitles if subtitles is not None else settings.subtitles
     chosen_formats = tuple(formats) if formats is not None else settings.formats
     lecture = str(project.mode).lower() == "lecture"
-    # With an episode to follow, the lecture's render is its first step, and
-    # is named so ("Rendering the lecture"), as the recitation and join are.
     with_episode = lecture and not project_episode(project).is_empty
     result = render_project(
         project,
@@ -442,14 +432,11 @@ def _make_episode(
         return None, t(error.key, **error.fmt)
     except JobCancelled:
         return None, t("episode.error.cancelled")
-    except Exception as error:  # noqa: BLE001 — the lecture's render must stand
-        # Not a failure the episode foresaw: the person gets a sentence, and
-        # whoever reads the log gets the traceback a bug needs.
+    except Exception as error:
         _log.error("The episode step failed unexpectedly", exc_info=True)
         return None, t("episode.error.ffmpeg", reason=str(error) or type(error).__name__)
 
 
-#: The parts a person adds as clips, by the name the window gives them.
 _CLIP_PARTS = ("intro", "outro")
 
 
@@ -500,8 +487,6 @@ def _join_episode(
     """
     choice = project_episode(project)
     if project.path is not None:
-        # A part no longer generated leaves no clip of it behind, except a clip
-        # the episode names as that part itself (a generated clip chosen as My clip).
         for part in _CLIP_PARTS:
             if not choice.is_generated(part):
                 remove_generated_parts(project.path, part, keep=getattr(choice, part))
@@ -553,8 +538,7 @@ def _join_episode(
         )
     except EpisodeError as error:
         raise _part_error(error, clips, made) from error
-    # Recorded before the subtitle files, which are extra: the video is made.
-    assert project.render is not None  # render_project has just recorded it
+    assert project.render is not None
     project.render["episode"] = {
         "video": str(joined.output),
         "lecture_offset": round(joined.lecture_offset, 3),
@@ -564,8 +548,6 @@ def _join_episode(
         try:
             save_project(project, project.path)
         except OSError:
-            # The episode is on disk either way; the record only names it. The
-            # review copies this render back and its next save writes it.
             pass
     if subtitles in ("sidecar", "both") and formats:
         try:
@@ -580,8 +562,8 @@ def _join_episode(
                 offset=joined.lecture_offset,
             )
         except ValueError:
-            pass  # no cue to write: the lecture's render wrote no subtitle file either
-        except Exception as error:  # noqa: BLE001 — OSError, or ffprobe unable to read
+            pass
+        except Exception as error:
             if not isinstance(error, OSError):
                 _log.error("The episode's subtitle files failed unexpectedly", exc_info=True)
             return joined.output, t(
@@ -633,16 +615,12 @@ def _generated_parts(
             )
         except EpisodeError as error:
             fmt = dict(error.fmt)
-            # The job layer names the part by its key; the window says it.
             if str(fmt.get("part", "")).startswith("episode.part."):
                 fmt["part"] = t(str(fmt["part"]))
             raise EpisodeError(error.key, **fmt) from error
         except JobCancelled:
             raise
-        except Exception as error:  # noqa: BLE001 — not the join's failure: this part's
-            # A link or a text the dialog refuses (only a hand-edited project has
-            # one), or odd data in the project: the person reads which part, the
-            # log has the cause.
+        except Exception as error:
             _log.warning("The generated %s could not be set up", part, exc_info=True)
             raise EpisodeError("episode.error.generate", part=t(f"episode.part.{part}")) from error
     return made

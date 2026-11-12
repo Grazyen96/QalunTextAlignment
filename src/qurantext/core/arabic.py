@@ -35,12 +35,8 @@ ARABIC_INDIC_DIGIT_RE = re.compile(r"^[٠١٢٣٤٥٦٧٨٩]+$")
 
 def _normalize_with_pattern(text: str, pattern: re.Pattern[str], *, map_bari_yeh: bool) -> str:
     text = pattern.sub("", text)
-    text = text.replace(
-        "\u0640", ""
-    )  # Remove Tatweel/Kashida (U+0640) — not covered by tashkeel patterns
+    text = text.replace("\u0640", "")
     text = re.sub(r"[إأآٱ]", "ا", text)
-    # Intentional: ة (teh marbuta) and ه (heh) are kept distinct — normalising them
-    # causes false merges between grammatically different word forms.
     text = text.replace("ى", "ي").replace("ؤ", "و").replace("ئ", "ي")
     if map_bari_yeh:
         text = text.replace("ے", "ي")
@@ -80,8 +76,6 @@ def partial_ratio(needle: str, haystack: str) -> float:
         return SequenceMatcher(None, needle, haystack, autojunk=False).ratio()
 
     best = 0.0
-    # Use step=1 for short needles (< 30 chars) to avoid skipping the best window;
-    # use n//10 for longer needles to keep runtime reasonable.
     step = 1 if n < 30 else max(1, n // 10)
     for start in range(0, h - n + 1, step):
         ratio = SequenceMatcher(
@@ -119,8 +113,6 @@ def ayah_text_with_marker(text_raw: str, ayah_num: int) -> str:
     return f"{text_raw} {int_to_arabic_indic(ayah_num)}"
 
 
-# --- Tanween outside the mushaf font --------------------------------------------------
-
 # Only qaloon.10 draws U+0657, U+065E and U+0656 as open fathatan, dammatan and
 # kasratan; every other font draws an inverted damma, a fatha with two dots and a
 # subscript alef, so text leaving the app's own font uses the standard open tanween.
@@ -141,23 +133,13 @@ def is_qaloon_face(font_name: str) -> bool:
     return "qaloon" in font_name.casefold()
 
 
-# --- Surah names as a title reads them ----------------------------------------------
-
-# Marks that are part of a letter, not a vowel: an alef with a madda or a hamza is
-# its own letter (آ أ إ), as a waw with a hamza is ؤ. Stripping the mark alone would
-# turn «آل عمران» into «ال عمران». Other vowel marks may sit between letter and mark.
 _LETTER_MARKS = (
-    (re.compile("\u0627([\u064b-\u0652]*)\u0653"), "\u0622\\1"),  # alef + madda: alef madda
-    (re.compile("\u0627([\u064b-\u0652]*)\u0654"), "\u0623\\1"),  # alef + hamza above
-    (re.compile("\u0627([\u064b-\u0652]*)\u0655"), "\u0625\\1"),  # alef + hamza below
-    (re.compile("\u0648([\u064b-\u0652]*)\u0654"), "\u0624\\1"),  # waw + hamza above
+    (re.compile("\u0627([\u064b-\u0652]*)\u0653"), "\u0622\\1"),
+    (re.compile("\u0627([\u064b-\u0652]*)\u0654"), "\u0623\\1"),
+    (re.compile("\u0627([\u064b-\u0652]*)\u0655"), "\u0625\\1"),
+    (re.compile("\u0648([\u064b-\u0652]*)\u0654"), "\u0624\\1"),
 )
-# A word-final yeh (or alef maksura) carrying a dagger alef is an alef maksura:
-# the store's «الشُّورَيٰ» is «الشورى», not «الشوري».
 _FINAL_YEH_ALEF = re.compile("[\u064a\u0649]([\u064b-\u0652]*)\u0670(?=[\u064b-\u0652]*(?:\\s|$))")
-# A word-final hamza on an alef carrier after a letter is written «أ» in a title: the
-# shipped text's Uthmani «سبإ» and «النبإ» (surahs 34 and 78) read as «سبأ» and «النبأ».
-# A word-initial «إ» («إبراهيم», «الإسراء») is untouched.
 _FINAL_HAMZA_BELOW = re.compile("(?<=[\u0621-\u064a])\u0625(?=\\s|$)")
 _SURAH_WORD = "سورة"
 

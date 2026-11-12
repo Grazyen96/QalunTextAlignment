@@ -99,10 +99,6 @@ class CheckResult:
 
 
 def _ffmpeg_binary(name: str) -> CheckResult:
-    # Ask the same way the renderer asks. Checking PATH here while the renderer
-    # looks beside the executable first made this report a packaged app broken
-    # when it would in fact have rendered — a check that disagrees with the code
-    # it is checking is worse than no check.
     try:
         found: str | None = require_binary(name)
     except RuntimeError as error:
@@ -131,9 +127,7 @@ def _ffmpeg_binary(name: str) -> CheckResult:
 _EPISODE = "Episode joining"
 
 
-#: How long making one of the release gate's trial clips may take.
 _TRIAL_TIMEOUT_S = 30
-#: How long the release gate's trial join may take; it needs well under a second.
 _TRIAL_JOIN_TIMEOUT_S = 30
 
 
@@ -191,8 +185,6 @@ def _trial_join(*, tone_map: bool = False) -> str | None:
             if made.returncode != 0:
                 return f"could not make a test clip: {made.stderr.strip() or made.returncode}"
             parts.append(part)
-        # The join has no time limit of its own; a cancel after the limit
-        # stops FFmpeg at once, as Cancel in the window does.
         token = CancelToken()
         timer = threading.Timer(_TRIAL_JOIN_TIMEOUT_S, token.cancel)
         timer.start()
@@ -257,7 +249,6 @@ def _episode_join(release: bool) -> CheckResult:
     if release:
         failed = _trial_join(tone_map=not no_tone_map)
         if failed is not None:
-            # FFmpeg's last lines say why; the very last is usually the verdict.
             lines = [line.strip() for line in failed.splitlines() if line.strip()]
             said = lines[-1] if lines else "no reason given"
             return CheckResult(
@@ -457,11 +448,8 @@ def _whisperx_check() -> CheckResult:
 
         import replicate  # noqa: F401 - importing it is the point
 
-        # The exact call that failed in the packaged build. replicate/client.py
-        # runs it at import time, so asking directly keeps this check pinned to
-        # the real failure rather than to a symptom of it.
         client_version = version("replicate")
-    except Exception as error:  # noqa: BLE001 - any import failure is the same news
+    except Exception as error:
         detail = f"the Replicate client will not import: {error}"
         if getattr(sys, "frozen", False):
             remedy = (
@@ -483,8 +471,6 @@ def _whisperx_check() -> CheckResult:
             "REPLICATE_API_TOKEN=your-token. Then restart the app — settings are "
             "read once at startup. Everything else works without it.",
         )
-    # Described the same way the rejection message describes it, so the two can
-    # be held side by side when a token is refused.
     return CheckResult(
         "Transcription",
         Status.OK,
@@ -492,12 +478,9 @@ def _whisperx_check() -> CheckResult:
     )
 
 
-#: The configured engine's line. The other engine's line has its own name, so a
-#: reader can tell which one their jobs use.
 _TRANSCRIPTION = "Transcription"
 _LOCAL_OPTIONAL = "On this computer (optional)"
 _WHISPERX_OPTIONAL = "WhisperX online (optional)"
-#: How the configured local line begins; the optional line's name already says it.
 _ON_THIS_COMPUTER = "on this computer with "
 
 
@@ -521,7 +504,6 @@ def _transcription(release: bool = False) -> list[CheckResult]:
     try:
         configured = resolve_engine(None, settings)
     except ValueError as error:
-        # The words a CLI job stops with, so the doctor and the failed job agree.
         unknown = CheckResult(
             _TRANSCRIPTION,
             Status.FAIL,
@@ -539,14 +521,12 @@ def _optional_whisperx(release: bool) -> CheckResult:
     """WhisperX when it is not the configured engine: information, bar the build gate."""
     result = _whisperx_check()
     if result.status == Status.FAIL:
-        # The client will not import. A person is told; a release build fails.
         remedy = result.remedy.replace(
             "Transcription cannot run.",
             "WhisperX online cannot run; transcription on this computer is unaffected.",
         )
         return CheckResult(_WHISPERX_OPTIONAL, _strict(release), result.detail, remedy)
     if result.status == Status.WARN:
-        # Only a missing token warns, and nobody needs one until they choose WhisperX.
         return CheckResult(
             _WHISPERX_OPTIONAL,
             Status.OK,
@@ -560,7 +540,6 @@ def _optional_local() -> CheckResult:
     result = _local_engine_check(offer_whisperx=False)
     if result.status == Status.FAIL:
         return CheckResult(_LOCAL_OPTIONAL, Status.WARN, result.detail, result.remedy)
-    # Not downloaded yet is nothing to do for someone who uses WhisperX.
     return CheckResult(_LOCAL_OPTIONAL, Status.OK, result.detail.removeprefix(_ON_THIS_COMPUTER))
 
 
@@ -591,7 +570,6 @@ def _local_engine_check(*, offer_whisperx: bool = True) -> CheckResult:
             f"the speech runtime (sherpa-onnx) did not load: {problem}",
             remedy,
         )
-    # Information, not a check: a long job on a small machine can run out of memory.
     memory = f"; transcribing uses up to about {engine_local.PEAK_MEMORY_GB} GB of memory"
     if not model_store.is_installed(manifest):
         return CheckResult(
@@ -609,16 +587,12 @@ def _local_engine_check(*, offer_whisperx: bool = True) -> CheckResult:
     )
 
 
-#: How long the playback check waits for Qt to report its test recording loaded.
 _PLAYBACK_TIMEOUT_MS = 5000
 
-#: The Qt application the checks made for themselves, held so it outlives them.
 _doctor_app: object | None = None
 
-#: The platform plugin a window application uses where there is a real one to use.
 _NATIVE_PLATFORMS = {"win32": "windows", "darwin": "cocoa"}
 
-#: Qt multimedia plugin file stems, and the backend each one is.
 _MEDIA_BACKENDS = {
     "ffmpeg": "FFmpeg",
     "darwin": "AVFoundation",
@@ -640,12 +614,8 @@ def _frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
-#: The loader's words when a library a module links is not on the system.
 _MISSING_LIBRARY = re.compile(r"(lib[\w.+-]+?\.so[\w.]*): cannot open shared object file")
 
-#: The Debian/Ubuntu package for the system libraries Qt links that no build may
-#: carry (EGL, GL: they belong to the machine's graphics driver) or that a build
-#: made on a bare machine left out. Anything else is named for a package search.
 _LIBRARY_PACKAGES = {
     "libEGL.so.1": "libegl1",
     "libGL.so.1": "libgl1",
@@ -776,7 +746,7 @@ def _qt_application(*, window: bool):
 
 
 def _import_multimedia():
-    from PySide6 import QtMultimedia  # optional part of Qt (PySide6-Addons)
+    from PySide6 import QtMultimedia
 
     return QtMultimedia
 
@@ -822,7 +792,7 @@ def _load_test_recording() -> tuple[bool, str]:
         status, duration_ms = player.mediaStatus(), player.duration()
         error = player.errorString()
         player.mediaStatusChanged.disconnect(on_status)
-        player.setSource(QUrl())  # let go of the file before its folder goes
+        player.setSource(QUrl())
         del player
 
     if status == statuses.LoadedMedia and duration_ms > 0:
@@ -915,7 +885,7 @@ def _media_backends_loaded() -> list[str] | None:
     """
     try:
         names = _loaded_library_names()
-    except Exception:  # noqa: BLE001 - any failure to ask means the same: cannot tell
+    except Exception:
         return None
     plugins = [name for name in names if "mediaplugin" in name]
     return [label for stem, label in _MEDIA_BACKENDS.items() if any(stem in n for n in plugins)]
@@ -953,7 +923,7 @@ def _playback(release: bool) -> CheckResult:
         return CheckResult(
             name, _strict(release), f"Qt Multimedia will not import ({error}); {without}", remedy
         )
-    except Exception as error:  # noqa: BLE001 - any failure to start is the same news
+    except Exception as error:
         return CheckResult(
             name, _strict(release), f"Qt Multimedia would not start ({error}); {without}", remedy
         )
@@ -969,7 +939,6 @@ def _playback(release: bool) -> CheckResult:
     on_disk = f"plugins on disk: {', '.join(_media_plugins()) or 'none named'}"
     if forced:
         wanted = _MEDIA_BACKENDS.get(forced.lower(), forced)
-        # Only it: a second backend loaded means Qt tried it and fell back.
         if in_use != [wanted]:
             got = ", ".join(in_use) if in_use else "cannot tell which"
             return CheckResult(
@@ -1107,8 +1076,6 @@ def _arabic_ui_font(release: bool) -> CheckResult:
     )
 
 
-#: Checks whose failure leaves rendering working: the job, the review window or
-#: the Arabic interface is what suffers, so the report must not say "Cannot render".
 _NOT_RENDERING = frozenset(
     {
         _TRANSCRIPTION,
@@ -1122,8 +1089,6 @@ _NOT_RENDERING = frozenset(
     }
 )
 
-#: Qt logging rules for the doctor: the FFmpeg plugin prints the test recording's
-#: stream details to stderr, noise in the report a person sends.
 _DOCTOR_LOGGING_RULES = "qt.multimedia.ffmpeg*=false"
 
 
@@ -1149,7 +1114,6 @@ def _interface_icons() -> CheckResult:
     try:
         from qurantext.gui.icons import ICON_DIR, NAMES
     except ImportError as error:
-        # Name what failed: a Qt without QtSvg is not "Qt is not installed".
         module = getattr(error, "name", None) or "a module"
         return CheckResult(
             "Interface icons",
@@ -1215,7 +1179,6 @@ def format_report(results: list[CheckResult], *, release: bool = False) -> str:
         f"Qalun {__version__} on {sys.platform}",
         f"  running from {'a checkout' if checkout_root() else 'an installed copy'}",
         f"  app data in {user_data_dir()}",
-        # The window's error log: what to send along with this report after a crash.
         f"  error log in {user_log_file()}",
         f"  licensed {LICENCE}; see LICENSE and THIRD_PARTY_NOTICES.md",
         "",

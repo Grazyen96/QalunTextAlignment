@@ -48,15 +48,10 @@ from qurantext.gui.theme import apply_theme, current_tokens
 from qurantext.jobs.project import Project, load_project, project_path_for
 from qurantext.utils.progress import CancelToken, ProgressCallback, ProgressEvent
 
-#: GUIDE_URL (where Help goes, tracked) is re-exported from ``config.links``.
 __all__ = ["GUIDE_URL", "MainWindow"]
 
-#: The job list's share of the window; the form takes the rest.
 _JOB_LIST_WIDTH = 300
-#: The window's size on first opening; a language switch keeps whatever it is now.
 _WINDOW_SIZE = (1024, 680)
-#: The stages the pipeline reports, each said in the window's words as
-#: ``job.stage.<stage>``; any other stage says ``job.stage.working``.
 _KNOWN_STAGES = frozenset(
     {
         "download",
@@ -74,13 +69,10 @@ _KNOWN_STAGES = frozenset(
         "episode_join",
     }
 )
-#: The percentage sentence of each stage that has its own; any other says "Matching".
 _PERCENT_KEYS = {
     "download": "home.progress.downloading",
     "transcribe": "home.progress.transcribing",
     "render": "home.progress.rendering",
-    # The episode's steps, after the lecture's own render (``gui.jobs`` reports
-    # the recitation's render and the join under these names).
     "episode_lecture": "home.progress.episode_lecture",
     "episode_intro": "home.progress.episode_intro",
     "episode_outro": "home.progress.episode_outro",
@@ -95,12 +87,8 @@ class _Said:
 
     key: str
     fmt: dict[str, object] = field(default_factory=dict)
-    #: Set for a key with plural forms, read with ``tn``.
     count: int | None = None
-    #: Sentences said after this one, on the same line (a render's look warnings).
     then: tuple[_Said, ...] = ()
-    #: Set for a sentence the job already said in the window's language (an
-    #: episode error, a seed notice): shown as it is, in place of *key*.
     raw: str | None = None
 
     def without_raw(self) -> _Said | None:
@@ -126,8 +114,6 @@ class _Finished:
 
     project: Project
     outcome: JobOutcome | None = None
-    #: What matching could not do for a new job (a default intro gone), in the
-    #: window's language; said as progress while the job runs.
     notices: tuple[str, ...] = ()
 
 
@@ -161,33 +147,18 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(plain_title(t("app.title")))
 
         self._cancel: CancelToken | None = None
-        #: Lets go of the default intro and outro the running job was started
-        #: with, which ``Prefs`` keeps on disk until then (``hold_default_clips``).
         self._release_clips: Callable[[], None] | None = None
-        #: Runs the matching/render job off the UI thread.
         self._jobs = BackgroundJobs(self)
-        #: Set once the window was closed while a job ran: the window is hidden,
-        #: the job cancelled, and the app quits when the job's thread ends.
         self._closing = False
-        #: The job running now, and how it ended (said once the form stops running).
         self._running_spec: JobSpec | None = None
         self._ending: _Said | None = None
-        #: The stage the running job last reported, so its sentence is said once.
         self._stage: str | None = None
-        #: What the status line says, when it was said from a key (see ``_say``).
         self._status: _Said | None = None
-        #: Set while an answer to the person is up during a job; progress of the
-        #: same stage, or the job's first report, leaves it there (see ``_answer``).
         self._holding = False
-        #: One review window per open project, keyed by its file: reopening the
-        #: same project raises what is already there instead of a second window.
-        #: A window leaves this once it closes, so the next review reads the file afresh.
         self._reviews: dict[Path, ReviewWindow] = {}
 
         self.resize(*_WINDOW_SIZE)
         self._build()
-
-    # -- construction ---------------------------------------------------------
 
     def _build(self) -> None:
         self.job_list = JobListPanel(self._prefs)
@@ -206,7 +177,6 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
 
-        # Built here with the panels, so a language switch gets one in its words.
         self.header = HeaderBar()
         self.header.show_theme(current_tokens().name)
         self.header.theme_toggle_requested.connect(self.toggle_theme)
@@ -229,8 +199,6 @@ class MainWindow(QMainWindow):
 
         splitter.setSizes([_JOB_LIST_WIDTH, max(0, self.width() - _JOB_LIST_WIDTH)])
 
-    # -- language ---------------------------------------------------------------
-
     def _language_busy(self) -> bool:
         return bool(self._reviews) or self._cancel is not None
 
@@ -243,7 +211,6 @@ class MainWindow(QMainWindow):
         window is now in *code*; Settings says why not when it is refused.
         """
         if code == i18n.current_language():
-            # Picking the language the system already gave is still a choice to keep.
             self._prefs.language = code
             return True
         if self._language_busy():
@@ -253,26 +220,16 @@ class MainWindow(QMainWindow):
         apply_language(QApplication.instance(), code)
         self._prefs.language = code
         self.setWindowTitle(plain_title(t("app.title")))
-        # setCentralWidget deletes the old panels (later); the new ones read the
-        # rest of the form back from prefs, all but the audio, which is not kept there.
-        # The old list's read is let go first: its rows are about to go anyway.
         self.job_list.stop_reading()
         self._build()
-        self._splitter.setSizes(sizes)  # where the person left the divider
+        self._splitter.setSizes(sizes)
         if audio is not None:
             self.new_job.set_audio(audio)
         if self._status is not None:
-            # Said again in the new language; what the job said in the old one
-            # (an episode error, a seed notice) is dropped, as ``_show_raw`` is:
-            # the review or the box that showed it said it whole.
             self._status = self._status.without_raw()
             self.new_job.show_status(self._status.text() if self._status else "")
-        # The gear went with the old header; a keyboard user is put back on the new one,
-        # where Settings (which asked for the switch, and closes on it) was opened.
         self.header.settings_button.setFocus()
         return True
-
-    # -- the header ---------------------------------------------------------------
 
     def toggle_theme(self) -> None:
         """Pin the opposite of the theme in force (System becomes an explicit choice)."""
@@ -287,13 +244,11 @@ class MainWindow(QMainWindow):
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802 - Qt override
         super().changeEvent(event)
         if event.type() == QEvent.Type.ApplicationPaletteChange:
-            self.header.show_theme(current_tokens().name)  # System followed the desktop
+            self.header.show_theme(current_tokens().name)
 
     def _open_help(self) -> None:
         if not QDesktopServices.openUrl(QUrl(GUIDE_URL)):
             self._answer(_Said("home.help_failed"))
-
-    # -- settings -----------------------------------------------------------------
 
     def make_settings_dialog(self, tab: str | None = None) -> SettingsDialog:
         """The Settings dialog over this window, on *tab*, wired to what the window applies."""
@@ -334,8 +289,6 @@ class MainWindow(QMainWindow):
         else:
             dialog.language_refused(t("home.language_busy"))
 
-    # -- the status line ------------------------------------------------------
-
     def _say(self, said: _Said | None) -> None:
         """Show *said* on the status line (None clears it), kept so a switch can say it again."""
         self._status = said
@@ -358,20 +311,15 @@ class MainWindow(QMainWindow):
         self._status = None
         self.new_job.show_status(text)
 
-    # -- running --------------------------------------------------------------
-
     def _start(self, spec: JobSpec) -> None:
         if self._cancel is not None:
-            return  # one job at a time; the form is disabled while one runs
+            return
         problem = spec.validate()
         if problem is not None:
             self._answer(_Said(problem))
             return
         open_review = self._review_of(project_path_for(match_path_for(spec)))
         if open_review is not None:
-            # Re-matching replaces that project on disk, under whatever the
-            # person has not saved in its review; saving then would overwrite
-            # the new match with the old one. They finish there first.
             self._answer(_Said("home.close_review_first"))
             _raise(open_review)
             return
@@ -385,8 +333,6 @@ class MainWindow(QMainWindow):
         self.new_job.set_running(True)
         self.new_job.set_progress(None, starting)
         self.job_list.set_running(Path(spec.audio).name, starting)
-        # A new lecture copies these when its matching ends; a default chosen
-        # meanwhile (in a review's Episode dialog) must not delete them first.
         self._release_clips = self._prefs.hold_default_clips(spec.episode_defaults)
 
         # The job may be a closure; every callback is a bound method, so it
@@ -429,21 +375,19 @@ class MainWindow(QMainWindow):
                 said = _Said(_stage_key(event.stage))
                 text = said.text()
             else:
-                return  # a log line of the stage already said
+                return
             self._show_running_row(text, None)
             if self._holding:
                 return
             if not new_stage:
-                self._show_raw(text)  # a translated sentence within the stage already said
+                self._show_raw(text)
                 return
-            self._status = said  # None for raw text: a language switch clears it
-            # A busy bar: the last stage's percentage is not this one's.
+            self._status = said
             self.new_job.set_progress(None, text)
             return
         text = _progress_text(event)
         self._show_running_row(text, event.fraction)
         if self._holding:
-            # The bar moves on and says how far; the answer stays on the line.
             self.new_job.set_progress(event.fraction, text, keep_status=True)
             return
         self._status = None
@@ -457,24 +401,18 @@ class MainWindow(QMainWindow):
     def _on_finished(self, finished: _Finished) -> None:
         project = finished.project
         project_path = project.path or project_path_for(project.matches)
-        # State, not UI: the list must show this job next launch, closed window or not.
         self._remember_output_dir()
-        # Running a job again is asking for it: one removed from the list comes back.
         self._prefs.unhide_job(project_path)
         if self._closing:
-            return  # no review, and no list, under a window that is going away
+            return
         self.job_list.end_running()
 
         outcome = finished.outcome
         if outcome is not None and outcome.video is not None:
-            # Rendered right away: the person chose to skip the review.
-            # What the look could not do (its image) is said after it, as the review says it,
-            # and so is a chosen surah with no card: the video holds only its title card.
             warnings = tuple(_Said(look_warning_key(code)) for code in outcome.look_warnings)
             if outcome.studied_surah_missing is not None:
                 label = surah_label(outcome.studied_surah_missing, stored_surah_names())
                 warnings += (_Said("review.studied_surah_missing", {"surah": label}),)
-            # The episode after it: written, or why not (a cancel included).
             if outcome.episode_video is not None:
                 name = Path(outcome.episode_video).name
                 warnings += (_Said("review.episode_written", {"name": name}),)
@@ -490,7 +428,6 @@ class MainWindow(QMainWindow):
         # Set before any box: the job's ``done`` can arrive while the box is open.
         self._ending = problem or _Said("home.finished.matched", count=len(project.cards))
         if problem is None and finished.notices:
-            # Shown in the review that just opened, until it closes.
             review = self._review_of(project_path)
             if review is not None:
                 review.show_notices(finished.notices)
@@ -510,9 +447,7 @@ class MainWindow(QMainWindow):
     def _on_failed(self, message: str) -> None:
         self._remember_matched_output()
         if self._closing:
-            return  # the person closed the window; a dialog now would bring it back
-        # The worker's message may be an OS or library detail in English; the
-        # sentence around it is in the person's language.
+            return
         said = _Said("home.failed", {"details": message})
         self._ending = said
         self._list_a_half_done_job()
@@ -553,7 +488,6 @@ class MainWindow(QMainWindow):
             self._release_clips()
             self._release_clips = None
         if self._closing:
-            # The job's thread has quit (or is about to): join it, then leave.
             self._cancel = None
             self._running_spec = None
             self._jobs.stop()
@@ -567,15 +501,11 @@ class MainWindow(QMainWindow):
         self.new_job.set_running(False)
         self._say(self._ending)
 
-    # -- the job list -----------------------------------------------------------
-
     def _reveal(self, path: Path) -> None:
         show_in_folder(path)
 
     def _show_damaged(self, error: str) -> None:
         self._answer(_Said("home.damaged", {"details": error}))
-
-    # -- review windows -------------------------------------------------------
 
     def _open_review(self, project_path: Path) -> None:
         """Open *project_path* for review, or say on the status line why it cannot be.
@@ -585,8 +515,6 @@ class MainWindow(QMainWindow):
         ``_show_review`` before ``_on_done`` clears ``_running_spec``.
         """
         if self._is_being_matched(project_path):
-            # Its file is about to be replaced; a review opened now would show the old
-            # match, and saving it would overwrite the new one.
             self._answer(_Said("home.busy_matching"))
             return
         problem = self._show_review(project_path)
@@ -638,7 +566,7 @@ class MainWindow(QMainWindow):
 
     def _review_saved(self, path: Path) -> None:
         self.job_list.refresh()
-        if self._cancel is None:  # while a job runs, the status line is its progress
+        if self._cancel is None:
             self._say(_Said("main.saved", {"path": path_text(path)}))
 
     def _forget_review(self, project_path: Path, window: ReviewWindow) -> None:

@@ -1,13 +1,3 @@
-"""How much of the recording the timeline shows, as one slider.
-
-A span of seconds is a poor thing to put on a linear slider: the useful range
-runs from the whole of an hour-long lecture down to one second, and nearly all
-of the interesting stops sit near the narrow end. The slider is therefore
-logarithmic — each step divides the span by the same factor — with the whole
-recording at the left and :data:`Viewport.MIN_SPAN_S` at the right. It zooms
-around the playhead, so what the person is listening to stays in view.
-"""
-
 from __future__ import annotations
 
 import math
@@ -24,8 +14,6 @@ _STEPS = 100
 
 
 class ZoomSlider(QSlider):
-    """Sets ``viewport.span`` on a log scale, anchored at ``anchor()`` seconds."""
-
     def __init__(
         self, viewport: Viewport, anchor: Callable[[], float], parent: QWidget | None = None
     ) -> None:
@@ -47,7 +35,6 @@ class ZoomSlider(QSlider):
         self._viewport.zoom(self._viewport.span / span, self._anchor())
 
     def _sync(self) -> None:
-        """Show the viewport's current span, without zooming again."""
         widest, narrowest = self._bounds()
         value = 0
         if widest > narrowest:

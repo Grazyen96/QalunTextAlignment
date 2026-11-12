@@ -99,8 +99,6 @@ def extract_matching_words(
         if not norm or start is None or end is None:
             skipped += 1
             return
-        # Tolerate messy WhisperX/hand-edited JSON: a single non-numeric
-        # timestamp skips that word instead of crashing the whole load.
         try:
             start_f, end_f = float(start), float(end)
         except (TypeError, ValueError):

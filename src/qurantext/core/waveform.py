@@ -161,5 +161,5 @@ def load_or_compute_peaks(
                 digest=digest,
             )
     except OSError:
-        pass  # a cache that cannot be written costs a re-decode next time, nothing more
+        pass
     return peaks

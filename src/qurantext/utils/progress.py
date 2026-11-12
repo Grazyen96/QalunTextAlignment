@@ -142,7 +142,6 @@ class ConsoleProgress:
             text = f"{text}  ETA {event.eta_seconds:.0f}s"
 
         if not self._interactive:
-            # Non-terminal: emit only the closing line so logs stay readable.
             if event.done:
                 self._finish_line()
                 print(text, file=self._stream, flush=True)

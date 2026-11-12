@@ -148,9 +148,9 @@ class StatusChip(QFrame):
         handled = super().event(event)
         palette_events = (QEvent.Type.PaletteChange, QEvent.Type.ApplicationPaletteChange)
         if event.type() in palette_events and getattr(self, "_built", False):
-            self._recolour()  # a theme switch: the old theme's colour may not read
+            self._recolour()
         elif event.type() == QEvent.Type.DevicePixelRatioChange and getattr(self, "_built", False):
-            self._draw_icon()  # moved to a screen of another pixel ratio
+            self._draw_icon()
         return handled
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802 - Qt override
@@ -176,12 +176,10 @@ class StatusChip(QFrame):
             self.icon_label.hide()
             return
         role = {"attention": "text", "accent": "accent", "neutral": "secondary"}[self._kind]
-        # At the screen's pixel ratio, so the glyph is sharp on a HiDPI screen.
         ratio = self.icon_label.devicePixelRatioF()
         pixmap = icon(self._icon_name, role).pixmap(QSize(16, 16), ratio)
         if self._kind == "attention":
-            # The amber has no token role; tint the pixmap through a mask (the copy
-            # keeps the ratio, and the painter works in its logical pixels).
+            # The copy keeps the ratio, and the painter works in its logical pixels.
             pixmap = pixmap.copy()
             painter = QPainter(pixmap)
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)

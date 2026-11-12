@@ -89,7 +89,6 @@ def user_data_dir() -> Path:
         return Path(base).expanduser() / APP_NAME if base else Path.home() / APP_NAME
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / APP_NAME
-    # Linux and the rest follow the XDG base directory specification.
     base = os.getenv("XDG_DATA_HOME")
     root = Path(base).expanduser() if base else Path.home() / ".local" / "share"
     return root / _APP_DIR_POSIX
@@ -181,14 +180,12 @@ INPUT_DIR = _input_root()
 QURAN_INPUT_DIR = INPUT_DIR / "quran"
 LECTURES_INPUT_DIR = INPUT_DIR / "lectures"
 RECITATIONS_INPUT_DIR = INPUT_DIR / "recitations"
-# User-supplied basmala spliced before each recitation (see core.basmala).
 BASMALA_INPUT_DIR = INPUT_DIR / "basmala"
 BASMALA_AUDIO_PATH = BASMALA_INPUT_DIR / "basmala.mp3"
 
 OUTPUT_DIR = _output_root()
 VIDEOS_OUTPUT_DIR = OUTPUT_DIR / "videos"
 
-# On-device data store (versioned SQLite build of the certified Qalun text).
 DATA_DIR = _store_root()
 QURAN_DB_PATH = DATA_DIR / "quran.sqlite"
 RECITATION_MATCHING_OUTPUT_DIR = OUTPUT_DIR / "recitation_matching"

@@ -27,7 +27,6 @@ __all__ = ["TIMEOUT_S", "clip_frame"]
 
 _log = logging.getLogger(__name__)
 
-#: A frame that takes longer than this is not worth the wait.
 TIMEOUT_S = 10
 
 
@@ -49,14 +48,14 @@ def clip_frame(
         folder = Path(cache_dir) / "thumbs"
         folder.mkdir(parents=True, exist_ok=True)
         raw = f"clip|{path}|{stat.st_mtime_ns}|{stat.st_size}|{long_side}"
-        key = hashlib.sha1(raw.encode("utf-8")).hexdigest()  # noqa: S324 - a cache name
+        key = hashlib.sha1(raw.encode("utf-8")).hexdigest()
         target = folder / f"clip-{key}.png"
         if target.is_file():
             return target
         ffmpeg = require_binary("ffmpeg")
         at = max(0.0, (seconds or 0.0) / 2)
         scale = f"scale='if(gt(iw,ih),{long_side},-1)':'if(gt(iw,ih),-1,{long_side})'"
-        handle = tempfile.NamedTemporaryFile(  # noqa: SIM115 - closed at once, replaced below
+        handle = tempfile.NamedTemporaryFile(
             dir=folder, prefix=".", suffix=".png.part", delete=False
         )
         handle.close()
@@ -81,7 +80,7 @@ def clip_frame(
                 return target
         _log.debug("No frame for %s: ffmpeg wrote nothing", path)
         return None
-    except Exception as error:  # noqa: BLE001 - a picture is never worth a failed dialog
+    except Exception as error:
         _log.debug("No frame for %s: %s", path, error)
         return None
     finally:

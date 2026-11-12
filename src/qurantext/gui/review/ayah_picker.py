@@ -1,22 +1,3 @@
-"""The ayah picker: which surah and which ayat a lecture card shows.
-
-Detection follows recitation, so it misses the ayah a teacher goes back to and
-talks about without reciting it, and it can match a teacher's return to an
-earlier ayah to the wrong one. The person then says which ayat the card is
-about, and this dialog is where they say it: a surah, a first and a last ayah,
-and under them the exact text the card will show.
-
-The preview is the point of the dialog. A card names a reference and its text
-always comes from the store (``data.quran_db.ayah_range_card``, the same
-function the session builds the card with), so what the person reads here is
-what the video draws, line for line. Nothing typed ever becomes Quran text.
-
-The store is read once on opening for the surah list and ayah counts. Each
-preview opens its own short connection: a dialog left open should not hold
-the file. A store that is missing or unreadable is said in the preview, and
-OK stays off, since no card can be made without it.
-"""
-
 from __future__ import annotations
 
 import sqlite3
@@ -47,15 +28,12 @@ from qurantext.jobs.project import SURAH_COUNT
 
 __all__ = ["PREVIEW_LINES", "AyahPicker"]
 
-#: How many ayat the preview shows before it says how many more there are.
 PREVIEW_LINES = 5
 
-#: The preview's text size against the window's: Quran text is read closely here.
 _PREVIEW_SCALE = 1.4
 
 
 def _read_store(db_path: Path) -> dict[int, tuple[str, int]] | None:
-    """Each surah's name and ayah count from the store, or None when it cannot be read."""
     try:
         conn = connect(db_path)
     except (OSError, sqlite3.Error):
@@ -71,8 +49,6 @@ def _read_store(db_path: Path) -> dict[int, tuple[str, int]] | None:
 
 
 class AyahPicker(QDialog):
-    """Choose a surah and an ayah range, and see the card's text before saying OK."""
-
     def __init__(
         self,
         parent: QWidget | None = None,
@@ -85,16 +61,11 @@ class AyahPicker(QDialog):
         super().__init__(parent)
         self._db_path = db_path
         self._surahs = _read_store(db_path)
-        #: Whether the person set the last ayah themselves; until then it follows the first.
-        #: A range handed in (a card's 7–9) counts as set: moving its start keeps its end.
         self._to_set = to_ayah is not None and to_ayah != from_ayah
-        #: True while the dialog itself moves the spins, so that is not read as the person's.
         self._syncing = False
         self.setWindowTitle(plain_title(t("ayah_picker.title")))
         self._build()
         self._fill(surah, from_ayah, to_ayah)
-
-    # -- layout -----------------------------------------------------------------
 
     def _build(self) -> None:
         layout = QVBoxLayout(self)
@@ -114,14 +85,11 @@ class AyahPicker(QDialog):
         self.preview = QLabel()
         self.preview.setTextFormat(Qt.TextFormat.PlainText)
         self.preview.setWordWrap(True)
-        # Quran text reads from the right in an English window too.
         self.preview.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.preview.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignAbsolute | Qt.AlignmentFlag.AlignTop
         )
         self.preview.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        # The card in the video is drawn in the Quran face, so the preview reads the
-        # same; Qt draws the "…and 3 more" line's Latin from the window's own font.
         font = QFont(with_quran_face(self.font()))
         if font.pointSizeF() > 0:  # -1 for a font sized in pixels
             font.setPointSizeF(font.pointSizeF() * _PREVIEW_SCALE)
@@ -148,9 +116,7 @@ class AyahPicker(QDialog):
         self.to_spin.valueChanged.connect(self._on_to)
 
     def _fill(self, surah: int, from_ayah: int, to_ayah: int | None) -> None:
-        """Show *surah*'s *from_ayah*–*to_ayah*, clamped to what the surah has."""
         if self._surahs is None:
-            # No store: nothing to count ayat by or to preview, so nothing to choose.
             for widget in (self.surah_box, self.from_spin, self.to_spin):
                 widget.setEnabled(False)
             blocked = self.surah_box.blockSignals(True)
@@ -167,20 +133,14 @@ class AyahPicker(QDialog):
             self.surah_box.blockSignals(blocked)
         self._set_range(from_ayah, to_ayah if to_ayah is not None else from_ayah)
 
-    # -- reading ------------------------------------------------------------------
-
     def choice(self) -> tuple[int, int, int]:
-        """``(surah, from_ayah, to_ayah)`` as chosen."""
         return int(self.surah_box.currentData()), self.from_spin.value(), self.to_spin.value()
-
-    # -- keeping the spins and the preview in line ---------------------------------
 
     def _count(self) -> int:
         surahs = self._surahs or {}
         return surahs.get(int(self.surah_box.currentData()), ("", 1))[1]
 
     def _set_range(self, first: int, last: int) -> None:
-        """Bound both spins by the current surah, put *first*–*last* in them, then preview."""
         count = self._count()
         first = min(max(1, first), count)
         last = min(max(first, last), count)
@@ -188,7 +148,6 @@ class AyahPicker(QDialog):
         try:
             self.from_spin.setRange(1, count)
             self.from_spin.setValue(first)
-            # The last ayah is never before the first: the spin will not go there.
             self.to_spin.setRange(first, count)
             self.to_spin.setValue(last)
         finally:
@@ -211,9 +170,8 @@ class AyahPicker(QDialog):
         self._show_preview()
 
     def _show_preview(self) -> None:
-        """The card's text for the chosen range, the first few ayat of a long one."""
         if self._surahs is None:
-            self._preview_unavailable()  # never a preview, nor OK, from a store not read
+            self._preview_unavailable()
             return
         surah, first, last = self.choice()
         try:
@@ -224,7 +182,6 @@ class AyahPicker(QDialog):
         try:
             text = ayah_range_card(conn, surah, first, last)["full_text"]
         except (ValueError, sqlite3.Error):
-            # The store changed or is damaged under the dialog; a card cannot be made from it.
             self._preview_unavailable()
             return
         finally:

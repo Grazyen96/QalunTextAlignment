@@ -57,7 +57,6 @@ SUPPORTED_VERSIONS = ("1", "2")
 REVIEW_STATES = ("needs_review", "reviewed")
 #: Where a job's subtitles go: in the picture, in files beside the video, or both.
 SUBTITLE_CHOICES = ("burn", "sidecar", "both")
-#: Surahs a lecture can be chosen to study.
 SURAH_COUNT = 114
 
 _KNOWN_KEYS = frozenset(
@@ -146,7 +145,6 @@ class Project:
     cards: list[dict[str, Any]] = field(default_factory=list)
     #: Recognised subtitle cues, fully editable.
     captions: list[CaptionCue] = field(default_factory=list)
-    #: Render style tokens. Phase 5 fills this in; unknown keys are preserved.
     style: dict[str, Any] = field(default_factory=dict)
     #: Export choices (burn-in, sidecar files, formats). Preserved verbatim.
     export: dict[str, Any] = field(default_factory=dict)
@@ -164,8 +162,6 @@ class Project:
     extra: dict[str, Any] = field(default_factory=dict)
     #: Where this project was loaded from, when it was.
     path: Path | None = None
-
-    # -- construction ---------------------------------------------------------
 
     @classmethod
     def from_match_file(
@@ -209,8 +205,6 @@ class Project:
             matches=matches_path,
         )
 
-    # -- serialisation --------------------------------------------------------
-
     def to_dict(self, *, relative_to: Path | None = None) -> dict[str, Any]:
         data: dict[str, Any] = dict(self.extra)
         render = None
@@ -236,8 +230,6 @@ class Project:
                 "render": render,
             }
         )
-        # Absent rather than empty when no episode was chosen, so a project
-        # that never chose one is written exactly as before the episode existed.
         if self.episode:
             data["episode"] = self.episode
         return data
@@ -446,8 +438,6 @@ def set_job_settings(project: Project, settings: JobSettings) -> None:
         export["output_dir"] = Path(settings.output_dir).expanduser().resolve().as_posix()
     else:
         export.pop("output_dir", None)
-    # Absent rather than null when unset, so a project that never chose one
-    # reads exactly as it did before the choice existed.
     studied = studied_surah_choice(settings.studied_surah)
     if studied is not None:
         export["studied_surah"] = studied

@@ -63,7 +63,7 @@ class JobEntry:
 def _background(project: Project) -> tuple[int, int, int] | None:
     try:
         return background_for(project)
-    except Exception:  # noqa: BLE001 - a look that cannot be read is not a damaged job
+    except Exception:
         return None
 
 

@@ -44,7 +44,7 @@ def _create_prediction(client: Any, resolved_model_ref: str, prediction_input: d
                 return client.predictions.create(version=version_id, input=prediction_input)
             owner, _, name = owner_name.partition("/")
             return client.models.predictions.create(model=(owner, name), input=prediction_input)
-        except Exception as error:  # noqa: BLE001 — re-raised below when not transient
+        except Exception as error:
             if _transient_status(error) is None:
                 raise
             last_error = error
@@ -71,7 +71,7 @@ def _await_prediction_output(prediction: Any) -> Any:
         try:
             prediction.reload()
             transient_streak = 0
-        except Exception as error:  # noqa: BLE001 — re-raised below when not transient
+        except Exception as error:
             if _transient_status(error) is None:
                 raise
             transient_streak += 1
@@ -117,7 +117,6 @@ def run_whisperx(audio_file_path: Path, settings: AppSettings, model_ref: str) -
                 model_ref,
                 {**settings.whisperx.input_kwargs(), "audio_file": audio_file},
             )
-        # Poll after the file handle is closed — the audio is already uploaded.
         return _await_prediction_output(prediction)
     except WhisperXServiceError:
         raise
@@ -125,10 +124,6 @@ def run_whisperx(audio_file_path: Path, settings: AppSettings, model_ref: str) -
         error_text = str(error)
         status = getattr(error, "status", None)
         if "status: 401" in error_text or status == 401 or "Unauthenticated" in error_text:
-            # Worth spelling out: a 401 means a token arrived and was refused,
-            # which looks identical to having no token unless the message says
-            # otherwise. The token is described rather than printed, because
-            # this text ends up in logs people send to other people.
             from qurantext.config.settings import describe_secret, env_dir
 
             raise WhisperXServiceError(

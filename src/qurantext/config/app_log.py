@@ -66,24 +66,15 @@ __all__ = [
 LOG_MAX_BYTES = 1_000_000
 LOG_BACKUPS = 3
 
-#: Every record says when, how bad, from where, and what; a traceback follows on
-#: its own lines when the record carries one.
 _FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
-#: The logger every module's ``logging.getLogger(__name__)`` descends from.
 _ROOT = "qurantext"
-#: Where uncaught exceptions are logged. Kept off standard error: the previous
-#: hook, which still runs, prints them there already.
 _UNCAUGHT = f"{_ROOT}.uncaught"
 
-#: Set on the handlers and hooks this module installs, so a second call can see
-#: them and the tests can take them away again.
 _MARK = "_qalun_app_log"
 
 _crash_log = logging.getLogger(_UNCAUGHT)
 
-#: The file faulthandler writes to, kept open for as long as the process runs,
-#: and whether faulthandler was on before (the tests put it back as it was).
 _faults: IO[str] | None = None
 _faults_were_enabled = False
 
@@ -101,11 +92,10 @@ class SharedRotatingFileHandler(RotatingFileHandler):
     """
 
     def __init__(self, filename: os.PathLike[str] | str, **kwargs: object) -> None:
-        super().__init__(filename, **kwargs)  # type: ignore[arg-type]
-        #: The file's size below which a refused rotation is not tried again; 0 when none was refused.
+        super().__init__(filename, **kwargs)
         self.retry_at = 0
 
-    def shouldRollover(self, record: logging.LogRecord) -> bool:  # noqa: N802 - logging's name
+    def shouldRollover(self, record: logging.LogRecord) -> bool:
         if self.stream is not None:
             # Measure the file, not what this window wrote: another window appends
             # to it too. Python 3.12.4+ and 3.13 read the position without seeking
@@ -117,15 +107,11 @@ class SharedRotatingFileHandler(RotatingFileHandler):
             return False
         return True
 
-    def doRollover(self) -> None:  # noqa: N802 - logging's name
+    def doRollover(self) -> None:
         if self.stream is not None:
             self.stream.close()
             self.stream = None  # type: ignore[assignment]
         base = self.baseFilename
-        # Unique to this process and this rotation: under a fixed name, a crash
-        # between the steps below, or two windows rotating in the same instant,
-        # let the next rotation overwrite a copy not yet moved to ``.1``. A crash
-        # leaves this file behind under its own name, on disk for whoever looks.
         moving = f"{base}.{os.getpid()}-{uuid.uuid4().hex[:8]}.rotating"
         try:
             os.replace(base, moving)
@@ -140,11 +126,11 @@ class SharedRotatingFileHandler(RotatingFileHandler):
                 try:
                     os.replace(older, f"{base}.{index + 1}")
                 except OSError:
-                    pass  # that copy stays where it is; the next one overwrites it
+                    pass
         try:
             os.replace(moving, f"{base}.1")
         except OSError:
-            pass  # left under its .rotating name, still on disk for whoever looks
+            pass
         self.stream = self._open()
 
 
@@ -153,7 +139,7 @@ def _usable(stream: object) -> bool:
     if stream is None:
         return False
     try:
-        stream.fileno()  # type: ignore[attr-defined]
+        stream.fileno()
     except Exception:
         return False
     return True
@@ -163,10 +149,6 @@ def _file_handler() -> SharedRotatingFileHandler | None:
     """The rotating log file, or None when its folder cannot be made or written."""
     try:
         user_log_dir().mkdir(parents=True, exist_ok=True)
-        # Opened now rather than at the first record, so an unwritable folder
-        # is found here, where it can be passed over, and not mid-crash. A
-        # character UTF-8 cannot write (a file name's undecodable byte, carried
-        # as a surrogate) is escaped rather than losing the whole record.
         return SharedRotatingFileHandler(
             user_log_file(),
             maxBytes=LOG_MAX_BYTES,
@@ -175,8 +157,6 @@ def _file_handler() -> SharedRotatingFileHandler | None:
             errors="backslashreplace",
         )
     except Exception:
-        # OSError above all, but a home folder that cannot be resolved raises
-        # RuntimeError, and no reason is good enough to keep the window shut.
         return None
 
 
@@ -235,7 +215,7 @@ def install_excepthooks() -> None:
             previous(exc_type, exc_value, tb)
 
         setattr(log_uncaught, _MARK, True)
-        log_uncaught.previous = previous  # type: ignore[attr-defined]
+        log_uncaught.previous = previous
         sys.excepthook = log_uncaught
 
     if not getattr(threading.excepthook, _MARK, False):
@@ -251,7 +231,7 @@ def install_excepthooks() -> None:
             previous_thread(args)
 
         setattr(log_thread, _MARK, True)
-        log_thread.previous = previous_thread  # type: ignore[attr-defined]
+        log_thread.previous = previous_thread
         threading.excepthook = log_thread
 
 
@@ -292,7 +272,7 @@ def enable_fault_log() -> Path | None:
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.is_file() and path.stat().st_size > LOG_MAX_BYTES:
             os.replace(path, path.with_name("faults.log.1"))
-        stream = open(path, "a", encoding="utf-8")  # noqa: SIM115 - open for the process's life
+        stream = open(path, "a", encoding="utf-8")
     except Exception:
         return None
     try:
@@ -322,9 +302,9 @@ def _uninstall() -> None:
         handler.close()
     logger.setLevel(logging.NOTSET)
     if getattr(sys.excepthook, _MARK, False):
-        sys.excepthook = sys.excepthook.previous  # type: ignore[attr-defined]
+        sys.excepthook = sys.excepthook.previous
     if getattr(threading.excepthook, _MARK, False):
-        threading.excepthook = threading.excepthook.previous  # type: ignore[attr-defined]
+        threading.excepthook = threading.excepthook.previous
     if _faults is not None:
         if _faults_were_enabled and _usable(sys.__stderr__):
             faulthandler.enable(file=sys.__stderr__, all_threads=True)

@@ -1,29 +1,3 @@
-"""The review window: listen to a job, watch its frame, and correct its timings.
-
-This module is layout and wiring only. What an edit may do lives in
-:class:`ReviewSession` (and below it ``core.timing_edit``); how each widget
-draws lives in that widget (the small bars included: :class:`Banner`,
-:class:`SelectionBar`, :class:`ZoomSlider`, and the :class:`LookPanel`); the slow reads of the recording
-run through :class:`BackgroundJobs`. The window turns what the person does — a key, a
-click, a drag the strip reports — into session calls, and after every change
-brings the widgets, the toolbar and the title back in line with the session.
-
-Keys are bound twice on purpose. ``QShortcut``\\ s make them work whichever
-child has focus (a focused table would otherwise swallow ``.`` as a type-ahead
-search, a focused button would take Space as a click), and
-:meth:`ReviewWindow.keyPressEvent` handles the same keys when they reach the
-window as plain key presses — which is how they arrive before the window is
-active, as in an offscreen test. A key a shortcut consumes never becomes a key
-press, so nothing runs twice.
-
-On a layout that types other letters there (Arabic puts ج on the ``[`` key),
-the punctuation keys match no shortcut and arrive as key presses of that
-letter; ``keyPressEvent`` then reads which physical key it was from
-:data:`SCANCODE_KEYS`, so the shortcuts stay where the person's fingers learned
-them. That is only a fallback for a press nothing else took: a focused caption
-editor or table still receives the letter as the text it is.
-"""
-
 from __future__ import annotations
 
 import copy
@@ -144,26 +118,14 @@ SCANCODE_KEYS: dict[str, dict[int, Qt.Key]] = {
     },
 }
 
-#: The playhead poll while playing: often enough that the highlight looks continuous.
 _TICK_MS = 16
-#: How long after the last edit the coverage check re-runs.
 _COVERAGE_DEBOUNCE_MS = 1000
-#: The nudge step with Shift held, in seconds (the plain step is ``NUDGE_S``).
 _FINE_NUDGE_S = 0.01
-#: The timeline window shown on open, before the person zooms.
 _DEFAULT_SPAN_S = 20.0
-#: The room either side of a toolbar separator, in pixels (the buttons keep the style's).
 _SEPARATOR_GAP = 4
-#: How far one press of a zoom button moves the zoom slider (of its 0–100).
 _ZOOM_STEP = 10
-#: The least the left column's Look panel keeps under the preview before the
-#: fitted preview starts to give way to a short window.
 _LOOK_MIN_HEIGHT = 120
-#: The room ``_size_columns`` asks the right column to keep beside a left column
-#: at the preset's width: the wide branch is taken only when the window leaves it.
-#: The splitter then clamps the left column to what the right column's minimum leaves.
 _TIMELINE_ROOM = 700
-#: What the render's progress bar says during each of the episode's steps.
 _EPISODE_PROGRESS_KEYS = {
     "episode_lecture": "render.running_lecture",
     "episode_intro": "render.running_intro",
@@ -186,22 +148,12 @@ def _platform_family() -> str:
 
 
 def _physical_key(event: QKeyEvent) -> Qt.Key | None:
-    """The layout-dependent shortcut key *event*'s physical key is, if it is one."""
     platform = _platform_family()
     code = event.nativeVirtualKey() if platform == "macos" else event.nativeScanCode()
     return SCANCODE_KEYS[platform].get(code)
 
 
 class _FrameScroll(QScrollArea):
-    """The preview's scroll area, asking for the preview's whole preset size.
-
-    A plain :class:`QScrollArea` caps its size hint at 24 lines of text, which
-    is less than a portrait preview's 480 px. Fitted (the area resizes its
-    frame), a column narrower than the preset asks for only the height the
-    frame then takes at the preset's shape, so no empty band is left under a
-    landscape frame; the hint follows the area's width as it changes.
-    """
-
     def sizeHint(self) -> QSize:  # noqa: D102 - Qt override, documented by the class
         widget = self.widget()
         if widget is None:
@@ -217,23 +169,15 @@ class _FrameScroll(QScrollArea):
     def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 - Qt override
         super().resizeEvent(event)
         if event.oldSize().width() != event.size().width():
-            self.updateGeometry()  # a new width is a new height to ask for
+            self.updateGeometry()
 
 
 class _LookScroll(QScrollArea):
-    """The Look panel's scroll area, asking for its :data:`_LOOK_MIN_HEIGHT` floor in height.
-
-    Its whole panel's height would crowd the preview out of a short window,
-    and no height at all (an Ignored policy) would open the window that much
-    too short, as a window shown at its size hint is.
-    """
-
     def sizeHint(self) -> QSize:  # noqa: D102 - Qt override, documented by the class
         return QSize(super().sizeHint().width(), _LOOK_MIN_HEIGHT)
 
 
 def _separator() -> QFrame:
-    """A 1 px upright rule between two groups of toolbar buttons (the sheet colours it)."""
     line = QFrame()
     line.setFrameShape(QFrame.Shape.VLine)
     line.setFrameShadow(QFrame.Shadow.Plain)
@@ -244,12 +188,6 @@ def _separator() -> QFrame:
 
 
 def _is_portrait(project: Project) -> bool:
-    """Whether the job's video is taller than wide: the job's preset, else its last render.
-
-    The preset is what the next render makes, so it wins over the size of a
-    render made before the job was re-run with another one. A project that
-    never recorded a preset falls back to the size it was last rendered at.
-    """
     chosen = project.export.get("preset")
     if isinstance(chosen, str) and chosen in VIDEO_PRESETS:
         width, height = VIDEO_PRESETS[chosen][:2]
@@ -262,29 +200,20 @@ def _is_portrait(project: Project) -> bool:
 
 
 def _card_number(card: dict, key: str) -> int | None:
-    """A card's surah or ayah number when it has a usable one (a preamble card has none)."""
     value = card.get(key)
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
 
 def _content_end(project: Project) -> float:
-    """The latest time any card or caption reaches: a timeline length before the audio is read."""
     ends = [float(card.get("end_time") or 0.0) for card in project.cards]
     ends += [float(cue.end) for cue in project.captions]
     return max(ends, default=0.0)
 
 
 class ReviewWindow(QMainWindow):
-    """One project under review: toolbar, warnings, frame, look, timeline, segment list."""
-
-    #: The project file was written; carries its path.
     saved = Signal(object)
-    #: The person asked to export subtitles (handled by whoever opened the window).
     export_requested = Signal()
-    #: The person asked to render with the corrections.
     render_requested = Signal()
-    #: A close was accepted and the window stopped everything it ran; whoever
-    #: opened it should let it go (the next review loads the project afresh).
     closed = Signal()
 
     def __init__(
@@ -298,47 +227,28 @@ class ReviewWindow(QMainWindow):
     ) -> None:
         super().__init__(parent)
         self.session = ReviewSession(project)
-        #: The Quran store a hand-made card's text is read from.
         self._db_path = db_path
-        #: Where "Use for new videos" keeps the default look.
         self._prefs = prefs if prefs is not None else Prefs()
         self.player = player if player is not None else create_player(self)
         self.viewport = Viewport(self)
         self._jobs = BackgroundJobs(self)
         self._audio = Path(project.audio)
-        #: The recording's speech levels, decoded once; coverage re-checks read these.
         self._levels: tuple[list[float], list[float], float] | None = None
         self._reading_levels = False
         self._reading_peaks = False
-        #: A measured recording length has sized the timeline (so the zoom is the person's now).
         self._measured = False
-        #: The segment the list last highlighted, so a tick only moves it on a change.
         self._highlighted: tuple[str, int] | None = None
         self._closed = False
-        #: The session revision the views last caught up with (see ``_after_caption_edit``).
         self._seen_revision = self.session.revision
-        #: How many cards and captions there were when the views last caught up
-        #: (see ``_drop_stale_selection``).
         self._seen_counts = self._segment_counts()
-        #: Whether a render job is running: gates the editing actions while it is.
         self._rendering = False
         self._render_cancel: CancelToken | None = None
-        #: The deep copy handed to the render job; read back into the live
-        #: project's ``render`` once the job finishes (see ``_on_render_finished``).
         self._render_project_copy: Project | None = None
-        #: The running render was stopped by "Stop and close": what it does from
-        #: now on is taken back but never announced (see ``_stop_render_to_close``).
         self._render_stopped_to_close = False
-        #: That render did not end within the close's wait, so its job may still
-        #: write the project file over a save made since (see ``_take_back_render``).
         self._render_outlived_stop = False
-        #: The segment list's edit triggers, saved while a render disables them.
         self._segment_list_edit_triggers: QAbstractItemView.EditTrigger | None = None
-        #: The progress bar's sentence for the running render's current step.
         self._render_progress_key = "render.running"
-        #: The sheet of every shortcut, made the first time it is asked for.
         self.shortcut_sheet: ShortcutSheet | None = None
-        #: The frame shown full size after a double-click on the preview, while it is open.
         self._full_frame: FullFrameView | None = None
 
         self._build()
@@ -357,7 +267,6 @@ class ReviewWindow(QMainWindow):
 
         self._set_duration(_content_end(project), measured=False)
         if not self.player.available:
-            # One short line in the strip; the technical reason is on the button.
             self.play_button.setEnabled(False)
             self.play_button.setToolTip(self.player.reason)
             self.warnings.add_notice(t("player.unavailable_short"))
@@ -367,12 +276,9 @@ class ReviewWindow(QMainWindow):
         else:
             self.waveform.set_missing()
             self.warnings.add_notice(t("review.audio_missing", path=path_text(self._audio)))
-        # Connected now: a chosen image that has gone missing is said on opening.
         self.look_panel.announce()
         self._sync_state()
         self._show_time(self.player.position(), force=True)
-
-    # -- layout ---------------------------------------------------------------
 
     def _build(self) -> None:
         central = QWidget(self)
@@ -384,12 +290,10 @@ class ReviewWindow(QMainWindow):
         self.redo_button = QPushButton(t("review.redo"))
         self.reviewed_button = QPushButton(t("review.mark_reviewed"))
         self.remove_button = QPushButton(t("review.remove"))
-        # The label is short to keep the toolbar within 1280 px; the tip says it whole.
         self.remove_button.setToolTip(t("review.remove.tip"))
         self.export_button = QPushButton(t("review.export"))
         self.render_button = QPushButton(t("review.render"))
         self.render_button.setToolTip(t("review.render.tip"))
-        # A lecture's episode: what plays around it, and whether anything does.
         self.episode_button = QPushButton(t("review.episode"))
         self.episode_button.setToolTip(t("review.episode.tip"))
         self.episode_label = QLabel(t("review.episode_on"))
@@ -410,14 +314,8 @@ class ReviewWindow(QMainWindow):
             (self.episode_button, "sparkles"),
         ):
             set_icon(button, name)
-        # On the accent fill, in the colour the label beside it is drawn in.
         set_icon(self.render_button, "film", role="on_accent")
         make_primary(self.render_button)
-        # Grouped by what the buttons act on: the file's history, the selected
-        # rows, then (after the stretch) the lecture's surah and what leaves the
-        # window. Each group keeps the style's spacing; a separator sits only
-        # _SEPARATOR_GAP from its neighbours, which is what keeps the toolbar
-        # within a 1280 px screen.
         gap = self.style().pixelMetric(QStyle.PixelMetric.PM_LayoutHorizontalSpacing)
         toolbar.setSpacing(_SEPARATOR_GAP)
         history, rows, outward = QHBoxLayout(), QHBoxLayout(), QHBoxLayout()
@@ -432,7 +330,6 @@ class ReviewWindow(QMainWindow):
         toolbar.addLayout(rows)
         toolbar.addWidget(_separator())
         toolbar.addStretch(1)
-        # A lecture's cards keep to one surah; which one is the person's to say.
         self.studied_surah_label = QLabel(t("review.studied_surah"))
         self.studied_surah_box = QComboBox()
         self.studied_surah_box.setToolTip(t("review.studied_surah.tip"))
@@ -468,7 +365,6 @@ class ReviewWindow(QMainWindow):
         self.warnings = Banner()
         column.addWidget(self.warnings)
 
-        # Left: the frame and the Look that changes it, at the preset's width.
         self.frame_view = FrameView(self.session, portrait=_is_portrait(self.session.project))
         self.frame_scroll = _FrameScroll()
         self.frame_scroll.setWidget(self.frame_view)
@@ -490,10 +386,8 @@ class ReviewWindow(QMainWindow):
         fit_group.setExclusive(True)
         fit_group.addButton(self.fit_button)
         fit_group.addButton(self.actual_button)
-        # The full-size view, also a double-click on the preview away.
         self.full_frame_button = QToolButton()
         self.full_frame_button.setAutoRaise(True)
-        # Its own tip: the preview's names the double-click, which a button does not need.
         self.full_frame_button.setToolTip(t("review.full_frame_button"))
         self.full_frame_button.setAccessibleName(t("review.full_frame_button"))
         set_icon(self.full_frame_button, "maximize-2", size=16)
@@ -505,18 +399,11 @@ class ReviewWindow(QMainWindow):
         self.left_column = QWidget()
         left = QVBoxLayout(self.left_column)
         left.setContentsMargins(0, 0, 0, 0)
-        # The preview keeps its preset height and the Look panel under it takes
-        # what is left, scrolling; only when that would leave the panel less
-        # than _LOOK_MIN_HEIGHT does the fitted preview give way (to half size).
         left.addWidget(self.frame_scroll, 0)
         left.addLayout(fit_row)
         left.addWidget(self._build_look_panel(), 1)
-        # As narrow as a portrait preview for every preset, so a landscape job
-        # fits a 1280 px screen too; the splitter opens it wider when there is
-        # room (see _size_columns) and the fitted frame scales to the column.
         self.left_column.setMinimumWidth(PORTRAIT_PREVIEW_WIDTH + 2 * theme.SP_12)
 
-        # Right: the timeline and its transport, then the table down to the status bar.
         self.right_column = QWidget()
         right = QVBoxLayout(self.right_column)
         right.setContentsMargins(0, 0, 0, 0)
@@ -527,16 +414,13 @@ class ReviewWindow(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self.left_column)
         splitter.addWidget(self.right_column)
-        # Neither column can be dragged away, and extra width goes to the timeline.
         splitter.setChildrenCollapsible(False)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         self._splitter = splitter
-        #: Whether the first show has given the columns their opening widths.
         self._columns_sized = False
         column.addWidget(splitter, 1)
 
-        # A short line with a link to the sheet that lists every key.
         self.hint_label = QLabel(hint_html())
         self.hint_label.setTextFormat(Qt.TextFormat.RichText)
         self.hint_label.setTextInteractionFlags(
@@ -549,7 +433,6 @@ class ReviewWindow(QMainWindow):
         self._set_preview_fit(self._prefs.preview_fit, remember=False)
 
     def _build_look_panel(self) -> QScrollArea:
-        """The Look panel under the frame it changes, scrolling when the window is short."""
         self.look_panel = LookPanel(
             self.session,
             prefs=self._prefs,
@@ -561,8 +444,6 @@ class ReviewWindow(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        # It asks for its floor only (see _LookScroll) and takes whatever the
-        # preview leaves; below that floor the preview gives way instead.
         scroll.setMinimumHeight(_LOOK_MIN_HEIGHT)
         self.look_scroll = scroll
         return scroll
@@ -585,7 +466,6 @@ class ReviewWindow(QMainWindow):
             button.setAccessibleName(t(key))
             set_icon(button, name, size=16)
             button.clicked.connect(partial(self._zoom_step, step))
-        # How much of the recording the timeline shows, in words.
         self.zoom_readout = QLabel()
         self.zoom_readout.setFont(theme.font("secondary"))
         for widget in (
@@ -605,9 +485,6 @@ class ReviewWindow(QMainWindow):
         right.addWidget(self.waveform)
         right.addWidget(self.strip)
 
-        # Play, the steps, the clock, the rate, the nudges and (in a lecture)
-        # "Show ayah… from here": the playhead's own controls, off the toolbar
-        # a render fills.
         self.transport = Transport(RATES)
         self.transport.set_lecture(self._is_lecture())
         self.play_button = self.transport.play_button
@@ -643,10 +520,7 @@ class ReviewWindow(QMainWindow):
         self.segment_list.seek_requested.connect(self.seek)
         self.segment_list.card_ayah_requested.connect(self._change_card_ayah)
         self.transport.show_ayah_requested.connect(self._show_ayah_from_here)
-        # Remove is offered only while a row is selected. Only the button: a full _sync_state
-        # here would mark a removal as seen before _drop_stale_selection could act on it.
         self.segment_list.itemSelectionChanged.connect(self._update_remove_button)
-        # Connected after the list's own handler, so the caption text is already in the session.
         self.segment_list.itemChanged.connect(self._after_caption_edit)
         self.transport.play_toggled.connect(self.toggle_play)
         self.transport.step_requested.connect(self._step)
@@ -670,15 +544,10 @@ class ReviewWindow(QMainWindow):
     def _bind_keys(self) -> None:
         bindings: list[tuple[str, Callable[[], None]]] = [
             ("Space", self.toggle_play),
-            # The timeline runs right to left, so the arrows follow it on
-            # screen: Left goes to the next (later) word, Right to the previous.
             ("Left", partial(self._step, 1)),
             ("Right", partial(self._step, -1)),
             ("[", self._set_start_at_playhead),
             ("]", self._set_end_at_playhead),
-            # The nudges match their keys' < and > to the screen: "," moves the
-            # edge left, which on the right-to-left timeline is later, and "."
-            # moves it right, earlier.
             (",", partial(self._nudge, NUDGE_S)),
             (".", partial(self._nudge, -NUDGE_S)),
             ("Shift+,", partial(self._nudge, _FINE_NUDGE_S)),
@@ -712,7 +581,6 @@ class ReviewWindow(QMainWindow):
         self._keys["Shift+/"] = self.show_shortcuts
 
     def _set_tips(self) -> None:
-        """Say each button's shortcut on the button itself, where a person hovers to learn it."""
         native = QKeySequence.SequenceFormat.NativeText
         tips = (
             (self.save_button, "Ctrl+S"),
@@ -722,7 +590,6 @@ class ReviewWindow(QMainWindow):
         for button, keys in tips:
             shown = QKeySequence(keys).toString(native)
             button.setToolTip(t("review.tip", action=button.text(), keys=shown))
-        # The play button's tip, naming Space, is the transport's: it follows the button.
         transport = self.transport
         transport.minus_button.setToolTip(
             t("review.tip_fine", action=transport.minus_button.text(), keys=".")
@@ -732,7 +599,6 @@ class ReviewWindow(QMainWindow):
         )
 
     def show_shortcuts(self) -> None:
-        """Open the sheet of every shortcut (one sheet, raised again when already open)."""
         if self.shortcut_sheet is None:
             self.shortcut_sheet = ShortcutSheet(self)
         self.shortcut_sheet.show()
@@ -773,14 +639,11 @@ class ReviewWindow(QMainWindow):
             return None
         return self._keys.get(QKeySequence(QKeyCombination(modifiers, key)).toString())
 
-    # -- playback -------------------------------------------------------------
-
     def toggle_play(self) -> None:
         if self.player.available:
             self.player.toggle()
 
     def seek(self, seconds: float) -> None:
-        """Move the playhead to *seconds* and bring every view there at once."""
         self.player.seek(seconds)
         self._show_time(seconds, force=True)
 
@@ -802,12 +665,6 @@ class ReviewWindow(QMainWindow):
         self.frame_view.show_at(seconds, force=force)
 
     def _highlight_segment(self, seconds: float, *, force: bool) -> None:
-        """Move the list's current row to the segment at *seconds*, but only on a change.
-
-        Moving the current cell closes an open editor, so while the person is
-        correcting a caption the list is left alone; it catches up on the
-        first tick after the edit ends.
-        """
         if self.segment_list.state() == QAbstractItemView.State.EditingState:
             return
         segment = self.segment_list.segment_at(seconds)
@@ -819,8 +676,6 @@ class ReviewWindow(QMainWindow):
     def _on_playing_changed(self, playing: bool) -> None:
         self.transport.set_playing(playing)
         if not self.player.available:
-            # The transport's tip names the button's action; without a player
-            # the tip is the reason instead, and stays so.
             self.play_button.setToolTip(self.player.reason)
         if playing:
             self._timer.start()
@@ -829,25 +684,17 @@ class ReviewWindow(QMainWindow):
             self._show_time(self.player.position(), force=True)
 
     def _play_video(self, path: Path) -> None:
-        """Open the rendered video in the person's own player; say so when none opens it."""
         if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
             self.warnings.add_notice(t("render.play_failed"))
 
-    # -- the preview ------------------------------------------------------------
-
     def _set_preview_fit(self, fit: bool, *, remember: bool = True) -> None:
-        """Fit the frame to its column, or show it at the preset's size (scrolling if need be)."""
         self.frame_view.set_fit(fit)
         self.frame_scroll.setWidgetResizable(fit)
-        # Fitted, the frame never scrolls: its area keeps the least height the
-        # frame shrinks to, and the Look panel under it gives way instead.
         policy = (
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff if fit else Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
         self.frame_scroll.setVerticalScrollBarPolicy(policy)
         self.frame_scroll.setHorizontalScrollBarPolicy(policy)
-        # Either way the area asks for the preset's height (see _FrameScroll) and
-        # gives way down to half of it, as the fitted frame does.
         self.frame_scroll.setMinimumHeight(self.frame_view.minimumSizeHint().height())
         self.frame_scroll.updateGeometry()
         (self.fit_button if fit else self.actual_button).setChecked(True)
@@ -855,15 +702,6 @@ class ReviewWindow(QMainWindow):
             self._prefs.preview_fit = fit
 
     def _size_columns(self) -> None:
-        """Open the left column at the preset's width when the splitter has the room.
-
-        Asks for the preset's width plus the column's margins when the window
-        leaves the right column at least :data:`_TIMELINE_ROOM`, else for the
-        column's minimum. The splitter clamps what is asked to what the right
-        column's minimum leaves, so on a window too narrow for both the left
-        column opens narrower than the preset. The person can drag the splitter
-        either way afterwards.
-        """
         layout = self.centralWidget().layout()
         if layout is not None:
             layout.activate()
@@ -875,7 +713,6 @@ class ReviewWindow(QMainWindow):
             self._splitter.setSizes([left, total - left])
 
     def _show_full_frame(self, seconds: float) -> None:
-        """Show the frame at *seconds* full size; playback goes on underneath."""
         if self._full_frame is not None:
             self._full_frame.deleteLater()
         full = FullFrameView(
@@ -887,19 +724,15 @@ class ReviewWindow(QMainWindow):
         full.setFocus()
 
     def _on_full_frame_closed(self, full: FullFrameView) -> None:
-        """Let a closed full-size view go, so hidden ones do not pile up, and come back here."""
         if self._full_frame is full:
             self._full_frame = None
         full.deleteLater()
         self.activateWindow()
 
-    # -- timeline -------------------------------------------------------------
-
     def _zoom_step(self, delta: int) -> None:
         self.zoom_slider.setValue(max(0, min(100, self.zoom_slider.value() + delta)))
 
     def _show_span(self) -> None:
-        """Say how much of the recording the timeline shows: seconds, or minutes and seconds."""
         span = self.viewport.span
         if span >= 60:
             self.zoom_readout.setText(
@@ -913,18 +746,11 @@ class ReviewWindow(QMainWindow):
             self.zoom_readout.setText(tn("review.span", int(round(span))))
 
     def _set_duration(self, duration: float, *, measured: bool = True) -> None:
-        """Size the timeline to *duration* seconds, keeping the view near the default span.
-
-        Only a *measured* length (the player's, or the decoded peaks') bounds
-        a ripple; the content's own extent, used until one arrives, does not.
-        """
         duration = float(duration)
         if duration <= 0:
             return
         if measured:
             self.session.duration = duration
-        # Once a measured length has sized the view, a later one (peaks after the
-        # player, say) only re-clamps it: the zoom is the person's by then.
         choose_span = not self._measured
         self._measured = self._measured or measured
         if math.isclose(duration, self.viewport.duration):
@@ -932,8 +758,6 @@ class ReviewWindow(QMainWindow):
         self.viewport.set_duration(duration)
         if choose_span:
             self.viewport.set_window(self.viewport.start, min(_DEFAULT_SPAN_S, duration))
-
-    # -- editing --------------------------------------------------------------
 
     def _step(self, direction: int) -> None:
         ref = self.session.step(self.strip.selected, direction)
@@ -959,7 +783,6 @@ class ReviewWindow(QMainWindow):
             self._after_edit()
 
     def _nudge(self, delta: float) -> None:
-        """Move the selected word's armed edge (its start, by default) by *delta* seconds."""
         if self._rendering:
             return
         ref = self.strip.selected
@@ -973,7 +796,6 @@ class ReviewWindow(QMainWindow):
         self._after_edit()
 
     def _snap_to_playhead(self) -> None:
-        """Move whichever edge of the selected word is nearer the playhead onto it."""
         if self._rendering:
             return
         ref = self.strip.selected
@@ -994,13 +816,11 @@ class ReviewWindow(QMainWindow):
         self._after_edit()
 
     def _remove_selected(self) -> None:
-        """Remove the selected row(s); says so in the status bar if none is selected."""
         if self._rendering:
             return
         if not self.segment_list.remove_selected():
             self.statusBar().showMessage(t("review.remove_none"), 4000)
             return
-        # The list already rebuilt itself; bring the rest of the window in line.
         self._drop_stale_selection()
         self.strip.refresh()
         self._highlight_segment(self.player.position(), force=True)
@@ -1010,15 +830,6 @@ class ReviewWindow(QMainWindow):
             self._coverage_timer.start()
 
     def _show_ayah_from_here(self) -> None:
-        """Ask which ayat to show from the playhead on, and place that card.
-
-        The picker opens on the card the frame shows there (its surah and
-        range), which is what the person is looking at when they decide it is
-        wrong or missing. Before the first card it opens on the lecture's
-        studied surah, chosen or else guessed, at its first ayah: the ayah a
-        teacher goes back to is most often in the surah being studied. Cancel
-        changes nothing.
-        """
         if self._rendering:
             return
         at = self.player.position()
@@ -1034,7 +845,6 @@ class ReviewWindow(QMainWindow):
             )
 
     def _change_card_ayah(self, index: int) -> None:
-        """Ask which ayat card *index* shows, keeping its times; Cancel changes nothing."""
         if self._rendering or not 0 <= index < len(self.session.project.cards):
             return
         card = self.session.project.cards[index]
@@ -1053,15 +863,9 @@ class ReviewWindow(QMainWindow):
         return index
 
     def _studied_surah_guess(self) -> int:
-        """The surah chosen for the cards, else the one guessed for them, else al-Fatiha."""
         return self.session.studied_surah or self.session.guessed_studied_surah or 1
 
     def _ask_ayat(self, surah: int, first: int, last: int | None) -> tuple[int, int, int] | None:
-        """The ``(surah, from_ayah, to_ayah)`` the person picks, or None when they cancel.
-
-        Playback pauses while the picker is open, so the frame redrawn after
-        OK is still the moment the card was placed at, not a later one past it.
-        """
         if self.player.is_playing():
             self.player.pause()
         picker = AyahPicker(self, surah=surah, from_ayah=first, to_ayah=last, db_path=self._db_path)
@@ -1073,13 +877,6 @@ class ReviewWindow(QMainWindow):
             picker.deleteLater()
 
     def _edit_card(self, title: str, edit: Callable[[], int | None]) -> None:
-        """Run a card edit, then bring every view along and show the card in the list.
-
-        The session raises one ``ValueError``, in the window's language, for a
-        reference the store does not have and for a store it cannot read;
-        nothing changed then, so there is nothing to redraw, only the reason
-        to say.
-        """
         try:
             index = edit()
         except ValueError as error:
@@ -1087,8 +884,6 @@ class ReviewWindow(QMainWindow):
             return
         self._after_edit()
         if index is not None:
-            # In a lecture the playhead's row is a caption, listed after every card:
-            # without this the card just placed or changed may be out of sight.
             self.segment_list.show_card(index)
 
     def undo(self) -> None:
@@ -1105,35 +900,25 @@ class ReviewWindow(QMainWindow):
 
     def _after_caption_edit(self, _item: object) -> None:
         if self.session.revision != self._seen_revision:
-            # Not refreshing the list: it is mid-signal for the edited cell.
             self._after_edit(refresh_list=False)
 
     def _after_edit(self, *, refresh_list: bool = True) -> None:
-        """Bring every view back in line with the session after any change."""
         self._drop_stale_selection()
         self.strip.refresh()
         if refresh_list:
             self.segment_list.refresh()
-            # The rebuilt rows carry no playhead mark yet.
             self._highlight_segment(self.player.position(), force=True)
         self._sync_state()
-        # Undo, redo and discard may have changed the look too; a no-op when not.
         self.look_panel.refresh()
         self.frame_view.show_at(self.player.position(), force=True)
         if self._levels is not None:
             self._coverage_timer.start()
 
     def _after_look_change(self) -> None:
-        """The look changed from its panel: redraw the frame, and bring undo and the title along.
-
-        Lighter than ``_after_edit``: no word, card or caption moved, so the
-        strip, the list and the coverage check stay as they are.
-        """
         self._sync_state()
         self.frame_view.show_at(self.player.position(), force=True)
 
     def _known_surah_names(self) -> dict[int, str]:
-        """Surah names for the picker: the store's, else whatever the cards carry."""
         names = stored_surah_names()
         for card in self.session.project.cards:
             num, name = card.get("surah_num"), card.get("surah_name")
@@ -1142,7 +927,6 @@ class ReviewWindow(QMainWindow):
         return names
 
     def _on_studied_surah(self) -> None:
-        """The surah on the cards changed: one undoable edit, and the frame redrawn."""
         self.session.set_studied_surah(self.studied_surah_box.currentData())
         self._after_look_change()
 
@@ -1151,14 +935,6 @@ class ReviewWindow(QMainWindow):
         return len(project.cards), len(project.captions)
 
     def _drop_stale_selection(self) -> None:
-        """Clear the strip's selection when the last change added or removed a segment.
-
-        A :class:`WordRef` is a position. Once a card or caption before it is
-        removed (or an undo puts one back) the same position names a
-        different word, which the strip would go on showing as selected and
-        a nudge would then retime. Only a change in the segment counts can do
-        that, so an ordinary retime keeps its selection.
-        """
         if self._segment_counts() != self._seen_counts:
             self.strip.select(None)
             self._show_selection(None)
@@ -1167,10 +943,6 @@ class ReviewWindow(QMainWindow):
         session = self.session
         self._seen_revision = session.revision
         self._seen_counts = self._segment_counts()
-        # A render reads a snapshot taken when it started, but undo, save and the
-        # timing edits wait for it to finish all the same. The Look panel stays
-        # open (a look changed meanwhile only makes the render stale), so a look
-        # change made during a render is undone once the render is done.
         editable = not self._rendering
         self.save_button.setEnabled(session.dirty and editable)
         self.undo_button.setEnabled(session.can_undo and editable)
@@ -1190,8 +962,6 @@ class ReviewWindow(QMainWindow):
         return str(self.session.project.mode).lower() == "lecture"
 
     def _show_studied_surah(self) -> None:
-        """Bring the picker back in line after undo, redo, discard or save, and say
-        when the chosen surah has no card (the video then shows only its title card)."""
         blocked = self.studied_surah_box.blockSignals(True)
         try:
             select_studied_surah(self.studied_surah_box, self.session.studied_surah)
@@ -1205,7 +975,6 @@ class ReviewWindow(QMainWindow):
         )
 
     def _update_remove_button(self) -> None:
-        """Offer Remove only for a selected row, and never during a render."""
         self.remove_button.setEnabled(
             not self._rendering and bool(self.segment_list.selectedIndexes())
         )
@@ -1213,30 +982,24 @@ class ReviewWindow(QMainWindow):
     def _show_selection(self, ref: WordRef | None) -> None:
         self.selection_bar.show_word(self.session.word(ref) if ref is not None else None)
 
-    # -- export and render ------------------------------------------------------
-
     def _open_export_dialog(self) -> None:
         if self._rendering:
             return
         self._make_export_dialog().exec()
-        # The dialog may have saved the session on our behalf; catch up either way.
         self._sync_state()
 
     def _make_export_dialog(self) -> ExportDialog:
-        """The Export dialog for this session; a save it makes is announced as ours."""
         dialog = ExportDialog(self.session, self)
         dialog.saved.connect(self.saved)
         return dialog
 
     def _open_episode_dialog(self) -> None:
-        """Choose the intro, recitation and outro; OK is one undoable edit."""
         if self._rendering or not self._is_lecture():
             return
         dialog = EpisodeDialog(self.session, prefs=self._prefs, parent=self)
         try:
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 return
-            # OK made the edit itself (the clips copied beside the project first).
             if dialog.default_error:
                 self.statusBar().showMessage(dialog.default_error, 8000)
             self._sync_state()
@@ -1246,36 +1009,21 @@ class ReviewWindow(QMainWindow):
             dialog.deleteLater()
 
     def show_notices(self, notices: tuple[str, ...] | list[str]) -> None:
-        """Keep *notices* (what the job that made this project could not do) in view."""
         for notice in notices:
             self.warnings.add_notice(notice)
 
     def _start_render(self) -> None:
-        """Save, then render a snapshot of the project's cards and captions in a worker.
-
-        The job never sees the live ``Project``: it gets a deep copy, so a
-        render running for minutes cannot be mutated by (or itself mutate) a
-        project the person is still, in principle, looking at. Timing edits
-        are disabled for the duration (see ``_set_render_running``); the look
-        is not, so the live project may differ from the copy in its ``style``
-        too. Only ``render`` is copied back (in ``_on_render_finished``) once
-        the job is done; a look changed meanwhile leaves that render stale.
-        """
         if self._rendering:
             return
         if self.session.dirty and not self.save():
             return
         snapshot = copy.deepcopy(self.session.project)
         self._render_project_copy = snapshot
-        # With an episode, the bar names each step: the lecture, then the rest.
         has_episode = self._is_lecture() and not self.session.episode.is_empty
         self._render_progress_key = "render.running_lecture" if has_episode else "render.running"
         self._render_stopped_to_close = False
-        # The last render's episode error is about that render, not this one.
         self.warnings.set_episode_notice(None)
         self._set_render_running(True)
-        # No preset or subtitles here: ``run_render`` reads the job's own, so
-        # this renders what the job was started for.
         self._render_cancel = self._jobs.start(
             lambda progress, cancel: jobs_module.run_render(
                 snapshot, progress=progress, cancel=cancel
@@ -1301,25 +1049,12 @@ class ReviewWindow(QMainWindow):
         self._take_back_render(always=True)
         if self._closed or self._render_stopped_to_close:
             return
-        # Said before the announcement, which waits for the person to close it.
         for code in outcome.look_warnings:
             self.warnings.add_look_notice(look_warning_text(code))
-        # Why this render's episode was not made, until the next render says otherwise.
         self.warnings.set_episode_notice(outcome.episode_error)
         self._announce_render(outcome)
 
     def _take_back_render(self, *, always: bool = False) -> None:
-        """Copy the job's render record onto the live project, and say the file changed.
-
-        ``render`` is the only field the job changes: it is copied back rather
-        than the whole snapshot, so it never overwrites an edit made meanwhile
-        (the look stays editable during a render). A render that stopped or
-        failed after its video was written and recorded (a lecture whose
-        episode step was then cancelled, say) has saved that record too; it
-        is taken back as well, or the session's next save would write the
-        old record over it. *always* announces the save even when the record
-        is unchanged, as a finished render does.
-        """
         copied = self._render_project_copy
         if copied is not None and (always or copied.render != self.session.project.render):
             self.session.project.render = copy.deepcopy(copied.render)
@@ -1327,16 +1062,12 @@ class ReviewWindow(QMainWindow):
         else:
             changed = False
         if (always or changed) and self.session.project.path is not None:
-            # The render recorded itself in the project file (``render_project`` saves it).
             if self._render_outlived_stop and not self.session.dirty:
-                # It wrote its copy of the project, from before the edits saved after
-                # "Stop and close", over that save: put the saved state back, record and all.
                 with suppress(OSError, ValueError):
                     self.session.save()
             self.saved.emit(self.session.project.path)
 
     def _on_render_done(self) -> None:
-        # Runs even after close, so the flags are right if the window reopens.
         self._set_render_running(False)
         self._render_stopped_to_close = False
         self._render_outlived_stop = False
@@ -1351,15 +1082,11 @@ class ReviewWindow(QMainWindow):
             self.render_progress.setToolTip("")
         self._rendering = running
         self.render_button.setEnabled(not running)
-        # The progress bar and Cancel take the button's place, so the toolbar keeps
-        # its width and the window fits a 1280 px screen while a render runs.
         self.render_button.setVisible(not running)
-        # The episode is part of what is rendered: chosen before, not during.
         self.episode_button.setEnabled(not running)
         self.episode_button.setVisible(not running and self._is_lecture())
         self.export_button.setEnabled(not running)
         self.strip.setEnabled(not running)
-        # The nudges are edits and wait; play, the steps and the rate go on working.
         self.transport.nudge_row.setEnabled(not running)
         self.segment_list.set_cards_editable(not running)
         if running:
@@ -1371,7 +1098,6 @@ class ReviewWindow(QMainWindow):
         self.render_cancel_button.setVisible(running)
         self.render_cancel_button.setEnabled(running)
         if running:
-            # The last render's line is about that render, not this one.
             self.warnings.clear_render()
             self.render_progress.setValue(0)
             self.render_progress.setFormat(t(self._render_progress_key, percent=0))
@@ -1383,7 +1109,6 @@ class ReviewWindow(QMainWindow):
     def _on_render_progress(self, event: ProgressEvent) -> None:
         step = _EPISODE_PROGRESS_KEYS.get(event.stage)
         if step is not None and step != self._render_progress_key:
-            # The lecture is done; the episode's next step starts from nothing.
             self._render_progress_key = step
             self.render_progress.setToolTip(t(f"job.stage.{event.stage}"))
             if event.fraction is None:
@@ -1396,17 +1121,12 @@ class ReviewWindow(QMainWindow):
         self.render_progress.setFormat(t(self._render_progress_key, percent=percent))
 
     def _announce_render(self, outcome: JobOutcome) -> None:
-        """Say the render is ready on the banner; an episode that failed still asks for a look.
-
-        The tests replace this to keep a finished render quiet.
-        """
         duration = self.session.duration if self._measured else None
         self.warnings.set_render_done(outcome, duration)
         if outcome.episode_error:
             self._say_render("failed", outcome.episode_error)
 
     def _say_render(self, kind: str, text: str) -> None:
-        """Say something about a render that did not simply finish (tests replace this)."""
         icon = QMessageBox.Icon.Warning if kind == "failed" else QMessageBox.Icon.Information
         box = QMessageBox(self)
         box.setIcon(icon)
@@ -1427,16 +1147,6 @@ class ReviewWindow(QMainWindow):
         self._say_render("cancelled", t("render.cancelled"))
 
     def _stop_render_to_close(self) -> None:
-        """Stop the render the person chose to stop, before the unsaved-changes question.
-
-        Every job is cancelled and waited for briefly, and the window leaves
-        its rendering state, so Save can run and a Cancel there keeps the window
-        with the render stopped. What the render did is taken back first (a
-        lecture recorded before its episode step was stopped), so a Save writes
-        it too. Nothing is said about the stop: the person asked for it. A
-        render that outlives the wait keeps the copy its record comes back
-        through, and the reads the stop cut short start again if the window stays.
-        """
         self._render_stopped_to_close = True
         if self._jobs.stop():
             self._take_back_render()
@@ -1447,10 +1157,7 @@ class ReviewWindow(QMainWindow):
             self._set_render_running(False)
             self._render_project_copy = copied
 
-    # -- saving and closing ---------------------------------------------------
-
     def save(self) -> bool:
-        """Write the corrections to the project file; ``False`` (after saying why) if it failed."""
         if self._rendering:
             return False
         try:
@@ -1467,7 +1174,6 @@ class ReviewWindow(QMainWindow):
         return True
 
     def _confirm_discard(self) -> str:
-        """Ask what to do with unsaved changes: ``"save"``, ``"discard"`` or ``"cancel"``."""
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Question)
         box.setWindowTitle(plain_title(t("review.discard_title")))
@@ -1483,11 +1189,6 @@ class ReviewWindow(QMainWindow):
         return "cancel"
 
     def _confirm_stop_render(self) -> bool:
-        """Ask whether to stop the running render and close; True means stop.
-
-        Keep rendering is the default and the Escape answer, so neither Enter
-        nor Escape throws away a render that may have run for minutes.
-        """
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Question)
         box.setWindowTitle(plain_title(t("review.stop_render_title")))
@@ -1501,10 +1202,6 @@ class ReviewWindow(QMainWindow):
         return box.clickedButton() is stop
 
     def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 - Qt override
-        """Shown again after a close: ask about changes next time, and resume what close stopped.
-
-        The first show also opens the columns at their widths (see :meth:`_size_columns`).
-        """
         super().showEvent(event)
         if not self._columns_sized:
             self._columns_sized = True
@@ -1518,19 +1215,11 @@ class ReviewWindow(QMainWindow):
             self._start_reads()
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt override
-        """Ask about a running render first, then about unsaved changes; either can keep it open.
-
-        Closing stops a running render, and a person who closes mid-render may
-        not mean to; the earlier video stays either way. Stop ends the render
-        before the unsaved-changes question, so its Save works; a Cancel there
-        keeps the window open with the render stopped.
-        """
         stopped = False
         if not self._closed and self._rendering:
             if not self._confirm_stop_render():
                 event.ignore()
                 return
-            # Stopped before the next question, so its Save is not refused mid-render.
             self._stop_render_to_close()
             stopped = True
         if not self._closed and self.session.dirty:
@@ -1538,11 +1227,9 @@ class ReviewWindow(QMainWindow):
             if answer == "cancel" or (answer == "save" and not self.save()):
                 event.ignore()
                 if stopped:
-                    # After the stopped jobs' last callbacks, which free the reads to start.
                     QTimer.singleShot(0, self._resume_reads)
                 return
             if answer == "discard":
-                # Discard means the edits are gone, not parked in memory for a re-show.
                 self.session.revert()
                 self._after_edit()
         self._closed = True
@@ -1553,19 +1240,11 @@ class ReviewWindow(QMainWindow):
         event.accept()
         self.closed.emit()
 
-    # -- background reads -------------------------------------------------------
-
     def _resume_reads(self) -> None:
-        """Start again the reads a stop cut short, if the window is still open."""
         if not self._closed and self._audio.is_file():
             self._start_reads()
 
     def _start_reads(self) -> None:
-        """Read what is still missing: the peaks, and the levels coverage is checked from.
-
-        Each is read at most once at a time; a read that close cancelled is
-        started again when the window is shown again.
-        """
         audio = self._audio
         if self.waveform.peaks is None and not self._reading_peaks:
             self._reading_peaks = True
@@ -1602,15 +1281,9 @@ class ReviewWindow(QMainWindow):
     def _on_levels_done(self) -> None:
         self._reading_levels = False
         if self._levels is None:
-            # The read failed or was stopped: its notice (if any) says so instead.
             self.warnings.set_checking(False)
 
     def _recheck_coverage(self) -> None:
-        """Find uncovered speech from the cached levels, on the UI thread.
-
-        Only the decode is slow; this part takes about 2.5 ms for an hour of
-        audio (14,400 frames) against 5,000 words, so it needs no worker.
-        """
         if self._levels is None:
             return
         times, levels, floor = self._levels

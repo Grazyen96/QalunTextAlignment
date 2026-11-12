@@ -38,17 +38,12 @@ __all__ = ["JobWorker", "run_in_thread"]
 
 _log = logging.getLogger(__name__)
 
-#: The app's own error types, raised on purpose with a sentence for the person
-#: (``TranscriptionError`` covers WhisperX, the model download and the local engine;
-#: ``TargetLocked`` is a video the machine would not let a render replace).
 _APP_ERRORS: tuple[type[Exception], ...] = (
     EpisodeError,
     QuranDataError,
     TranscriptionError,
     TargetLocked,
 )
-#: What the machine refused rather than what the code got wrong. Not every
-#: ``OSError``: a broken pipe is FFmpeg dying under the renderer, a bug to read.
 _REFUSED_BY_THE_MACHINE: tuple[type[OSError], ...] = (
     FileNotFoundError,
     PermissionError,
@@ -60,8 +55,7 @@ _REFUSED_BY_THE_MACHINE: tuple[type[OSError], ...] = (
 class JobWorker(QObject):
     """Runs one callable, forwarding its progress, result and failure."""
 
-    #: A progress update from the job. Carried as the event itself so the window
-    #: can decide what to show rather than parsing a formatted string.
+    #: A progress update from the job.
     progressed = Signal(object)
     #: The job returned. Carries whatever the job returned.
     finished = Signal(object)
@@ -82,7 +76,7 @@ class JobWorker(QObject):
             result = self._job(progress=self._emit, cancel=self._cancel)
         except JobCancelled:
             self.cancelled.emit()
-        except Exception as error:  # noqa: BLE001 — a window must never die on a job
+        except Exception as error:
             if _foreseen(error):
                 _log.warning("The job stopped: %s", _readable(error), exc_info=True)
             else:
@@ -112,7 +106,6 @@ def _foreseen(error: Exception) -> bool:
 def _readable(error: Exception) -> str:
     """A message worth showing someone who did not write the code."""
     if isinstance(error, TargetLocked):
-        # The one render failure a person must act on, said in the window's language.
         return t("render.locked", name=error.name)
     text = str(error).strip()
     if not text:

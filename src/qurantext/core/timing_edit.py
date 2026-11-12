@@ -124,7 +124,6 @@ def retime(
     word = out[index]
     prev = out[index - 1] if index > 0 else None
     nxt = out[index + 1] if index + 1 < len(out) else None
-    # Judged before anything moves, on the grid ``_copy`` just put every edge on.
     joined_prev = keep_joined and prev is not None and prev["end"] == word["start"]
     joined_next = keep_joined and nxt is not None and word["end"] == nxt["start"]
 
@@ -133,8 +132,6 @@ def retime(
         current = float(word["start"])
         low = float(prev["start"]) + _keep(prev) if prev else 0.0
         high = float(word["end"]) - _keep(word)
-        # The current value is always reachable, so a no-op request stays one
-        # even on input that does not meet the rules.
         _set(word, "start", _clamp(float(start), min(low, current), max(high, current)))
         new_start = float(word["start"])
         if prev is not None and (joined_prev or float(prev["end"]) > new_start):

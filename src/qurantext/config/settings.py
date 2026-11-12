@@ -33,11 +33,6 @@ DEFAULT_LECTURE_CANDIDATE_LIMIT = 25
 DEFAULT_LECTURE_SHORT_PHRASE_THRESHOLD = 0.90
 DEFAULT_LECTURE_SHORT_PHRASE_WORD_LIMIT = 6
 
-# Recitation word-highlight timing corrections (applied by refine_word_timings).
-# Offset shifts every highlight start/end to cancel a consistent lag (negative)
-# or lead (positive); 0.0 = neutral, dial empirically per reciter. Bridge_max is
-# the largest inter-word silence (seconds) that gets closed so spans stay
-# continuous — gaps beyond it are treated as genuine pauses and left intact.
 DEFAULT_HIGHLIGHT_OFFSET_S = 0.0
 DEFAULT_TIMING_BRIDGE_MAX_S = 0.6
 
@@ -49,17 +44,10 @@ DEFAULT_VIDEO_RENDERER = "frame"
 DEFAULT_VIDEO_WIDTH = 1280
 DEFAULT_VIDEO_HEIGHT = 720
 DEFAULT_VIDEO_FPS = 25
-# Gaps between consecutive ayah groups are bridged so no black screen shows.
-# Gaps up to this many seconds pull the next group back to the previous group's
-# end; longer gaps (a genuine pause) split the difference at the midpoint so the
-# next card does not sit idle for the whole pause.
 DEFAULT_VIDEO_GAP_MIDPOINT_THRESHOLD = 3.0
 DEFAULT_VIDEO_FONT_FILE = str(DEFAULT_FONT_PATH)
-# Splice the shipped input/basmala/basmala.mp3 before each recitation video when
-# the recitation does not already open with one (see core.basmala).
 DEFAULT_VIDEO_PREPEND_BASMALA = True
 
-# (width, height, fps) tuples for named quality presets.
 VIDEO_PRESETS: dict[str, tuple[int, int, int]] = {
     "fast": (960, 540, 24),
     "standard": (1280, 720, 25),
@@ -78,10 +66,6 @@ DEFAULT_WHISPERX_INPUT = {
     "align_output": True,
     "language_detection_min_prob": 0,
     "language_detection_max_tries": 5,
-    # Fake "previous transcript" text Whisper conditions its first window on.
-    # A sentence of Quranic/tafseer Arabic biases decoding toward classical
-    # vocabulary and spellings, which cleans up quoted ayat inside dars audio.
-    # Empty disables the parameter (it is omitted from the request payload).
     "initial_prompt": "",
 }
 

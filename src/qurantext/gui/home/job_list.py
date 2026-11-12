@@ -87,8 +87,6 @@ _STATUS_KEYS = {
     CHANGED_SINCE_RENDER: "home.status.changed_since_render",
     DAMAGED: "home.status.damaged",
 }
-#: Each status's chip: its kind (the colour) and its icon (the cue that does
-#: not depend on telling amber from the text colour).
 _CHIP_FOR_STATUS = {
     NEEDS_REVIEW: ("attention", "circle-alert"),
     CHANGED_SINCE_RENDER: ("attention", "circle-alert"),
@@ -96,9 +94,7 @@ _CHIP_FOR_STATUS = {
     REVIEWED: ("neutral", "circle-check"),
     DAMAGED: ("attention", "triangle-alert"),
 }
-#: The side of a row's picture, in pixels.
 _THUMB_PX = 48
-#: How long the folders must stay quiet before a change to them is read.
 _WATCH_DEBOUNCE_MS = 500
 
 
@@ -107,8 +103,7 @@ class JobListPanel(QWidget):
 
     #: A row was opened (double-click or Enter); carries the project's Path.
     open_requested = Signal(object)
-    #: "Show in folder" was chosen; carries the project's Path. The panel does
-    #: not reveal it itself — ``MainWindow`` owns that call.
+    #: "Show in folder" was chosen; carries the project's Path.
     reveal_requested = Signal(object)
     #: A damaged row was opened; carries its error, for ``MainWindow`` to show.
     damaged_activated = Signal(str)
@@ -121,27 +116,14 @@ class JobListPanel(QWidget):
     def __init__(self, prefs: Prefs, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._prefs = prefs
-        #: The running job's row label, or None, and how far it is (None: not
-        #: known). Kept apart from the row itself so :meth:`refresh` can put
-        #: the row back after rebuilding the list.
         self._running_label: str | None = None
         self._running_fraction: float | None = None
-        #: The running job's file name and progress words, the parts of
-        #: ``_running_label``; the row shortens the name, never the words.
         self._running_parts: tuple[str, str] | None = None
-        #: The transient "matching…" row set_running adds, or None.
         self._running_item: QListWidgetItem | None = None
-        #: The running job has ended (:meth:`end_running`): its row goes when
-        #: the read that lists the job in its place lands.
         self._running_ends_on_read = False
-        #: Reads the folders off the UI thread (see :meth:`refresh`).
         self._reads = BackgroundJobs(self)
-        #: Bumped by every refresh; a read that lands under an older number is
-        #: dropped, so a slow early read can never overwrite a newer one.
         self._generation = 0
-        #: The number of the read the rows show now; 0 until the first lands.
         self._shown_generation = 0
-        #: Each read still out, by number: what hears of it failing (see ``_Read``).
         self._pending: dict[int, _Read] = {}
 
         layout = QVBoxLayout(self)
@@ -157,21 +139,16 @@ class JobListPanel(QWidget):
         self.list = QListWidget()
         self.list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        # A row takes the list's width and elides its name to it (see _JobRow),
-        # so a long recording's name never pushes the date out of sight.
         self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.list.itemActivated.connect(self._on_activated)
         self.list.customContextMenuRequested.connect(self._on_context_menu)
         layout.addWidget(self.list)
 
         self.empty_state = EmptyState()
-        self.empty_label = self.empty_state.hint_label  # its words are set by _update_empty_state
+        self.empty_label = self.empty_state.hint_label
         self.empty_state.mode_chosen.connect(self.mode_requested)
         layout.addWidget(self.empty_state, 1)
 
-        # The actions a row offers, where a person can see them: the context
-        # menu and double-click stay, but nothing told anyone they were there,
-        # and a keyboard user could reach neither.
         self.actions_row = QWidget()
         actions = QHBoxLayout(self.actions_row)
         actions.setContentsMargins(0, 0, 0, 0)
@@ -184,8 +161,6 @@ class JobListPanel(QWidget):
         for button in (self.open_button, self.reveal_button, self.remove_button):
             actions.addWidget(button)
         actions.addStretch(1)
-        # Hidden under the empty state (see _update_empty_state), but its room is
-        # kept: the column must not narrow, then widen again, as the first job lands.
         policy = self.actions_row.sizePolicy()
         policy.setRetainSizeWhenHidden(True)
         self.actions_row.setSizePolicy(policy)
@@ -197,9 +172,6 @@ class JobListPanel(QWidget):
         self.list.itemSelectionChanged.connect(self._show_selected_rows)
         self._update_actions()
 
-        # The folders tell the list when a job appears, goes or is renamed; a
-        # burst of files (a render writing several) is read once, half a second
-        # after the last of them.
         self.watcher = QFileSystemWatcher(self)
         self._watch_timer = QTimer(self)
         self._watch_timer.setSingleShot(True)
@@ -208,8 +180,6 @@ class JobListPanel(QWidget):
         self.watcher.directoryChanged.connect(lambda _path: self._watch_timer.start())
 
         self.refresh()
-
-    # -- filling ----------------------------------------------------------------
 
     def refresh(self) -> None:
         """Start reading the folders again; returns at once, the rows follow.
@@ -226,8 +196,7 @@ class JobListPanel(QWidget):
                 _read_jobs, self._generation, list(self._prefs.job_dirs), self._prefs.hidden_jobs
             ),
             on_finished=self._on_listed,
-            # _read_jobs catches what it can, so this is only a backstop; bound
-            # methods all the same, so they run on the UI thread.
+            # Bound methods, so they run on the UI thread.
             on_failed=read.failed,
             on_done=read.done,
         )
@@ -262,7 +231,6 @@ class JobListPanel(QWidget):
         is parked until it ends (see ``review/background.py``).
         """
         self._watch_timer.stop()
-        # A change heard after this must not start the timer again on a panel being dropped.
         self.watcher.blockSignals(True)
         self._reads.stop(wait_ms=0)
 
@@ -275,7 +243,7 @@ class JobListPanel(QWidget):
         that could not be read leaves the rows as they were.
         """
         if listing.generation != self._generation:
-            return  # a newer refresh is on its way; this one is already out of date
+            return
         self._shown_generation = listing.generation
         if self._running_ends_on_read:
             self._running_ends_on_read = False
@@ -283,8 +251,6 @@ class JobListPanel(QWidget):
         if listing.folders is not None:
             self._arm_watcher(listing.folders)
         if listing.entries is not None:
-            # The buttons act on the current row: a rebuild must not take it
-            # from under the person (a review saved, a job finished).
             kept = self._current_entry()
             kept_selected = kept is not None and self.list.currentItem().isSelected()
             self.list.clear()
@@ -322,8 +288,6 @@ class JobListPanel(QWidget):
     def _add_entry(self, entry: JobEntry) -> None:
         item = QListWidgetItem()
         item.setData(Qt.ItemDataRole.UserRole, entry)
-        # Two jobs can share a name (the same recording matched into two
-        # folders); the folder tells them apart.
         folder = str(entry.project.parent)
         item.setToolTip(folder)
         if entry.status == DAMAGED and entry.error:
@@ -343,7 +307,7 @@ class JobListPanel(QWidget):
         Clearing it after :meth:`end_running` leaves the row to that read.
         """
         if text is None and self._running_ends_on_read:
-            return  # it goes when the read end_running started lands
+            return
         self._running_ends_on_read = False
         # A template, not a join: in Arabic the file name and the progress are
         # each isolated, so a Latin name does not turn the line left to right.
@@ -389,19 +353,15 @@ class JobListPanel(QWidget):
 
     def _update_empty_state(self) -> None:
         has_rows = self.list.count() > 0
-        # While a read is out, the cards inviting a first job would be a guess.
         self.empty_state.set_reading(self.reading)
         self.list.setVisible(has_rows)
         self.empty_state.setVisible(not has_rows)
-        # Three disabled buttons under the invitation would read as broken.
         self.actions_row.setVisible(has_rows)
-
-    # -- actions ------------------------------------------------------------------
 
     def _on_activated(self, item: QListWidgetItem) -> None:
         entry = item.data(Qt.ItemDataRole.UserRole)
         if not isinstance(entry, JobEntry):
-            return  # the transient running row carries no entry
+            return
         if entry.status == DAMAGED:
             self.damaged_activated.emit(entry.error or t("home.status.damaged"))
             return
@@ -468,8 +428,6 @@ class JobListPanel(QWidget):
                 was_current = item is self.list.currentItem()
                 self.list.takeItem(index)
                 if was_current and self.list.count() > 0:
-                    # The next row (the previous one if it was last) takes its place,
-                    # so the buttons, and the focus on them, stay where they were.
                     self.list.setCurrentRow(min(index, self.list.count() - 1))
                 break
         self.refresh()
@@ -542,16 +500,13 @@ def _read_jobs(
         folders = tuple(folder for folder in dirs if folder.is_dir())
         entries = list_jobs(dirs, hidden=hidden, cancel=cancel, thumbnail_cache=user_cache_dir())
     except JobCancelled:
-        raise  # no one waits for this read any more; the worker reports it cancelled
-    except Exception as error:  # noqa: BLE001 - a folder that cannot be read must not empty the list
+        raise
+    except Exception as error:
         _log.warning("Could not read the job folders: %s", error, exc_info=True)
-        # The folders found before it failed are still worth watching: a fix to
-        # one of them is a change, and the next read may then succeed.
         return _Listing(generation, None, folders)
     return _Listing(generation, tuple(entries), folders)
 
 
-#: What a row hears when the theme, or a bare palette, changes under it.
 _PALETTE_EVENTS = (QEvent.Type.PaletteChange, QEvent.Type.ApplicationPaletteChange)
 
 
@@ -572,7 +527,6 @@ class _JobRow(QWidget):
 
         text = QVBoxLayout()
         text.setSpacing(theme.SP_4)
-        #: The whole name; the label shows it elided to its width (see _show_name).
         self._name = entry.name
         self.name_label = QLabel(entry.name)
         self.name_label.setAlignment(_leading_edge(self))
@@ -580,7 +534,6 @@ class _JobRow(QWidget):
         bold_font = self.name_label.font()
         bold_font.setBold(True)
         self.name_label.setFont(bold_font)
-        # Asks for no width of its own: the row fits the list, the name fits the row.
         self.name_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.name_label.setMinimumWidth(0)
         text.addWidget(self.name_label)
@@ -607,8 +560,7 @@ class _JobRow(QWidget):
         self._selected = False
         # Inside the list's viewport a label inherits its Base background and
         # so paints with Text, not WindowText; pin the role so the colour set
-        # on it is the one drawn, wherever the row ends up. The date is
-        # quieter: the secondary colour, which follows a theme switch by itself.
+        # on it is the one drawn, wherever the row ends up.
         for label in (self.name_label, self.detail_label, self.date_label):
             label.setForegroundRole(QPalette.ColorRole.Text)
             label.installEventFilter(self)
@@ -630,9 +582,7 @@ class _JobRow(QWidget):
             self._paint_labels()
 
     def event(self, event: QEvent) -> bool:  # noqa: A003 - Qt override
-        # A theme switched while the app runs: the amber, or the highlighted
-        # text, chosen for the old palette may not read on the new one. Setting
-        # a label's palette sends PaletteChange to the label, not here.
+        # Setting a label's palette sends PaletteChange to the label, not here.
         handled = super().event(event)
         if event.type() in _PALETTE_EVENTS and (self._warning or self._selected):
             self._paint_labels()
@@ -675,7 +625,7 @@ class _JobRow(QWidget):
             for label in (self.name_label, self.detail_label, self.date_label):
                 label.setPalette(QPalette())
         if self._warning:
-            self.chip.set_kind(self.chip.property("kind"))  # re-reads the amber
+            self.chip.set_kind(self.chip.property("kind"))
 
 
 class _RunningRow(QWidget):
@@ -688,8 +638,6 @@ class _RunningRow(QWidget):
         layout.setSpacing(3)
         self.label = QLabel()
         self.label.setAlignment(_leading_edge(self))
-        # Asks for no width of its own, as a job's name does: the list has no
-        # horizontal scrollbar, so a long recording's name must fit the row.
         self.label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.label.setMinimumWidth(0)
         self.label.installEventFilter(self)
@@ -827,7 +775,6 @@ class _ModeCard(Card):
         self.body.addLayout(row)
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt override
-        # On release, inside the card, as a button: a press dragged off it chooses nothing.
         inside = self.rect().contains(event.position().toPoint())
         if event.button() == Qt.MouseButton.LeftButton and inside:
             self.clicked.emit()
@@ -898,9 +845,6 @@ def _thumbnail_pixmap(entry: JobEntry) -> QPixmap:
         name = "triangle-alert"
     else:
         name = "book-open" if entry.mode == "lecture" else "mic"
-    # The glyph is chosen for the tile, not the theme: a light glyph on a dark
-    # look, a dark one on a light look. Each theme has one of each: its text,
-    # and the colour it draws on the accent.
     wants_light = background.lightness() < 128
     role = "text" if wants_light == (tokens.name == "dark") else "on_accent"
     glyph = icon(name, role).pixmap(QSize(24, 24))

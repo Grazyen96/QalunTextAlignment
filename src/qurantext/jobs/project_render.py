@@ -112,8 +112,6 @@ def render_project(
     elif look != own:
         set_project_look(snapshot, look)
     settings = job_settings(snapshot)
-    # A recitation draws every card whatever the surah, so a fallback there
-    # changes nothing in the video and must not make its render read stale.
     lecture = str(snapshot.mode).lower() == "lecture"
     if lecture and settings.studied_surah is None and studied_surah is not None:
         set_job_settings(snapshot, replace(settings, studied_surah=studied_surah))

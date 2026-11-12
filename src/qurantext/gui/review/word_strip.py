@@ -1,26 +1,3 @@
-"""Every timed word laid out on the shared timeline, draggable by its edges.
-
-Each word is drawn as a box from its start to its end. A press near a shared
-boundary between two words grabs the earlier word's end (retiming a shared
-edge moves both words at once); a press near any other edge grabs that edge
-alone; a plain press inside a word selects it and asks to seek there; a
-shift-press inside a word starts a ripple drag that pushes every later word
-by the same amount the pointer travels. An edge dragged with Ctrl (or Alt)
-held moves alone: a shared edge detaches from its neighbour, so a gap can be
-opened between two joined words. Every move of a drag is applied from
-the state the drag began in, so dragging back undoes what the way out did.
-The strip never writes a timing itself — every drag goes through
-:class:`ReviewSession`, which is the one place the rules about what an edit
-may do live.
-
-Time runs right to left (see :mod:`.viewport`), so a word's start is its box's
-right edge and its end the left one: dragging a box's right edge retimes its
-start, and a drag to the left moves an edge later. The edges and the ripple
-are worked out in time — the pointer's pixel goes through
-:meth:`Viewport.t_for` before anything is edited — so only the boxes and the
-hit-tests deal in screen sides, and they take left and right from the pixels.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -47,9 +24,6 @@ from qurantext.gui.review.viewport import Viewport
 
 __all__ = ["WordStrip"]
 
-#: Below this box width, skip text layout entirely and draw only the box —
-#: at deep zoom-out on a long lecture, thousands of boxes are only a
-#: fraction of a pixel wide and the label would not be legible anyway.
 _MIN_TEXT_WIDTH_PX = 12.0
 
 #: Held while grabbing a joined edge: the edge leaves its neighbour behind.
@@ -59,30 +33,21 @@ _DETACH = Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier
 
 @dataclass(slots=True)
 class _EdgeDrag:
-    """An in-progress drag of one word's start or end edge."""
-
     ref: WordRef
-    edge: str  # "start" | "end"
+    edge: str
     revision_before: int
-    #: False for a Ctrl (or Alt) drag: the edge leaves a neighbour it touched behind.
     keep_joined: bool = True
 
 
 @dataclass(slots=True)
 class _RippleDrag:
-    """An in-progress shift-drag: the pointer's travel since *t0* is the ripple delta."""
-
     ref: WordRef
     t0: float
     revision_before: int
 
 
 class WordStrip(QWidget):
-    """Paints ``session.words()`` against a shared :class:`Viewport`; edits by dragging."""
-
-    #: How close (in pixels) a press or the pointer must be to count as "on an edge".
     EDGE_PX = 8
-    #: How wide the grab handle is drawn; narrower than :attr:`EDGE_PX`, which is felt, not seen.
     HANDLE_PX = 6
 
     selection_changed = Signal(object)
@@ -122,28 +87,13 @@ class WordStrip(QWidget):
 
     @property
     def last_edge(self) -> str:
-        """The selected word's armed edge, which nudges move: ``"start"`` or ``"end"``.
-
-        It is ``"start"`` until an edge of the selected word is grabbed, and
-        again whenever another word is selected: the video lights a word up
-        when it starts, so selecting a word and nudging it moves when that
-        word lights up. A joined end is the next word's start, so arming the
-        end by default moved the neighbour's light-up instead.
-        """
         return self._last_edge
 
     @property
     def hovered_edge(self) -> tuple[str, WordRef] | None:
-        """The edge under the pointer, ``("start"|"end", ref)``, drawn as a handle; else None."""
         return self._hover
 
     def painted_handle(self) -> tuple[str, WordRef] | None:
-        """The one edge drawn as a handle, ``("start"|"end", ref)``, or None.
-
-        The edge being dragged; else the edge under the pointer, which a press
-        would grab; else the selected word's armed edge, so a person sees which
-        edge a nudge moves.
-        """
         if isinstance(self._drag, _EdgeDrag):
             return self._drag.edge, self._drag.ref
         if self._hover is not None:
@@ -153,7 +103,6 @@ class WordStrip(QWidget):
         return None
 
     def select(self, ref: WordRef | None) -> None:
-        """Select *ref* (or clear the selection with ``None``) and repaint."""
         if ref == self._selected:
             return
         self._selected = ref
@@ -162,17 +111,10 @@ class WordStrip(QWidget):
         self.update()
 
     def set_playhead(self, t: float) -> None:
-        """Move the drawn playhead to *t* seconds; the word under it gets a bold outline."""
         self._playhead = float(t)
         self.update()
 
     def refresh(self) -> None:
-        """Repaint from ``session.words()``; call after the session's revision changes.
-
-        A selection whose ref is no longer among the session's words — its
-        card or caption was removed, or the undo/redo it came from was
-        reverted — can't stay selected, so this drops it first.
-        """
         if self._selected is not None:
             try:
                 self._session.word(self._selected)
@@ -195,13 +137,7 @@ class WordStrip(QWidget):
         start = self._viewport.start
         return self._session.words_in(start, start + self._viewport.span)
 
-    # -- hit testing --------------------------------------------------------------
-
     def _edges(self) -> list[tuple]:
-        """Each visible word with its start's and its end's pixel, in time order.
-
-        Right to left, the start's pixel is the larger (the box's right edge).
-        """
         width = self.width()
         return [
             (tw, self._viewport.x_for(tw.start, width), self._viewport.x_for(tw.end, width))
@@ -209,12 +145,6 @@ class WordStrip(QWidget):
         ]
 
     def _hit_test(self, x: float) -> tuple[str, WordRef] | None:
-        """Where a press (or the pointer) at *x* lands, in priority order.
-
-        (1) within :attr:`EDGE_PX` of a boundary shared by two words — grab the
-        earlier word's end; (2) within :attr:`EDGE_PX` of any single edge —
-        grab that edge; (3) inside a word's body; (4) nothing.
-        """
         edges = self._edges()
         for i in range(len(edges) - 1):
             earlier, _, earlier_end = edges[i]
@@ -230,8 +160,6 @@ class WordStrip(QWidget):
             if x_end <= x <= x_start:
                 return "body", tw.ref
         return None
-
-    # -- mouse ----------------------------------------------------------------
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt override
         if event.button() != Qt.MouseButton.LeftButton:
@@ -252,10 +180,7 @@ class WordStrip(QWidget):
             self._drag = _EdgeDrag(ref, kind, revision_before, keep_joined=not detach)
             self.setCursor(Qt.CursorShape.SizeHorCursor)
             return
-        # kind == "body"
         self.select(ref)
-        # A click on a word is a selection, so it arms the start even when the
-        # word was already selected with its end grabbed (select() returns early then).
         if self._last_edge != "start":
             self._last_edge = "start"
             self.update()
@@ -283,8 +208,6 @@ class WordStrip(QWidget):
                 self._hover = hover
                 self.update()
             return
-        # Each move is applied from the state the drag began in (the session
-        # restores it), so the result depends only on where the pointer is now.
         t = self._viewport.t_for(x, self.width())
         if isinstance(self._drag, _EdgeDrag):
             keep_joined = self._drag.keep_joined
@@ -303,15 +226,6 @@ class WordStrip(QWidget):
         self._finish_drag()
 
     def _finish_drag(self) -> None:
-        """Close an open gesture, however it ends.
-
-        A mouse grab can be lost mid-drag — the window is deactivated, a
-        modal dialog opens, the strip is hidden — with no
-        ``mouseReleaseEvent`` ever arriving. Left open, the session's gesture
-        stays started forever and every later edit merges into that one undo
-        step. Every path that can lose the grab funnels through here instead
-        of duplicating the release logic.
-        """
         if self._drag is None:
             return
         changed = self._session.revision != self._drag.revision_before
@@ -336,13 +250,10 @@ class WordStrip(QWidget):
     # losing activation instead, now that a press gives the strip real focus.
 
     def leaveEvent(self, event: QEvent) -> None:  # noqa: N802 - Qt override
-        """Drop the hover handle: an edge the pointer left is no longer the one it would grab."""
         if self._hover is not None:
             self._hover = None
             self.update()
         super().leaveEvent(event)
-
-    # -- painting ---------------------------------------------------------------
 
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 - Qt override
         painter = QPainter(self)
@@ -353,7 +264,6 @@ class WordStrip(QWidget):
             height = self.height()
             playhead_ref = self._session.word_at(self._playhead)
             for tw in self._visible_words():
-                # Right to left: the end is the box's left edge, the start its right.
                 left = self._viewport.x_for(tw.end, width)
                 right = self._viewport.x_for(tw.start, width)
                 if right < 0 or left > width:
@@ -370,8 +280,6 @@ class WordStrip(QWidget):
     def _paint_word(self, painter, rect, tw, is_under_playhead, palette) -> None:
         tokens = theme.current_tokens()
         selected = tw.ref == self._selected
-        # The word under the playhead is outlined in the accent: the red playhead
-        # itself is the ruler's and the waveform's, one mark per time.
         if is_under_playhead:
             border_pen = QPen(QColor(tokens.accent), 2)
         else:
@@ -385,10 +293,6 @@ class WordStrip(QWidget):
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
         if rect.width() < _MIN_TEXT_WIDTH_PX:
-            # Too narrow to read at this zoom (thousands of boxes fit in view
-            # at once); the box alone is the useful signal, and skipping the
-            # text layout is what keeps painting a fully zoomed-out long
-            # lecture cheap.
             return
 
         text_color = QColor(tokens.on_accent) if selected else palette.windowText().color()
@@ -406,7 +310,6 @@ class WordStrip(QWidget):
             painter.fillRect(bar, warning_color(palette))
 
     def _paint_handle(self, painter, handle, width, height, palette) -> None:
-        """A :attr:`HANDLE_PX` bar on the edge a press or a nudge moves, seen before it is felt."""
         edge, ref = handle
         try:
             tw = self._session.word(ref)
@@ -418,16 +321,12 @@ class WordStrip(QWidget):
         if not self._on_selected_box(x, width):
             painter.fillRect(bar, palette.highlight())
             return
-        # The selected box is itself filled with the highlight, so a highlight bar
-        # vanished on its edges, the ones grabbed most; outlined so the half that
-        # falls outside the box shows on the window too.
         painter.fillRect(bar, palette.highlightedText())
         painter.setPen(QPen(palette.windowText().color(), 1))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRect(bar)
 
     def _on_selected_box(self, x: float, width: int) -> bool:
-        """Whether an edge at *x* touches the selected word's box."""
         if self._selected is None:
             return False
         try:

@@ -17,15 +17,8 @@ from qurantext.config.settings import (
 from qurantext.core.arabic import ayah_text_with_marker, partial_ratio, word_recall
 from qurantext.utils.progress import CancelToken, ProgressCallback, report
 
-# When two ayat compete for the same time slice and the top one would switch
-# surah, keep the current surah if its best candidate is within this confidence
-# margin — disambiguates near-identical ayat across surahs (e.g. Furqan 9 ≈ Isra
-# 48) toward the surah the lecture is actually on.
 SURAH_CONTINUITY_MARGIN = 0.1
 
-# Ayah count of the shipped Qalun text. A caller handing over at least this many
-# ayat is working on the whole Quran, so the candidate queries have nothing to
-# narrow (see _scope_clause).
 _FULL_QURAN_AYAT = 6214
 
 
@@ -113,7 +106,6 @@ def iter_word_windows(
     if not words:
         return
 
-    # Build (start_step, size_min, size_max) for each non-overlapping pass.
     passes: list[tuple[int, int, int]] = []
     short_cap = min(max_words, short_max_words)
     long_min = max(min_words, short_max_words + 1)
@@ -254,16 +246,13 @@ def db_candidate_spans(
 
     placeholders = ",".join("?" * len(window_words))
     rows = conn.execute(
-        f"SELECT surah_num, ayah_num, COUNT(DISTINCT text_norm) AS overlap"  # noqa: S608
+        f"SELECT surah_num, ayah_num, COUNT(DISTINCT text_norm) AS overlap"
         f" FROM words WHERE text_norm IN ({placeholders})"
         f" GROUP BY surah_num, ayah_num HAVING overlap >= ?"
         f" ORDER BY overlap DESC, surah_num, ayah_num LIMIT ?",
         (*window_words, min_overlap_words, candidate_limit),
     ).fetchall()
 
-    # Cap to the same candidate budget the in-memory path uses (candidate_limit
-    # spans), taking spans from the highest-overlap ayat first so scoring cost
-    # per window stays comparable rather than candidate_limit * max_span.
     spans: list[dict] = []
     for surah_num, ayah_num, _overlap in rows:
         index = ayat_index.get((surah_num, ayah_num))
@@ -342,7 +331,7 @@ def db_candidate_spans_ngram(
     placeholders = ",".join("?" * len(grams))
     scope_sql, scope_params = _scope_clause(ayat_index)
     rows = conn.execute(
-        f"SELECT surah_num, ayah_num, COUNT(DISTINCT gram) AS hits"  # noqa: S608
+        f"SELECT surah_num, ayah_num, COUNT(DISTINCT gram) AS hits"
         f" FROM citation_ngrams WHERE gram IN ({placeholders}){scope_sql}"
         f" GROUP BY surah_num, ayah_num HAVING hits >= ?"
         f" ORDER BY hits DESC, surah_num, ayah_num LIMIT ?",
@@ -406,11 +395,6 @@ def merge_quran_matches(
                 last["from_index"] = match["from_index"]
                 last["from_ayah"] = match["from_ayah"]
 
-            # Only let confident detections extend the span FORWARD (more ayat, a
-            # later end). A low-confidence overlap still merges for de-duplication
-            # but must not stretch the displayed range — guard to_index/to_ayah,
-            # end_word and end_time together, since hydrate_merged_matches re-derives
-            # the final end_time from end_word (so guarding end_time alone is moot).
             if match["confidence"] >= min_score:
                 if match["to_index"] > last["to_index"]:
                     last["to_index"] = match["to_index"]
@@ -455,8 +439,6 @@ def hydrate_merged_matches(
             ayah_text_with_marker(ayah["text_raw"], ayah["ayah_num"]) for ayah in selected_ayat
         )
 
-        # Anchor timing to actual word-level timestamps instead of the window
-        # boundaries, which may span multiple ayat inside one WhisperX segment.
         if detected_words:
             start_time = round(detected_words[0]["start"], 2)
             end_time = round(detected_words[-1]["end"], 2)
@@ -499,7 +481,7 @@ def _merge_same_ayah_intervals(matches: list[dict]) -> list[dict]:
         group.sort(key=lambda m: m["start_time"])
         current = dict(group[0])
         for match in group[1:]:
-            if match["start_time"] <= current["end_time"]:  # overlap or touch
+            if match["start_time"] <= current["end_time"]:
                 current["end_time"] = max(current["end_time"], match["end_time"])
                 current["confidence"] = max(current["confidence"], match["confidence"])
                 if len(str(match.get("detected_text", ""))) > len(
@@ -545,7 +527,7 @@ def select_lecture_timeline(matches: list[dict], *, min_card_seconds: float = 1.
     def _rank(m: dict) -> tuple:
         return (m["confidence"], m["end_time"] - m["start_time"], -m["start_time"])
 
-    slices: list[list] = []  # [start, end, winning_match]
+    slices: list[list] = []
     for start, end in zip(breakpoints, breakpoints[1:], strict=False):
         if end <= start:
             continue
@@ -565,11 +547,10 @@ def select_lecture_timeline(matches: list[dict], *, min_card_seconds: float = 1.
     absorbed: list[list] = []
     for start, end, winner in slices:
         if absorbed and (end - start) < min_card_seconds:
-            absorbed[-1][1] = end  # extend the previous card over the sliver
+            absorbed[-1][1] = end
         else:
             absorbed.append([start, end, winner])
 
-    # Absorption can leave two adjacent cards with the same ayah — re-merge.
     cards: list[list] = []
     for start, end, winner in absorbed:
         if cards and _same(cards[-1][2], winner):
@@ -682,10 +663,6 @@ def detect_quran_mentions_in_lecture(
 
     matches: list[dict] = []
 
-    # This loop is the slow stage: it fuzzy-scores tens of thousands of windows
-    # and used to run for minutes in total silence with no way to stop it.
-    # Progress is keyed off the window's position in the transcript, which is
-    # monotonic and cheap, rather than counting windows up front.
     total_words = max(1, len(words))
     started = time.monotonic()
     next_report = 0.0
@@ -751,17 +728,11 @@ def detect_quran_mentions_in_lecture(
 
         for span in candidates:
             span_text_norm = str(span["text_norm"])
-            # The cheap checks run first, and none of them needs the fuzzy score:
-            # too few shared words, or a ceiling (score_upper_bound) already under
-            # a threshold, rules a candidate out exactly as the full score would,
-            # without its cost.
             span_words = span["_word_set"]
             matched_words = sum(1 for word in window_words if word in span_words)
             if matched_words < min_matched_words:
                 continue
 
-            # Short-phrase guard: require higher confidence for spans with few words
-            # to avoid false positives from common short phrases.
             short_phrase = span["num_words"] < short_phrase_word_limit
             required = max(min_score, short_phrase_threshold) if short_phrase else min_score
             if score_upper_bound(span_text_norm, window_text_norm) < required:

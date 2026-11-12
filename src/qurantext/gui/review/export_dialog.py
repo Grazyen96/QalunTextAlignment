@@ -1,14 +1,3 @@
-"""The Export subtitles dialog: pick formats and a destination, then write.
-
-Exporting never renders. Unsaved edits are saved first (through
-:meth:`ReviewSession.save`), so the files written here and the project file
-agree with each other. A bad destination, a recording ffprobe cannot read,
-or a project that cannot yield a cue (:func:`export_project_subtitles`
-raising ``ValueError``/``OSError``/``RuntimeError``) is shown inline, in
-the dialog itself, rather than raised — the review window underneath must
-stay up either way.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -44,14 +33,10 @@ from qurantext.jobs.project_render import export_project_subtitles
 
 __all__ = ["ExportDialog"]
 
-#: SRT is the format almost everything downstream understands; preselect it.
 _DEFAULT_FORMAT = "srt"
 
 
 class ExportDialog(QDialog):
-    """Write the session's project as subtitle files, without rendering anything."""
-
-    #: The dialog saved the project before exporting; carries the file's path.
     saved = Signal(object)
 
     def __init__(
@@ -70,8 +55,6 @@ class ExportDialog(QDialog):
         self._format_boxes: dict[str, QCheckBox] = {}
         self._build()
         self._set_defaults()
-
-    # -- layout -----------------------------------------------------------------
 
     def _build(self) -> None:
         layout = QVBoxLayout(self)
@@ -93,7 +76,6 @@ class ExportDialog(QDialog):
         form = QFormLayout()
         folder_row = QHBoxLayout()
         self._folder_field = QLineEdit()
-        # A typed path shows on hover too; _set_folder also puts the cursor at the start.
         self._folder_field.textChanged.connect(self._folder_field.setToolTip)
         self._choose_button = QPushButton(t("export.choose"))
         self._choose_button.clicked.connect(self._choose_folder)
@@ -138,7 +120,6 @@ class ExportDialog(QDialog):
             t("export.close"), QDialogButtonBox.ButtonRole.RejectRole
         )
         layout.addWidget(self.buttons)
-        # Export writes and stays open to say what it wrote; only Close leaves.
         self._go_button.clicked.connect(self.export)
         self.close_button.clicked.connect(self.accept)
 
@@ -154,17 +135,13 @@ class ExportDialog(QDialog):
 
         available = self.video_timeline_available()
         if project.render_is_stale:
-            # Still the video's clock, but not the video's content: say so.
             self._video_radio.setText(t("export.match_video_stale"))
         self._video_radio.setEnabled(available)
         self.needs_render_chip.setVisible(not available)
         self._video_radio.setChecked(available)
         self._audio_radio.setChecked(not available)
 
-    # -- reading ------------------------------------------------------------------
-
     def video_timeline_available(self) -> bool:
-        """Whether the project has a rendered video to line subtitles up with."""
         return self._session.project.render is not None
 
     def timeline(self) -> str:
@@ -176,8 +153,6 @@ class ExportDialog(QDialog):
     def destination(self) -> Path:
         return Path(self._folder_field.text()) / self._name_field.text()
 
-    # -- programmatic control (also used by tests) ---------------------------------
-
     def set_formats(self, formats: tuple[str, ...]) -> None:
         chosen = set(formats)
         for name, box in self._format_boxes.items():
@@ -187,8 +162,6 @@ class ExportDialog(QDialog):
         self._set_folder(str(folder))
         self._name_field.setText(stem)
 
-    # -- actions ------------------------------------------------------------------
-
     def _choose_folder(self) -> None:
         chosen = QFileDialog.getExistingDirectory(
             self, plain_title(t("export.choose")), self._folder_field.text()
@@ -197,19 +170,11 @@ class ExportDialog(QDialog):
             self._set_folder(chosen)
 
     def _set_folder(self, folder: str) -> None:
-        """Show the path from its start, with the whole of it on hover."""
         self._folder_field.setText(folder)
         self._folder_field.setCursorPosition(0)
         self._folder_field.setToolTip(folder)
 
     def export(self) -> list[Path]:
-        """Save unsaved edits, then write the chosen formats; ``[]`` on a shown error.
-
-        Saving is inside the same ``try`` as the write itself: a project with
-        no file yet (``session.save()`` raising ``ValueError``) or one an
-        unwritable folder (``OSError``) must be shown inline like any other
-        export failure, not escape the click.
-        """
         formats = self.formats()
         if not formats:
             self._show_error(t("export.none_chosen"))
@@ -228,7 +193,6 @@ class ExportDialog(QDialog):
                 db_path=self._db_path,
             )
         except (ValueError, OSError, RuntimeError) as error:
-            # RuntimeError: ffprobe could not read the recording's length.
             self._show_error(t("export.failed", details=str(error)))
             return []
         self._written = written
@@ -253,13 +217,6 @@ class ExportDialog(QDialog):
 
 
 def _named_files(destination: Path) -> Path:
-    """A path whose suffix each format replaces, keeping every dot the name has.
-
-    The name is a stem ("Tafsir 25.7-11"), which ``with_suffix`` would cut at
-    its last dot; a format suffix the person typed ("talk.srt") is dropped
-    rather than doubled, and so is a video's ("talk.mp4", the video's own name
-    typed in), which would otherwise give ``talk.mp4.srt``.
-    """
     name = destination.name
     suffix = Path(name).suffix.lower()
     if suffix.lstrip(".") in SUBTITLE_FORMATS or suffix in EPISODE_SUFFIXES:
@@ -268,12 +225,6 @@ def _named_files(destination: Path) -> Path:
 
 
 def _text_start(box: QCheckBox) -> int:
-    """How far *box*'s text starts from its leading edge: the style's indicator and gap.
-
-    Measured left to right: the style gives a visual rect, which in a right-to-left
-    window starts at the left edge, away from the indicator. A label's indent is
-    already taken from its leading edge, so it wants the logical distance.
-    """
     option = QStyleOptionButton()
     box.initStyleOption(option)
     option.direction = Qt.LayoutDirection.LeftToRight

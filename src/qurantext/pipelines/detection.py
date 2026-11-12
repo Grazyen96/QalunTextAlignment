@@ -62,7 +62,7 @@ def assign_recitation_word_timings(
     seconds. Deriving the window from the aligned words instead makes cards tile
     the recitation with no gap and switch exactly on the next chunk's first word.
     """
-    range_tokens: list[tuple[int, str]] = []  # (ayah_num, token) in recital order
+    range_tokens: list[tuple[int, str]] = []
     for ayah in recitation_ayat:
         for token in str(ayah["text_raw"]).split():
             if not _is_ayah_marker(token):
@@ -70,9 +70,6 @@ def assign_recitation_word_timings(
 
     range_norms = [normalize_alignment_ar(token) for _, token in range_tokens]
     global_timings = align_canonical_word_timings(words, range_norms)
-    # Steady the raw CTC timings: monotonic starts (kill backward jitter),
-    # gap-free onset-anchored ends (keyframe-ready spans, and cards that abut
-    # cleanly), and a global offset to cancel any consistent highlight lag/lead.
     global_timings = refine_word_timings(global_timings, offset=offset, bridge_max=bridge_max)
 
     for match in mentions:
@@ -114,8 +111,6 @@ def cards_for_range(ayat: list[dict], *, max_span: int) -> list[dict]:
                 "detected_text": "",
                 "text": full_text,
                 "full_text": full_text,
-                # The range was stated, not inferred, so there is nothing to be
-                # uncertain about. Only the timings below come from a model.
                 "confidence": 1.0,
                 "start_time": 0.0,
                 "end_time": 0.0,
@@ -342,9 +337,6 @@ def run_detection(
         min_matched_words if min_matched_words is not None else lecture_settings.min_matched_words,
     )
 
-    # Stage output goes through the progress reporter, so a user interface gets
-    # the same information as the terminal. `echo` stays as the convenience it
-    # always was: it simply supplies the console reporter when no other is given.
     if progress is None and echo:
         progress = ConsoleProgress()
 
@@ -417,24 +409,12 @@ def run_detection(
 
     if mode == "lecture":
         emit("[3/4] Detecting Quran mentions inside lecture...")
-        # Back candidate selection with the persisted citation n-gram index: on
-        # lecture audio most windows are speech, not quotes, so the index skips
-        # them before any fuzzy scoring (~10× faster, same final boundaries). If
-        # the store can't be prepared, fall back to the in-memory path so
-        # detection never hard-fails on a missing/unwritable DB.
         conn = None
         try:
             conn = ensure_quran_db(quran, QURAN_DB_PATH)
         except (OSError, sqlite3.DatabaseError, QuranDataError) as error:
             emit(f"      Note: citation index unavailable ({error}); using in-memory matcher.")
         try:
-            # Lecture cards show exactly the single ayah being mentioned: a
-            # teacher quotes one ayah, explains, then quotes the next. Force
-            # single-ayah spans (max_span=1) and block range-merging
-            # (max_merged_ayat=1) so each card is one ayah — a continuously
-            # recited passage still surfaces as its individual ayat in sequence,
-            # which the renderer latches one at a time. (Multi-ayah spans remain
-            # the default for recitation mode, which has its own call below.)
             mentions = detect_quran_mentions_in_lecture(
                 ayat,
                 words,
@@ -454,9 +434,6 @@ def run_detection(
         finally:
             if conn is not None:
                 conn.close()
-        # Resolve overlapping/competing single-ayah detections into a clean
-        # one-ayah-at-a-time timeline so each card shows exactly the ayah being
-        # mentioned (see select_lecture_timeline).
         mentions = select_lecture_timeline(mentions)
         result = {
             "matches": mentions,
@@ -543,24 +520,6 @@ def run_detection(
     if mode == "recitation":
         emit("[3/4] Refining recitation matches inside detected range...")
         recitation_ayat = ayat_in_detected_range(ayat, first_ayah, last_ayah)
-        # This call dominates recitation mode — roughly 99% of its runtime, and
-        # it prints nothing while it works. Backing it with the citation n-gram
-        # index (conn + db_strategy="ngram"), the lever that makes lecture mode
-        # fast, was tried and REJECTED. Measured on the 914-word Al-Furqan
-        # recitation, full surah detected:
-        #
-        #     in-memory   583 s   22 cards, 74 of 77 ayat, no gap over 1.6 s
-        #     ngram       369 s   16 cards, 66 of 77 ayat, gaps up to 39 s
-        #
-        # Only 1.6x faster, because the index earns its speed by skipping windows
-        # with no exact phrase hit — common in a tafseer where most speech is not
-        # quotation, rare in continuous recitation where nearly every window hits
-        # (see the docstring on detect_quran_mentions_in_lecture). Paying eight
-        # dropped ayat and half-minute holes on screen for that is a bad trade.
-        #
-        # The real fix is not a faster matcher: with the surah and ayah range
-        # known, recitation is forced alignment over known text and this whole
-        # detection stage goes away.
         raw_mentions = detect_quran_mentions_in_lecture(
             recitation_ayat,
             words,
@@ -581,8 +540,6 @@ def run_detection(
             max_span=resolved_max_span,
         )
 
-        # Attach per-word timestamps for the video highlight and re-derive each
-        # card's display window from those aligned onsets (see the helper).
         assign_recitation_word_timings(
             mentions,
             recitation_ayat,
@@ -591,11 +548,6 @@ def run_detection(
             bridge_max=settings.alignment.bridge_max_s,
         )
 
-        # A leading istiʿādha/basmala is stripped from the canonical text, so the
-        # matcher folds that audio into the first ayah — pulling its start time to
-        # the top of the recording and shifting its word highlights. Emit the
-        # preamble as its own timed card(s) and trim the first ayah back to where
-        # it actually begins.
         preamble_matches, boundary_time = extract_preamble(words)
         if preamble_matches and boundary_time is not None:
             trim_leading_preamble(mentions, boundary_time)

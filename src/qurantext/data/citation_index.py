@@ -58,9 +58,8 @@ def build_citation_index(conn: sqlite3.Connection, n: int = DEFAULT_NGRAM_N) -> 
         "SELECT surah_num, ayah_num, word_num, text_norm FROM words"
         " ORDER BY surah_num, ayah_num, word_num"
     )
-    # Group consecutive rows by ayah and slide an n-word window within each ayah.
     ayah_key: tuple[int, int] | None = None
-    buf: list[tuple[int, str]] = []  # (word_num, text_norm) for the current ayah
+    buf: list[tuple[int, str]] = []
 
     def flush() -> None:
         for i in range(len(buf) - n + 1):
