@@ -2,7 +2,6 @@ from pathlib import Path
 
 from qurantext.core.alignment import (
     align_canonical_word_timings,
-    align_segments,
     align_words,
     refine_word_timings,
 )
@@ -124,7 +123,7 @@ def test_refine_word_timings_passes_through_none_entries() -> None:
     assert refine_word_timings(timings, offset=-0.1) == timings
 
 
-def test_align_words_and_segments_keep_unmatched_entries_for_manual_review() -> None:
+def test_align_words_keeps_unmatched_entries_for_manual_review() -> None:
     canon_original = ["الحمد", "لله"]
     canon_norm = ["الحمد", "لله"]
 
@@ -137,16 +136,6 @@ def test_align_words_and_segments_keep_unmatched_entries_for_manual_review() -> 
         canon_norm,
         min_score=0.8,
     )
-    segment_alignment, segment_manual = align_segments(
-        [
-            {"text_raw": "الْحَمْدُ لِلَّهِ", "text_norm": "الحمد لله", "start": 0.0, "end": 1.0},
-            {"text_raw": "غير مطابق", "text_norm": "غير مطابق", "start": 1.0, "end": 2.0},
-        ],
-        ["الْحَمْدُ لِلَّهِ"],
-        ["الحمد لله"],
-        min_score=0.8,
-    )
-
     assert word_alignment[0]["word"] == "الحمد"
     assert word_alignment[1]["word"] == "غير"
     assert len(word_manual) == 1
@@ -155,15 +144,6 @@ def test_align_words_and_segments_keep_unmatched_entries_for_manual_review() -> 
     assert word_manual[0]["start"] == 0.4
     assert word_manual[0]["end"] == 0.7
     assert 0.0 <= word_manual[0]["best_score"] < 0.8
-
-    assert segment_alignment[0]["text"] == "الْحَمْدُ لِلَّهِ"
-    assert segment_alignment[1]["text"] == "غير مطابق"
-    assert len(segment_manual) == 1
-    assert segment_manual[0]["segment_index"] == 1
-    assert segment_manual[0]["whisperx_text"] == "غير مطابق"
-    assert segment_manual[0]["start"] == 1.0
-    assert segment_manual[0]["end"] == 2.0
-    assert 0.0 <= segment_manual[0]["best_score"] < 0.8
 
 
 def test_extract_words_supports_flat_list_whisperx_shape() -> None:

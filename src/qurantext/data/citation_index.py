@@ -19,14 +19,12 @@ time by accumulating adjacent hits).
 Normalization is :func:`qurantext.core.arabic.normalize_detection_ar` (no
 diacritics, no tatweel, unified alef/ya/waw-hamza), already applied when the
 store was built. Callers MUST normalize transcript windows the same way before
-looking phrases up — :func:`normalize_phrase` does this.
+looking phrases up.
 """
 
 from __future__ import annotations
 
 import sqlite3
-
-from qurantext.core.arabic import normalize_detection_ar
 
 DEFAULT_NGRAM_N = 3
 
@@ -87,56 +85,3 @@ def build_citation_index(conn: sqlite3.Connection, n: int = DEFAULT_NGRAM_N) -> 
     )
     conn.commit()
     return len(rows)
-
-
-def normalize_phrase(text: str) -> list[str]:
-    """Normalize *text* into the token list used by the index."""
-    norm = normalize_detection_ar(text)
-    return norm.split() if norm else []
-
-
-def find_candidate_ayat(
-    conn: sqlite3.Connection,
-    text: str,
-    *,
-    n: int = DEFAULT_NGRAM_N,
-    min_hits: int = 1,
-    limit: int = 20,
-) -> list[dict]:
-    """Return candidate ayat for a transcript fragment, ranked by n-gram hits.
-
-    Slides every n-gram of the normalized *text* against the index and counts how
-    many distinct n-grams of *text* hit each ayah. This is a fast candidate
-    filter — callers still fuzzy-score the survivors (see ``lecture_matching``).
-
-    Each result: ``{surah_num, ayah_num, hits}`` with ``hits >= min_hits``.
-    """
-    tokens = normalize_phrase(text)
-    if len(tokens) < n:
-        return []
-
-    grams = {" ".join(tokens[i : i + n]) for i in range(len(tokens) - n + 1)}
-    if not grams:
-        return []
-
-    counts: dict[tuple[int, int], int] = {}
-    for gram in grams:
-        seen_for_gram: set[tuple[int, int]] = set()
-        for surah_num, ayah_num in conn.execute(
-            "SELECT surah_num, ayah_num FROM citation_ngrams WHERE gram = ?", (gram,)
-        ):
-            key = (surah_num, ayah_num)
-            # Count each distinct gram at most once per ayah.
-            if key not in seen_for_gram:
-                seen_for_gram.add(key)
-                counts[key] = counts.get(key, 0) + 1
-
-    ranked = sorted(
-        (
-            {"surah_num": s, "ayah_num": a, "hits": h}
-            for (s, a), h in counts.items()
-            if h >= min_hits
-        ),
-        key=lambda r: (-r["hits"], r["surah_num"], r["ayah_num"]),
-    )
-    return ranked[:limit]

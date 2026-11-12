@@ -7,7 +7,7 @@ from qurantext.io.readers import (
     extract_segments,
     load_json,
 )
-from qurantext.io.writers import write_json, write_text_srt, write_word_srt
+from qurantext.io.writers import write_json, write_word_srt
 
 
 def test_io_helpers_extract_words_segments_and_write_outputs(tmp_path: Path) -> None:
@@ -39,11 +39,7 @@ def test_io_helpers_extract_words_segments_and_write_outputs(tmp_path: Path) -> 
     word_srt = Path(
         write_word_srt([{"start": 0.0, "end": 0.5, "word": "بسم"}], tmp_path / "word.srt")
     )
-    text_srt = Path(
-        write_text_srt([{"start": 0.0, "end": 1.0, "text": "بسم الله"}], tmp_path / "text.srt")
-    )
     assert "بسم" in word_srt.read_text(encoding="utf-8")
-    assert "بسم الله" in text_srt.read_text(encoding="utf-8")
     assert json.loads(json_path.read_text(encoding="utf-8"))["segments"][0]["text"] == "بِسْمِ اللَّهِ"
 
 

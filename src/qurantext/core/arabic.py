@@ -59,7 +59,7 @@ def normalize_full_aya_ar(text: str) -> str:
 
 
 def normalize_detection_ar(text: str) -> str:
-    """Match the detect_range.py normalization used for ayah matching."""
+    """Normalize text the way ayah detection and matching compare it."""
     return _normalize_with_pattern(text, DETECTION_TASHKEEL, map_bari_yeh=True)
 
 

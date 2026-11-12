@@ -73,16 +73,6 @@ def _align_entries(
     return result, manual_check
 
 
-def find_best_canonical_word(
-    word_norm: str,
-    canon_original: list[str],
-    canon_norm: list[str],
-    min_score: float,
-) -> tuple[str | None, float]:
-    """Search canonical words for the best fuzzy match."""
-    return _find_best_match(word_norm, canon_original, canon_norm, min_score)
-
-
 def align_words(
     words: list[dict],
     canon_original: list[str],
@@ -100,36 +90,6 @@ def align_words(
         display_key="word",
         manual_index_key="word_index",
         manual_raw_key="whisperx_word",
-    )
-
-
-def find_best_canonical_line(
-    segment_norm: str,
-    lines_original: list[str],
-    lines_norm: list[str],
-    min_score: float,
-) -> tuple[str | None, float]:
-    """Search canonical lines for the best fuzzy match."""
-    return _find_best_match(segment_norm, lines_original, lines_norm, min_score)
-
-
-def align_segments(
-    segments: list[dict],
-    lines_original: list[str],
-    lines_norm: list[str],
-    min_score: float,
-) -> tuple[list[dict], list[dict]]:
-    """Align WhisperX segment entries against canonical Quran lines."""
-    return _align_entries(
-        segments,
-        lines_original,
-        lines_norm,
-        min_score,
-        needle_key="text_norm",
-        raw_key="text_raw",
-        display_key="text",
-        manual_index_key="segment_index",
-        manual_raw_key="whisperx_text",
     )
 
 

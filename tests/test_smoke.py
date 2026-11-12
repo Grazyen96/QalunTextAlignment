@@ -19,7 +19,7 @@ def test_cli_parser_includes_expected_commands() -> None:
     assert "run-all" in help_text
 
 
-def test_package_and_root_detect_range_smoke(tmp_path: Path) -> None:
+def test_package_range_match_smoke(tmp_path: Path) -> None:
     quran = tmp_path / "sample_quran.txt"
     whisper = tmp_path / "sample_whisper.json"
     output = tmp_path / "result.json"
@@ -72,26 +72,9 @@ def test_package_and_root_detect_range_smoke(tmp_path: Path) -> None:
 
     package_result = json.loads(output.read_text(encoding="utf-8"))
     assert package_result["first_ayah"]["ayah_num"] == 1
+    assert package_result["last_ayah"]["ayah_num"] == 2
     # No transcription ran, so the file says no engine produced it.
     assert package_result["meta"]["transcription_engine"] is None
-
-    subprocess.run(
-        [
-            sys.executable,
-            "detect_range.py",
-            "--quran",
-            str(quran),
-            "--whisperx",
-            str(whisper),
-            "--output",
-            str(output),
-        ],
-        cwd=Path(__file__).resolve().parents[1],
-        check=True,
-    )
-
-    wrapper_result = json.loads(output.read_text(encoding="utf-8"))
-    assert wrapper_result["last_ayah"]["ayah_num"] == 2
 
 
 def test_cli_offers_the_engine_choice(capsys) -> None:

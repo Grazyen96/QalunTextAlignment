@@ -54,22 +54,6 @@ def test_the_third_party_notice_credits_the_speech_model() -> None:
     assert "without warranties" in text
 
 
-def test_requirements_txt_carries_every_core_dependency() -> None:
-    """The README installs from requirements.txt; pyproject is what CI installs.
-
-    sherpa-onnx was once missing from requirements.txt, so an install that
-    followed the README could not transcribe on the default engine, and nothing
-    in CI noticed. Same name and same version range in both, or they drift again.
-    """
-    tomllib = pytest.importorskip("tomllib")  # Python 3.11+; the project allows 3.10
-    root = Path(__file__).resolve().parents[1]
-    with (root / "pyproject.toml").open("rb") as handle:
-        core = tomllib.load(handle)["project"]["dependencies"]
-    lines = (root / "requirements.txt").read_text(encoding="utf-8").splitlines()
-    pinned = {line.strip() for line in lines if line.strip() and not line.startswith("#")}
-    assert set(core) == pinned
-
-
 def test_the_spec_collects_sherpa_onnx() -> None:
     text = SPEC.read_text(encoding="utf-8")
     assert 'collect_dynamic_libs("sherpa_onnx")' in text
@@ -220,7 +204,6 @@ def test_the_installed_sherpa_onnx_is_the_build_the_notices_describe() -> None:
     from importlib.metadata import version
 
     pin = _sherpa_onnx_pin()
-    assert f"sherpa-onnx=={pin}" in (ROOT / "requirements.txt").read_text(encoding="utf-8")
     assert version("sherpa_onnx") == pin, (
         f"sherpa-onnx {version('sherpa_onnx')} is installed but the pin and the notices say "
         f"{pin}: reinstall with `pip install -e .`, or move the pin and update "
@@ -445,7 +428,6 @@ def test_segno_is_pinned_credited_and_its_licence_shipped() -> None:
     from importlib.metadata import distribution
 
     pin = _segno_pin()
-    assert f"segno=={pin}" in (ROOT / "requirements.txt").read_text(encoding="utf-8")
     installed = distribution("segno")
     assert installed.version == pin, (
         f"segno {installed.version} is installed but the pin says {pin}: reinstall with "
@@ -477,7 +459,6 @@ def test_idna_is_pinned_credited_and_its_licence_shipped() -> None:
     pins = [dep for dep in core if dep.startswith("idna")]
     assert len(pins) == 1 and pins[0].startswith("idna=="), pins
     pin = pins[0].removeprefix("idna==")
-    assert f"idna=={pin}" in (ROOT / "requirements.txt").read_text(encoding="utf-8")
     assert distribution("idna").version == pin
     assert 'copy_metadata("idna")' in SPEC.read_text(encoding="utf-8")
     notice = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")

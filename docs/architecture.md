@@ -20,7 +20,6 @@ QuranText is organized around a small number of stable layers:
 - `pipelines/` coordinates complete workflows such as recitation matching, detect-range matching, and video generation.
 - `gui/` is the desktop window: widgets, a worker thread, and the one call it makes
   into the pipeline. Qt is optional, so nothing outside this package imports it.
-- `scripts/` and root scripts are thin compatibility entry points.
 
 ## Module Responsibilities
 
@@ -41,14 +40,14 @@ QuranText is organized around a small number of stable layers:
 - `lecture_matching.py` builds ayah spans, scans transcript windows, scores lecture matches, and merges overlapping detections.
 - `pause_cut.py` cuts a stream of audio into recognisable windows, at pauses.
 - `token_words.py` turns the recogniser's sub-word tokens and their times into timed words.
-- `alignment.py` holds the legacy word- and segment-alignment fuzzy matching helpers.
+- `alignment.py` holds the legacy word-alignment fuzzy matching helper and the canonical word timing alignment.
 - `video_common.py` contains shared validation, timing, JSON loading, and rendering helpers.
 - `ass_renderer.py` contains ASS subtitle generation, FFmpeg ASS rendering, and font-family validation.
 - `subtitles.py` builds subtitle cues and writes them as SRT, WebVTT or ASS.
 - `coverage.py` finds recited audio that no word timing covers, from the waveform.
 - `frame_renderer.py` contains the Pillow frame renderer and active-match tracking. Frames are
   streamed straight into FFmpeg, so the video is encoded once with no intermediate file.
-- `video_renderer.py` only re-exports the renderer modules for older imports; the render job itself is `jobs/render.py` (`core/` never imports `jobs/` or `gui/`, which `tests/test_layering.py` enforces).
+- The render job itself is `jobs/render.py` (`core/` never imports `jobs/` or `gui/`, which `tests/test_layering.py` enforces).
 
 ### `src/qurantext/io`
 
@@ -104,20 +103,4 @@ Add new pure matching logic under `core/`.
 Add file format readers or writers under `io/`.
 Add external services under `services/`.
 Add new workflows under `pipelines/` and expose them from `cli/main.py`.
-Keep root scripts and `scripts/` wrappers free of business logic.
-
-## Old To New Mapping
-
-- `detect_range.py` -> `src/qurantext/pipelines/detection.py`
-- `lecture_mode.py` -> `src/qurantext/core/lecture_matching.py`
-- `whisperx_service.py` -> `src/qurantext/services/transcription.py`
-- `render_ayat_video.py` -> `src/qurantext/core/video_renderer.py` and `src/qurantext/pipelines/video.py`
-- `audioAlignment.py` -> `src/qurantext/core/alignment.py` and `src/qurantext/pipelines/recitation.py`
-- `fullAyaAlignment.py` -> retired legacy workflow
-- `env_utils.py` -> `src/qurantext/config/settings.py`
-
-## Compatibility Strategy
-
-- The root scripts remain executable wrappers.
-- The `scripts/` directory contains additional wrapper entry points.
-- The package CLI under `python3 -m qurantext` is the preferred interface going forward.
+The package CLI under `python3 -m qurantext` is the only command-line interface.

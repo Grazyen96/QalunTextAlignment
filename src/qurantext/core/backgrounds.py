@@ -370,7 +370,7 @@ _PATTERNS = {"pattern_stars": _stars, "pattern_lattice": _lattice, "pattern_arch
 
 
 def _draw_card(image: Image.Image, box, radius: int, fill, outline) -> None:
-    """The card panel, drawn exactly as frame_renderer.draw_rounded_rectangle drew it."""
+    """The card panel, drawn exactly as the frame renderer once drew it."""
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     ImageDraw.Draw(overlay, "RGBA").rounded_rectangle(
         box, radius=radius, fill=fill, outline=outline, width=2

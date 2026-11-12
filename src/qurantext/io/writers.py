@@ -24,13 +24,6 @@ def write_word_srt(
     return _write_srt(result, destination, text_key="word", bom=bom)
 
 
-def write_text_srt(
-    result: list[dict], destination: str | PathLike[str], *, bom: bool = False
-) -> str:
-    """Write a text-level SRT caption file."""
-    return _write_srt(result, destination, text_key="text", bom=bom)
-
-
 def _write_srt(
     result: list[dict],
     destination: str | PathLike[str],

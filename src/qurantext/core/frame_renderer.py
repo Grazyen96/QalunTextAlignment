@@ -413,32 +413,6 @@ def paginate_lines(
     ]
 
 
-def draw_rounded_rectangle(
-    image: Any,
-    box: tuple[int, int, int, int],
-    radius: int,
-    fill: tuple[int, int, int, int],
-    outline: tuple[int, int, int, int] = COLOUR_CARD_BORDER,
-) -> None:
-    """Draw a semi-transparent rounded rectangle using Pillow."""
-    _, image_module, image_draw, _, _ = _frame_dependencies()
-    overlay = image_module.new("RGBA", image.size, (0, 0, 0, 0))
-    draw = image_draw.Draw(overlay, "RGBA")
-
-    if hasattr(draw, "rounded_rectangle"):
-        draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=2)
-    else:
-        x0, y0, x1, y1 = box
-        draw.rectangle((x0 + radius, y0, x1 - radius, y1), fill=fill)
-        draw.rectangle((x0, y0 + radius, x1, y1 - radius), fill=fill)
-        draw.ellipse((x0, y0, x0 + 2 * radius, y0 + 2 * radius), fill=fill)
-        draw.ellipse((x1 - 2 * radius, y0, x1, y0 + 2 * radius), fill=fill)
-        draw.ellipse((x0, y1 - 2 * radius, x0 + 2 * radius, y1), fill=fill)
-        draw.ellipse((x1 - 2 * radius, y1 - 2 * radius, x1, y1), fill=fill)
-
-    image.alpha_composite(overlay)
-
-
 def draw_centered_multiline_text(
     draw: Any,
     lines: list[str],

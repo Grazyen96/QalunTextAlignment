@@ -104,16 +104,6 @@ exclude = ["prototypes"]
 select = ["B", "E", "F", "I", "UP", "PLE2502"]
 ignore = ["E501"]
 
-[tool.ruff.lint.per-file-ignores]
-# Legacy root/`scripts/` compatibility shims intentionally adjust sys.path
-# before importing the package, which trips E402 (import not at top of file).
-"detect_range.py" = ["E402"]
-"render_ayat_video.py" = ["E402"]
-"lecture_mode.py" = ["E402"]
-"whisperx_service.py" = ["E402"]
-"env_utils.py" = ["E402"]
-"scripts/*.py" = ["E402"]
-
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"

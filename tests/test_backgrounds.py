@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from qurantext.core import backgrounds
 from qurantext.core.backgrounds import background_mean, base_layer, clear_cache
@@ -29,11 +29,15 @@ def _with_bg(**kw) -> object:
 
 
 def test_night_gold_layer_is_the_old_frame_start() -> None:
-    """Same pixels as Image.new(COLOUR_BG) + the old draw_rounded_rectangle."""
-    from qurantext.core.frame_renderer import COLOUR_BG, COLOUR_CARD, draw_rounded_rectangle
+    """Same pixels as Image.new(COLOUR_BG) + the card panel the frame renderer once drew."""
+    from qurantext.core.frame_renderer import COLOUR_BG, COLOUR_CARD, COLOUR_CARD_BORDER
 
     old = Image.new("RGBA", (540, 960), COLOUR_BG)
-    draw_rounded_rectangle(old, CARD, 24, COLOUR_CARD)
+    overlay = Image.new("RGBA", old.size, (0, 0, 0, 0))
+    ImageDraw.Draw(overlay, "RGBA").rounded_rectangle(
+        CARD, radius=24, fill=COLOUR_CARD, outline=COLOUR_CARD_BORDER, width=2
+    )
+    old.alpha_composite(overlay)
     assert base_layer(NIGHT_GOLD, 540, 960, CARD, 24).image.tobytes() == old.tobytes()
 
 

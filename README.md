@@ -10,8 +10,7 @@ audio, or an existing WhisperX transcript, and does four main things:
 4. **Render timestamped Quran videos** from lecture or recitation match results.
 
 It ships as a desktop app (Qalun, built with PySide6) and as a command-line
-tool. The project uses a `src/` package layout and keeps the older root scripts
-as thin compatibility wrappers.
+tool. The project uses a `src/` package layout.
 
 ## Python Version
 
@@ -56,10 +55,12 @@ Typical workflows:
 
 ## Installation
 
-Create or activate a Python environment, then install runtime dependencies:
+Create or activate a Python environment, then install the package in editable
+mode, which brings the runtime dependencies and makes `python3 -m qurantext ...`
+work directly:
 
 ```bash
-python3 -m pip install -r requirements.txt
+python3 -m pip install -e .
 ```
 
 The runtime dependencies are NumPy, Pillow (built with libraqm, for Arabic
@@ -70,12 +71,6 @@ That model, NVIDIA's FastConformer Hybrid Large (Arabic),
 `stt_ar_fastconformer_hybrid_large_pcd_v1.0`, is not installed by pip: Qalun
 downloads it once, on first use (about 110 MB). It is licensed CC BY 4.0; the
 attribution is in `THIRD_PARTY_NOTICES.md`.
-
-For normal development, install the package in editable mode so `python3 -m qurantext ...` works directly:
-
-```bash
-python3 -m pip install -e .
-```
 
 Install development tooling when you want tests and linting:
 
@@ -349,7 +344,7 @@ Qt is an optional dependency, so the command line installs without it. Running
 
 ## How To Run The CLI
 
-You have **three** common ways to run the project.
+You have **two** common ways to run the project.
 
 ### Option 1: installed editable package (recommended)
 
@@ -362,19 +357,6 @@ python3 -m qurantext --help
 
 ```bash
 PYTHONPATH=src python3 -m qurantext --help
-```
-
-### Option 3: use compatibility wrapper scripts
-
-```bash
-python3 detect_range.py --help
-python3 render_ayat_video.py --help
-```
-
-For new usage, prefer:
-
-```bash
-python3 -m qurantext ...
 ```
 
 ## Environment
@@ -439,7 +421,11 @@ output/
   lecture_matching/
   whisperx_transcripts/
   range_matching/
-scripts/               Thin convenience wrappers
+examples/              A sample Quran text file for the command-line examples
+tools/                 Developer scripts (fonts, icons, Mushaf conversion, model export)
+packaging/             The desktop app build and its release steps
+tests/                 The test suite
+docs/                  Architecture notes, plans, audits and findings
 ```
 
 ## Inputs
@@ -744,34 +730,6 @@ python3 -m qurantext generate-video \
   --fps 25
 ```
 
-The frame renderer is the direct replacement for older commands such as:
-
-```bash
-python3 render_ayat_video.py \
-  --audio alFurqan.mp3 \
-  --matches recitation_result.json \
-  --output test2-recitation-alfurquan-frame.mp4 \
-  --renderer frame \
-  --font-file src/qurantext/assets/fonts/qaloon.10.ttf \
-  --width 1920 \
-  --height 1080 \
-  --fps 25
-```
-
-Equivalent package command:
-
-```bash
-python3 -m qurantext generate-video \
-  --audio alFurqan.mp3 \
-  --matches recitation_result.json \
-  --output test2-recitation-alfurquan-frame.mp4 \
-  --renderer frame \
-  --font-file src/qurantext/assets/fonts/qaloon.10.ttf \
-  --width 1920 \
-  --height 1080 \
-  --fps 25
-```
-
 ### 7. Run transcription + matching in one command
 
 ```bash
@@ -794,7 +752,7 @@ python3 -m qurantext run-all \
 
 ```bash
 python3 -m qurantext word-align \
-  --quran alFurqan.txt \
+  --quran examples/alFurqan.txt \
   --audio alFurqan.mp3
 ```
 
@@ -828,28 +786,6 @@ python3 -m qurantext generate-video \
   --output output/videos/alFurqan-frame.mp4 \
   --renderer frame \
   --font-file src/qurantext/assets/fonts/qaloon.10.ttf
-```
-
-## Backward-Compatible Script Wrappers
-
-These still work and delegate into the packaged implementation:
-
-```bash
-python3 detect_range.py --help
-python3 render_ayat_video.py --help
-python3 scripts/detect_range.py --help
-python3 scripts/render_ayat_video.py --help
-```
-
-Prefer `python3 -m qurantext ...` for new usage.
-
-## Old To New Command Mapping
-
-```text
-python3 detect_range.py ...         -> python3 -m qurantext range-match ...
-python3 render_ayat_video.py ...    -> python3 -m qurantext generate-video ...
-python3 scripts/detect_range.py ... -> python3 -m qurantext range-match ...
-python3 scripts/render_ayat_video.py ... -> python3 -m qurantext generate-video ...
 ```
 
 ## Workflow Notes
