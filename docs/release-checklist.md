@@ -326,7 +326,7 @@ this is the only place anyone hears each platform's build recognise speech.
       خيرًا», «بارك الله فيكم» and «سبحانك اللهم وبحمدك، أشهد أن لا إله إلا أنت،
       أستغفرك وأتوب إليك».
     - the 114 surah names as the intro's title writes them, in plain letters, listed in
-      `tests/test_surah_names.py` (`PLAIN_TITLES`): «سورة آل عمران», «سورة الشورى», «سورة
+      `tests/core/test_surah_names.py` (`PLAIN_TITLES`): «سورة آل عمران», «سورة الشورى», «سورة
       الأعلى», «سورة الضحى» and the rest. 34 «سبأ» and 78 «النبأ» are written as most people
       write them, not as the shipped text's Uthmani «سبإ» and «النبإ»: confirm that is right.
 

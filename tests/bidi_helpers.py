@@ -37,7 +37,7 @@ def left_to_right(text: str, parts: Sequence[str], *, rtl: bool | None = None) -
     layout.setTextOption(option)
     layout.beginLayout()
     line = layout.createLine()
-    line.setLineWidth(100_000)  # one line, however long the text
+    line.setLineWidth(100_000)
     layout.endLayout()
 
     def left_edge(part: str) -> float:

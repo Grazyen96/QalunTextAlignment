@@ -32,7 +32,7 @@ the wheels the binaries come from do not carry them.
   the app's archive and leaves the metadata out; the spec ships this copy
   beside `THIRD_PARTY_NOTICES.md` instead. Copied verbatim from the installed
   segno 1.6.6 (`segno-1.6.6.dist-info/licenses/LICENSE`, fetched 12 Oct 2026);
-  `tests/test_packaging_spec.py` fails if it stops matching the installed one.
+  `tests/packaging/test_packaging_spec.py` fails if it stops matching the installed one.
 
 - `Amiri-OFL.txt`: the SIL Open Font License 1.1 for the Amiri font, the
   release's own `OFL.txt` from
@@ -58,4 +58,4 @@ those source archives (espeak-ng for every platform, alsa-lib for Linux) by URL
 and sha256, and `packaging/ci/package.sh` puts them in every app zip under
 `third-party-sources/`. sherpa-onnx is pinned exactly (`sherpa-onnx==1.13.8` in
 `pyproject.toml`), so these files and that list always describe the build that
-ships; `tests/test_packaging_spec.py` fails if the installed version differs.
+ships; `tests/packaging/test_packaging_spec.py` fails if the installed version differs.
