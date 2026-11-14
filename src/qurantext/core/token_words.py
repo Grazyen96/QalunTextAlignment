@@ -33,7 +33,7 @@ def tokens_to_words(
     """Words with absolute start/end seconds, from one window's tokens."""
     if len(tokens) != len(times):
         raise ValueError(f"{len(tokens)} tokens but {len(times)} times")
-    pieces: list[list] = []  # [text, start, last token time]
+    pieces: list[list] = []
     pending = False
     for token, t in zip(tokens, times, strict=True):
         starts = token.startswith(WORD_STARTS)
@@ -41,7 +41,7 @@ def tokens_to_words(
         if not text:
             pending = pending or starts
             continue
-        if text.startswith("<") and text.endswith(">"):  # <unk>, <blk>: not speech
+        if text.startswith("<") and text.endswith(">"):
             pending = pending or starts
             continue
         if all(ch in _PUNCT for ch in text):

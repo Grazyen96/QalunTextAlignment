@@ -106,8 +106,6 @@ class SettingsDialog(QDialog):
     def current_tab(self) -> str:
         return TABS[self.tabs.currentIndex()]
 
-    # -- General ------------------------------------------------------------------
-
     def _general(self) -> QWidget:
         page = QWidget()
         form = QFormLayout(page)
@@ -149,8 +147,6 @@ class SettingsDialog(QDialog):
         self.language_note.setText(reason)
         self.language_note.setVisible(True)
 
-    # -- Transcription ------------------------------------------------------------
-
     def _transcription(self) -> QWidget:
         page = QWidget()
         column = QVBoxLayout(page)
@@ -179,7 +175,6 @@ class SettingsDialog(QDialog):
 
     def _engine_changed(self) -> None:
         self._prefs.engine = self._current_engine()
-        # The form says before Start that WhisperX uploads the recording.
         self.changed_files = True
         self._show_token_note()
 
@@ -189,8 +184,6 @@ class SettingsDialog(QDialog):
             t("home.engine.no_token", folder=path_text(env_dir())) if missing else ""
         )
         self.no_token_label.setVisible(missing)
-
-    # -- Files --------------------------------------------------------------------
 
     def _files(self) -> QWidget:
         page = QWidget()
@@ -285,7 +278,7 @@ class SettingsDialog(QDialog):
             self.set_output_dir(Path(name))
 
     def set_output_dir(self, path: Path | None) -> None:
-        self._prefs.output_dir = path  # which also adds it to the job folders
+        self._prefs.output_dir = path
         self.changed_files = True
         self._update_output_label()
         self._fill_dirs()
@@ -304,7 +297,6 @@ class SettingsDialog(QDialog):
         )
         if not name:
             return
-        # Resolved, as Prefs stores it, so the list never shows a row Prefs dropped.
         folder = Path(name).resolve()
         dirs = list(self._prefs.job_dirs)
         if folder not in dirs:
@@ -351,13 +343,11 @@ class SettingsDialog(QDialog):
         self._update_dir_buttons()
 
     def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 - Qt override
-        self._fill_dirs()  # a job may have added its folder since the dialog was built
+        self._fill_dirs()
         super().showEvent(event)
 
     def _update_dir_buttons(self) -> None:
         self.remove_dir_button.setEnabled(self.job_dirs_list.currentRow() >= 0)
-
-    # -- Videos -------------------------------------------------------------------
 
     def _videos(self) -> QWidget:
         page = QWidget()
@@ -424,8 +414,6 @@ class SettingsDialog(QDialog):
         else:
             self._prefs.save_default_episode(KEEP_DEFAULT, None, outro_generated=None)
         self._show_episode()
-
-    # -- About --------------------------------------------------------------------
 
     def _about(self) -> QWidget:
         page = QWidget()

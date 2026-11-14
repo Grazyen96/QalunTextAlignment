@@ -18,8 +18,6 @@ _RAW = f"https://raw.githubusercontent.com/lucide-icons/lucide/{LUCIDE_TAG}"
 ICON_DIR = Path(__file__).resolve().parents[1] / "src" / "qurantext" / "assets" / "icons"
 LICENCE_COPY = Path(__file__).resolve().parents[1] / "packaging" / "licenses" / "Lucide-LICENSE.txt"
 
-#: Every icon the windows use. Add here, re-run, and name the new one in
-#: ``qurantext.gui.icons.NAMES`` too (its test keeps the two lists equal).
 ICON_NAMES: tuple[str, ...] = (
     "play",
     "pause",
@@ -66,7 +64,7 @@ ICON_NAMES: tuple[str, ...] = (
 
 
 def _fetch(url: str) -> bytes:
-    with urllib.request.urlopen(url, timeout=30) as response:  # noqa: S310 - a pinned GitHub URL
+    with urllib.request.urlopen(url, timeout=30) as response:
         return response.read()
 
 

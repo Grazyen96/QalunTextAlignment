@@ -21,7 +21,6 @@ def _reset_to_english() -> None:
         return
     app = QApplication.instance()
     if app is not None:
-        # Also removes Qt's own translation, sets the direction back and the C locale.
         apply_language(app, "en")
 
 
@@ -48,7 +47,6 @@ def _private_cache_dir(monkeypatch, tmp_path):
     monkeypatch.setenv("QURANTEXT_CACHE_DIR", str(tmp_path / "cache"))
 
 
-#: The application properties ``gui.theme.apply_theme`` sets; restored after every test.
 _THEME_PROPERTIES = (
     "qalun.tokens",
     "qalun.theme_mode",
@@ -59,7 +57,7 @@ _THEME_PROPERTIES = (
 
 @pytest.fixture(autouse=True)
 def _panels_do_not_animate(monkeypatch):
-    """Every disclosure opens at once under test; tests/test_disclosure.py drives the motion itself."""
+    """Every disclosure opens at once under test; tests/gui/test_disclosure.py drives the motion itself."""
     try:
         from qurantext.gui import disclosure
     except ImportError:
@@ -67,7 +65,7 @@ def _panels_do_not_animate(monkeypatch):
     monkeypatch.setattr(disclosure, "animations_enabled", lambda prefs: False)
 
 
-def restore_theme(app, *, palette, sheet: str, style_name: str, properties: dict) -> None:  # noqa: ANN001 - a QApplication and a QPalette
+def restore_theme(app, *, palette, sheet: str, style_name: str, properties: dict) -> None:
     """Put back the palette, sheet, style and theme properties a test found, deleting what it let go first.
 
     A widget a test let go with ``deleteLater()`` waits for an event loop
@@ -78,7 +76,7 @@ def restore_theme(app, *, palette, sheet: str, style_name: str, properties: dict
     caches, so if it dies under the next sheet a pointer to it stays behind,
     and that sheet's next change follows it into freed memory. That is how
     ``tools/screenshots.py`` crashed in its last ``apply_theme``: it ran the
-    deferred deletes of a dialog from ``tests/test_widgets.py``. A widget
+    deferred deletes of a dialog from ``tests/gui/test_widgets.py``. A widget
     kept alive only by a reference cycle dies the same way when the garbage
     collector gets to it, so when the sheet is about to come off the collector
     runs first (only then: that is the only change that ends a sheet's era).

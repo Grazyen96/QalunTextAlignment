@@ -47,12 +47,8 @@ __all__ = [
 #: The recogniser's peak working set in GB, measured (see the module docstring).
 #: The doctor and the README state it, so a small machine knows before a long job.
 PEAK_MEMORY_GB = 1.8
-#: Leave two cores to the window and the rest of the machine.
 DEFAULT_THREADS = max(1, (os.cpu_count() or 1) - 2)
-#: Windows recognised together. Part of what the parity gate approved: changing it
-#: changes transcripts (see the module docstring) and needs the gate run again.
 _BATCH_WINDOWS = 4
-#: How much of FFmpeg's error output is read back for a failure's message.
 _STDERR_TAIL_BYTES = 4096
 
 RecognizerFactory = Callable[[Path, int], Any]
@@ -66,7 +62,7 @@ def runtime_problem() -> str | None:
     """
     try:
         import sherpa_onnx  # noqa: F401
-    except Exception as error:  # noqa: BLE001 — ImportError, or a native library that will not load
+    except Exception as error:
         return str(error) or type(error).__name__
     return None
 
@@ -87,7 +83,7 @@ def make_recognizer(model_dir: Path, num_threads: int) -> Any:
             decoding_method="greedy_search",
             model_type="nemo_transducer",
         )
-    except Exception as error:  # noqa: BLE001 — every load failure means the same thing here
+    except Exception as error:
         raise ModelLoadError(
             f"The speech model could not be loaded from {model_dir}: {error}"
         ) from error
@@ -192,8 +188,6 @@ def transcribe_local(
 ) -> dict:
     """Transcribe *audio_path* on this computer, in the WhisperX raw shape."""
     audio_path = Path(audio_path)
-    # Say so at once: probing and loading take seconds, and the window would
-    # otherwise keep naming the stage before this one.
     report(progress, "transcribe", "Transcribing on this computer...")
     duration = probe_duration(audio_path)
     recognizer = recognizer_factory(Path(model_dir), num_threads)
@@ -214,7 +208,7 @@ def transcribe_local(
             return streams
         except JobCancelled:
             raise
-        except Exception as error:  # noqa: BLE001 — native errors and MemoryError alike
+        except Exception as error:
             detail = str(error) or type(error).__name__
             raise LocalEngineError(
                 f"The local model stopped while recognising {audio_path.name} at "
@@ -257,7 +251,6 @@ def transcribe_local(
             eta_seconds=eta,
         )
 
-    # closing(): FFmpeg is reaped the moment we stop, not whenever the generator is collected.
     with closing(decode_pcm(audio_path)) as blocks:
         for block in blocks:
             if cancel is not None:

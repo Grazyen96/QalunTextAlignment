@@ -40,23 +40,17 @@ __all__ = [
     "tn",
 ]
 
-#: Languages written right to left: their layout mirrors, and every value
-#: formatted into their sentences is isolated so it keeps its own direction.
 RTL_LANGUAGES = frozenset({"ar"})
 
-#: Each language by its own name, for the language menu; never translated.
 LANGUAGE_NAMES = {"en": "English", "ar": "العربية"}
 
 _FSI, _LRI, _PDI, _LRM = "\u2068", "\u2066", "\u2069", "\u200e"
 _RLI, _RLM = "\u2067", "\u200f"
 
-#: The speech model's download, rounded for people ("about 110 MB"); read from
-#: the pinned model so a new one never leaves an old figure behind.
 _MODEL_MB = LOCAL_MODEL.download_mb
 
 STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
     "en": {
-        # Tasks 3–9 add their keys here, grouped by widget.
         "home.jobs": "Your jobs",
         "home.refresh": "Refresh",
         "home.mode.recitation": "Recitation",
@@ -140,8 +134,6 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "job.progress.aligning": "Aligning against the ayat you chose…",
         "job.progress.detecting": "Looking for Quran in the audio…",
         "job.progress.kept": "Kept your earlier corrections in {name}",
-        # What the status line says while a stage runs; the pipeline's own
-        # messages are English log lines and are never shown.
         "job.stage.download": f"Downloading the speech model, once (about {_MODEL_MB} MB)…",
         "job.stage.unpack": "Unpacking and checking the speech model…",
         "job.stage.transcribe": "Transcribing on this computer…",
@@ -450,7 +442,6 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "look.image_unreadable": (
             "The background image could not be read; the palette's background is shown instead."
         ),
-        # The episode: intro, recitation, lecture and outro joined into one video.
         "episode.error.missing": (
             "The clip \u2068{name}\u2069 is missing, so the episode was not made."
         ),
@@ -588,8 +579,6 @@ STRINGS: dict[str, dict[str, str | dict[str, str]]] = {
         "platform.telegram": "Telegram",
         "platform.whatsapp": "WhatsApp",
     },
-    # Drafted for the first release; a native speaker must review every line
-    # before it ships (spec §4). Keep the order and grouping of "en".
     # \u2066…\u2069 isolates keep Latin and number runs left to right, and a leading
     # \u200f (RLM) makes a line of only values read right to left; they must be kept.
     "ar": {
@@ -1323,9 +1312,9 @@ def plain_title(text: str) -> str:
     of the text.
     """
     out: list[str] = []
-    opener = ""  # the outermost open isolate
-    start = 0  # where its content starts in *text*
-    mark_at = 0  # where its content starts in *out*
+    opener = ""
+    start = 0
+    mark_at = 0
     depth = 0
 
     def close(end: int) -> None:
@@ -1346,7 +1335,7 @@ def plain_title(text: str) -> str:
             depth += 1
         elif char == _PDI:
             if depth == 0:
-                continue  # closes nothing
+                continue
             depth -= 1
             if depth == 0:
                 close(index)

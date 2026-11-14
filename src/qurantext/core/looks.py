@@ -1,4 +1,3 @@
-# src/qurantext/core/looks.py
 """A video's look: its colours and its background, as one value.
 
 The renderer used to read thirteen module constants. A ``Look`` carries the
@@ -62,8 +61,6 @@ EDITABLE_COLOURS = (
     "caption_text",
     "caption_active",
 )
-#: Text drawn on the card, and text drawn on the caption strip: what the
-#: readability check measures. Dimmed and debug text are dim on purpose.
 _CARD_TEXT = ("header_text", "body_text", "highlight_word", "placeholder_text")
 _CAPTION_TEXT = ("caption_text", "caption_active")
 
@@ -155,7 +152,6 @@ def _parse_background(data: Any, fallback: Background, base_dir: Path | None) ->
         try:
             image = _resolve_path(raw, base_dir)
         except (OSError, ValueError, RuntimeError):
-            # "~nosuchuser/…", a NUL byte, a symlink loop: junk opens as the preset.
             return fallback
     return Background(
         kind=kind,
@@ -181,18 +177,13 @@ def _parse_hex(value: Any) -> RGBA | None:
     channels = [int(value[i : i + 2], 16) for i in range(1, len(value), 2)]
     if len(channels) == 3:
         channels.append(255)
-    return tuple(channels)  # type: ignore[return-value]
+    return tuple(channels)
 
 
 def _clamped(value: Any, low: float, high: float, fallback: float) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return fallback
     return float(min(high, max(low, value)))
-
-
-# The same rule as jobs/project.py's _store_path/_resolve_path (core must not
-# import jobs): relative only when the image lies inside the project folder, so
-# moving the folder alone keeps it; anything outside is stored absolute.
 
 
 def _store_path(path: Path, relative_to: Path | None) -> str:
@@ -248,7 +239,7 @@ def contrast_ratio(fg: tuple[int, ...], bg: tuple[int, ...]) -> float:
 def composite(fg: RGBA, bg: tuple[int, ...]) -> tuple[int, int, int]:
     """*fg* laid over an opaque *bg* at its alpha."""
     alpha = fg[3] / 255
-    return tuple(round(fg[i] * alpha + bg[i] * (1 - alpha)) for i in range(3))  # type: ignore[return-value]
+    return tuple(round(fg[i] * alpha + bg[i] * (1 - alpha)) for i in range(3))
 
 
 def readability_warnings(look: Look, background_mean: tuple[int, ...]) -> list[str]:

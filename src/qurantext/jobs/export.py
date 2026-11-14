@@ -73,7 +73,6 @@ class ExportRequest:
     captions: tuple[dict, ...] | None = None
     #: Ayah cards from a project file, used instead of the match file's.
     cards: tuple[dict, ...] | None = None
-    #: Colours and background of the video.
     look: Look = NIGHT_GOLD
     #: The surah a lecture's cards keep to; None guesses it. The subtitles
     #: are not affected: they carry everything said.
@@ -144,13 +143,8 @@ def build_cues(
         from qurantext.data.quran_db import QuranDataError, ensure_quran_db
 
         try:
-            # The certified text ships with the app, so a missing store is
-            # something to build rather than to fail on. First export on a new
-            # machine pays for it once.
             conn = ensure_quran_db(DEFAULT_QURAN_PATH, db_path)
         except (OSError, sqlite3.DatabaseError, QuranDataError, FileNotFoundError) as error:
-            # The video is already rendered by the time this runs, so a store
-            # that cannot be built costs the subtitles, not the job.
             warn(
                 f"Could not prepare the Quran store at {db_path} ({error}), so the "
                 "canonical ayah text for the subtitles cannot be read. The video is "
@@ -199,8 +193,6 @@ def export_job(
 
     mode = str(load_matches_meta(matches).get("mode") or "recitation").lower()
 
-    # A sidecar-only job still renders: the ayah card and the word highlight are
-    # the picture. What changes is whether the caption band is burned in.
     burn_captions = request.subtitles in ("burn", "both")
     render_request = RenderRequest(
         audio=audio,
@@ -225,11 +217,6 @@ def export_job(
         if cancel is not None:
             cancel.raise_if_cancelled(STAGE)
         report(progress, STAGE, "Writing subtitle files...")
-        # The match file's timings predate the basmala splice, so the cues are
-        # built on the pre-splice timeline and shifted afterwards. The duration
-        # has to match that timeline too: passing the rendered (post-splice)
-        # length here stretched the last cue, which holds to the end of the
-        # audio, and then shifting it added the offset a second time.
         offset = render_result.basmala_offset_seconds
         duration = (render_result.duration_seconds or get_audio_duration(audio)) - offset
         cues = build_cues(
@@ -248,9 +235,6 @@ def export_job(
         if cues:
             written = write_subtitles(
                 cues,
-                # The video's own path, whose ``.mp4`` each format replaces: a
-                # bare stem would lose everything after a dot in the name
-                # ("Tafsir 25.7-11" written as "Tafsir 25.srt").
                 output,
                 request.formats,
                 width=render_result.width,

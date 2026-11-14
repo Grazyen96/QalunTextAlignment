@@ -24,11 +24,8 @@ from qurantext.core.video_common import require_binary
 
 __all__ = ["UncoveredSpeech", "find_uncovered_speech", "speech_levels", "uncovered_from_levels"]
 
-#: Analysis frame length. Long enough to be stable, short enough to place a gap.
 FRAME_SECONDS = 0.25
-#: How far above the noise floor a frame must sit to count as speech.
 DEFAULT_MARGIN_DB = 8.0
-#: Shorter stretches are breaths and word junctures, not dropped recitation.
 DEFAULT_MIN_SECONDS = 1.5
 
 
@@ -86,7 +83,7 @@ def speech_levels(
 
     try:
         import numpy as np
-    except ModuleNotFoundError as error:  # pragma: no cover - numpy is a dependency
+    except ModuleNotFoundError as error:
         raise RuntimeError("coverage analysis requires numpy") from error
 
     samples = np.frombuffer(completed.stdout, dtype=np.float32)
@@ -156,8 +153,6 @@ def uncovered_from_levels(
     ]
     spans.sort()
 
-    # Mark every frame a word span touches. Spans overlap and nest freely, so
-    # this is painted directly rather than inferred from a sorted walk.
     covered = [False] * len(times)
     for start, end in spans:
         first = max(0, int(start / frame_seconds))

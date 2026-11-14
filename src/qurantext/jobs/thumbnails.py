@@ -39,11 +39,7 @@ _log = logging.getLogger(__name__)
 
 #: The thumbnail's long side, in pixels.
 LONG_SIDE = 96
-#: Rendered this many times larger, then shrunk: the renderer's text is laid
-#: out for a frame, and a 54 px frame would set it in 2 px letters.
 _OVERSAMPLE = 4
-#: Folded into every key: bumped when the picture is drawn differently, so a
-#: PNG made the old way is never served again (2: the card's text is drawn).
 _KEY_VERSION = 2
 
 
@@ -53,7 +49,7 @@ def cache_key(project: Project) -> str:
     mtime = path.stat().st_mtime_ns if path is not None and path.exists() else 0
     style = json.dumps(project.style or {}, sort_keys=True)
     raw = f"v{_KEY_VERSION}|{path}|{mtime}|{style}"
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()  # noqa: S324 - a cache name, not security
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 
 def _look(project: Project):
@@ -99,7 +95,6 @@ def thumbnail_image(project: Project, look: Look, size: tuple[int, int]) -> Imag
         if card is None:
             return None
         width, height = size
-        # Halfway in: past the opening, and far enough that a word is lit.
         start, end = float(card["_start_time"]), float(card["_end_time"])
         at = start + max(0.1, (end - start) / 2)
         frame = render_frame_pillow(
@@ -113,7 +108,7 @@ def thumbnail_image(project: Project, look: Look, size: tuple[int, int]) -> Imag
         )
         rgb = np.ascontiguousarray(frame[:, :, ::-1])
         return Image.fromarray(rgb).resize((width, height), Image.Resampling.LANCZOS)
-    except Exception as error:  # noqa: BLE001 - a picture is never worth a damaged row
+    except Exception as error:
         _log.debug("No thumbnail for %s: %s", project.path, error)
         return None
 
@@ -138,7 +133,7 @@ def thumbnail_for(project: Project, cache_dir: Path | None) -> Path | None:
             return None
         _save_atomically(image, target)
         return target
-    except Exception as error:  # noqa: BLE001
+    except Exception as error:
         _log.debug("No thumbnail for %s: %s", project.path, error)
         return None
 
@@ -149,7 +144,7 @@ def _save_atomically(image: Image.Image, target: Path) -> None:
     Two reads can overlap (a refresh does not wait for the one before it);
     a reader must find a whole PNG or none, never a half-written one.
     """
-    handle = tempfile.NamedTemporaryFile(  # noqa: SIM115 - closed below, then replaced
+    handle = tempfile.NamedTemporaryFile(
         dir=target.parent, prefix=".", suffix=".png.part", delete=False
     )
     try:

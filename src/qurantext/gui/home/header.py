@@ -44,7 +44,7 @@ class HeaderBar(QWidget):
         self.icon_label.setFixedSize(QSize(_ICON_PX, _ICON_PX))
         row.addWidget(self.icon_label)
 
-        self.title_label = QLabel("Qalun")  # the product's name, never translated
+        self.title_label = QLabel("Qalun")
         self.title_label.setFont(theme.font("title"))
         row.addWidget(self.title_label)
         row.addStretch(1)

@@ -29,8 +29,6 @@ def _encode(data: str) -> segno.QRCode:
     check and the clip's frames all ask for the same link (a long one takes
     about 80 ms to encode)."""
     try:
-        # boost_error=False keeps the level at M: a higher level would grow the
-        # code for the same link, and the size check below assumes M.
         return segno.make_qr(data, error="m", boost_error=False)
     except segno.DataOverflowError as error:
         raise ValueError("link too long for a QR code") from error

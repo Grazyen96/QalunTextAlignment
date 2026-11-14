@@ -34,13 +34,13 @@ COLOUR_CARD = (36, 36, 42, 230)
 COLOUR_CARD_BORDER = (255, 255, 255, 28)
 COLOUR_HEADER_TEXT = (230, 230, 235, 255)
 COLOUR_BODY_TEXT = (255, 255, 255, 255)
-COLOUR_HIGHLIGHT_WORD = (255, 215, 0, 255)  # Gold — active recited word
+COLOUR_HIGHLIGHT_WORD = (255, 215, 0, 255)
 COLOUR_DEBUG_TEXT = (188, 188, 198, 255)
 COLOUR_SUBTLE = (150, 150, 162, 255)
-COLOUR_CAPTION_BG = (0, 0, 0, 165)  # translucent strip behind the live captions
-COLOUR_CAPTION_TEXT = (240, 240, 245, 255)  # already-spoken caption words
-COLOUR_CAPTION_ACTIVE = (128, 226, 234, 255)  # soft cyan — word being spoken now
-COLOUR_CAPTION_UPCOMING = (150, 150, 162, 255)  # dimmed — not yet spoken
+COLOUR_CAPTION_BG = (0, 0, 0, 165)
+COLOUR_CAPTION_TEXT = (240, 240, 245, 255)
+COLOUR_CAPTION_ACTIVE = (128, 226, 234, 255)
+COLOUR_CAPTION_UPCOMING = (150, 150, 162, 255)
 COLOUR_PLACEHOLDER_TEXT = (205, 205, 215, 255)
 
 
@@ -59,13 +59,10 @@ class TargetLocked(RuntimeError):
         )
 
 
-#: How often a finished video is put in its target's place while that file is held
-#: (on Windows, briefly by a scanner or for good by a player), and the pause between.
 _REPLACE_TRIES = 3
 _REPLACE_RETRY_S = 0.3
 
 CARD_WIDTH_RATIO = 0.86
-# Ayah card height as a fraction of the region *above* the caption band.
 CARD_REGION_HEIGHT_RATIO = 0.90
 CARD_RADIUS_RATIO = 0.024
 CARD_PADDING_X_RATIO = 0.055
@@ -78,24 +75,13 @@ DEBUG_FONT_MIN_RATIO = 0.015
 LINE_SPACING_RATIO = 0.30
 SECTION_GAP_RATIO = 0.02
 
-# Live-transcript caption band pinned to the bottom of the frame. The text is
-# kept inside a safe area (insets from the edges) so players that crop-to-fill —
-# phone fullscreen, TV overscan — don't clip it, and sized generously so it stays
-# legible on a phone held at arm's length. A taller band both gives long captions
-# more room and pulls the caption text up closer to the ayah card.
 CAPTION_BAND_RATIO = 0.34
 CAPTION_PADDING_X_RATIO = 0.08
-# Keep caption text this far above the very bottom edge (fraction of frame height).
 CAPTION_SAFE_BOTTOM_RATIO = 0.07
 CAPTION_FONT_START_RATIO = 0.055
 CAPTION_FONT_MIN_RATIO = 0.034
-# A single WhisperX segment can run long enough to overflow the band even at the
-# minimum font size. Cap how many words are shown at once: the caption is paged
-# in fixed chunks of this size and only the chunk holding the spoken word is
-# drawn, so the text stays inside the band and shifts only at chunk boundaries.
 MAX_CAPTION_WORDS = 28
 
-# Centre placeholder shown before the first ayah is detected.
 DEFAULT_PLACEHOLDER_TITLE = "القرآن الكريم"
 PLACEHOLDER_FONT_START_RATIO = 0.060
 PLACEHOLDER_FONT_MIN_RATIO = 0.030
@@ -413,32 +399,6 @@ def paginate_lines(
     ]
 
 
-def draw_rounded_rectangle(
-    image: Any,
-    box: tuple[int, int, int, int],
-    radius: int,
-    fill: tuple[int, int, int, int],
-    outline: tuple[int, int, int, int] = COLOUR_CARD_BORDER,
-) -> None:
-    """Draw a semi-transparent rounded rectangle using Pillow."""
-    _, image_module, image_draw, _, _ = _frame_dependencies()
-    overlay = image_module.new("RGBA", image.size, (0, 0, 0, 0))
-    draw = image_draw.Draw(overlay, "RGBA")
-
-    if hasattr(draw, "rounded_rectangle"):
-        draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=2)
-    else:
-        x0, y0, x1, y1 = box
-        draw.rectangle((x0 + radius, y0, x1 - radius, y1), fill=fill)
-        draw.rectangle((x0, y0 + radius, x1, y1 - radius), fill=fill)
-        draw.ellipse((x0, y0, x0 + 2 * radius, y0 + 2 * radius), fill=fill)
-        draw.ellipse((x1 - 2 * radius, y0, x1, y0 + 2 * radius), fill=fill)
-        draw.ellipse((x0, y1 - 2 * radius, x0 + 2 * radius, y1), fill=fill)
-        draw.ellipse((x1 - 2 * radius, y1 - 2 * radius, x1, y1), fill=fill)
-
-    image.alpha_composite(overlay)
-
-
 def draw_centered_multiline_text(
     draw: Any,
     lines: list[str],
@@ -589,9 +549,7 @@ def draw_rtl_line_with_highlight(
     n_gaps = max(1, len(line_words) - 1)
     computed_space = max(1.0, (total_w - sum_widths) / n_gaps) if len(line_words) > 1 else 0.0
 
-    # Centre the total line inside the box.
     line_left = box_x0 + max(0, ((box_x1 - box_x0) - total_w) / 2)
-    # Start placing from the right edge of the line (RTL visual order).
     current_right = line_left + total_w
 
     for i, (word, ww) in enumerate(zip(line_words, word_widths, strict=True)):
@@ -708,7 +666,7 @@ def draw_centered_multiline_text_with_highlight(
 
     space_w = max(2.0, measure_text_bbox(draw, " ", font)[0])
 
-    global_word_idx = 0  # counts only non-marker words
+    global_word_idx = 0
 
     for line in lines:
         probe = line if line.strip() else " "
@@ -716,7 +674,6 @@ def draw_centered_multiline_text_with_highlight(
 
         line_words = line.split() if line.strip() else []
 
-        # Determine whether the highlighted word falls inside this line.
         highlight_local_idx: int | None = None
         if highlight_word_idx is not None:
             temp_global = global_word_idx
@@ -754,7 +711,6 @@ def draw_centered_multiline_text_with_highlight(
                 align="center",
             )
 
-        # Advance the global non-marker word counter.
         for token in line_words:
             if not _is_ayah_marker(token):
                 global_word_idx += 1
@@ -782,7 +738,7 @@ def _frame_layout(width: int, height: int, *, reserve_caption_band: bool = True)
     """
     caption_band_h = max(1, int(height * CAPTION_BAND_RATIO)) if reserve_caption_band else 0
     caption_band_top = height - caption_band_h
-    region_h = caption_band_top  # space available above the caption band
+    region_h = caption_band_top
 
     card_width = int(width * CARD_WIDTH_RATIO)
     card_height = int(region_h * CARD_REGION_HEIGHT_RATIO)
@@ -907,8 +863,6 @@ def _draw_ayah_card(
     content = _card_content(draw, match, layout, height, font_file, debug_detected_text)
     body_pages = content.body_pages
 
-    # Resolve the active word first: page turns follow the recited word so the
-    # displayed page tracks the highlight instead of a fixed time fraction.
     _word_timings = match.get("_word_timings") or []
     _highlight_idx = active_word_timing_index(_word_timings, t) if _word_timings else None
 
@@ -916,8 +870,6 @@ def _draw_ayah_card(
         if _highlight_idx is not None:
             _page_idx = _page_index_for_word(body_pages, _highlight_idx)
         else:
-            # No active word (silence or missing timings) — fall back to
-            # clock-proportional paging so multi-page cards still advance.
             _start = float(match.get("_start_time", t))
             _end = float(match.get("_end_time", _start + 1.0))
             _dur = max(_end - _start, 0.001)
@@ -932,14 +884,7 @@ def _draw_ayah_card(
         draw, [content.header_text], content.header_font, content.header_box, look.header_text, 0
     )
 
-    # _word_timings carries one entry per canonical (non-marker) word, aligned
-    # to the display text upstream (see detection.py), so this index maps
-    # directly onto the word the highlight helper colours.
     if _highlight_idx is not None and _page_idx > 0:
-        # active_word_timing_index returns an index over the whole ayah's word
-        # list, but only one page is drawn. Make it page-local by subtracting
-        # the non-marker words on earlier pages; the draw helper leaves the
-        # highlight off when the index is not on this page.
         words_before_page = sum(
             _count_non_marker_words(line) for page in body_pages[:_page_idx] for line in page
         )
@@ -1117,13 +1062,9 @@ def _draw_caption(
 
     pad_x = int(width * CAPTION_PADDING_X_RATIO)
     pad_top = max(8, int((by1 - by0) * 0.12))
-    # Raise the text off the bottom edge so a crop-to-fill player can't clip it,
-    # while the translucent strip itself may safely run to the frame edge.
     safe_bottom = max(pad_top, int(height * CAPTION_SAFE_BOTTOM_RATIO))
     text_box = (bx0 + pad_x, by0 + pad_top, bx1 - pad_x, by1 - safe_bottom)
 
-    # Page long captions to a bounded chunk around the spoken word so the text
-    # never overflows the band; plain (untimed) captions render whole.
     if word_timings:
         active_idx = active_word_timing_index(word_timings, t)
         display_words, local_active = _caption_window(word_timings, active_idx, MAX_CAPTION_WORDS)
@@ -1291,8 +1232,6 @@ def _start_frame_encoder(
     command = [
         ffmpeg_path,
         "-y",
-        # Raw frames on stdin. render_frame_pillow hands back BGR, so declare it
-        # rather than paying for a channel swap on every frame.
         "-f",
         "rawvideo",
         "-pix_fmt",
@@ -1382,14 +1321,8 @@ def write_frame_video(
 
     sorted_matches = sorted(matches, key=lambda m: float(m.get("_start_time", math.inf)))
     caption_list = sorted(captions or [], key=lambda c: float(c.get("start", math.inf)))
-    # Reserve the bottom caption band only when there are captions to show.
-    # Recitation renders have none, so the ayah card centres in the full frame
-    # instead of leaving a black strip where the transcript would be.
     reserve_caption_band = bool(caption_list)
 
-    # Lecture intro: when live captions are present the opening placeholder
-    # announces the surah and the range of ayat the lecture ponders instead of
-    # the generic title. Recitation renders (no captions) keep the plain title.
     placeholder_title, placeholder_subtitle = placeholder_lines(
         sorted_matches,
         reserve_caption_band=reserve_caption_band,
@@ -1397,9 +1330,6 @@ def write_frame_video(
         studied_surah=studied_surah,
     )
 
-    # Pre-compute paginated body lines for every unique active match. Caching the
-    # pages (not just the count) lets page boundaries be derived from the active
-    # word, matching how render_frame_pillow chooses the displayed page.
     page_cache: dict[int, list[list[str]]] = {}
 
     def _get_pages(match: dict[str, Any] | None) -> list[list[str]]:
@@ -1417,35 +1347,26 @@ def write_frame_video(
             )
         return page_cache[mid]
 
-    # First pass: scan all frame timestamps and record render-event boundaries.
-    # An event boundary occurs when the latched match, the displayed page, the
-    # actively highlighted card word, the active caption, or the spoken caption
-    # word changes.
     n_matches = len(sorted_matches)
-    # (frame, match, caption_segment)
     events: list[tuple[int, dict[str, Any] | None, dict[str, Any] | None]] = []
     last_key: tuple[int | None, int, int | None, int, int | None] = (-2, -1, None, -2, None)
-    card_ptr = -1  # index of the latched match, -1 while showing the placeholder
+    card_ptr = -1
     caption_track = CaptionTrack(caption_spans(caption_list))
 
     for fi in range(total_frames):
         t = fi / fps
-        # Latch: advance to the most recently started match (holds across gaps).
         while card_ptr + 1 < n_matches and float(sorted_matches[card_ptr + 1]["_start_time"]) <= t:
             card_ptr += 1
         match = sorted_matches[card_ptr] if card_ptr >= 0 else None
 
-        # Captions are not latched — they roll with the speech and clear in gaps.
         cap_index = caption_track.index_at(t)
         cap_active = -1 if cap_index is None else cap_index
         caption_seg = caption_list[cap_active] if cap_active >= 0 else None
-        # Re-render on each spoken caption word so the karaoke highlight advances.
         _cap_wt = caption_seg.get("word_timings") if caption_seg else None
         cap_word = active_word_timing_index(_cap_wt, t) if _cap_wt else None
 
         pages = _get_pages(match)
         n_pages = max(1, len(pages))
-        # Include the active word index so a re-render fires on each word change.
         _wt = list(match.get("_word_timings") or []) if match is not None else []
         active_word = active_word_timing_index(_wt, t) if _wt else None
         if match is not None and n_pages > 1:
@@ -1470,15 +1391,10 @@ def write_frame_video(
             events.append((fi, match, caption_seg))
             last_key = key
 
-    # Second pass: render once per event and write all frames for that segment.
     t0 = time.monotonic()
     n_events = len(events)
     report_every = max(1, n_events // 10)
 
-    # The layer every frame starts from, built (and any photo decoded) before
-    # FFmpeg starts and handed to every frame, so its warnings (a photo that
-    # could not be read, say) are the render's, as the frames saw them — even
-    # if the review window's preview evicts it from the shared cache meanwhile.
     layer = frame_base_layer(look, width, height, reserve_caption_band=reserve_caption_band)
     layer_warnings = layer.warnings
 
@@ -1501,9 +1417,6 @@ def write_frame_video(
     try:
         process = _start_frame_encoder(audio_path, partial, width, height, fps, log_handle)
         for ev_idx, (ev_start, ev_match, ev_caption) in enumerate(events):
-            # Checked per event rather than per frame: an event is one Pillow
-            # render, so this bounds how long Cancel takes to take effect while
-            # costing nothing measurable.
             if cancel is not None:
                 cancel.raise_if_cancelled("render")
             ev_end = events[ev_idx + 1][0] if ev_idx + 1 < n_events else total_frames
@@ -1524,12 +1437,6 @@ def write_frame_video(
                 look=look,
                 base=layer,
             )
-            # Serialise once, then hand the encoder the same bytes for every
-            # frame this event covers. A latched card with no word highlight can
-            # span the whole video as a single event, so cancellation is also
-            # checked inside this loop — once per second of video — or a long
-            # static card would be uninterruptible however often the outer loop
-            # polls.
             payload = frame.tobytes()
             try:
                 for offset in range(ev_end - ev_start):
@@ -1554,8 +1461,6 @@ def write_frame_video(
                     done=ev_idx == n_events - 1,
                 )
 
-        # Closing stdin tells FFmpeg the stream ended; it then finalises the
-        # container (moov atom, +faststart) before exiting.
         process.stdin.close()
         if process.wait() != 0:
             raise _encoder_failure(
@@ -1570,11 +1475,6 @@ def write_frame_video(
                 process.kill()
                 process.wait()
         log_handle.close()
-        # A killed encoder leaves a container it never finalised — a few dozen
-        # bytes that no player opens. Cancelling should leave nothing behind,
-        # and the earlier video, which this render never touched, stays. A
-        # partial held for a moment (a scanner on Windows) is left rather than
-        # let its error hide why the render stopped.
         if not completed:
             with suppress(OSError):
                 partial.unlink(missing_ok=True)
@@ -1629,8 +1529,6 @@ def render_frame_video(
     require_binary("ffprobe", "Install FFmpeg/ffprobe and try again.")
 
     duration = get_audio_duration(audio_path)
-    # The centre card is latched (holds until the next detection), so gap
-    # bridging is unnecessary and would only move the detection boundaries.
     valid_matches = validated_matches(matches, bridge_gaps=False)
     if not valid_matches and matches:
         warn(
@@ -1645,8 +1543,6 @@ def render_frame_video(
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    # The encoder log is the only intermediate left, and it goes to a temp
-    # directory so the user's output folder holds deliverables only.
     log_dir = Path(tempfile.mkdtemp(prefix="qurantext-render-"))
     log_path = log_dir / f"{output_path.stem}.ffmpeg.log"
 

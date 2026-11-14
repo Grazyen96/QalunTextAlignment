@@ -169,7 +169,6 @@ def _run_whisperx(
     return engine_whisperx.run_whisperx(audio_file_path, settings, model_ref)
 
 
-#: Manifests whose installed files this process has checked against their checksums.
 _VERIFIED: set[str] = set()
 
 

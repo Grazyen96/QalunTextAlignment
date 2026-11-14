@@ -37,14 +37,8 @@ __all__ = ["KEEP_DEFAULT", "Prefs"]
 
 _MODES = ("recitation", "lecture")
 
-#: How many surahs there are: a remembered surah outside 1..114 is not one.
 _SURAH_COUNT = 114
 
-#: Default clips a running job was started with (``hold_default_clips``), each
-#: with how many jobs hold it. A new lecture's matching copies its default
-#: intro and outro beside it only when matching ends, so a default replaced
-#: meanwhile must stay on disk until then. Shared by every ``Prefs``: the
-#: window and its reviews may hold different ones over the same folder.
 _HELD_CLIPS: Counter[Path] = Counter()
 _HELD_LOCK = threading.Lock()
 
@@ -108,10 +102,6 @@ class Prefs:
     def __init__(self, settings: QSettings | None = None) -> None:
         self._settings = settings if settings is not None else QSettings()
 
-    # -- language ---------------------------------------------------------------
-    # None until the person picks one: until then the window follows the
-    # system's language, so a machine switched to Arabic later still gets it.
-
     @property
     def language(self) -> str | None:
         value = self._settings.value("language", "")
@@ -127,8 +117,6 @@ class Prefs:
             raise ValueError(f"Unknown language {value!r}; choose from {', '.join(LANGUAGES)}.")
         self._settings.sync()
 
-    # -- theme ------------------------------------------------------------------
-
     @property
     def theme(self) -> str:
         """``system`` (follow the desktop), ``light`` or ``dark``; anything else reads as ``system``."""
@@ -142,8 +130,6 @@ class Prefs:
         self._settings.setValue("theme", value)
         self._settings.sync()
 
-    # -- the review preview ------------------------------------------------------
-
     @property
     def preview_fit(self) -> bool:
         """Whether the review's preview fits its column (True) or shows the preset's size."""
@@ -154,8 +140,6 @@ class Prefs:
     def preview_fit(self, value: bool) -> None:
         self._settings.setValue("preview_fit", bool(value))
         self._settings.sync()
-
-    # -- motion ------------------------------------------------------------------
 
     @property
     def animate_panels(self) -> bool:
@@ -168,8 +152,6 @@ class Prefs:
         self._settings.setValue("animate_panels", bool(value))
         self._settings.sync()
 
-    # -- mode -----------------------------------------------------------------
-
     @property
     def mode(self) -> str:
         value = self._settings.value("mode", "recitation")
@@ -179,8 +161,6 @@ class Prefs:
     def mode(self, value: str) -> None:
         self._settings.setValue("mode", value)
         self._settings.sync()
-
-    # -- preset -----------------------------------------------------------------
 
     @property
     def preset(self) -> str:
@@ -192,8 +172,6 @@ class Prefs:
         self._settings.setValue("preset", value)
         self._settings.sync()
 
-    # -- subtitles --------------------------------------------------------------
-
     @property
     def subtitles(self) -> str:
         value = self._settings.value("subtitles", "burn")
@@ -204,8 +182,6 @@ class Prefs:
         self._settings.setValue("subtitles", value)
         self._settings.sync()
 
-    # -- transcription engine ----------------------------------------------------
-
     @property
     def engine(self) -> str:
         value = self._settings.value("engine", "local")
@@ -215,8 +191,6 @@ class Prefs:
     def engine(self, value: str) -> None:
         self._settings.setValue("engine", value)
         self._settings.sync()
-
-    # -- formats ------------------------------------------------------------
 
     @property
     def formats(self) -> tuple[str, ...]:
@@ -229,8 +203,6 @@ class Prefs:
         self._settings.setValue("formats", list(value))
         self._settings.sync()
 
-    # -- render_right_away ----------------------------------------------------
-
     @property
     def render_right_away(self) -> bool:
         return _as_bool(self._settings.value("render_right_away"), False)
@@ -239,8 +211,6 @@ class Prefs:
     def render_right_away(self, value: bool) -> None:
         self._settings.setValue("render_right_away", bool(value))
         self._settings.sync()
-
-    # -- output_dir -----------------------------------------------------------
 
     @property
     def output_dir(self) -> Path | None:
@@ -256,8 +226,6 @@ class Prefs:
             self._settings.setValue("output_dir", str(resolved))
             self._add_job_dir(resolved)
         self._settings.sync()
-
-    # -- quran_override ---------------------------------------------------------
 
     @property
     def quran_override(self) -> Path | None:
@@ -279,10 +247,6 @@ class Prefs:
         else:
             self._settings.setValue("quran_override", str(Path(value).expanduser().resolve()))
         self._settings.sync()
-
-    # -- default_look -----------------------------------------------------------
-    # The look new videos start with. Stored with an absolute image path into the
-    # app's own folder, so deleting the original photo does not lose it.
 
     @property
     def default_look(self) -> Look:
@@ -318,15 +282,6 @@ class Prefs:
         """The default look as a project style (empty for Night gold)."""
         look = self.default_look
         return {} if look == NIGHT_GOLD else look.to_dict()
-
-    # -- default_episode --------------------------------------------------------
-    # The intro and outro new lectures start with: each a clip or generated
-    # settings, never both. A clip is stored as an absolute path into the app's
-    # own folder, so deleting or moving the original clip does not lose it.
-    # The recitation is never a default: it differs per lecture.
-    # Each part's generated settings are also remembered apart from its kind
-    # ("<part>_remembered"): a part set to None or a clip keeps its channel
-    # name, phrase and link for when it is Generated again.
 
     def _default_episode_data(self) -> dict:
         """The stored default episode as a dict; empty when unset or unreadable."""
@@ -386,12 +341,12 @@ class Prefs:
     @property
     def remembered_intro_generated(self) -> GeneratedIntro | None:
         """The intro's generated settings last kept, whatever its default kind is now."""
-        return self._remembered("intro", GeneratedIntro)  # type: ignore[return-value]
+        return self._remembered("intro", GeneratedIntro)
 
     @property
     def remembered_outro_generated(self) -> GeneratedOutro | None:
         """The outro's generated settings last kept, whatever its default kind is now."""
-        return self._remembered("outro", GeneratedOutro)  # type: ignore[return-value]
+        return self._remembered("outro", GeneratedOutro)
 
     def _remembered(self, key: str, kind: type) -> GeneratedIntro | GeneratedOutro | None:
         data = self._default_episode_data()
@@ -403,7 +358,7 @@ class Prefs:
         """Each default part's kind: ``"none"``, ``"clip"`` or ``"generated"``."""
         clips = self.default_episode
         generated = (self.default_intro_generated, self.default_outro_generated)
-        return tuple(  # type: ignore[return-value]
+        return tuple(
             "generated" if made is not None else "clip" if clip is not None else "none"
             for clip, made in zip(clips, generated, strict=True)
         )
@@ -459,7 +414,6 @@ class Prefs:
                 (f"{key}_remembered", remembered),
             ):
                 if given is not KEEP_DEFAULT and given is not None and not isinstance(given, kind):
-                    # An outro's settings given as the intro's would read back empty.
                     raise TypeError(
                         f"{label} must be a {kind.__name__}, not {type(given).__name__}"
                     )
@@ -470,7 +424,7 @@ class Prefs:
             if isinstance(remembered, kind):
                 memory = remembered.to_dict()
                 if kept_settings is not None:
-                    kept_settings = memory  # generated by default: the default follows
+                    kept_settings = memory
             if isinstance(generated, kind):
                 clip = None
                 value[f"{key}_generated"] = memory = generated.to_dict()
@@ -486,14 +440,14 @@ class Prefs:
             elif clip is None:
                 value[key] = value[f"{key}_name"] = None
             else:
-                clip = Path(clip)  # type: ignore[arg-type]
+                clip = Path(clip)
                 copy = copy_by_content(clip, folder, suffixes=EPISODE_SUFFIXES).resolve()
                 value[key] = str(copy)
                 value[f"{key}_name"] = name or clip.name
         self._settings.setValue("default_episode", json.dumps(value))
         self._settings.sync()
         kept_paths = {value[key] for key in ("intro", "outro") if value[key] is not None}
-        _remove_clips_but(folder, kept_paths | _held_clips())  # type: ignore[arg-type]
+        _remove_clips_but(folder, kept_paths | _held_clips())
 
     def hold_default_clips(self, clips: Iterable[Path | None]) -> Callable[[], None]:
         """Keep *clips* (a job's ``episode_defaults``) on disk until the returned call.
@@ -524,8 +478,6 @@ class Prefs:
 
         return release
 
-    # -- more_options_open --------------------------------------------------
-
     @property
     def more_options_open(self) -> bool:
         return _as_bool(self._settings.value("more_options_open"), False)
@@ -534,10 +486,6 @@ class Prefs:
     def more_options_open(self, value: bool) -> None:
         self._settings.setValue("more_options_open", bool(value))
         self._settings.sync()
-
-    # -- the last surah and range --------------------------------------------
-    # Restored by the new-job panel once the surah list has loaded, clamped to
-    # that surah's ayah count, so a hand-edited range cannot run past its end.
 
     @property
     def surah_num(self) -> int | None:
@@ -563,10 +511,6 @@ class Prefs:
     def to_ayah(self, value: int | None) -> None:
         self._write_optional_int("to_ayah", value)
 
-    # -- the last studied surah ------------------------------------------------
-    # Its own key: a lecture's "Detect automatically" or chosen surah must not
-    # move the recitation's surah and range, nor they it.
-
     @property
     def lecture_surah(self) -> int | None:
         """The surah a new lecture's cards keep to; None is "Detect automatically"."""
@@ -579,8 +523,6 @@ class Prefs:
     def _write_optional_int(self, key: str, value: int | None) -> None:
         self._settings.setValue(key, "" if value is None else int(value))
         self._settings.sync()
-
-    # -- hidden_jobs ----------------------------------------------------------
 
     @property
     def hidden_jobs(self) -> set[Path]:
@@ -602,8 +544,6 @@ class Prefs:
     def _write_hidden(self, hidden: set[Path]) -> None:
         self._settings.setValue("hidden_jobs", [str(path) for path in sorted(hidden)])
         self._settings.sync()
-
-    # -- job_dirs ---------------------------------------------------------------
 
     @property
     def job_dirs(self) -> list[Path]:

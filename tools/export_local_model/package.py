@@ -22,8 +22,6 @@ def sha256(path: Path) -> str:
 
 
 def _anonymous(info: tarfile.TarInfo) -> tarfile.TarInfo:
-    # Same files, same archive bytes: no build time and no local user name in the
-    # headers, so a re-run reproduces the checksum already pinned in the app.
     info.mtime = 0
     info.uid = info.gid = 0
     info.uname = info.gname = ""
@@ -34,7 +32,7 @@ def _anonymous(info: tarfile.TarInfo) -> tarfile.TarInfo:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--variant-dir", required=True, type=Path)
-    ap.add_argument("--version", required=True)  # e.g. int8-1
+    ap.add_argument("--version", required=True)
     ap.add_argument("--out-dir", required=True, type=Path)
     args = ap.parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -44,7 +42,7 @@ def main() -> None:
     archive = args.out_dir / name
     with tarfile.open(archive, "w:bz2") as tar:
         for file in FILES:
-            tar.add(args.variant_dir / file, arcname=file, filter=_anonymous)  # flat
+            tar.add(args.variant_dir / file, arcname=file, filter=_anonymous)
 
     files = [
         {

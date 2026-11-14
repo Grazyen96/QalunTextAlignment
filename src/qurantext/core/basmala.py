@@ -30,7 +30,6 @@ from qurantext.config.paths import BASMALA_AUDIO_PATH
 from qurantext.core.preamble import BASMALA_DISPLAY, BASMALA_LABEL
 from qurantext.core.video_common import get_audio_duration, require_binary
 
-# At-Tawbah is the sole surah with no opening basmala, so never prepend one.
 SURAH_AT_TAWBAH = 9
 
 
@@ -39,7 +38,7 @@ class BasmalaPrepend:
     """Result of splicing the basmala: the concatenated audio and new matches."""
 
     audio_path: Path  # concatenated basmala + recitation (temporary file)
-    matches: list[dict[str, Any]]  # basmala card + timing-shifted originals
+    matches: list[dict[str, Any]]
     offset: float  # seconds the recitation timeline was pushed back
 
 

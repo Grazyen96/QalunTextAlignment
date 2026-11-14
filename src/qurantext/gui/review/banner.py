@@ -1,14 +1,3 @@
-"""What needs a person's attention, under the toolbar, in a card that never moves the body.
-
-Three kinds of thing: notices (the recording is missing, playback is off, a
-read failed, the chosen surah has no card, the episode was not made), the
-coverage check's result (stretches of speech no word covers, folded behind
-a count), and a finished render, with Play and Show in folder. Empty, the
-card collapses to a 4 px rule, so the body under it stays where it is.
-Dismiss clears news — the render line and the plain notices — never state:
-coverage, look, surah and episode notices come back from their checks.
-"""
-
 from __future__ import annotations
 
 import html
@@ -31,8 +20,6 @@ _KIND_ICON = {"info": "info", "attention": "circle-alert", "success": "film"}
 
 
 class Banner(Card):
-    """See the module docstring."""
-
     EMPTY_HEIGHT = 4
     jump_requested = Signal(float)
     play_requested = Signal(object)
@@ -85,8 +72,6 @@ class Banner(Card):
         self._is_empty = True
         self._render()
 
-    # -- the strip's old API ----------------------------------------------------------
-
     def add_notice(self, text: str) -> None:
         if text not in self._notices:
             self._notices.append(text)
@@ -121,10 +106,7 @@ class Banner(Card):
         self._checking = checking
         self._render()
 
-    # -- the render ----------------------------------------------------------------
-
     def set_render_done(self, outcome: JobOutcome, duration_s: float | None) -> None:
-        """Say the video is ready, with Play and Show in folder; the episode line joins it."""
         name = outcome.video.name if outcome.video is not None else ""
         if duration_s is not None and duration_s > 0:
             self._render_line = t(
@@ -145,12 +127,9 @@ class Banner(Card):
         self._render()
 
     def dismiss(self) -> None:
-        """Clear the news; the state (coverage, look, surah, episode) stays."""
         self._notices = []
         self.clear_render()
         self.dismissed.emit()
-
-    # -- gaps ----------------------------------------------------------------------
 
     @property
     def gaps_expanded(self) -> bool:
@@ -166,10 +145,7 @@ class Banner(Card):
         except ValueError:
             pass
 
-    # -- what it says --------------------------------------------------------------
-
     def lines(self) -> list[str]:
-        """Every line as plain text, in the order shown."""
         lines = list(self._notices) + [n for n in self._look_notices if n not in self._notices]
         for extra in (self._surah_notice, self._episode_notice):
             if extra and extra not in lines:
@@ -195,7 +171,6 @@ class Banner(Card):
         parts = [html.escape(line) for line in self.lines()]
         if self._gaps:
             count = len(self._gaps)
-            # Folded, the arrow points where the line reads on to.
             arrow = "▾" if self._gaps_expanded else ("◂" if is_rtl() else "▸")
             parts.append(
                 f'<a href="gaps">{html.escape(tn("review.gaps_toggle", count))} {arrow}</a>'
@@ -256,12 +231,11 @@ class Banner(Card):
         self.updateGeometry()
 
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802 - Qt override
-        """Draw the kind icon again in a new theme's colours (a label's pixmap is not redrawn)."""
         palette_changed = event.type() in (
             QEvent.Type.PaletteChange,
             QEvent.Type.ApplicationPaletteChange,
         )
-        if palette_changed and hasattr(self, "_render_more"):  # not while __init__ builds it
+        if palette_changed and hasattr(self, "_render_more"):
             self._render()
         super().changeEvent(event)
 

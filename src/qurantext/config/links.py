@@ -20,7 +20,6 @@ __all__ = ["APP_SOURCE", "GITHUB_URL", "GUIDE_URL", "app_link"]
 
 #: Who sent the click: this desktop app.
 APP_SOURCE = "qalun-app"
-#: The project's home on GitHub, untracked.
 _REPOSITORY = "https://github.com/Grazyen96/QalunTextAlignment"
 
 

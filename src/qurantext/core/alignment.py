@@ -73,16 +73,6 @@ def _align_entries(
     return result, manual_check
 
 
-def find_best_canonical_word(
-    word_norm: str,
-    canon_original: list[str],
-    canon_norm: list[str],
-    min_score: float,
-) -> tuple[str | None, float]:
-    """Search canonical words for the best fuzzy match."""
-    return _find_best_match(word_norm, canon_original, canon_norm, min_score)
-
-
 def align_words(
     words: list[dict],
     canon_original: list[str],
@@ -103,36 +93,6 @@ def align_words(
     )
 
 
-def find_best_canonical_line(
-    segment_norm: str,
-    lines_original: list[str],
-    lines_norm: list[str],
-    min_score: float,
-) -> tuple[str | None, float]:
-    """Search canonical lines for the best fuzzy match."""
-    return _find_best_match(segment_norm, lines_original, lines_norm, min_score)
-
-
-def align_segments(
-    segments: list[dict],
-    lines_original: list[str],
-    lines_norm: list[str],
-    min_score: float,
-) -> tuple[list[dict], list[dict]]:
-    """Align WhisperX segment entries against canonical Quran lines."""
-    return _align_entries(
-        segments,
-        lines_original,
-        lines_norm,
-        min_score,
-        needle_key="text_norm",
-        raw_key="text_raw",
-        display_key="text",
-        manual_index_key="segment_index",
-        manual_raw_key="whisperx_text",
-    )
-
-
 def _interpolate_missing_timings(timings: list[dict], transcript_words: list[dict]) -> None:
     """Fill ``None`` timings in place by interpolating across timed neighbours.
 
@@ -149,7 +109,6 @@ def _interpolate_missing_timings(timings: list[dict], transcript_words: list[dic
         if timings[i]["start"] is not None:
             i += 1
             continue
-        # Locate the contiguous run [i, k) of unfilled canonical words.
         k = i
         while k < n and timings[k]["start"] is None:
             k += 1
@@ -194,9 +153,6 @@ def align_canonical_word_timings(
 
     t_norms = [str(w.get("word_norm") or "") for w in transcript_words]
 
-    # H[i][j]: best alignment score over the first i transcript and j canonical
-    # words. A diagonal step aligns a pair (scored by similarity); a vertical or
-    # horizontal step leaves a transcript or canonical word unaligned (penalised).
     H = [[0.0] * (n + 1) for _ in range(m + 1)]
     for i in range(1, m + 1):
         H[i][0] = -gap_penalty * i
@@ -211,7 +167,6 @@ def align_canonical_word_timings(
             left = row[j - 1] - gap_penalty
             row[j] = max(diag, up, left)
 
-    # Backtrack, collecting the transcript words aligned to each canonical word.
     aligned: list[list[int]] = [[] for _ in range(n)]
     i, j = m, n
     while i > 0 and j > 0:
@@ -225,10 +180,6 @@ def align_canonical_word_timings(
         else:
             j -= 1
 
-    # Fold unaligned transcript words into the canonical word they duplicate, so a
-    # repeated utterance keeps the highlight on that word instead of stalling on
-    # the previous one. Words dissimilar to their neighbours (a leading preamble,
-    # filler) stay unattached and become insertions.
     fold_threshold = max(gap_penalty, 0.5)
     pairs = sorted((min(ks), c) for c, ks in enumerate(aligned) if ks)
     for u in range(m):
@@ -303,7 +254,6 @@ def refine_word_timings(
     refined = [dict(t) for t in timings]
     n = len(refined)
 
-    # 1. Monotonic starts (and keep each end at or after its own start).
     prev_start: float | None = None
     for entry in refined:
         start = entry.get("start")
@@ -317,7 +267,6 @@ def refine_word_timings(
             entry["end"] = start
         prev_start = start
 
-    # 2. Onset-anchored ends: bridge small gaps / overlaps to the next start.
     for i in range(n - 1):
         cur_end = refined[i].get("end")
         next_start = refined[i + 1].get("start")
@@ -326,7 +275,6 @@ def refine_word_timings(
         if next_start - cur_end <= bridge_max:
             refined[i]["end"] = next_start
 
-    # 3. Global offset (floored at 0 so nothing goes negative near t=0).
     if offset:
         for entry in refined:
             for key in ("start", "end"):

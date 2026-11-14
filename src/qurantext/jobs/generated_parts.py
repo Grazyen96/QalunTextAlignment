@@ -224,8 +224,6 @@ def outro_spec_for(
     )
 
 
-#: The look's fields a title clip's pixels depend on, besides its background: the
-#: frame and card colours and the text and QR colours. A caption colour is not one.
 _DRAWN_LOOK_FIELDS = (
     "frame_bg",
     "card",
@@ -263,7 +261,7 @@ def _image_key(look: Look) -> str:
         return "none"
     try:
         return _file_digest(Path(background.image))
-    except (OSError, ValueError):  # missing, unreadable, a NUL in a hand-edited path
+    except (OSError, ValueError):
         return "unreadable"
 
 
@@ -374,7 +372,7 @@ def ensure_generated_part(
         return output
     try:
         fits = qr_fits(spec, width, height)
-    except Exception as error:  # noqa: BLE001 — a text the font cannot lay out, say
+    except Exception as error:
         _log.warning("The %s could not be laid out", kind, exc_info=True)
         raise EpisodeError("episode.error.generate", part=part) from error
     if not fits:
@@ -393,7 +391,7 @@ def ensure_generated_part(
         )
     except JobCancelled:
         raise
-    except Exception as error:  # noqa: BLE001 — FFmpeg, the font, the disk: all one sentence
+    except Exception as error:
         _log.warning("The %s could not be made", kind, exc_info=True)
         raise EpisodeError("episode.error.generate", part=part) from error
     remove_generated_parts(project.path, kind, keep=output)

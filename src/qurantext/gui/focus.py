@@ -16,9 +16,7 @@ from PySide6.QtWidgets import QWidget
 
 __all__ = ["KBDFOCUS", "KeyboardFocusMarker", "install"]
 
-#: The dynamic property the sheet reads.
 KBDFOCUS = "kbdfocus"
-#: The application property that holds the one installed marker.
 _INSTALLED = "qalun.focus_marker"
 _KEYBOARD = (
     Qt.FocusReason.TabFocusReason,

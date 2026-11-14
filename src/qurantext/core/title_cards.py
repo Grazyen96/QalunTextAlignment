@@ -88,27 +88,22 @@ MAX_SECONDS = 10.0
 #: The progress stage a clip reports under.
 STAGE = "title_clip"
 
-_TEXT_FADE = 0.6  # seconds the text takes to fade in, and out
-_QR_FADE = 0.2  # seconds the QR code takes to fade in, and out
-# The share of the clip the QR code is fully drawn: 72 %, so that counted in whole
-# frames it is still at least 70 % at any length and frame rate from 17 fps up.
+_TEXT_FADE = 0.6
+_QR_FADE = 0.2
 _QR_FROM, _QR_TO = 0.14, 0.86
-_REVEAL_SHARE = 0.4  # the share of the clip "reveal" spends uncovering the frame
-_RISE = 0.06  # how far below its place "rise" starts the text, as a share of H
-_FONT_START = 0.09  # the first size tried for titles, as a share of H
-_FONT_MIN = 0.02  # the smallest size, as a share of the frame's short side
-_LINK_START = 0.045  # the first size tried for the link text, of the short side
-_TITLE_UNDER_NAME = 0.7  # the intro's title starts at this share of the name's size
+_REVEAL_SHARE = 0.4
+_RISE = 0.06
+_FONT_START = 0.09
+_FONT_MIN = 0.02
+_LINK_START = 0.045
+_TITLE_UNDER_NAME = 0.7
 _MAX_LINES = 2
-# Before wrapping, a text may shrink to this share of its first size to stay on one
-# line: «دروس الشيخ أحمد» as one line, not «دروس الشيخ» over a lone «أحمد».
 _ONE_LINE_SHARE = 0.7
-_QR_MIN_SHARE = 0.25  # the code with its quiet zone, at least, of the short side
+_QR_MIN_SHARE = 0.25
 _QR_QUIET = 4
-_QR_MIN_MODULE = 5  # px; 4 px codes stop decoding after a 480p transcode
-# The most of the panel's text room the code may take, so the words keep theirs.
-_QR_ROOM_PORTRAIT = 0.6  # of the panel's height
-_QR_ROOM_LANDSCAPE = 0.5  # of the panel's width
+_QR_MIN_MODULE = 5
+_QR_ROOM_PORTRAIT = 0.6
+_QR_ROOM_LANDSCAPE = 0.5
 _ELLIPSIS = "…"
 # Characters the title font has but cannot draw, and what is drawn instead. Amiri's
 # ﷽ (U+FDFD, the basmala ligature) fails to rasterise at every size ("raster
@@ -203,9 +198,6 @@ class OutroSpec:
 
 
 Spec = IntroSpec | OutroSpec
-
-
-# --- Text ---------------------------------------------------------------------
 
 
 def _direction(text: str) -> str:
@@ -350,9 +342,6 @@ def _fit_text(
             return font, lines, _Block(lines, font, direction, width, height)
         return font, lines, None
 
-    # The smallest size first: text that does not fit even there fits at no
-    # larger size, and is cut short at once rather than measured at every size
-    # (a pasted link of 2,000 characters would take seconds).
     font, lines, block = attempt(minimum)
     if block is not None:
         while size > minimum:
@@ -364,7 +353,6 @@ def _fit_text(
     if exact:
         return None
     kept = list(lines[:max_lines])
-    # Lines that do not fit by height go too: one line at the smallest size always stays.
     while len(kept) > 1 and _block_size(tuple(kept), font, direction)[1] > max_height:
         kept.pop()
     cut_short = len(kept) < len(lines)
@@ -395,15 +383,11 @@ def _draw_block(draw: ImageDraw.ImageDraw, block: _Block, centre_x: float, top: 
         y += (y1 - y0) + _spacing(block.font)
 
 
-# --- Layout -------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class _Placed:
     block: _Block
     centre_x: float
     top: float
-    #: The look colour that draws it: ``header_text``, ``body_text`` or ``placeholder_text``.
     colour: str
 
     @property
@@ -419,7 +403,6 @@ class _Layout:
     radius: int
     texts: tuple[_Placed, ...]
     qr_box: Box | None
-    #: False when the frame is too small for modules of 5 px (a preview thumbnail).
     qr_scannable: bool
 
 
@@ -460,16 +443,12 @@ def _layout(spec: Spec, width: int, height: int) -> _Layout:
         span = qr_modules(spec.qr_url) + 2 * _QR_QUIET
         module = max(_QR_MIN_MODULE, math.ceil(_QR_MIN_SHARE * short / span))
         qr_side = module * span
-        # The most the code may take and still leave the words their room.
         if portrait:
             room = min(max_w - 2 * pad, int((max_h - 2 * pad) * _QR_ROOM_PORTRAIT))
         else:
             room = min(max_h - 2 * pad, int((max_w - 3 * pad) * _QR_ROOM_LANDSCAPE))
         if qr_side > room:
-            # Only a preview is drawn this small; a clip refuses (qr_fits).
             qr_scannable = False
-            # Whole modules when even 1 px ones fit; below that the code is scaled
-            # down into the room, so a thumbnail never draws it past the frame.
             qr_side = (room // span) * span if room >= span else max(1, room)
         if portrait:
             panel_w = max(panel_w, qr_side + 2 * pad)
@@ -492,7 +471,6 @@ def _layout(spec: Spec, width: int, height: int) -> _Layout:
             spec.name, TEXT_FONT_BOLD_PATH, inner_w, round(share * 0.55), start, minimum, _MAX_LINES
         )
         title_room = inner_h - (name.height + gap if name else 0)
-        # Below the name, smaller than it: the title starts at 0.7 of the name's size.
         title_start = round(name.font.size * _TITLE_UNDER_NAME) if name else start
         title = _fit(
             spec.title,
@@ -623,8 +601,8 @@ def missing_glyphs(text: str) -> str:
 
 def qr_colours(look: Look) -> tuple[RGB, RGB]:
     """The QR code's (modules, ground): the look's body text and card, dark on light."""
-    dark: RGB = tuple(look.body_text[:3])  # type: ignore[assignment]
-    light: RGB = tuple(look.card[:3])  # type: ignore[assignment]
+    dark: RGB = tuple(look.body_text[:3])
+    light: RGB = tuple(look.card[:3])
     if contrast_ratio(dark, light) < MIN_CONTRAST:
         return (0, 0, 0), (255, 255, 255)
     black = (0, 0, 0)
@@ -633,13 +611,9 @@ def qr_colours(look: Look) -> tuple[RGB, RGB]:
     return dark, light
 
 
-# --- Frames -------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class _Scene:
     layout: _Layout
-    #: Every text, drawn at full alpha on a transparent panel-sized layer.
     text: Image.Image | None
     qr: Image.Image | None
 
@@ -655,8 +629,6 @@ def _scene(spec: Spec, look: Look, width: int, height: int) -> _Scene:
             placed = [p for p in layout.texts if p.colour == colour]
             if not placed:
                 continue
-            # Drawn white on a mask, then given the colour: a straight alpha
-            # edge, with no dark fringe from blending into transparent black.
             mask = Image.new("L", text.size, 0)
             draw = ImageDraw.Draw(mask)
             for p in placed:
@@ -678,7 +650,7 @@ def _scene(spec: Spec, look: Look, width: int, height: int) -> _Scene:
             light,
             min_module_px=_QR_MIN_MODULE if layout.qr_scannable else 1,
         )
-        if qr.width != side:  # a thumbnail smaller than one pixel a module
+        if qr.width != side:
             qr = qr.resize((side, side), Image.Resampling.BOX)
     return _Scene(layout, text, qr)
 
@@ -718,7 +690,6 @@ def _compose(
     layout = scene.layout
     frame = base_layer(look, width, height, layout.panel, layout.radius).image.copy()
     if reveal is not None:
-        # The look uncovers from the edge a reader starts at; the rest is its plain colour.
         shown = round(width * reveal)
         canvas = Image.new("RGBA", (width, height), tuple(look.frame_bg[:3]) + (255,))
         if shown > 0:
@@ -731,7 +702,6 @@ def _compose(
             layer = layer.copy()
             layer.putalpha(layer.getchannel("A").point(lambda v: round(v * text_alpha)))
         if offset:
-            # Moved down inside the panel, and clipped to it.
             shifted = Image.new("RGBA", layer.size, (0, 0, 0, 0))
             shifted.paste(
                 layer.crop((0, 0, layer.width, max(0, layer.height - offset))), (0, offset)
@@ -762,9 +732,6 @@ def render_title_frame(
     return _compose(scene, look, width, height, _state(spec, height, t), edge)
 
 
-# --- Clips --------------------------------------------------------------------
-
-
 def _last_lines(handle: Any) -> str:
     handle.seek(0)
     text = handle.read().decode("utf-8", "replace")
@@ -779,7 +746,7 @@ def _stop(process: subprocess.Popen) -> None:
     if process.stdin is not None:
         try:
             process.stdin.close()
-        except OSError:  # the pipe broke when FFmpeg ended
+        except OSError:
             pass
     process.wait()
 
@@ -840,7 +807,7 @@ def render_title_clip(
                     _stop(process)
                     cancel.raise_if_cancelled(STAGE)
                 state = _state(spec, height, index / fps)
-                if state != last_state:  # most of a clip is one still frame
+                if state != last_state:
                     data = _compose(scene, look, width, height, state, spec.rtl).tobytes()
                     last_state = state
                 try:
@@ -853,7 +820,7 @@ def render_title_clip(
                     report(progress, STAGE, "Drawing the title clip", fraction=(index + 1) / frames)
             try:
                 process.stdin.close()
-            except OSError:  # the flush hit the same closed pipe
+            except OSError:
                 pass
             process.wait()
             if cancel is not None:

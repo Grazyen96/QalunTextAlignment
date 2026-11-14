@@ -53,7 +53,6 @@ __all__ = ["AUDIO_SUFFIXES", "NewJobPanel"]
 
 AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".mp4", ".mkv"}
 
-#: Display order for the preset combo: the two most people want, then the rest.
 _PRESET_ORDER = ("social", "high", "standard", "fast")
 _PRESET_KEYS = {
     "social": "preset.social",
@@ -66,11 +65,8 @@ _SUBTITLE_KEYS = {
     "sidecar": "home.subtitles.sidecar",
     "both": "home.subtitles.both",
 }
-#: The drop zone's height: room for its icon, the file's name, its folder and "Choose…".
 _DROP_ZONE_HEIGHT = 112
-#: The form's widest: a column of choices reads down, not across a wide window.
 _COLUMN_WIDTH = 560
-#: The drop zone's icon, in px.
 _DROP_ICON_SIZE = 24
 
 _FORMAT_KEYS = {
@@ -103,11 +99,7 @@ class NewJobPanel(QWidget):
         self._quran_default = quran_default
         self._db_path = db_path
         self._audio: Path | None = None
-        #: True while the surah list is being filled and set back to the
-        #: remembered choice, so those steps are not remembered as new choices.
         self._restoring_range = False
-        #: True between ``set_running(True)`` and ``set_running(False)``: a
-        #: settings reload meanwhile must not wake the inputs or Start's reason.
         self._running = False
         self.setAcceptDrops(True)
 
@@ -119,13 +111,9 @@ class NewJobPanel(QWidget):
         self._apply_prefs()
         self._refresh()
 
-    # -- construction -----------------------------------------------------------
-
     def _build(self) -> None:
         outer = QHBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        # One column, no wider than a form reads well; the stretch keeps it at
-        # the leading edge (the layout mirrors it in Arabic).
         self.column = QWidget()
         self.column.setMaximumWidth(_COLUMN_WIDTH)
         outer.addWidget(self.column, 1)
@@ -138,10 +126,6 @@ class NewJobPanel(QWidget):
         self.heading_label = self.heading.label
         layout.addWidget(self.heading)
 
-        # The drop zone holds its own "Choose…": dropping and choosing are one
-        # control, not a box and a stray button under it.
-        # A card with a dashed rule: the sheet knows it by its object name, and
-        # lights it while an accepted drag is over it (the ``dragOver`` property).
         self.drop_zone = Card()
         self.drop_zone.setObjectName("dropZone")
         self.drop_zone.setFixedHeight(_DROP_ZONE_HEIGHT)
@@ -156,9 +140,6 @@ class NewJobPanel(QWidget):
         self.drop_label = QLabel(t("home.drop"))
         self.drop_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.drop_label.setWordWrap(True)
-        # A long folder path must not widen the whole window, nor wrap past the
-        # zone's fixed height: each line is elided to the label's width (again
-        # on every resize) and the whole path is the tooltip.
         self.drop_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.drop_label.installEventFilter(self)
         drop_layout.addWidget(self.drop_label)
@@ -173,7 +154,6 @@ class NewJobPanel(QWidget):
         self.recitation_button.setCheckable(True)
         self.lecture_button = QPushButton(t("home.mode.lecture"))
         self.lecture_button.setCheckable(True)
-        # A segmented choice: the sheet fills the chosen one, and its icon turns on_accent.
         for button, name in ((self.recitation_button, "mic"), (self.lecture_button, "book-open")):
             button.setProperty("segment", True)
             set_icon(button, name, size=16, on_role="on_accent")
@@ -187,7 +167,6 @@ class NewJobPanel(QWidget):
         layout.addLayout(mode_row)
         self._mode_group.buttonToggled.connect(self._mode_changed)
 
-        # What the chosen mode does, in a quieter voice under it.
         self.description_label = QLabel()
         self.description_label.setWordWrap(True)
         self.description_label.setFont(theme.font("secondary"))
@@ -201,8 +180,6 @@ class NewJobPanel(QWidget):
         self.surah_box = QComboBox()
         self.surah_box.currentIndexChanged.connect(self._surah_changed)
         form.addRow(t("home.surah"), self.surah_box)
-        # A lecture's own picker, in the same place: which surah its cards keep
-        # to. Separate from the recitation's, which also sets the ayat range.
         self.studied_surah_box = QComboBox()
         self.studied_surah_box.setToolTip(t("home.studied_surah.tip"))
         fill_studied_surah_box(self.studied_surah_box, {})
@@ -217,7 +194,6 @@ class NewJobPanel(QWidget):
         self.to_spin.setMinimum(1)
         self.from_spin.valueChanged.connect(self._range_changed)
         self.to_spin.valueChanged.connect(self._range_changed)
-        # Buddies, so a screen reader names each spin box by its "from"/"to".
         self.range_from_label = QLabel(t("home.range_from"))
         self.range_from_label.setBuddy(self.from_spin)
         self.range_to_label = QLabel(t("home.range_to"))
@@ -233,7 +209,7 @@ class NewJobPanel(QWidget):
 
         self.preset_box = QComboBox()
         for name in _PRESET_ORDER:
-            if name in VIDEO_PRESETS:  # defends against a preset renamed elsewhere
+            if name in VIDEO_PRESETS:
                 self.preset_box.addItem(t(_PRESET_KEYS[name]), name)
         self.preset_box.currentIndexChanged.connect(self._preset_changed)
         form.addRow(t("home.video_size"), self.preset_box)
@@ -247,8 +223,6 @@ class NewJobPanel(QWidget):
         self.more_button.toggled.connect(self._toggle_more_options)
         layout.addWidget(self.more_button)
 
-        # Labelled rows like the form above, so each choice says what it is
-        # and its value text need not repeat it.
         self.more_group = QWidget()
         self.more_form = QFormLayout(self.more_group)
         self.more_form.setContentsMargins(0, 0, 0, 0)
@@ -284,7 +258,6 @@ class NewJobPanel(QWidget):
 
         layout.addWidget(self.more_group)
 
-        # Said here, not chosen here: the engine is a machine setting now.
         self.engine_note = QLabel()
         self.engine_note.setWordWrap(True)
         self.engine_note.setTextFormat(Qt.TextFormat.RichText)
@@ -301,7 +274,6 @@ class NewJobPanel(QWidget):
         self.start_button.setDefault(True)
         make_primary(self.start_button)
         self.start_button.clicked.connect(lambda: self.start_requested.emit(self.spec()))
-        # While a job runs the bar stands where Start stood, as tall, and says the stage.
         self.progress_bar = QProgressBar()
         self.progress_bar.setTextVisible(True)
         self.progress_bar.setRange(0, 100)
@@ -315,7 +287,6 @@ class NewJobPanel(QWidget):
         start_row.addWidget(self.progress_bar, 1)
         start_row.addWidget(self.cancel_button)
         layout.addLayout(start_row)
-        # What stops Start is said under it, in a quieter voice.
         self.problem_label = QLabel()
         self.problem_label.setWordWrap(True)
         self.problem_label.setFont(theme.font("secondary"))
@@ -325,7 +296,6 @@ class NewJobPanel(QWidget):
         self.status_label.setWordWrap(True)
         self.status_label.setVisible(False)
         layout.addWidget(self.status_label)
-        # Spare height goes below the form, so the controls stay together at the top.
         layout.addStretch(1)
         self._align_label_columns()
 
@@ -368,7 +338,7 @@ class NewJobPanel(QWidget):
 
     def reload_settings(self) -> None:
         """The Settings dialog changed something this form shows or sends: read it again."""
-        self._load_surahs()  # refills from the (possibly new) store and puts the remembered surah back
+        self._load_surahs()
         self._show_engine_note()
         self._refresh()
 
@@ -376,8 +346,6 @@ class NewJobPanel(QWidget):
         """Choose *mode* for the person (the empty state's cards) and move them to the file."""
         (self.recitation_button if mode == "recitation" else self.lecture_button).setChecked(True)
         self.choose_button.setFocus(Qt.FocusReason.OtherFocusReason)
-
-    # -- the Quran store ----------------------------------------------------------
 
     def _usable_override(self) -> Path | None:
         """The override while its file is there, else None.
@@ -428,7 +396,6 @@ class NewJobPanel(QWidget):
     def _fill_surahs(self) -> None:
         """List every surah from the store, or say in the picker why there are none."""
         self.surah_box.clear()
-        # Numbers only until the store is read: a lecture can still choose.
         fill_studied_surah_box(self.studied_surah_box, {})
         quran = self._effective_quran()
         if quran is None:
@@ -442,7 +409,7 @@ class NewJobPanel(QWidget):
                 surahs = list_surahs(conn)
             finally:
                 conn.close()
-        except Exception as error:  # noqa: BLE001 — a bad store must not kill the window
+        except Exception as error:
             self.surah_box.addItem(t("home.quran_store_error", details=str(error)), None)
             self.surah_box.setEnabled(False)
             self._surah_changed()
@@ -463,8 +430,6 @@ class NewJobPanel(QWidget):
                 surah,
             )
         self._surah_changed()
-
-    # -- input --------------------------------------------------------------------
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 — Qt's name
         if _first_audio(event.mimeData().urls()) is not None:
@@ -517,8 +482,6 @@ class NewJobPanel(QWidget):
         return super().eventFilter(watched, event)
 
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802 — Qt's name
-        # A label's pixmap is not a button's icon: ``refresh_icons`` does not
-        # reach it, so a theme switch redraws it here.
         if event.type() in (QEvent.Type.PaletteChange, QEvent.Type.ApplicationPaletteChange):
             self._show_drop_icon()
         super().changeEvent(event)
@@ -547,8 +510,6 @@ class NewJobPanel(QWidget):
             name = metrics.elidedText(name, Qt.TextElideMode.ElideMiddle, width)
             folder = metrics.elidedText(folder, Qt.TextElideMode.ElideMiddle, width)
         self.drop_label.setText(f"{name}\n{path_text(folder)}")
-
-    # -- controls -------------------------------------------------------------------
 
     def _mode_changed(self) -> None:
         recitation = self.recitation_button.isChecked()
@@ -598,7 +559,7 @@ class NewJobPanel(QWidget):
             return
         surah = self.surah_box.currentData()
         if not surah:
-            return  # no store to pick from: keep the last real choice
+            return
         self._prefs.surah_num = int(surah["surah_num"])
         self._prefs.from_ayah = self.from_spin.value()
         self._prefs.to_ayah = self.to_spin.value()
@@ -615,8 +576,6 @@ class NewJobPanel(QWidget):
         disclosure.reveal(
             self.more_group, open_, animate=disclosure.animations_enabled(self._prefs)
         )
-        # Down when the options show; else along the reading direction (the
-        # icon module mirrors it in Arabic).
         set_icon(self.more_button, "chevron-down" if open_ else "chevron-right", size=16)
 
     def _current_subtitles(self) -> str:
@@ -664,8 +623,6 @@ class NewJobPanel(QWidget):
         self._prefs.render_right_away = checked
         self._refresh()
 
-    # -- the job ----------------------------------------------------------------------
-
     def spec(self) -> JobSpec:
         """The job this panel would run right now."""
         recitation = self.recitation_button.isChecked()
@@ -712,11 +669,8 @@ class NewJobPanel(QWidget):
     def _refresh(self) -> None:
         problem = self.problem()
         self.problem_label.setText(t(problem) if problem else "")
-        # Start's reason has no Start to stand under while the bar is there.
         self.problem_label.setVisible(problem is not None and not self._running)
         self.start_button.setEnabled(problem is None)
-
-    # -- running --------------------------------------------------------------------
 
     def set_running(self, running: bool) -> None:
         """Disable every input and put the bar and Cancel where Start stood while a job runs."""
@@ -743,7 +697,6 @@ class NewJobPanel(QWidget):
             self.progress_bar.setRange(0, 0)
             self.progress_bar.setFormat("")
             self.status_label.setVisible(False)
-        # The status line is shown again by ``show_status``, with the outcome.
         self._refresh()
 
     def set_progress(

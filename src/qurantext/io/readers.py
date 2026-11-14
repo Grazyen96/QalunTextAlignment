@@ -51,7 +51,7 @@ def extract_alignment_words(
     *,
     normalizer: TextNormalizer = normalize_alignment_ar,
 ) -> list[dict]:
-    """Return audioAlignment-style word entries from WhisperX output."""
+    """Return word entries for the legacy word alignment from WhisperX output."""
     words: list[dict] = []
 
     skipped = 0
@@ -88,7 +88,7 @@ def extract_matching_words(
     *,
     normalizer: TextNormalizer = normalize_detection_ar,
 ) -> list[dict]:
-    """Return detect_range-style word entries from WhisperX output."""
+    """Return word entries for range and lecture matching from WhisperX output."""
     words: list[dict] = []
     skipped = 0
 
@@ -99,8 +99,6 @@ def extract_matching_words(
         if not norm or start is None or end is None:
             skipped += 1
             return
-        # Tolerate messy WhisperX/hand-edited JSON: a single non-numeric
-        # timestamp skips that word instead of crashing the whole load.
         try:
             start_f, end_f = float(start), float(end)
         except (TypeError, ValueError):
@@ -147,7 +145,7 @@ def extract_segments(
     *,
     normalizer: TextNormalizer = normalize_full_aya_ar,
 ) -> list[dict]:
-    """Return fullAyaAlignment-style segment entries from WhisperX output."""
+    """Return segment entries, normalized for whole-ayah comparison, from WhisperX output."""
     segments: list[dict] = []
 
     for segment in _iter_whisperx_segments(output):

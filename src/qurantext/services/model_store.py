@@ -48,18 +48,12 @@ __all__ = [
 _BLOCK = 1 << 20
 _TIMEOUT_SECONDS = 30
 _SPACE_MARGIN = 1.10
-#: Progress is said at most this often: a read returns whatever has arrived, often a few KB.
 _REPORT_EVERY_SECONDS = 0.2
-#: A temporary download or folder this old was left by a run that crashed or was
-#: killed; a live run touches its own far more often than this.
 _STALE_AFTER_SECONDS = 3600
 #: Putting the folder in place is tried this often, this far apart: on Windows an
 #: antivirus scan can hold a freshly written file for a moment.
 _PLACE_ATTEMPTS = 5
 _PLACE_PAUSE_SECONDS = 0.2
-#: One download at a time within this process: a second job waits for the first
-#: one's model. Other processes are not waited for; each downloads under its own
-#: temporary names, and the first verified folder moved in is the one kept.
 _LOCK = threading.Lock()
 
 
@@ -276,7 +270,6 @@ def _download(
     cancel: CancelToken | None,
 ) -> None:
     size = manifest.archive_size
-    # Without a fraction, so a window says the stage's own sentence first.
     report(
         progress,
         "download",
@@ -293,7 +286,7 @@ def _download(
         ) as response:
             _check_length(manifest, response.headers.get("Content-Length"))
             with _saving(part):
-                out: BinaryIO = open(part, "wb")  # closed by the with below
+                out: BinaryIO = open(part, "wb")
             with out:
                 # read1 returns what has arrived, so cancel and progress keep up on a
                 # slow link; asking for one byte past the pinned size catches a body
@@ -465,7 +458,7 @@ def _set_aside(manifest: ModelManifest, target: Path) -> None:
     try:
         target.rename(aside)
     except OSError:
-        return  # gone already, or held open: the next attempt says which
+        return
     if _complete(aside, manifest):
         with contextlib.suppress(OSError):
             aside.rename(target)

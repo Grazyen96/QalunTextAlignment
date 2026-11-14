@@ -39,7 +39,6 @@ __all__ = [
     "tokens_for",
 ]
 
-#: What the theme preference may say; ``system`` follows the desktop.
 MODES = ("system", "light", "dark")
 
 SP_4, SP_8, SP_12, SP_16, SP_24, SP_32 = 4, 8, 12, 16, 24, 32
@@ -281,7 +280,6 @@ def font(role: str) -> QFont:
     return base
 
 
-#: Application properties: the tokens in force and the mode they came from.
 TOKENS_PROPERTY = "qalun.tokens"
 MODE_PROPERTY = "qalun.theme_mode"
 _CONNECTED_PROPERTY = "qalun.scheme_connected"
@@ -330,7 +328,6 @@ def apply_theme(app, mode: str) -> Tokens:
         from qurantext.gui.style import QalunStyle
 
         base = QStyleFactory.create("Fusion")
-        # A Qt built without Fusion: the proxy wraps whatever style is in force.
         app.setStyle(QalunStyle(base) if base is not None else QalunStyle(app.style()))
         app.setProperty(_FUSION_PROPERTY, True)
     from qurantext.gui import focus

@@ -76,7 +76,7 @@ not add one per build. On GitHub Actions the gate points the app at
 **Keep the speech model between runs** step in `release.yml` caches
 `.ci-cache/qalun/models` between runs, one cache per platform. Its key is the
 model archive's pinned sha256 from `model_store.py`, written out in `release.yml`;
-`tests/test_gate_script.py` fails if the two disagree. Publishing a new model
+`tests/packaging/test_gate_script.py` fails if the two disagree. Publishing a new model
 therefore needs one edit to `release.yml`, by someone whose token has the
 `workflow` scope.
 

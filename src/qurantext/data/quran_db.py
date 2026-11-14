@@ -42,7 +42,6 @@ from qurantext.data.citation_index import DEFAULT_NGRAM_N, build_citation_index
 
 SCHEMA_VERSION = 2
 COUNTING = "madani"
-# Metadata available in the schema but not yet populated (needs a metadata pack).
 METADATA_PENDING = "surahs.revelation_type, ayat.juz, ayat.hizb, ayat.sajda"
 
 _SCHEMA = """
@@ -232,7 +231,6 @@ def _write_db(
             [{**w, "ayah_id": f"{w['surah_num']}:{w['ayah_num']}"} for w in words],
         )
         conn.commit()
-        # Built after words exist, in the same atomic temp file.
         return build_citation_index(conn, n=ngram_n)
     finally:
         conn.close()
@@ -424,7 +422,7 @@ def ayah_range_card(
         raise ValueError(
             f"Surah and ayah numbers must be whole numbers: {surah_num}:{from_ayah}-{to_ayah}."
         )
-    count = surah_ayah_count(conn, surah_num)  # raises ValueError for an unknown surah
+    count = surah_ayah_count(conn, surah_num)
     if not (1 <= from_ayah <= to_ayah <= count):
         raise ValueError(
             f"Ayat {from_ayah}–{to_ayah} are not in surah {surah_num} (it has {count})."

@@ -77,7 +77,7 @@ Copyright 2010-2022 The Amiri Project Authors, under the SIL Open Font License,
 Version 1.1. The licence, the release's `OFL.txt`, is `fonts/Amiri-OFL.txt`
 beside the fonts, so it travels wherever they do (the wheel, the app, the
 source zip); `packaging/licenses/Amiri-OFL.txt` keeps the same text.
-`tests/test_packaging_spec.py` checks both hashes.
+`tests/packaging/test_packaging_spec.py` checks both hashes.
 
 ## Noto Sans Arabic: the interface's Arabic fallback
 
@@ -97,4 +97,4 @@ Copyright 2022 The Noto Project Authors, under the SIL Open Font License,
 Version 1.1. The licence, the release's `OFL.txt`, is `fonts/NotoSansArabic-OFL.txt`
 beside the fonts, so it travels wherever they do (the wheel, the app, the
 source zip); `packaging/licenses/NotoSansArabic-OFL.txt` keeps the same text.
-`tests/test_packaging_spec.py` checks both hashes.
+`tests/packaging/test_packaging_spec.py` checks both hashes.

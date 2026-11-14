@@ -20,8 +20,6 @@ from dataclasses import dataclass
 from math import inf
 from typing import Any
 
-# Normalised vocabulary (matches ``normalize_detection_ar`` output) used to
-# recognise the spoken preamble at the very start of a recitation.
 TAAWWUDH_VOCAB = frozenset(
     {
         "اعوذ",
@@ -38,10 +36,6 @@ TAAWWUDH_VOCAB = frozenset(
 )
 BASMALA_REST = frozenset({"الله", "الرحمن", "الرحيم"})
 
-# Canonical, fully-pointed display text + header label for each preamble kind.
-# The basmala is the shipped Qaloon text's own line, with its wasl marks (U+06EC)
-# and its shadda written before the fatha, as 111 of the file's 113 basmala lines
-# write it; the other two add a shadda on the ba. The istiʿādha is not mushaf text.
 ISTIAADHA_DISPLAY = "أَعُوذُ بِاللَّهِ مِنَ الشَّيْطَانِ الرَّجِيمِ"
 BASMALA_DISPLAY = "بِسْمِ اِ۬للَّهِ اِ۬لرَّحْمَٰنِ اِ۬لرَّحِيمِ"
 ISTIAADHA_LABEL = "الاستعاذة"
@@ -52,7 +46,6 @@ _PRESENTATION: dict[str, tuple[str, str]] = {
     "basmala": (BASMALA_DISPLAY, BASMALA_LABEL),
 }
 
-# How many WhisperX words from the start we inspect for a preamble.
 _SCAN_WINDOW = 20
 
 
@@ -60,9 +53,9 @@ _SCAN_WINDOW = 20
 class PreambleSpan:
     """A contiguous run of WhisperX words forming one preamble line."""
 
-    kind: str  # "istiaadha" | "basmala"
-    start_index: int  # inclusive index into the word list
-    end_index: int  # exclusive index into the word list
+    kind: str
+    start_index: int
+    end_index: int
 
 
 def detect_leading_preamble(words: list[dict]) -> tuple[list[PreambleSpan], int]:
@@ -102,9 +95,6 @@ def _build_span_match(words: list[dict], span: PreambleSpan) -> dict[str, Any] |
         return None
 
     start_time = round(float(seg_words[0]["start"]), 2)
-    # End at the next token's start so the card stays up until the following
-    # preamble line or the first ayah begins (no dark gap). Fall back to the
-    # span's own last word when it is the final token in the stream.
     if span.end_index < len(words):
         end_time = round(float(words[span.end_index]["start"]), 2)
     else:

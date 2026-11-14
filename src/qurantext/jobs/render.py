@@ -43,7 +43,6 @@ __all__ = ["RenderRequest", "RenderResult", "look_warning_message", "render_vide
 
 STAGE = "render"
 
-#: What each look warning code means to the person, said once per render.
 _LOOK_WARNINGS = {
     "image_missing": "The background image is missing; the preset's background was used.",
     "image_unreadable": "The background image could not be read; the preset's background was used.",
@@ -159,8 +158,6 @@ def render_video(
         if request.cards is not None
         else load_matches(matches_path)
     )
-    # A lecture's card keeps to the surah it studies; quotes from elsewhere
-    # stay in the captions only.
     mode = load_matches_meta(matches_path).get("mode")
     lecture = str(mode or "").lower() == "lecture"
     studied_surah_missing = (
@@ -189,8 +186,6 @@ def render_video(
     basmala_offset = 0.0
     look_warnings: list[str] = []
     try:
-        # Splice the shipped basmala before recitations that do not already open
-        # with one, shifting every timing back by its duration (see core.basmala).
         if get_settings().video.prepend_basmala:
             report(progress, STAGE, "Checking for a leading basmala...")
             prepend = maybe_prepend_basmala(
@@ -258,14 +253,12 @@ def render_video(
                 cancel=cancel,
                 look=request.look,
                 look_warnings=look_warnings,
-                # The opening card names the surah the person chose, as the cards keep to it.
                 studied_surah=request.studied_surah if lecture else None,
             )
             for code in look_warnings:
                 warn(look_warning_message(code))
-            ass_path = None  # type: ignore[assignment]
+            ass_path = None
     finally:
-        # The concatenated basmala+recitation audio is a throwaway render input.
         if basmala_temp_audio is not None and not request.keep_temp:
             basmala_temp_audio.unlink(missing_ok=True)
 

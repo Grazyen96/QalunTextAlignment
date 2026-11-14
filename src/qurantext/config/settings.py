@@ -13,7 +13,6 @@ DEFAULT_MODEL_REF = (
 )
 
 DEFAULT_WORD_MATCH_THRESHOLD = 0.80
-DEFAULT_AYA_MATCH_THRESHOLD = 0.50
 
 DEFAULT_RANGE_HEAD_WORDS = 80
 DEFAULT_RANGE_TAIL_WORDS = 80
@@ -23,17 +22,6 @@ DEFAULT_RANGE_POSITION_THRESHOLD = 0.55
 DEFAULT_RANGE_POSITION_THRESHOLD_GLOBAL = 0.65
 DEFAULT_RANGE_HIGH_CONF_POSITION = 0.75
 DEFAULT_RANGE_MIN_WORDS_GLOBAL = 5
-
-DEFAULT_RANGE_MATCHING = {
-    "head_words": DEFAULT_RANGE_HEAD_WORDS,
-    "tail_words": DEFAULT_RANGE_TAIL_WORDS,
-    "search_range": DEFAULT_RANGE_SEARCH_RANGE,
-    "low_conf": DEFAULT_RANGE_LOW_CONF,
-    "position_threshold": DEFAULT_RANGE_POSITION_THRESHOLD,
-    "position_threshold_global": DEFAULT_RANGE_POSITION_THRESHOLD_GLOBAL,
-    "high_conf_position": DEFAULT_RANGE_HIGH_CONF_POSITION,
-    "min_words_global": DEFAULT_RANGE_MIN_WORDS_GLOBAL,
-}
 
 DEFAULT_LECTURE_MAX_SPAN = 5
 DEFAULT_LECTURE_MIN_WINDOW_WORDS = 5
@@ -45,21 +33,6 @@ DEFAULT_LECTURE_CANDIDATE_LIMIT = 25
 DEFAULT_LECTURE_SHORT_PHRASE_THRESHOLD = 0.90
 DEFAULT_LECTURE_SHORT_PHRASE_WORD_LIMIT = 6
 
-DEFAULT_LECTURE_MATCHING = {
-    "max_span": DEFAULT_LECTURE_MAX_SPAN,
-    "min_window_words": DEFAULT_LECTURE_MIN_WINDOW_WORDS,
-    "max_window_words": DEFAULT_LECTURE_MAX_WINDOW_WORDS,
-    "window_step": DEFAULT_LECTURE_WINDOW_STEP,
-    "min_score": DEFAULT_LECTURE_THRESHOLD,
-    "min_matched_words": DEFAULT_LECTURE_MIN_MATCHED_WORDS,
-    "candidate_limit": DEFAULT_LECTURE_CANDIDATE_LIMIT,
-}
-
-# Recitation word-highlight timing corrections (applied by refine_word_timings).
-# Offset shifts every highlight start/end to cancel a consistent lag (negative)
-# or lead (positive); 0.0 = neutral, dial empirically per reciter. Bridge_max is
-# the largest inter-word silence (seconds) that gets closed so spans stay
-# continuous — gaps beyond it are treated as genuine pauses and left intact.
 DEFAULT_HIGHLIGHT_OFFSET_S = 0.0
 DEFAULT_TIMING_BRIDGE_MAX_S = 0.6
 
@@ -71,31 +44,15 @@ DEFAULT_VIDEO_RENDERER = "frame"
 DEFAULT_VIDEO_WIDTH = 1280
 DEFAULT_VIDEO_HEIGHT = 720
 DEFAULT_VIDEO_FPS = 25
-# Gaps between consecutive ayah groups are bridged so no black screen shows.
-# Gaps up to this many seconds pull the next group back to the previous group's
-# end; longer gaps (a genuine pause) split the difference at the midpoint so the
-# next card does not sit idle for the whole pause.
 DEFAULT_VIDEO_GAP_MIDPOINT_THRESHOLD = 3.0
 DEFAULT_VIDEO_FONT_FILE = str(DEFAULT_FONT_PATH)
-# Splice the shipped input/basmala/basmala.mp3 before each recitation video when
-# the recitation does not already open with one (see core.basmala).
 DEFAULT_VIDEO_PREPEND_BASMALA = True
 
-# (width, height, fps) tuples for named quality presets.
 VIDEO_PRESETS: dict[str, tuple[int, int, int]] = {
     "fast": (960, 540, 24),
     "standard": (1280, 720, 25),
     "high": (1920, 1080, 30),
     "social": (1080, 1920, 30),
-}
-
-DEFAULT_VIDEO = {
-    "renderer": DEFAULT_VIDEO_RENDERER,
-    "width": DEFAULT_VIDEO_WIDTH,
-    "height": DEFAULT_VIDEO_HEIGHT,
-    "fps": DEFAULT_VIDEO_FPS,
-    "gap_midpoint_threshold": DEFAULT_VIDEO_GAP_MIDPOINT_THRESHOLD,
-    "prepend_basmala": DEFAULT_VIDEO_PREPEND_BASMALA,
 }
 
 DEFAULT_WHISPERX_INPUT = {
@@ -109,10 +66,6 @@ DEFAULT_WHISPERX_INPUT = {
     "align_output": True,
     "language_detection_min_prob": 0,
     "language_detection_max_tries": 5,
-    # Fake "previous transcript" text Whisper conditions its first window on.
-    # A sentence of Quranic/tafseer Arabic biases decoding toward classical
-    # vocabulary and spellings, which cleans up quoted ayat inside dars audio.
-    # Empty disables the parameter (it is omitted from the request payload).
     "initial_prompt": "",
 }
 
@@ -345,7 +298,6 @@ class AppSettings:
     alignment: AlignmentSettings
     video: VideoSettings
     word_match_threshold: float
-    aya_match_threshold: float
 
 
 @lru_cache(maxsize=1)
@@ -469,9 +421,5 @@ def get_settings() -> AppSettings:
         word_match_threshold=_env_float(
             "QURANTEXT_WORD_MATCH_THRESHOLD",
             DEFAULT_WORD_MATCH_THRESHOLD,
-        ),
-        aya_match_threshold=_env_float(
-            "QURANTEXT_AYA_MATCH_THRESHOLD",
-            DEFAULT_AYA_MATCH_THRESHOLD,
         ),
     )

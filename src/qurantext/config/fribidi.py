@@ -65,9 +65,6 @@ def preload_fribidi() -> str | None:
 
     directory = Path(sys.executable).resolve().parent
 
-    # On Windows the library may have been built against sibling runtime DLLs.
-    # Loading by absolute path does not put that folder on the search path for
-    # its dependencies, so say so explicitly first.
     if sys.platform == "win32" and hasattr(os, "add_dll_directory"):
         try:
             os.add_dll_directory(str(directory))

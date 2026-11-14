@@ -53,8 +53,6 @@ _TRACKING = ("utm_source", "utm_medium", "utm_content")
 _SCHEME = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*):(.*)$", re.DOTALL)
 _HOST_PORT = re.compile(r"^\d+(?:[/?#]|$)")
 _LABEL = re.compile(r"^(?!-)[a-z0-9-]{1,63}(?<!-)$")
-# Characters kept as they are when the path, query or fragment is made ASCII:
-# RFC 3986's reserved and unreserved characters, and "%" so escapes stay escapes.
 _SAFE_PATH = "/%:@!$&'()*+,;=-._~"
 _SAFE_QUERY = _SAFE_PATH + "?"
 
@@ -100,7 +98,7 @@ def _ascii_host(host: str, text: str) -> str:
     if not all(_LABEL.match(label) for label in labels):
         raise LinkError("host", text)
     if len(ascii_host) > 253 or all(label.isdigit() for label in labels):
-        raise LinkError("host", text)  # too long, or a broken IPv4 address
+        raise LinkError("host", text)
     if len(labels) < 2 and ascii_host != "localhost":
         raise LinkError("host", text)
     return ascii_host
@@ -129,7 +127,7 @@ def normalise_link(text: str) -> str:
             break
     scheme = _SCHEME.match(text)
     if scheme is None or _HOST_PORT.match(scheme.group(2)):
-        text = "https://" + text  # no scheme: a bare host, perhaps with a port
+        text = "https://" + text
     parts = urlsplit(text)
     if parts.scheme.lower() not in ("http", "https"):
         raise LinkError("scheme", text)
@@ -194,7 +192,7 @@ def tracked_link(url: str, *, platform: str, campaign: str, content: str = "outr
             continue
         if key == "utm_campaign":
             if not unquote_plus(value).strip():
-                continue  # an empty campaign measures nothing: the automatic one replaces it
+                continue
             has_campaign = True
         keep.append(piece)
     if not has_campaign:
@@ -208,7 +206,7 @@ def _for_people(text: str) -> str:
     try:
         decoded = unquote(text, errors="strict")
     except UnicodeDecodeError:
-        return text  # not UTF-8: the escapes are the only honest way to show it
+        return text
     return "".join(quote(char, safe="") if _invisible_or_space(char) else char for char in decoded)
 
 
@@ -237,7 +235,6 @@ def readable_link(url: str) -> str:
 #: Scripts counted as one when a host name mixes them: Japanese mixes kana and
 #: kanji, Korean hangul and hanja, as their own domains do.
 _SCRIPT_GROUPS = {"HIRAGANA": "CJK", "KATAKANA": "CJK", "HANGUL": "CJK"}
-#: Cyrillic and Greek small letters that read as Latin ones in most fonts.
 _LOOK_LATIN = frozenset("аеорсухіјѕһԁԛԝӏοανικρτυχ")
 
 

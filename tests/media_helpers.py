@@ -18,7 +18,6 @@ QURAN_FILE = DEFAULT_QURAN_PATH
 FFMPEG = shutil.which("ffmpeg")
 FFPROBE = shutil.which("ffprobe")
 
-#: Whether a real render can run here. Each media test module skips on it.
 MEDIA_AVAILABLE = bool(FFMPEG and FFPROBE and QURAN_FILE.exists() and DEFAULT_FONT_PATH.exists())
 MEDIA_REASON = "needs ffmpeg, ffprobe, the shipped Quran file and the bundled font"
 

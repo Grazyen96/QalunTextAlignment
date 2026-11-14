@@ -169,7 +169,6 @@ def _place(
 
 
 def convert(v10: dict[tuple[int, int], list[str]], lines: list[str]) -> str:
-    # Per line, the new text for each whitespace-separated token that changes.
     replacements: dict[int, dict[int, str]] = {}
     slots: list[tuple[int, int, str]] = []
     surah = 0
@@ -191,7 +190,7 @@ def convert(v10: dict[tuple[int, int], list[str]], lines: list[str]) -> str:
         if _is_basmala(stripped):
             continue
         if (surah, ayah) == final:
-            break  # the attribution footer
+            break
         for tok_no, token in enumerate(stripped.split()):
             if _is_marker(token):
                 ayah += 1

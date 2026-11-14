@@ -11,27 +11,15 @@ from qurantext.config.paths import bundled_asset
 
 __all__ = ["APP_ICON_PNG", "APP_ICON_SIZES", "main", "set_app_icon"]
 
-#: The window and task-bar icon at its largest everyday size.
 APP_ICON_PNG = bundled_asset("icon/qalun-256.png")
-#: Every size drawn for the icon: the small ones are drawn for their size, so a
-#: title bar shows them rather than the 256 px one scaled down.
 APP_ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 
-#: Qt's own criticals and fatals (``QThread: Destroyed while thread is still
-#: running``) come through its message handler, not Python's, so a windowed
-#: build would otherwise record nothing of them. Its warnings stay out of the
-#: log: platform chatter (``qt.qpa.*`` on each activation) would share the 4 MB
-#: with real errors, and one repeated per frame would rotate them away.
 _qt_log = logging.getLogger("qurantext.qt")
-#: The handler Qt had before ours: None means Qt's default, which prints.
 _previous_qt_handler: Any = None
 
-#: How long quitting waits, in total, for background threads a closed window
-#: left running (a coverage check, a waveform read) before leaving anyway.
 _EXIT_WAIT_MS = 30_000
 
 
-#: The name settings are filed under; see :func:`_name_the_app`.
 _APP_NAME = "Qalun"
 
 
@@ -96,7 +84,6 @@ def _qt_message(mode: Any, context: Any, message: str) -> None:
         }
         level = levels.get(mode)
         if level is None:
-            # Debug, info and warnings: not the log's; printed as Qt would.
             if _previous_qt_handler is not None:
                 _previous_qt_handler(mode, context, message)
             elif sys.stderr is not None:
@@ -105,7 +92,6 @@ def _qt_message(mode: Any, context: Any, message: str) -> None:
         category = getattr(context, "category", None)
         if category and category != "default":
             message = f"{category}: {message}"
-        # The log's stderr handler prints it on a terminal, so Qt's default need not.
         _qt_log.log(level, "%s", message)
     except Exception:
         pass
@@ -149,7 +135,6 @@ def main(argv: list[str] | None = None) -> int:
     from qurantext.gui.language import apply_language, initial_language
     from qurantext.gui.prefs import Prefs
 
-    # Before the window: every widget reads its words and direction as it is built.
     prefs = Prefs()
     apply_language(app, initial_language(prefs))
     from qurantext.gui.theme import apply_theme

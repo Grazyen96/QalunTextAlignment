@@ -1,23 +1,3 @@
-"""The Look panel: a video's palette, colours and background, beside its frame.
-
-Every change goes through the session (:meth:`ReviewSession.set_look`), so a
-look is undone, saved and marked unsaved like any timing edit; a slider drag
-is one gesture and undoes as one step. The panel only asks and shows: it
-emits :attr:`LookPanel.look_changed` after each change it made, and the window
-redraws the preview. After a change the panel did not make (undo, redo,
-discard) the window calls :meth:`LookPanel.refresh`, which reads the look back
-into the controls without emitting anything.
-
-The readability check measures the text colours against the card as it sits
-on this background (its average colour, from the same cached layer the
-preview draws on), and the same layer says when a chosen image has gone
-missing or cannot be read.
-
-The panel sits in a scroll area, so its sliders take the mouse wheel only
-once they have focus, and the background tiles never take it: scrolling past
-them moves the panel, never the look.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -78,40 +58,26 @@ from qurantext.jobs.look_assets import import_look_image
 
 __all__ = ["LOOK_WARNING_KEYS", "LookPanel", "look_warning_key", "look_warning_text"]
 
-#: The sentence for each code the renderer reports about a look's image.
 LOOK_WARNING_KEYS = {
     "image_missing": "look.image_missing",
     "image_unreadable": "look.image_unreadable",
 }
 
-#: A palette or background tile, in pixels.
 _SWATCH = QSize(56, 36)
-#: A colour row's chip.
 _CHIP = QSize(24, 24)
-#: Tiles per row; three fit the panel's width with their names under them.
 _SWATCH_COLUMNS = 3
-#: The ring a chosen tile wears, in pixels.
 _RING = 2
-#: The ring's gold on a pale tile: 3.03:1 on Ink on paper's frame (#E8E2D4), the palest
-#: preset, and 3.52:1 and 4.40:1 on the light and dark windows beside it. The light
-#: theme's gold token (#A67C11) is 2.95:1 on that frame, so the ring takes its own.
 _PALE_RING = "#A47A10"
-#: A slider's value readout, wide enough for "100%".
 _READOUT_WIDTH = 44
-#: What an image starts dimmed by, so the text on the card still reads.
 _IMAGE_DIM = 0.35
-#: How far a second colour sits from the first when a look has only one
-#: (a gradient or pattern chosen over a solid colour).
 _SHADE_STEP = 22
 
 
 def look_warning_text(code: str) -> str:
-    """The person's sentence for a renderer's look warning code."""
     return t(look_warning_key(code))
 
 
 def look_warning_key(code: str) -> str:
-    """The key of that sentence; a code this build does not know reads as unreadable."""
     return LOOK_WARNING_KEYS.get(code, "look.image_unreadable")
 
 
@@ -157,23 +123,13 @@ def _qcolor(colour: tuple[int, ...]) -> QColor:
 
 
 def _ring_gold(pixmap: QPixmap) -> QColor:
-    """The gold that reads on *pixmap*'s edge, whatever the theme.
-
-    The dark theme's gold is 1.53:1 on the palest preset tile, so a pale tile (its
-    pixel at 2, 2 has a lightness of 128 or more) wears the deeper ``_PALE_RING``,
-    and a dark one the dark theme's gold.
-    """
     ratio = pixmap.devicePixelRatio()
-    at = int(2 * ratio)  # logical (2, 2) in the pixmap's own pixels
+    at = int(2 * ratio)
     corner = pixmap.toImage().pixelColor(at, at)
     return QColor(_PALE_RING if corner.lightness() >= 128 else theme.DARK.gold)
 
 
 def _ringed(pixmap: QPixmap) -> QPixmap:
-    """*pixmap* with a gold ring on its edge, in the gold that reads on it: the chosen tile.
-
-    The copy keeps *pixmap*'s pixel ratio, so the ring is painted in its logical pixels.
-    """
     ratio = pixmap.devicePixelRatio()
     ringed = QPixmap(pixmap)
     painter = QPainter(ringed)
@@ -188,7 +144,6 @@ def _ringed(pixmap: QPixmap) -> QPixmap:
 
 
 def _two_state_icon(pixmap: QPixmap) -> QIcon:
-    """*pixmap* plain when not chosen, ringed when chosen (``QIcon.State.On``)."""
     result = QIcon()
     result.addPixmap(pixmap, QIcon.Mode.Normal, QIcon.State.Off)
     result.addPixmap(_ringed(pixmap), QIcon.Mode.Normal, QIcon.State.On)
@@ -206,7 +161,6 @@ def _canvas(size: QSize, ratio: float) -> QPixmap:
 
 
 def _swatch_icon(look: Look, ratio: float = 1.0) -> QIcon:
-    """The preset in miniature: its card on its background, a line of text and a highlight."""
     pixmap = _canvas(_SWATCH, ratio)
     pixmap.fill(_qcolor(look.frame_bg))
     painter = QPainter(pixmap)
@@ -224,7 +178,6 @@ def _swatch_icon(look: Look, ratio: float = 1.0) -> QIcon:
 
 
 def _chip_icon(colour: RGBA, ratio: float = 1.0) -> QIcon:
-    """A colour as a small square, over a checkerboard so a see-through colour shows as one."""
     pixmap = _canvas(_CHIP, ratio)
     pixmap.fill(QColor(255, 255, 255))
     painter = QPainter(pixmap)
@@ -243,14 +196,12 @@ def _chip_icon(colour: RGBA, ratio: float = 1.0) -> QIcon:
 
 
 def _shade(colour: RGBA) -> RGBA:
-    """A second colour near *colour*: lighter on a dark one, darker on a light one."""
     r, g, b, a = colour
     step = _SHADE_STEP if (r * 299 + g * 587 + b * 114) / 1000 < 128 else -_SHADE_STEP
-    return (*(max(0, min(255, c + step)) for c in (r, g, b)), a)  # type: ignore[return-value]
+    return (*(max(0, min(255, c + step)) for c in (r, g, b)), a)
 
 
 def _second_colour(look: Look, colour: RGBA) -> RGBA:
-    """The preset's own second colour when it has one, else a shade of *colour*."""
     preset = PRESETS.get(look.base_preset, NIGHT_GOLD).background
     if preset.colour == colour and preset.colour2 != colour:
         return preset.colour2
@@ -258,8 +209,6 @@ def _second_colour(look: Look, colour: RGBA) -> RGBA:
 
 
 def _background_for_kind(look: Look, kind: str) -> Background:
-    """The background choosing *kind* gives *look*: a solid one is the frame's colour,
-    the rest keep the colours and derive a second when there is none; dim and blur start over."""
     if kind == "solid":
         return Background("solid", look.frame_bg, look.frame_bg)
     colour = look.background.colour
@@ -270,7 +219,6 @@ def _background_for_kind(look: Look, kind: str) -> Background:
 
 
 def _pil_pixmap(image, ratio: float = 1.0) -> QPixmap:  # noqa: ANN001 — a PIL image
-    """*image* (drawn at *ratio* times the logical size) as a pixmap at *ratio*."""
     rgba = image.convert("RGBA")
     width, height = rgba.size
     qimage = QImage(rgba.tobytes(), width, height, 4 * width, QImage.Format.Format_RGBA8888)
@@ -280,7 +228,6 @@ def _pil_pixmap(image, ratio: float = 1.0) -> QPixmap:  # noqa: ANN001 — a PIL
 
 
 def _icon_tile(colour: RGBA, name: str, ratio: float = 1.0) -> QPixmap:
-    """*name*'s icon centred on *colour*: the image tile while the look has no image."""
     pixmap = _canvas(_SWATCH, ratio)
     pixmap.fill(_qcolor(colour))
     glyph = icon(name, "secondary").pixmap(QSize(20, 20), ratio)
@@ -317,18 +264,11 @@ class _ColourRow(QPushButton):
         self.hex_label = QLabel()
         self.hex_label.setFont(theme.font("secondary"))
         self.hex_label.setForegroundRole(QPalette.ColorRole.PlaceholderText)
-        # A hex is a code, not a sentence: it reads left to right in both languages.
         self.hex_label.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-        # A click on the hex is a click on the row.
         self.hex_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         trailing.addWidget(self.hex_label)
 
     def set_colour(self, colour: RGBA, ratio: float = 1.0) -> None:
-        """Show *colour* as the chip (drawn at *ratio*) and as its hex.
-
-        The hex is also the row's accessible description: a screen reader says the
-        row's name and then its colour, which the chip alone does not.
-        """
         self.setIcon(_chip_icon(colour, ratio))
         self.hex_label.setText("#{:02X}{:02X}{:02X}".format(*colour[:3]))
         self.setAccessibleDescription(self.hex_label.text())
@@ -354,7 +294,6 @@ class _GestureSlider(QSlider):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     def let_go(self) -> None:
-        """End a drag as a release would; nothing when the slider is not held."""
         if not self.isSliderDown():
             return
         # A release with no button held: QSlider forgets the grabbed handle
@@ -373,7 +312,7 @@ class _GestureSlider(QSlider):
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802 - Qt override
         if not self.hasFocus():
-            event.ignore()  # on to the scroll area
+            event.ignore()
             return
         super().wheelEvent(event)
 
@@ -392,16 +331,9 @@ class _GestureSlider(QSlider):
 
 
 class LookPanel(QWidget):
-    """Palette swatches, Customise, Background, and the default; edits go through the session."""
-
-    #: The panel changed the session's look (the window redraws the preview).
     look_changed = Signal()
-    #: A problem to show in the warnings strip, already in the person's words.
     notice = Signal(str)
-    #: Every problem the current look has (its image), in the person's words;
-    #: replaces the last list, so a problem that went away leaves the strip.
     look_notices = Signal(list)
-    #: A short confirmation for the status bar, already in the person's words.
     message = Signal(str)
 
     def __init__(
@@ -418,13 +350,10 @@ class LookPanel(QWidget):
         self._prefs = prefs
         self._frame_size = frame_size
         self._reserve_caption_band = reserve_caption_band
-        #: The look the controls show; refresh skips the work when it has not changed.
         self._shown: Look | None = None
         self._build()
         self._wire()
         self.refresh()
-
-    # -- layout -----------------------------------------------------------------
 
     def _build(self) -> None:
         column = QVBoxLayout(self)
@@ -440,8 +369,6 @@ class LookPanel(QWidget):
         palette_row.addWidget(self.status_label, 1)
         column.addLayout(palette_row)
 
-        # The swatches are a row of samples, not a sentence: they keep one order
-        # in both languages, as the frame they describe does.
         swatches = QWidget()
         swatches.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         grid = QGridLayout(swatches)
@@ -452,15 +379,12 @@ class LookPanel(QWidget):
             button = QToolButton()
             button.setCheckable(True)
             button.setAutoRaise(True)
-            # The chosen tile wears a gold ring (its On pixmap); the sheet gives it
-            # the accent text (``swatch`` marks it).
             button.setProperty("swatch", True)
             button.setIcon(_swatch_icon(look, self.devicePixelRatioF()))
             button.setIconSize(_SWATCH)
             button.setText(_preset_name(name))
             button.setToolTip(_preset_name(name))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-            # Equal columns, whatever length each name has in this language.
             button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             self.palette_buttons[name] = button
             grid.addWidget(button, index // _SWATCH_COLUMNS, index % _SWATCH_COLUMNS)
@@ -495,7 +419,6 @@ class LookPanel(QWidget):
                 opacity_row.addWidget(self.opacity_slider, 1)
                 opacity_row.addWidget(self.opacity_readout)
                 custom.addLayout(opacity_row)
-        # The colour a built-in background is drawn in; an image has none to pick.
         self.background_colour_button = _ColourRow(t("look.colour.background"))
         custom.addWidget(self.background_colour_button)
         self.customise_box.setVisible(False)
@@ -508,7 +431,6 @@ class LookPanel(QWidget):
 
         background_label = QLabel(t("look.background"))
         column.addWidget(background_label)
-        # A row of samples like the palette's: one order in both languages.
         tiles = QWidget()
         tiles.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         tile_grid = QGridLayout(tiles)
@@ -530,7 +452,6 @@ class LookPanel(QWidget):
         for column_index in range(_SWATCH_COLUMNS):
             tile_grid.setColumnStretch(column_index, 1)
         column.addWidget(tiles)
-        #: What the tiles were last painted for; they are rebuilt when it changes.
         self._tiles_key: tuple | None = None
 
         self.image_button = QPushButton(t("look.choose_image"))
@@ -538,7 +459,6 @@ class LookPanel(QWidget):
         set_icon(self.image_button, "image", size=16)
         column.addWidget(self.image_button)
         if self._session.project.path is None:
-            # The image is copied beside the project file; without one there is nowhere.
             self.image_button.setEnabled(False)
             self.image_button.setToolTip(t("session.no_file"))
             self.background_tiles["image"].setEnabled(False)
@@ -575,7 +495,6 @@ class LookPanel(QWidget):
 
     @staticmethod
     def _readout() -> QLabel:
-        """A slider's value beside it; a number reads left to right in both languages."""
         label = QLabel()
         label.setFixedWidth(_READOUT_WIDTH)
         label.setFont(theme.font("secondary"))
@@ -617,14 +536,7 @@ class LookPanel(QWidget):
         )
         set_icon(self.customise_toggle, "chevron-down" if open_ else "chevron-right", size=16)
 
-    # -- reading the look back --------------------------------------------------
-
     def refresh(self) -> None:
-        """Show the session's look in the controls; emits no ``look_changed``.
-
-        A problem with the look's image is said again through ``notice``
-        whenever the look changed (the warnings strip keeps each line once).
-        """
         look = self._session.look
         if look == self._shown:
             return
@@ -633,11 +545,9 @@ class LookPanel(QWidget):
         self._check(look)
 
     def announce(self) -> None:
-        """Say the current look's image problems again (once the window has connected)."""
         self._check(self._session.look)
 
     def _show(self, look: Look) -> None:
-        # Every chip and tile is drawn at the screen's pixel ratio, so it is sharp on HiDPI.
         ratio = self.devicePixelRatioF()
         current = look.base_preset if look.is_preset else None
         for name, button in self.palette_buttons.items():
@@ -655,7 +565,6 @@ class LookPanel(QWidget):
         self._set_slider(self.opacity_slider, _alpha_percent(look.card[3]))
         self._set_slider(self.dim_slider, round(bg.dim * 100))
         self._set_slider(self.blur_slider, round(bg.blur))
-        # A blocked setValue says nothing, so the readouts are set here as well.
         self.opacity_readout.setText(t("look.percent", value=self.opacity_slider.value()))
         self.dim_readout.setText(t("look.percent", value=self.dim_slider.value()))
         self.blur_readout.setText(str(self.blur_slider.value()))
@@ -665,8 +574,6 @@ class LookPanel(QWidget):
                 tile.setChecked(kind == bg.kind)
 
     def _paint_tiles(self, look: Look, ratio: float) -> None:
-        """Each kind in *look*'s colours at *ratio*; only when those colours (or the preset a
-        second colour comes from), the image or the pixel ratio changed."""
         bg = look.background
         image = bg.image if bg.kind == "image" else None
         try:
@@ -690,7 +597,7 @@ class LookPanel(QWidget):
                     )
                     pixmap = _pil_pixmap(drawn, ratio)
                 except (ValueError, OSError):
-                    pixmap = None  # a missing or unreadable image: the icon tile below
+                    pixmap = None
             if pixmap is None:
                 pixmap = _icon_tile(look.frame_bg, "image", ratio)
             tile.setIcon(_two_state_icon(pixmap))
@@ -698,12 +605,11 @@ class LookPanel(QWidget):
     @staticmethod
     def _set_slider(slider: QSlider, value: int) -> None:
         if slider.isSliderDown():
-            return  # the hand on it decides where it is
+            return
         with QSignalBlocker(slider):
             slider.setValue(value)
 
     def _check(self, look: Look) -> None:
-        """The readability warning, and the image's problems, for *look*."""
         width, height = self._frame_size
         layer = frame_base_layer(
             look, width, height, reserve_caption_band=self._reserve_caption_band
@@ -718,14 +624,10 @@ class LookPanel(QWidget):
         self.look_notices.emit([look_warning_text(code) for code in layer.warnings])
 
     def _colour_contrast_label(self) -> None:
-        """The warning in the amber that reads on the palette the panel paints on now."""
         colour = warning_color(self.palette()).name()
         self.contrast_label.setStyleSheet(f"color: {colour};")
 
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802 - Qt override
-        # A theme switch: the amber picked for the old palette may not read on the new one,
-        # and the image tile's glyph was drawn in the old theme's secondary colour. (A
-        # ring's gold follows the tile it sits on, not the theme: see ``_ring_gold``.)
         super().changeEvent(event)
         if event.type() in (QEvent.Type.PaletteChange, QEvent.Type.ApplicationPaletteChange):
             self._colour_contrast_label()
@@ -735,17 +637,13 @@ class LookPanel(QWidget):
     def event(self, event: QEvent) -> bool:  # noqa: A003 - Qt override
         handled = super().event(event)
         if event.type() == QEvent.Type.DevicePixelRatioChange and hasattr(self, "palette_buttons"):
-            # Moved to a screen of another pixel ratio: every chip and tile again, sharp there.
             ratio = self.devicePixelRatioF()
             for name, button in self.palette_buttons.items():
                 button.setIcon(_swatch_icon(PRESETS[name], ratio))
             self._show(self._session.look)
         return handled
 
-    # -- changes ----------------------------------------------------------------
-
     def _apply(self, look: Look) -> None:
-        """Give the session *look*; say so only when it changed anything."""
         before = self._session.revision
         self._session.set_look(look)
         self._after_change(before)
@@ -760,7 +658,6 @@ class LookPanel(QWidget):
         self.look_changed.emit()
 
     def _end_gesture(self) -> None:
-        """Close a slider's gesture; always said, as undo's state may change even when the look did not."""
         self._session.end_gesture()
         self._shown = None
         self.refresh()
@@ -779,12 +676,6 @@ class LookPanel(QWidget):
         )
 
     def _pick_background_colour(self) -> None:
-        """The colour a built-in background is drawn in.
-
-        A solid background is that colour, and the frame's own colour follows
-        it. A gradient or a pattern derives its second colour from the new one
-        as choosing it in the list does.
-        """
         look = self._session.look
 
         def with_colour(start: Look, rgba: RGBA) -> Look:
@@ -808,11 +699,6 @@ class LookPanel(QWidget):
         *,
         alpha: bool,
     ) -> None:
-        """Ask for a colour, showing each one in the preview while the dialog is open.
-
-        The dialog is one gesture: whatever was tried while it was open, OK is
-        one undo step and Cancel leaves no edit at all.
-        """
         session = self._session
         start = session.look
         before = session.revision
@@ -862,7 +748,7 @@ class LookPanel(QWidget):
         if kind == "image":
             if not self._choose_image():
                 self._shown = None
-                self.refresh()  # the tiles go back to the background the look has
+                self.refresh()
             return
         look = self._session.look
         if kind == look.background.kind:
@@ -874,7 +760,6 @@ class LookPanel(QWidget):
         self._apply(replace(look, background=_background_for_kind(look, kind)))
 
     def _choose_image(self) -> bool:
-        """Ask for an image, copy it beside the project, and show it; whether it did."""
         project_path = self._session.project.path
         if project_path is None:
             return False

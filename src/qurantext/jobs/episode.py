@@ -57,21 +57,14 @@ __all__ = [
 ]
 
 _INSTALL_HINT = "Install FFmpeg and try again."
-#: The progress stage the join reports under. Joining is the end of the
-#: render, so the window says "Rendering — N%" for it without a sentence of its
-#: own; the job layer announces the join itself in the window's language.
 STAGE = "render"
-#: How long a probe of one clip may take before the clip is called unreadable.
 _PROBE_TIMEOUT_S = 60
-#: How many of FFmpeg's last error lines a failed join reports.
 _ERROR_LINES = 5
-#: Transfer characteristics of HDR video: PQ (HDR10, Dolby Vision) and HLG.
 _HDR_TRANSFERS = frozenset({"smpte2084", "arib-std-b67"})
 #: Filters every join needs, beyond FFmpeg's ever-present scale/pad/concat.
 REQUIRED_FILTERS = ("apad", "setparams", "sidedata")
 #: Filters an HDR part is tone-mapped with; without them it is only untagged.
 TONE_MAP_FILTERS = ("zscale", "tonemap")
-#: The frame renderer's encoding, so the episode looks like the lecture inside it.
 _ENCODE_ARGS = (
     "-c:v",
     "libx264",
@@ -225,10 +218,6 @@ def recitation_video(
     if avoid is not None and _same_file(target, avoid):
         target = target.with_name(f"{target.stem} – recitation.mp4")
     settings = job_settings(project)
-    # Rendered under a name of its own and moved into place when complete: a
-    # render of the same recitation from its own review may be writing the
-    # target right now, and a cancel or failure here must not take the
-    # earlier video with it (the renderer deletes what it was writing).
     partial = target.with_name(f".{target.stem}.{uuid.uuid4().hex[:8]}.part.mp4")
     before = _stamp(target)
     try:
@@ -236,8 +225,6 @@ def recitation_video(
             project,
             partial,
             preset=settings.preset,
-            # The job's own choice, so the job list does not call the render
-            # "changed since"; a recitation has no live captions to burn.
             subtitles=settings.subtitles,
             formats=(),
             progress=progress,
@@ -247,11 +234,10 @@ def recitation_video(
     except JobCancelled:
         partial.unlink(missing_ok=True)
         raise
-    except Exception as error:  # any render failure is the recitation's, said in a sentence
+    except Exception as error:
         partial.unlink(missing_ok=True)
         raise EpisodeError("episode.error.recitation", reason=str(error)) from error
     if _stamp(target) != before:
-        # Rendered again (or made) meanwhile by someone else: newer than this.
         Path(result.video).unlink(missing_ok=True)
         raise EpisodeError("episode.error.recitation_changed", name=target.name)
     try:
@@ -263,7 +249,6 @@ def recitation_video(
         Path(result.video).unlink(missing_ok=True)
         raise EpisodeError("episode.error.recitation", reason=str(error)) from error
     if project.render is not None and project.render.get("video"):
-        # The record names the file where it now is, not where it was made.
         project.render["video"] = target.expanduser().resolve()
     _record_on_the_file(path, project.render, target)
     return target
@@ -615,7 +600,6 @@ def assemble_episode(
             process = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE,
-                # FFmpeg's complaints go to a file nobody has to drain while it runs.
                 stderr=errors,
                 text=True,
                 encoding="utf-8",

@@ -86,9 +86,7 @@ def shoot(out_dir: Path, *, themes=("light", "dark"), languages=("en", "ar")) ->
     app = QApplication.instance() or QApplication(sys.argv)
     real_dirs = catalog.default_job_dirs
     real_cache = os.environ.get("QURANTEXT_CACHE_DIR")
-    # Thumbnails are cached on disk; keep them under the output folder, never the person's own cache.
     os.environ["QURANTEXT_CACHE_DIR"] = str(out_dir / "cache")
-    # The home window lists the one job made here, nothing from the checkout's own folders.
     catalog.default_job_dirs = lambda: []
     try:
         return _shoot(app, out_dir, themes, languages)
@@ -118,13 +116,11 @@ def _shoot(app: QApplication, out_dir: Path, themes, languages) -> list[Path]:
     from qurantext.gui.review.window import ReviewWindow
     from qurantext.jobs.project import save_project
 
-    # The ayah picker reads the real store; build it if this checkout has none yet.
     ensure_quran_db(DEFAULT_QURAN_PATH, QURAN_DB_PATH).close()
     out_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     with tempfile.TemporaryDirectory(prefix="qalun-shots-") as scratch:
         tmp = Path(scratch)
-        # The home window lists this one job and nothing from the checkout's own folders.
         jobs = tmp / "jobs"
         save_project(_project(tmp, "recitation"), jobs / "al-furqan.qalun.json")
         for language in languages:
@@ -132,16 +128,13 @@ def _shoot(app: QApplication, out_dir: Path, themes, languages) -> list[Path]:
                 apply_language(app, language)
                 theme.apply_theme(app, name)
                 tag = f"{language}-{name}"
-                # Fresh settings per pass, never the person's own.
                 prefs = Prefs(QSettings(str(tmp / f"prefs-{tag}.ini"), QSettings.Format.IniFormat))
-                prefs.theme = name  # so the header's theme button shows the theme in use
+                prefs.theme = name
                 prefs.job_dirs = [jobs]
                 home = MainWindow(prefs=prefs)
                 home.resize(1024, 680)
                 _spin(300)
                 written.append(_grab(home, out_dir / f"home-{tag}.png"))
-                # A job running with More options open: checked and disabled at once,
-                # and the bar part way, saying its stage and how far.
                 home.new_job.more_button.setChecked(True)
                 home.new_job.set_running(True)
                 home.new_job.set_progress(0.42, t("home.progress.matching", percent=42))
@@ -155,7 +148,6 @@ def _shoot(app: QApplication, out_dir: Path, themes, languages) -> list[Path]:
                 home.job_list.stop_reading()
                 home.close()
                 home.deleteLater()
-                # The first launch: no jobs anywhere.
                 empty_prefs = Prefs(
                     QSettings(str(tmp / f"prefs-empty-{tag}.ini"), QSettings.Format.IniFormat)
                 )
@@ -173,9 +165,6 @@ def _shoot(app: QApplication, out_dir: Path, themes, languages) -> list[Path]:
                     review.seek(1.2)
                     written.append(_grab(review, out_dir / f"review-{mode}-{tag}.png"))
                     if mode == "recitation":
-                        # The Look panel with Customise open: tiles, colour rows and readouts.
-                        # The panel itself, whole: in the window its scroll area shows only the
-                        # first row of tiles, so a grab of the window would not differ.
                         review.look_panel.customise_toggle.setChecked(True)
                         _spin(100)
                         written.append(
@@ -183,7 +172,6 @@ def _shoot(app: QApplication, out_dir: Path, themes, languages) -> list[Path]:
                         )
                         review.look_panel.customise_toggle.setChecked(False)
                     if mode == "lecture":
-                        # A render most of the way: the label sits over the chunk.
                         review._set_render_running(True)
                         review.render_progress.setValue(70)
                         review.render_progress.setFormat(t(review._render_progress_key, percent=70))
@@ -210,7 +198,6 @@ def _shoot(app: QApplication, out_dir: Path, themes, languages) -> list[Path]:
                         )
                         review._full_frame.hide()
                     else:
-                        # A generated intro, so the strip's card and the pane under it both show.
                         episode = EpisodeDialog(review.session, prefs=prefs, parent=review)
                         episode.intro_kind.setCurrentIndex(episode.intro_kind.findData("generated"))
                         episode.intro_name_edit.setText("دروس الشيخ")

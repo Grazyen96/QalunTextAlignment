@@ -19,10 +19,8 @@ from qurantext.gui.prefs import Prefs
 
 __all__ = ["apply_language", "ensure_arabic_font", "initial_language", "system_language"]
 
-#: Qt's own translation for the language in use, kept so the next switch can remove it.
 _qt_translator: QTranslator | None = None
 
-#: The bundled font once registered as the Arabic fallback: its font id and family.
 _fallback: tuple[list[int], str] | None = None
 
 
@@ -69,8 +67,6 @@ def ensure_arabic_font(app: QApplication) -> str | None:
     registered it), or None when nothing was registered.
     """
     global _fallback
-    # Once registered, Noto has the Arabic writing system and is not a private
-    # family, so ``arabic_ui_families`` counts it as installed: ask only before.
     if _fallback is None:
         try:
             if arabic_ui_families():
@@ -85,7 +81,7 @@ def ensure_arabic_font(app: QApplication) -> str | None:
             for family in QFontDatabase.applicationFontFamilies(font_id)
         ]
         if not families:
-            return None  # the files are missing or unreadable; the doctor reports it
+            return None
         _fallback = ([font_id for font_id in ids if font_id != -1], families[0])
     # Qt keeps each substitute once, so a second language switch adds nothing.
     QFont.insertSubstitution(app.font().family(), _fallback[1])
@@ -99,7 +95,7 @@ def apply_language(app: QApplication, code: str) -> None:
     words, which is why the home window rebuilds itself after calling this.
     """
     global _qt_translator
-    i18n.set_language(code)  # raises on an unknown code before anything changes
+    i18n.set_language(code)
     if _qt_translator is not None:
         app.removeTranslator(_qt_translator)
         _qt_translator.deleteLater()
@@ -111,10 +107,8 @@ def apply_language(app: QApplication, code: str) -> None:
             app.installTranslator(translator)
             _qt_translator = translator
         else:
-            translator.deleteLater()  # Qt's buttons stay English; the window's words do not
-    # The C locale draws 0-9 and a decimal point whatever the system is set to.
+            translator.deleteLater()
     QLocale.setDefault(QLocale.c())
-    # In every language: an Arabic job name shows in the English window too.
     ensure_arabic_font(app)
     # After the translator: installing one may set a direction of its own.
     app.setLayoutDirection(

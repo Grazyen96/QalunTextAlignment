@@ -408,8 +408,6 @@ def load_caption_segments(matches_path: Path) -> list[dict[str, Any]]:
         return []
 
     meta = payload.get("meta")
-    # Live captions are a lecture-only feature: a recitation video shows the
-    # certified ayah text alone, no spoken-transcript band. Skip silently.
     if isinstance(meta, dict) and str(meta.get("mode") or "").lower() == "recitation":
         return []
     raw_path = meta.get("whisperx_raw_output_path") if isinstance(meta, dict) else None
@@ -417,8 +415,6 @@ def load_caption_segments(matches_path: Path) -> list[dict[str, Any]]:
         warn("Matches file has no transcript path in meta; rendering without live captions.")
         return []
 
-    # The stored path is absolute, but fall back to the transcript sitting next
-    # to the matches file in case the project was moved between machines.
     candidates = [Path(raw_path), Path(matches_path).parent / Path(raw_path).name]
     transcript_path = next((p for p in candidates if p.exists()), None)
     if transcript_path is None:
@@ -434,8 +430,6 @@ def load_caption_segments(matches_path: Path) -> list[dict[str, Any]]:
         return []
 
     segments: list[dict[str, Any]] = []
-    # Keep the raw spoken text verbatim (strip-only normalizer) so non-Arabic or
-    # punctuation-only segments are not dropped from the captions.
     for segment in extract_segments(data, normalizer=lambda text: (text or "").strip()):
         try:
             start = float(segment["start"])
@@ -443,10 +437,6 @@ def load_caption_segments(matches_path: Path) -> list[dict[str, Any]]:
         except (KeyError, TypeError, ValueError):
             continue
 
-        # Prefer the per-word tokens: building the caption text from them keeps
-        # the displayed words in lock-step with their timings, so the renderer
-        # can highlight the spoken word (the Nth token IS the Nth timing). Fall
-        # back to the verbatim segment text when a segment carries no word data.
         word_timings = [
             {"word": w["word"], "start": float(w["start"]), "end": float(w["end"])}
             for w in (segment.get("words") or [])
@@ -498,8 +488,6 @@ def require_binary(binary_name: str, install_hint: str | None = None) -> str:
     raise RuntimeError(f"{binary_name} was not found{where}.{hint}")
 
 
-#: Filter lists already read, by FFmpeg path. Only answers are kept: a query
-#: that failed is asked again next time.
 _FILTERS: dict[str, frozenset[str]] = {}
 
 
@@ -526,7 +514,6 @@ def ffmpeg_filters(ffmpeg_path: str) -> frozenset[str]:
         )
     except (OSError, subprocess.SubprocessError):
         return frozenset()
-    # Lines read " TSC name   V->V   description" below a legend that ends in "---".
     names = set()
     for line in completed.stdout.splitlines():
         parts = line.split()

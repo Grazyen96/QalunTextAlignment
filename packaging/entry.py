@@ -36,7 +36,7 @@ def _usable(stream: object) -> bool:
     if stream is None:
         return False
     try:
-        stream.fileno()  # type: ignore[attr-defined]
+        stream.fileno()
     except Exception:
         return False
     return True
@@ -55,9 +55,6 @@ def _attach_console() -> None:
     if sys.platform != "win32" or not getattr(sys, "frozen", False):
         return
     if _usable(sys.stdout) and _usable(sys.stderr):
-        # Someone redirected us to a file or a pipe, which a windowed process
-        # does inherit. Writing to the console instead would send the output
-        # somewhere they are not looking.
         return
     try:
         import ctypes
@@ -73,7 +70,6 @@ def _attach_console() -> None:
             except OSError:
                 pass
     except Exception:
-        # Never let diagnostics stop the command the person actually asked for.
         pass
 
 
@@ -91,18 +87,10 @@ def _save_report(report: str) -> str | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    # Before anything imports Pillow. A packaged app carries its own FriBiDi
-    # because no Pillow wheel contains one, and without it Arabic does not
-    # shape and the renderer refuses to draw. A no-op outside a frozen build.
     from qurantext.config.fribidi import preload_fribidi
 
     preload_fribidi()
 
-    # freeze_support() is only needed where a frozen app re-executes itself to
-    # start a child process, which means Windows. Calling it unconditionally
-    # hung this build on Linux before a line of our own code ran, and nothing
-    # here uses multiprocessing anyway — parallel rendering was measured and
-    # declined, see docs/findings/parallel-rendering.md.
     if sys.platform == "win32":
         import multiprocessing
 
@@ -131,9 +119,6 @@ def main(argv: list[str] | None = None) -> int:
         )
 
         _attach_console()
-        # --release is the build gate: what a checkout is only told about, a
-        # release must have. Its environment is set before the checks import Qt,
-        # which reads it once.
         release = "--release" in args[1:]
         prepare_doctor_process(release=release)
         results = run_checks(release=release)

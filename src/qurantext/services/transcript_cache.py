@@ -41,7 +41,6 @@ def cache_key(audio_path: str | PathLike[str], settings: dict[str, Any]) -> str:
 
 def cache_path(key: str, *, root: Path | None = None) -> Path:
     base = root if root is not None else user_cache_dir() / "transcripts"
-    # One level of fan-out keeps a big cache directory listable.
     return base / key[:2] / f"{key}.json"
 
 
@@ -65,8 +64,6 @@ def store_cached(key: str, output: dict | list, *, root: Path | None = None) -> 
     path = cache_path(key, root=root)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Written beside the target and moved, so a crash mid-write cannot leave
-        # a half-file that would later be read as a hit.
         temporary = path.with_suffix(".partial")
         temporary.write_text(json.dumps(output, ensure_ascii=False), encoding="utf-8")
         temporary.replace(path)

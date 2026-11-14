@@ -43,14 +43,9 @@ __all__ = [
 #: The clip types an intro or outro can be.
 EPISODE_SUFFIXES = (".mp4", ".mov", ".mkv", ".webm")
 
-#: The episode keys the choice owns, in the order they play around the lecture.
 _PART_KEYS = ("intro", "recitation", "outro")
-#: The clip parts whose original file name is kept beside the stored path: the
-#: copy beside the project is named by its content (``3f2a9c1b2d4e.mp4``),
-#: which would tell the person nothing about which clip it is.
 _CLIP_PARTS = ("intro", "outro")
 _NAME_KEYS = tuple(f"{part}_name" for part in _CLIP_PARTS)
-#: The keys holding a part's generated settings, in place of its clip.
 _GENERATED_KEYS = tuple(f"{part}_generated" for part in _CLIP_PARTS)
 
 #: The outro's closing phrase until the person writes another.
@@ -103,7 +98,7 @@ class GeneratedIntro:
             return None
         return cls(
             name=_text(data.get("name"), ""),
-            style=data.get("style"),  # type: ignore[arg-type]  # normalised on init
+            style=data.get("style"),
             seconds=_seconds(data.get("seconds"), 5.0),
         )
 
@@ -152,7 +147,7 @@ class GeneratedOutro:
             phrase=_text(data.get("phrase"), DEFAULT_PHRASE),
             link=_text(data.get("link"), ""),
             platform=platform if isinstance(platform, str) else "youtube",
-            style=data.get("style"),  # type: ignore[arg-type]  # normalised on init
+            style=data.get("style"),
             seconds=_seconds(data.get("seconds"), 6.0),
         )
 
@@ -277,8 +272,6 @@ def set_project_episode(
     clip, so choosing one removes the other.
     """
     folder = Path(project_dir) if project_dir is not None else _project_dir(project)
-    # _store_path(..., None) is absolute: a relative path with nothing known to
-    # be relative to would be read later against the project's folder and miss.
     current = project.episode if isinstance(project.episode, dict) else {}
     owned = (*_PART_KEYS, *_NAME_KEYS, *_GENERATED_KEYS)
     episode = {k: v for k, v in current.items() if k not in owned}

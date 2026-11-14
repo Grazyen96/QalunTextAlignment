@@ -41,8 +41,6 @@ __all__ = [
     "write_vtt",
 ]
 
-#: Formats a sidecar can be written in. SRT is universal, WebVTT is what the web
-#: wants, ASS keeps styling.
 SUBTITLE_FORMATS = ("srt", "vtt", "ass")
 
 
@@ -55,9 +53,6 @@ class Cue:
     text: str
     #: ``25:7`` for an ayah cue, ``None`` for recognised speech.
     ref: str | None = None
-
-
-# --- building cues -----------------------------------------------------------
 
 
 def card_ref(match: dict[str, Any]) -> str:
@@ -183,9 +178,6 @@ def lecture_caption_cues(caption_segments: list[dict[str, Any]]) -> list[dict[st
         }
         for segment in caption_segments
     ]
-
-
-# --- writing files -----------------------------------------------------------
 
 
 def _ordered(cues: list[Cue]) -> list[Cue]:

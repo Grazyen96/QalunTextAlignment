@@ -22,11 +22,9 @@ from qurantext.gui.prefs import Prefs
 
 __all__ = ["DURATION_MS", "animations_enabled", "reveal"]
 
-#: How long a panel takes to open or close.
 DURATION_MS = 150
 #: ``QWIDGETSIZE_MAX``, which PySide6 does not export: no height limit.
 _NO_LIMIT = 16777215
-#: The running animation, kept on the widget so a second toggle can stop it.
 _ANIMATION = "qalun.disclosure"
 
 
@@ -42,11 +40,10 @@ def reveal(widget: QWidget, open_: bool, *, animate: bool, duration_ms: int = DU
     """Show (*open_*) or hide *widget*, growing or shrinking it when *animate* and on screen."""
     running = widget.property(_ANIMATION)
     if isinstance(running, QPropertyAnimation):
-        widget.setProperty(_ANIMATION, None)  # its finished slot then does nothing
+        widget.setProperty(_ANIMATION, None)
         running.stop()
         running.deleteLater()
     window = widget.window()
-    # Closing what is not on screen has nothing to shrink: hide it at once.
     closing_hidden = not open_ and not widget.isVisible()
     if not animate or window is None or not window.isVisible() or closing_hidden:
         widget.setMaximumHeight(_NO_LIMIT)
@@ -64,7 +61,7 @@ def reveal(widget: QWidget, open_: bool, *, animate: bool, duration_ms: int = DU
 
     def finished() -> None:
         if widget.property(_ANIMATION) is not animation:
-            return  # stopped by a later toggle
+            return
         widget.setProperty(_ANIMATION, None)
         widget.setMaximumHeight(_NO_LIMIT)
         if not open_:

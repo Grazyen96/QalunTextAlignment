@@ -74,8 +74,6 @@ def run_word_alignment(
         raise FileNotFoundError(f"Audio file not found: {audio_file}")
 
     resolved_output_paths = output_paths or build_recitation_output_paths(audio_file)
-    # BOM-aware read: the shipped Qalun file is UTF-16, which a plain utf-8 read
-    # would turn into mojibake (and produce near-zero alignment).
     quran_text = read_quran_text(quran_file)
     canon_original = quran_text.split()
     canon_norm = [normalize_alignment_ar(word) for word in canon_original]

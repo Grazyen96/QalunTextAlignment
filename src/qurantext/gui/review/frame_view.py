@@ -1,29 +1,3 @@
-"""The frame the export would draw at the playhead, rendered live.
-
-The review window polls this at frame rate while the play head moves, so a
-full render on every poll — about 60 ms at the widget's size — would fall
-behind real time. :meth:`FrameView.show_at` throttles to one render per
-:data:`MIN_INTERVAL_S` unless the caller passes ``force=True``, which a seek,
-a pause, or an edit does, so the frame the person is looking at is never
-stale after a deliberate action, only between polls while playing.
-
-The renderer itself (``core.frame_renderer``) is unaware of the GUI: it takes
-plain dicts and returns a BGR numpy array, the same shape a render job would
-hand to OpenCV. This widget is the only place that array becomes a
-:class:`QPixmap`.
-
-The preset size is what the widget asks for, not what it insists on: in a
-small window it gives way down to half that, and renders the frame at the
-largest size of the preset's shape that fits, so the frame never spills out of
-the widget and the rows under it keep their room. Switched to actual size
-(:meth:`FrameView.set_fit`), it holds exactly the preset size, and the window
-scrolls it if the column is smaller.
-
-A double-click asks for the frame full size (:attr:`FrameView.full_frame_requested`);
-:class:`FullFrameView` is that view: a frameless black window over the screen,
-the frame rendered once at the largest size of its shape that fits.
-"""
-
 from __future__ import annotations
 
 import time
@@ -55,17 +29,14 @@ from qurantext.gui.review.session import ReviewSession
 
 __all__ = ["PORTRAIT_PREVIEW_WIDTH", "FrameView", "FullFrameView"]
 
-#: Renders at most this often while polled continuously (e.g. during playback).
 MIN_INTERVAL_S = 0.2
 
 _PORTRAIT_SIZE = (270, 480)
 _LANDSCAPE_SIZE = (480, 270)
-#: A portrait preview's width: the review window's left column is never narrower.
 PORTRAIT_PREVIEW_WIDTH = _PORTRAIT_SIZE[0]
 
 
 def _to_pixmap(frame: np.ndarray) -> QPixmap:
-    """The renderer's BGR array as a pixmap that owns its pixels."""
     rgb = np.ascontiguousarray(frame[:, :, ::-1])
     height, width, _channels = rgb.shape
     image = QImage(rgb.data, width, height, 3 * width, QImage.Format.Format_RGB888).copy()
@@ -73,9 +44,6 @@ def _to_pixmap(frame: np.ndarray) -> QPixmap:
 
 
 class FrameView(QLabel):
-    """Shows the export frame at a given time, throttled while it is polled."""
-
-    #: A double-click on the preview: show the frame full size at this time.
     full_frame_requested = Signal(float)
 
     def __init__(
@@ -97,21 +65,17 @@ class FrameView(QLabel):
         self.setMinimumSize(self._width // 2, self._height // 2)
         self.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
         self.setToolTip(i18n.t("review.full_frame"))
-        #: The time last asked for, so a resize can redraw the same moment.
         self._last_t = 0.0
 
     @property
     def preset_size(self) -> QSize:
-        """The preset's preview size: what the widget asks for, and holds in actual size."""
         return QSize(self._width, self._height)
 
     @property
     def fit(self) -> bool:
-        """True when the frame scales down to the widget, False at the preset's size exactly."""
         return self._fit
 
     def set_fit(self, fit: bool) -> None:
-        """Fit: scale down to the widget. Actual: the preset's preview size, exactly."""
         self._fit = bool(fit)
         if self._fit:
             self.setMinimumSize(self._width // 2, self._height // 2)
@@ -123,11 +87,9 @@ class FrameView(QLabel):
         self.show_at(self._last_t, force=True)
 
     def request_full_frame(self) -> None:
-        """Ask for the frame full size at the time shown (a double-click, or the button)."""
         self.full_frame_requested.emit(self._last_t)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt override
-        """A left double-click asks for the frame full size at the time shown."""
         if event.button() == Qt.MouseButton.LeftButton:
             self.request_full_frame()
             return
@@ -137,23 +99,19 @@ class FrameView(QLabel):
         return QSize(self._width, self._height)
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt override
-        """Half the preset size: as far as the frame gives way to a small window."""
         return QSize(self._width // 2, self._height // 2)
 
     def _render_size(self) -> tuple[int, int]:
-        """The largest frame of the preset's shape that fits the widget, never above the preset size."""
         width = min(self._width, max(1, self.width()))
         height = min(self._height, max(1, self.height()))
         scale = min(width / self._width, height / self._height)
         return max(1, int(self._width * scale)), max(1, int(self._height * scale))
 
     def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 - Qt override
-        """Redraw the same moment at the new size, so the frame always fits the widget."""
         super().resizeEvent(event)
         self.show_at(self._last_t, force=True)
 
     def show_at(self, t: float, *, force: bool = False) -> None:
-        """Render the frame at *t*, skipping it if throttled and not *force*."""
         self._last_t = t
         now = time.monotonic()
         if (
@@ -181,7 +139,7 @@ class FrameView(QLabel):
                 reserve_caption_band=reserve_band,
                 look=self._session.look,
             )
-        except Exception as error:  # noqa: BLE001 - shown to the person, not raised
+        except Exception as error:
             self.clear()
             self.setText(i18n.t("frame.error", details=str(error)))
             return
@@ -189,15 +147,6 @@ class FrameView(QLabel):
         self.setPixmap(_to_pixmap(frame))
 
     def _placeholder_lines(self, reserve_caption_band: bool) -> tuple[str, str]:
-        """The (title, subtitle) for the moment before any ayah has started.
-
-        Delegates to ``core.frame_renderer.placeholder_lines`` — the same
-        choice ``write_frame_video`` makes for the exported video — so the
-        preview never shows a generic title where the video would show the
-        lecture's opening card instead. Cached per session revision, since
-        this reruns ``validated_matches`` (via ``session.validated_cards``)
-        and the result cannot change between edits.
-        """
         if self._placeholder_revision != self._session.revision:
             self._placeholder_revision = self._session.revision
             self._placeholder = placeholder_lines(
@@ -209,8 +158,6 @@ class FrameView(QLabel):
 
 
 class FullFrameView(QWidget):
-    """The frame at one moment, as large as the screen allows; Escape, a click or losing focus closes it."""
-
     close_requested = Signal()
 
     def __init__(
@@ -244,7 +191,6 @@ class FullFrameView(QWidget):
         self._render(session, t)
 
     def shown_size(self) -> QSize:
-        """The size the frame was rendered at: the preset's shape, as large as the screen fits."""
         return self._shown
 
     def _render(self, session: ReviewSession, t: float) -> None:
@@ -268,14 +214,13 @@ class FullFrameView(QWidget):
                 reserve_caption_band=reserve_band,
                 look=session.look,
             )
-        except Exception as error:  # noqa: BLE001 - shown to the person, not raised
+        except Exception as error:
             self._label.setStyleSheet("color: white;")
             self._label.setText(i18n.t("frame.error", details=str(error)))
             return
         self._label.setPixmap(_to_pixmap(frame))
 
     def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 - Qt override
-        """Take the focus, so Escape reaches it and losing the focus closes it."""
         super().showEvent(event)
         self._leaving = False
         self.raise_()
@@ -283,18 +228,15 @@ class FullFrameView(QWidget):
         self.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 - Qt override
-        """Escape closes the view."""
         if event.key() == Qt.Key.Key_Escape:
             self._leave()
             return
         super().keyPressEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt override
-        """Any click closes the view."""
         self._leave()
 
     def focusOutEvent(self, event: QFocusEvent) -> None:  # noqa: N802 - Qt override
-        """Losing the focus (another window, Alt+Tab) closes the view."""
         super().focusOutEvent(event)
         self._leave()
 

@@ -3,22 +3,13 @@ from __future__ import annotations
 from difflib import SequenceMatcher
 
 from qurantext.config.settings import (
-    DEFAULT_RANGE_HEAD_WORDS,
     DEFAULT_RANGE_HIGH_CONF_POSITION,
-    DEFAULT_RANGE_LOW_CONF,
     DEFAULT_RANGE_MIN_WORDS_GLOBAL,
     DEFAULT_RANGE_POSITION_THRESHOLD,
     DEFAULT_RANGE_POSITION_THRESHOLD_GLOBAL,
-    DEFAULT_RANGE_SEARCH_RANGE,
-    DEFAULT_RANGE_TAIL_WORDS,
 )
 from qurantext.core.arabic import ayah_text_with_marker, partial_ratio, word_recall
 from qurantext.core.preamble import detect_leading_preamble
-
-HEAD_WORDS = DEFAULT_RANGE_HEAD_WORDS
-TAIL_WORDS = DEFAULT_RANGE_TAIL_WORDS
-SEARCH_RANGE = DEFAULT_RANGE_SEARCH_RANGE
-LOW_CONF = DEFAULT_RANGE_LOW_CONF
 
 POSITION_THRESHOLD = DEFAULT_RANGE_POSITION_THRESHOLD
 POSITION_THRESHOLD_GLOBAL = DEFAULT_RANGE_POSITION_THRESHOLD_GLOBAL
@@ -366,7 +357,6 @@ def select_recitation_timeline(
     last_to_ayah = first_ayah_num - 1
     last_end_time = -1.0
 
-    # Defensive guard: discard matches that belong to a different surah.
     ordered = sorted(
         [m for m in matches if m.get("surah_num") == target_surah],
         key=lambda match: (
@@ -410,8 +400,4 @@ def select_recitation_timeline(
             selected[index] = dict(selected[index])
             selected[index]["end_time"] = round(next_start, 2)
 
-    # The overlap trims above can push a span's start past its own end (a short
-    # span fully covered in time by its neighbour). Such a span cannot be
-    # displayed and would otherwise be silently dropped by the renderer's
-    # validated_matches with a confusing warning — drop it here instead.
     return [span for span in selected if span["end_time"] > span["start_time"]]

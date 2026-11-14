@@ -1,17 +1,3 @@
-"""One card of the Episode dialog's strip: a part's title, controls, picture, length and standing.
-
-The dialog owns four of these in render order (Intro · Recitation · Lecture ·
-Outro) and fills each card's ``controls`` with the widgets it already has
-(the kind box, the clip line, the recitation list). The card only shows:
-a thumbnail fitted into :data:`THUMB_BOX`, a length line, a
-:class:`StatusChip` when there is something to say, and whether it is the
-selected one (a 2 px accent border, from the sheet's ``selected`` rule; the
-``part`` rule keeps the same 2 px transparent otherwise).
-A click, Enter or Space on the card, or focus landing on one of its
-controls, asks the dialog to select it (``select_requested``); the dialog
-decides, as the Lecture card is never selectable.
-"""
-
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt, Signal
@@ -24,26 +10,18 @@ from qurantext.gui.widgets import Card, StatusChip, repolish
 
 __all__ = ["CARD_WIDTH", "THUMB_BOX", "PartCard", "fitted_size"]
 
-#: The box a part's picture is fitted into, in pixels.
 THUMB_BOX = (176, 99)
-#: Each card's width: the box, the card's own margins and its 2 px border (transparent
-#: until the card is selected, so selecting one moves nothing).
 CARD_WIDTH = 204
-#: An icon tile's glyph.
 _GLYPH = 28
 
 
 def fitted_size(frame: tuple[int, int], box: tuple[int, int] = THUMB_BOX) -> tuple[int, int]:
-    """*frame*'s shape scaled to fit *box*, never larger than it."""
     width, height = frame
     scale = min(box[0] / width, box[1] / height)
     return max(1, round(width * scale)), max(1, round(height * scale))
 
 
 class PartCard(Card):
-    """A part of the episode as a card; the dialog fills ``controls`` and sets the rest."""
-
-    #: The person clicked the card, pressed Enter or Space on it, or focused one of its controls.
     select_requested = Signal()
 
     def __init__(self, title: str, parent: QWidget | None = None) -> None:
@@ -80,15 +58,11 @@ class PartCard(Card):
         self.body.addLayout(foot)
         self.set_placeholder()
 
-    # -- filling ---------------------------------------------------------------------
-
     def add_control(self, widget: QWidget) -> None:
-        """Put *widget* under the title; focus landing on it selects the card."""
         self.controls.addWidget(widget)
         widget.installEventFilter(self)
 
     def add_control_layout(self, layout: QLayout) -> None:
-        """Put a layout of controls under the title, watching each widget in it."""
         self.controls.addLayout(layout)
         self._watch(layout)
 
@@ -120,12 +94,10 @@ class PartCard(Card):
         )
 
     def set_placeholder(self) -> None:
-        """The dashed empty tile: nothing is chosen for this part."""
         self.thumb_label.clear()
         self._mark_placeholder(True)
 
     def set_icon_tile(self, name: str) -> None:
-        """An icon in place of a picture that could not be made."""
         self._mark_placeholder(False)
         self.thumb_label.setPixmap(icon(name, "secondary").pixmap(QSize(_GLYPH, _GLYPH)))
 
@@ -147,10 +119,7 @@ class PartCard(Card):
         self.chip.set_kind(kind)
         self.chip.show()
 
-    # -- selection -------------------------------------------------------------------
-
     def set_selectable(self, selectable: bool) -> None:
-        """A card that cannot be selected takes no focus, no hand cursor and no hover border."""
         self._selectable = selectable
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus if selectable else Qt.FocusPolicy.NoFocus)
         self.setCursor(
@@ -169,7 +138,6 @@ class PartCard(Card):
         repolish(self)
 
     def click(self) -> None:
-        """Ask to be selected, as a press or a key would."""
         if self._selectable:
             self.select_requested.emit()
 
@@ -181,7 +149,6 @@ class PartCard(Card):
         super().mouseReleaseEvent(event)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt override
-        # Only the card's own keys: Enter a control lets through is the dialog's (OK).
         if self.hasFocus() and event.key() in (
             Qt.Key.Key_Return,
             Qt.Key.Key_Enter,
