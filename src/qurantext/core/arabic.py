@@ -45,12 +45,12 @@ def _normalize_with_pattern(text: str, pattern: re.Pattern[str], *, map_bari_yeh
 
 
 def normalize_alignment_ar(text: str) -> str:
-    """Match the word-level alignment normalization used in audioAlignment.py."""
+    """Normalize for word-level alignment; bari yeh becomes yeh."""
     return _normalize_with_pattern(text, ALIGNMENT_TASHKEEL, map_bari_yeh=True)
 
 
 def normalize_full_aya_ar(text: str) -> str:
-    """Match the full-ayah normalization used in fullAyaAlignment.py."""
+    """Normalize for whole-ayah comparison; bari yeh is kept."""
     return _normalize_with_pattern(text, ALIGNMENT_TASHKEEL, map_bari_yeh=False)
 
 

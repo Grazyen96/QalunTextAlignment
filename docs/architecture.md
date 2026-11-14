@@ -5,8 +5,7 @@
 QuranText is organized around a small number of stable layers:
 
 - `cli/` handles command-line argument parsing only, and is the ONLY parser in
-  the project. The duplicate CLIs that lived in `pipelines/detection.py` and
-  `core/video_renderer.py` are gone.
+  the project. The duplicate CLIs that once lived beside it are gone.
 - `jobs/` is the callable boundary a user interface drives: typed requests
   (`RenderRequest`, `ExportRequest`), described results, the project file that
   owns a job's cards and editable captions, and the render and export entry points.

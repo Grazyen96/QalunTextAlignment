@@ -18,8 +18,7 @@ time by accumulating adjacent hits).
 
 Normalization is :func:`qurantext.core.arabic.normalize_detection_ar` (no
 diacritics, no tatweel, unified alef/ya/waw-hamza), already applied when the
-store was built. Callers MUST normalize transcript windows the same way before
-looking phrases up.
+store was built. A reader of the table must normalize its text the same way.
 """
 
 from __future__ import annotations
